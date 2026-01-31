@@ -1,3 +1,6 @@
+# Branch: provisional
+this branch exists for  bug fixes  while waiting on upstream to release the next stable version - 2.0. 
+
 # emsys - ersatz-emacs text editor 
 
 An ersatz-emacs text editor for unix-like systems (and msys, hence the name!)
