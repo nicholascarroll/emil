@@ -1,0 +1,267 @@
+.Dd February 10, 2026
+.Dt EMIL 1
+.Os
+.Sh NAME
+.Nm emil
+.Nd text editor
+
+.Sh SYNOPSIS
+.Nm
+.Op Ar options
+.Op Ar file
+
+.Sh DESCRIPTION
+.Nm
+is a small text editor for UTF-8 encoded files. 
+It is designed to operate on VT100-compatible terminals and implements 
+a subset of the operational conventions found in the 
+.Em Emacs 
+editor.
+.Pp
+Text is managed in discrete 
+.Sy buffers , 
+which may be displayed in one or more 
+.Sy windows .
+
+.Sh OPTIONS
+.Bl -tag -width Ds
+.It +N
+Position the cursor at line number N when opening the file.
+.It --version
+Display version information.
+.El
+
+.Sh COMMANDS
+Commands largely follow Emacs conventions.
+.Cm C-
+denotes the Control key,
+.Cm M-
+denotes the Meta (Alt) key.
+.Cm S-
+denotes the Shift key.
+
+.Ss Basic Commands
+.Bl -tag -width Ds
+.It Cm C-x C-c
+Quit the editor.
+.It Cm C-x C-f
+Open a file and load it into a buffer.
+.It Cm C-x C-s
+Save the current buffer to its associated file.
+.It Cm C-x k
+Kill (close) the current buffer.
+.It Cm C-x b
+Switch current window to another buffer.
+.It Cm C-x C-z
+Suspend the editor to the background and return control to the shell.
+.It Cm C-s
+Interactive search in the current buffer.
+.It Cm C-g
+Cancel the current operation.
+.El
+
+.Ss Cursor Movement
+.Bl -tag -width Ds
+.It Cm C-n
+Move cursor to next line.
+.It Cm C-p
+Move cursor to previous line.
+.It Cm C-f
+Move cursor forward.
+.It Cm C-b
+Move cursor backward.
+.It Cm M-f
+Move cursor forward by word.
+.It Cm M-b
+Move cursor backward by word.
+.It Cm M-<
+Move cursor to start of buffer.
+.It Cm M->
+Move cursor to end of buffer.
+.It Cm C-a
+Move cursor to beginning of line.
+.It Cm C-e
+Move cursor to end of line.
+.It Cm M-p
+Scroll up one line.
+.It Cm M-n
+Scroll down one line.
+.It Cm C-UP
+Scroll up one line.
+.It Cm C-DOWN
+Scroll down one line.
+.El
+
+.Ss Editing
+.Bl -tag -width Ds
+.It Cm C-_
+Undo.
+.It Cm C-x C-_
+Redo.
+.It Cm C-w
+Kill (cut) region.
+.It Cm M-w
+Copy region.
+.It Cm C-y
+Yank (paste).
+.It Cm C-k
+Delete to end of line.
+.It Cm C-u C-a
+Delete to beginning of line.
+.It Cm C-u
+Universal Prefix: Followed by a number it repeats the succeeding command.
+.It Cm C-j
+Insert newline and indent by inserting the same leading whitespace of the previous line.
+.It Cm C-o
+Insert newline without moving the cursor.
+.It Cm C-q
+Insert next character verbatim.
+.It Cm M-/
+Completes the word at the cursor, first using words from the current buffer, then all 
+other buffers.
+.El
+
+.Ss Selection and Regions
+A 
+.Sy region 
+is defined as the text between the 
+.Sy mark 
+and the 
+.Sy cursor . 
+Once a mark is set, moving the cursor changes the extent of the 
+active region.
+
+.Bl -tag -width Ds
+.It Cm C-SPC
+Set mark: Establish the mark at the cursor.
+.It Cm C-g
+Abort: Deactivate the current region and clear the mark.
+.It Cm C-x h
+Mark whole buffer: Set the cursor at the beginning and the mark 
+at the end of the buffer.
+.El
+
+.Ss Window Management
+The display can be partitioned into multiple tiled windows.
+.Bl -tag -width Ds
+.It Cm C-x o
+Other window: Cycle focus to the next visible window.
+.It Cm C-x 0
+Delete window: Close the currently focused window.
+.It Cm C-x 1
+Delete other windows: Expand the current window to fill the screen.
+.It Cm C-x 2
+Split window: Divide the current window horizontally.
+.It Cm C-x x t
+Toggle display mode from truncate-lines mode (the default) to line wrap.
+.El
+
+.Ss Registers
+Registers provide session-persistent storage of cursor position, text fragments, numbers, or keyboard macros. Each register is identified by a single character.
+
+.Bl -tag -width Ds
+.It Cm C-x r SPACE x
+Store the current cursor position in a register named 
+.Ar x .
+
+.It Cm C-x r j x
+Jump to the cursor position stored in register
+.Ar x .
+
+.It Cm C-x r a
+Store a keyboard macro in a register.
+
+.It Cm C-x r n
+Store a number.
+
+.It Cm C-x r s
+Store a region in a register.
+
+.It Cm C-x r +
+Increment a number in a register, or append a region to a string.
+
+.It Cm C-x r r
+Copy a rectangle to a register.
+
+.It Cm C-x r y
+Yank a region or rectangle from a register.
+
+.It Cm C-x r k
+Kill a region or rectangle into a register.
+
+.It Cm C-x r v
+View contents of a register.
+.El
+
+
+.Ss Rectangles
+Rectangles operate on column-aligned regions spanning multiple lines.
+
+.Bl -tag -width Ds
+.It Cm C-x r t
+Replace rectangle with string.
+.It Cm C-x r k
+Kill rectangle.
+.It Cm C-x r y
+Yank rectangle.
+.El
+
+.Ss Shell Integration
+When enabled at compile time:
+
+.Bl -tag -width Ds
+.It Cm M-|
+Filter the selected region through a shell command.
+.It Cm C-u M-|
+Filter the selected region through a shell command and replace the region with the output. 
+.It Cm C-x C-e
+Execute the current line as a shell command and log the result to a dedicated buffer.
+.El
+
+.Ss Named Commands
+
+.Bl -tag -width Ds
+.It Cm M-x
+Enter a command by name.
+.El
+
+
+.Sh FILES AND ENCODING
+.Nm
+expects all input and files to be encoded as
+.Sy UTF-8 .
+The software does not perform character set conversion or encoding detection.
+.Pp
+Files are loaded in their entirety into memory.
+.Nm
+adheres to the Unix convention where lines are delimited by a single linefeed (LF) character and files terminate with a linefeed.
+The presence of null bytes (0x00) or malformed UTF-8 sequences may result in undefined behavior or error conditions.
+
+.Ss File Persistence
+When saving,
+.Nm
+writes the complete buffer to the associated file.
+The editor attempts an atomic write operation to prevent data corruption.
+If an atomic write is not possible, the user is prompted to overwrite the file directly.
+No automatic backup or "auto-save" files are generated.
+
+.Sh UNDO HISTORY
+.Nm
+maintains a linear undo history of up to 1000 editing actions per buffer.
+
+.Sh SEE ALSO
+.Xr emacs 1
+
+.Sh BUGS
+Please report defects to the project repository at:
+.Lk https://github.com/nicholascarroll/emil
+.Sh AUTHOR
+The 
+.Nm 
+editor was developed by Nicholas Carroll. 
+It is a derivative of
+.Em emsys
+by japanoise.
+.Lk
+https://github.com/japanoise/emsys
+

@@ -1,18 +1,17 @@
-#ifndef EMSYS_H
-#define EMSYS_H 1
+#ifndef EMIL_H
+#define EMIL_H 1
 
 #include <stdint.h>
 #include <termios.h>
 #include <time.h>
-#include "config.h"
 #include "keymap.h"
 
 /*** util ***/
 
-#define EMSYS_TAB_STOP 8
+#define EMIL_TAB_STOP 8
 
-#ifndef EMSYS_VERSION
-#define EMSYS_VERSION "unknown"
+#ifndef EMIL_VERSION
+#define EMIL_VERSION "unknown"
 #endif
 
 #define ESC "\033"
@@ -215,7 +214,7 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 void editorUpdateBuffer(struct editorBuffer *buf);
 void editorInsertNewline(struct editorBuffer *bufr, int count);
 void editorInsertChar(struct editorBuffer *bufr, int c, int count);
-void editorOpen(struct editorBuffer *bufr, char *filename);
+int editorOpen(struct editorBuffer *bufr, char *filename);
 void die(const char *s);
 struct editorBuffer *newBuffer(void);
 void destroyBuffer(struct editorBuffer *);

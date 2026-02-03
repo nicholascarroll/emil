@@ -2,7 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
-#include "emsys.h"
+#include "emil.h"
+#include "message.h"
 #include "region.h"
 #include "buffer.h"
 #include "undo.h"
@@ -12,6 +13,11 @@
 #include "util.h"
 
 void editorDoUndo(struct editorBuffer *buf, int count) {
+	if (buf->read_only) {
+		editorSetStatusMessage(msg_read_only);
+		return;
+	}
+
 	int times = count ? count : 1;
 	for (int j = 0; j < times; j++) {
 		if (buf->undo == NULL) {
@@ -82,7 +88,7 @@ void editorDoUndo(struct editorBuffer *buf, int count) {
 	}
 }
 
-#ifdef EMSYS_DEBUG_UNDO
+#ifdef EMIL_DEBUG_UNDO
 void debugUnpair(struct editorConfig *UNUSED(ed), struct editorBuffer *buf) {
 	int undos = 0;
 	int redos = 0;
@@ -99,6 +105,11 @@ void debugUnpair(struct editorConfig *UNUSED(ed), struct editorBuffer *buf) {
 #endif
 
 void editorDoRedo(struct editorBuffer *buf, int count) {
+	if (buf->read_only) {
+		editorSetStatusMessage(msg_read_only);
+		return;
+	}
+
 	int times = count ? count : 1;
 	for (int j = 0; j < times; j++) {
 		if (buf->redo == NULL) {

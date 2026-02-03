@@ -1,8 +1,8 @@
-/* Core functionality tests for emsys - no stubs needed */
+/* Core functionality tests for emil - no stubs needed */
 #include "test.h"
 #include "../unicode.h"
 #include "../wcwidth.h"
-#include "../emsys.h"
+#include "../emil.h"
 #include <limits.h>
 #include <string.h>
 #include <stdlib.h>
@@ -43,7 +43,7 @@ void test_string_width() {
 
 /* Test control character classification */
 void test_control_chars() {
-    /* Use the ISCTRL macro from emsys.h */
+    /* Use the ISCTRL macro from emil.h */
     /* Note: Current ISCTRL excludes '\0' due to (0 < c) condition */
     TEST_ASSERT_FALSE(ISCTRL('\0')); /* Current behavior excludes null */
     TEST_ASSERT_TRUE(ISCTRL('\n'));
@@ -177,13 +177,13 @@ void test_utf8_validation() {
     TEST_ASSERT_TRUE(utf8_isCont(valid4[3]));
 }
 
-/* Test emsys_getline functionality */
+/* Test emil_getline functionality */
 #include "../util.h"
 #include <stdio.h>
 #include <unistd.h>
 #include <fcntl.h>
 
-void test_emsys_getline_short_line() {
+void test_emil_getline_short_line() {
     /* Test reading a line shorter than initial buffer (120 bytes) */
     const char *test_data = "Hello, World!\n";
     FILE *fp = tmpfile();
@@ -194,7 +194,7 @@ void test_emsys_getline_short_line() {
     
     char *line = NULL;
     size_t n = 0;
-    ssize_t result = emsys_getline(&line, &n, fp);
+    ssize_t result = emil_getline(&line, &n, fp);
     
     TEST_ASSERT_EQUAL_INT(14, result); /* Including newline */
     TEST_ASSERT_EQUAL_STRING("Hello, World!\n", line);
@@ -204,7 +204,7 @@ void test_emsys_getline_short_line() {
     fclose(fp);
 }
 
-void test_emsys_getline_exact_120() {
+void test_emil_getline_exact_120() {
     /* Test reading exactly 120 characters (including newline) */
     FILE *fp = tmpfile();
     TEST_ASSERT_NOT_NULL(fp);
@@ -218,7 +218,7 @@ void test_emsys_getline_exact_120() {
     
     char *line = NULL;
     size_t n = 0;
-    ssize_t result = emsys_getline(&line, &n, fp);
+    ssize_t result = emil_getline(&line, &n, fp);
     
     TEST_ASSERT_EQUAL_INT(120, result);
     TEST_ASSERT(line[0] == 'A');
@@ -230,7 +230,7 @@ void test_emsys_getline_exact_120() {
     fclose(fp);
 }
 
-void test_emsys_getline_long_line() {
+void test_emil_getline_long_line() {
     /* Test the bug we fixed: lines >= 120 chars should be read correctly */
     FILE *fp = tmpfile();
     TEST_ASSERT_NOT_NULL(fp);
@@ -247,7 +247,7 @@ void test_emsys_getline_long_line() {
     size_t n = 0;
     
     /* Read first line (200 chars + newline) */
-    ssize_t result = emsys_getline(&line, &n, fp);
+    ssize_t result = emil_getline(&line, &n, fp);
     TEST_ASSERT_EQUAL_INT(201, result);
     TEST_ASSERT(line[0] == '0');
     TEST_ASSERT(line[199] == '9');
@@ -255,7 +255,7 @@ void test_emsys_getline_long_line() {
     TEST_ASSERT(n >= 201);
     
     /* Read second line to ensure file position is correct */
-    result = emsys_getline(&line, &n, fp);
+    result = emil_getline(&line, &n, fp);
     TEST_ASSERT_EQUAL_INT(12, result);
     TEST_ASSERT_EQUAL_STRING("Second line\n", line);
     
@@ -263,7 +263,7 @@ void test_emsys_getline_long_line() {
     fclose(fp);
 }
 
-void test_emsys_getline_no_final_newline() {
+void test_emil_getline_no_final_newline() {
     /* Test line without trailing newline */
     FILE *fp = tmpfile();
     TEST_ASSERT_NOT_NULL(fp);
@@ -273,7 +273,7 @@ void test_emsys_getline_no_final_newline() {
     
     char *line = NULL;
     size_t n = 0;
-    ssize_t result = emsys_getline(&line, &n, fp);
+    ssize_t result = emil_getline(&line, &n, fp);
     
     TEST_ASSERT_EQUAL_INT(17, result);
     TEST_ASSERT_EQUAL_STRING("No newline at end", line);
@@ -282,14 +282,14 @@ void test_emsys_getline_no_final_newline() {
     fclose(fp);
 }
 
-void test_emsys_getline_empty_file() {
+void test_emil_getline_empty_file() {
     /* Test empty file */
     FILE *fp = tmpfile();
     TEST_ASSERT_NOT_NULL(fp);
     
     char *line = NULL;
     size_t n = 0;
-    ssize_t result = emsys_getline(&line, &n, fp);
+    ssize_t result = emil_getline(&line, &n, fp);
     
     TEST_ASSERT_EQUAL_INT(-1, result);
     
@@ -297,7 +297,7 @@ void test_emsys_getline_empty_file() {
     fclose(fp);
 }
 
-void test_emsys_getline_multiple_reallocs() {
+void test_emil_getline_multiple_reallocs() {
     /* Test very long line requiring multiple buffer reallocations */
     FILE *fp = tmpfile();
     TEST_ASSERT_NOT_NULL(fp);
@@ -311,7 +311,7 @@ void test_emsys_getline_multiple_reallocs() {
     
     char *line = NULL;
     size_t n = 0;
-    ssize_t result = emsys_getline(&line, &n, fp);
+    ssize_t result = emil_getline(&line, &n, fp);
     
     TEST_ASSERT_EQUAL_INT(1001, result);
     TEST_ASSERT(line[0] == 'X');
@@ -349,13 +349,13 @@ int main() {
     RUN_TEST(test_tab_stops);
     RUN_TEST(test_string_ops);
     
-    /* emsys_getline tests */
-    RUN_TEST(test_emsys_getline_short_line);
-    RUN_TEST(test_emsys_getline_exact_120);
-    RUN_TEST(test_emsys_getline_long_line);
-    RUN_TEST(test_emsys_getline_no_final_newline);
-    RUN_TEST(test_emsys_getline_empty_file);
-    RUN_TEST(test_emsys_getline_multiple_reallocs);
+    /* emil_getline tests */
+    RUN_TEST(test_emil_getline_short_line);
+    RUN_TEST(test_emil_getline_exact_120);
+    RUN_TEST(test_emil_getline_long_line);
+    RUN_TEST(test_emil_getline_no_final_newline);
+    RUN_TEST(test_emil_getline_empty_file);
+    RUN_TEST(test_emil_getline_multiple_reallocs);
     
     return TEST_END();
 }

@@ -1,6 +1,6 @@
-#ifndef EMSYS_BUFFER_H
-#define EMSYS_BUFFER_H
-#include "emsys.h"
+#ifndef EMIL_BUFFER_H
+#define EMIL_BUFFER_H
+#include "emil.h"
 void updateRow(erow *row);
 void editorInsertRow(struct editorBuffer *bufr, int at, char *s, size_t len);
 void freeRow(erow *row);

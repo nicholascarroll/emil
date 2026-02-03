@@ -1,7 +1,7 @@
-#ifndef EMSYS_UNDO_H
-#define EMSYS_UNDO_H 1
+#ifndef EMIL_UNDO_H
+#define EMIL_UNDO_H 1
 
-#include "emsys.h"
+#include "emil.h"
 
 void editorDoUndo(struct editorBuffer *buf, int count);
 void editorDoRedo(struct editorBuffer *buf, int count);
@@ -12,7 +12,7 @@ void editorUndoDelChar(struct editorBuffer *buf, erow *row);
 struct editorUndo *newUndo(void);
 void clearRedos(struct editorBuffer *buf);
 void clearUndosAndRedos(struct editorBuffer *buf);
-#ifdef EMSYS_DEBUG_UNDO
+#ifdef EMIL_DEBUG_UNDO
 void debugUnpair(struct editorConfig *ed, struct editorBuffer *buf);
 #endif
 #endif

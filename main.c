@@ -1,5 +1,4 @@
 #include "util.h"
-
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -12,7 +11,8 @@
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
-#include "emsys.h"
+#include "emil.h"
+#include "message.h"
 #include "fileio.h"
 #include "find.h"
 #include "pipe.h"
@@ -44,8 +44,17 @@ void editorSuspend(int UNUSED(sig)) {
 }
 
 void editorResume(int UNUSED(sig)) {
+	/* Reset scrolling region in case we came back from a shell drawer */
+	write(STDOUT_FILENO, CSI "r", 3);
+	/* Restore cursor (matches ESC 7 in editorOpenShellDrawer) */
+	write(STDOUT_FILENO, ESC "8", 2);
 	setupHandlers();
 	enableRawMode();
+
+	/* Force all windows to recalculate heights for the restored screen */
+	for (int i = 0; i < E.nwindows; i++)
+		E.windows[i]->height = 0;
+
 	editorResizeScreen(0);
 }
 
@@ -98,7 +107,7 @@ void initEditor(void) {
 int main(int argc, char *argv[]) {
 	// Check for --version flag before entering raw mode
 	if (argc >= 2 && strcmp(argv[1], "--version") == 0) {
-		printf("emsys %s\n", EMSYS_VERSION);
+		printf("emil %s\n", EMIL_VERSION);
 		return 0;
 	}
 
@@ -116,7 +125,13 @@ int main(int argc, char *argv[]) {
 		}
 		for (; i < argc; i++) {
 			struct editorBuffer *newBuf = newBuffer();
-			editorOpen(newBuf, argv[i]);
+			if (editorOpen(newBuf, argv[i]) < 0) {
+				disableRawMode();
+				fprintf(stderr,
+					"%s: file failed UTF-8 validation\n",
+					argv[i]);
+				exit(1);
+			}
 
 			newBuf->next = E.headbuf;
 			if (linum > 0) {
@@ -142,7 +157,9 @@ int main(int argc, char *argv[]) {
 	E.minibuf->filename = xstrdup("*minibuffer*");
 	E.edbuf = E.buf;
 
-	editorSetStatusMessage("emsys " EMSYS_VERSION " - C-x C-c to quit");
+#ifndef EMIL_DISABLE_PIPE
+	editorSetStatusMessage("Shell integration disabled");
+#endif /* EMIL_DISABLE_PIPE */
 	setupHandlers();
 
 	for (;;) {

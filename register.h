@@ -1,6 +1,6 @@
 #ifndef REGISTER_H
 #define REGISTER_H
-#include "emsys.h"
+#include "emil.h"
 
 void editorJumpToRegister(struct editorConfig *ed);
 void editorMacroToRegister(struct editorConfig *ed);

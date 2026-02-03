@@ -1,0 +1,239 @@
+.Dd February 10, 2026
+.Dt EMIL 1
+.Os
+.Sh NAME
+.Nm emil
+.Nd 文本编辑器
+
+.Sh SYNOPSIS
+.Nm
+.Op Ar 选项
+.Op Ar 文件
+
+.Sh DESCRIPTION
+.Nm
+是一款专为 UTF-8 编码文件设计的小型文本编辑器。
+它运行于 VT100 兼容终端，实现了
+.Em Emacs
+编辑器的一部分操作习惯。
+.Pp
+文本在独立的
+.Sy 缓冲区
+（buffers）中管理，可在一个或多个
+.Sy 窗口
+（windows）中显示。
+
+.Sh OPTIONS
+.Bl -tag -width Ds
+.It +N
+打开文件时将光标定位到第 N 行。
+.It --version
+显示版本信息。
+.El
+
+.Sh COMMANDS
+命令基本遵循 Emacs 习惯。
+.Cm C-
+表示 Control 键，
+.Cm M-
+表示 Meta（Alt）键，
+.Cm S-
+表示 Shift 键。
+
+.Ss 基本命令
+.Bl -tag -width Ds
+.It Cm C-x C-c
+退出编辑器。
+.It Cm C-x C-f
+打开文件并载入缓冲区。
+.It Cm C-x C-s
+保存当前缓冲区到关联文件。
+.It Cm C-x k
+关闭（kill）当前缓冲区。
+.It Cm C-x b
+切换当前窗口到另一个缓冲区。
+.It Cm C-x C-z
+挂起编辑器并返回 shell。
+.It Cm C-s
+在当前缓冲区进行交互式搜索。
+.It Cm C-g
+取消当前操作。
+.El
+
+.Ss 光标移动
+.Bl -tag -width Ds
+.It Cm C-n
+下一行。
+.It Cm C-p
+上一行。
+.It Cm C-f
+向前移动。
+.It Cm C-b
+向后移动。
+.It Cm M-f
+向前移动一个词。
+.It Cm M-b
+向后移动一个词。
+.It Cm M-<
+移动到缓冲区开头。
+.It Cm M->
+移动到缓冲区末尾。
+.It Cm C-a
+移动到行首。
+.It Cm C-e
+移动到行尾。
+..It Cm M-p
+向上滚动一行。
+.It Cm M-n
+向下滚动一行。
+.It Cm C-UP
+向上滚动一行。
+.It Cm C-DOWN
+向下滚动一行。
+.El
+
+.Ss 编辑操作
+.Bl -tag -width Ds
+.It Cm C-_
+撤销。
+.It Cm C-x C-_
+重做。
+.It Cm C-w
+剪切（kill）选区。
+.It Cm M-w
+复制选区。
+.It Cm C-y
+粘贴（yank）。
+.It Cm C-k
+删除至行尾。
+.It Cm C-u C-a
+删除至行首。
+.It Cm C-u
+通用前缀：后接数字可重复执行后续命令。
+.It Cm C-j
+插入换行并缩进（与上一行前导空白一致）。
+.It Cm C-o
+插入换行但不移动光标。
+.It Cm C-q
+逐字插入下一个字符。
+.It Cm M-/
+补全光标处的单词（先从当前缓冲区，再从其他缓冲区）。
+.El
+
+.Ss 选区与标记
+.Sy 区域
+（region）指
+.Sy 标记
+（mark）与光标之间的文本。设置标记后，移动光标即改变活动区域。
+
+.Bl -tag -width Ds
+.It Cm C-SPC
+设置标记。
+.It Cm C-g
+取消当前区域并清除标记。
+.It Cm C-x h
+标记整个缓冲区。
+.El
+
+.Ss 窗口管理
+.Bl -tag -width Ds
+.It Cm C-x o
+切换到下一个窗口。
+.It Cm C-x 0
+关闭当前窗口。
+.It Cm C-x 1
+关闭其他所有窗口（当前窗口全屏）。
+.It Cm C-x 2
+水平分割窗口。
+.It Cm C-x x t
+切换长行处理模式（截断 ↔ 自动换行）。
+.El
+
+.Ss 寄存器
+寄存器用于会话内持久保存光标位置、文本片段、数字或键盘宏，每个寄存器用单个字符标识。
+
+.Bl -tag -width Ds
+.It Cm C-x r SPACE x
+将当前光标位置存入寄存器 x。
+.It Cm C-x r j x
+跳转到寄存器 x 中保存的光标位置。
+.It Cm C-x r a
+将键盘宏存入寄存器。
+.It Cm C-x r n
+存入数字。
+.It Cm C-x r s
+存入区域。
+.It Cm C-x r +
+递增寄存器中的数字，或将区域追加到字符串。
+.It Cm C-x r r
+将矩形复制到寄存器。
+.It Cm C-x r y
+从寄存器粘贴区域或矩形。
+.It Cm C-x r k
+将区域或矩形剪切到寄存器。
+.It Cm C-x r v
+查看寄存器内容。
+.El
+
+.Ss 矩形操作
+.Bl -tag -width Ds
+.It Cm C-x r t
+用字符串替换矩形。
+.It Cm C-x r k
+剪切矩形。
+.It Cm C-x r y
+粘贴矩形。
+.El
+
+.Ss Shell 集成
+（编译时启用时可用）
+
+.Bl -tag -width Ds
+.It Cm M-|
+将选区通过 shell 命令过滤。
+.It Cm C-u M-|
+将选区通过 shell 命令过滤，并用输出替换原选区。
+.It Cm C-x C-e
+将当前行作为 shell 命令执行，结果记录到专用缓冲区。
+.El
+
+.Ss 命名命令
+.Bl -tag -width Ds
+.It Cm M-x
+按名称执行命令。
+.El
+
+.Sh 文件与编码
+.Nm
+要求所有输入和文件均为
+.Sy UTF-8
+编码，不进行字符集转换或编码检测。
+.Pp
+文件会完整加载到内存。
+.Nm
+遵循 Unix 惯例：行以单个换行符（LF）分隔，文件以换行符结束。
+出现空字节（0x00）或错误的 UTF-8 序列可能导致未定义行为或错误。
+
+.Ss 文件保存
+保存时，
+.Nm
+将整个缓冲区写入关联文件。
+会尝试原子写入以防止数据损坏；若无法原子写入，则提示用户直接覆盖。
+不生成自动备份或自动保存文件。
+
+.Sh 撤销历史
+每个缓冲区维护线性撤销历史，最多保存 1000 条编辑操作。
+
+.Sh 参见
+.Xr emacs 1
+
+.Sh BUGS
+请将缺陷报告至项目仓库：
+.Lk https://github.com/nicholascarroll/emil
+
+.Sh 作者
+.Nm
+由 Nicholas Carroll 开发，是
+.Em emsys
+（作者：japanoise）的衍生项目。
+.Lk https://github.com/japanoise/emsys

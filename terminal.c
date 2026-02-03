@@ -1,6 +1,8 @@
 #include "util.h"
 #include "terminal.h"
-#include "emsys.h"
+#include "emil.h"
+#include "message.h"
+#include "base64.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,6 +14,7 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 #include <string.h>
+#include <signal.h>
 #include "unicode.h"
 #include "keymap.h"
 #include "display.h"
@@ -33,6 +36,87 @@ void disableRawMode(void) {
 	if (write(STDOUT_FILENO, CSI "?1049l", 8) == -1)
 		die("disableRawMode write");
 }
+
+/*
+ * Restore cooked terminal mode without leaving the alternate screen
+ * buffer.  Used by the shell drawer so that the editor content painted
+ * in the upper portion of the alt screen stays visible while the shell
+ * runs in the bottom portion.
+ */
+void disableRawModeKeepScreen(void) {
+	if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_termios) == -1)
+		die("disableRawModeKeepScreen tcsetattr");
+}
+
+/*
+ * Shell drawer — opens a small shell region at the bottom of the
+ * terminal while the editor content above stays frozen.
+ *
+ * Mechanism:
+ *   1. Set the DECSTBM scrolling region to the bottom N rows.
+ *   2. Move the cursor into the drawer area and print a header.
+ *   3. Restore cooked mode (without leaving the alt screen).
+ *   4. raise(SIGTSTP) — the parent shell prints its prompt inside the
+ *      restricted scrolling region; everything above is protected.
+ *   5. On SIGCONT (user typed `fg`), the handler resets the scrolling
+ *      region, re-enters raw mode, and redraws — closing the drawer.
+ */
+
+
+void editorOpenShellDrawer(void) {
+	struct winsize ws;
+	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_row < 12)
+		return;
+
+	int drawerHeight = ws.ws_row / 3;
+	if (drawerHeight < 6)
+		drawerHeight = 6;
+
+	/*
+	 * Shrink the editor to fit in the top portion of the screen.
+	 * The bottom window's modeline becomes the visual separator
+	 * between the editor and the shell drawer area.
+	 */
+	int editorRows = ws.ws_row - drawerHeight;
+	E.screenrows = editorRows;
+
+	/* Force all windows to recalculate heights for the smaller space */
+	for (int i = 0; i < E.nwindows; i++)
+		E.windows[i]->height = 0;
+
+	/* Save cursor position */
+	if (write(STDOUT_FILENO, ESC "7", 2) != 2)
+		return;
+
+	/* Repaint the editor into the smaller area */
+	refreshScreen();
+
+	/*
+	 * The editor content now occupies rows 1..editorRows.
+	 * The minibuffer sits at row editorRows; start the drawer
+	 * there so the clear below erases it, leaving the bottom
+	 * window's modeline as the boundary.
+	 */
+	int drawerTop = editorRows;
+	char buf[64];
+	int n = snprintf(buf, sizeof(buf), CSI "%d;%dr", drawerTop, ws.ws_row);
+	if (n > 0)
+		write(STDOUT_FILENO, buf, n);
+
+	/* Move cursor to the top of the drawer and clear the area */
+	n = snprintf(buf, sizeof(buf), CSI "%d;1H", drawerTop);
+	if (n > 0)
+		write(STDOUT_FILENO, buf, n);
+	write(STDOUT_FILENO, CSI "J", 3);
+
+	/* Restore cooked mode but stay on the alt screen */
+	disableRawModeKeepScreen();
+
+	/* Let the shell take over */
+	signal(SIGTSTP, SIG_DFL);
+	raise(SIGTSTP);
+}
+
 
 void enableRawMode(void) {
 	/* Saves the screen and switches to an alt screen */
@@ -98,6 +182,28 @@ int getWindowSize(int *rows, int *cols) {
 	}
 }
 
+void editorCopyToClipboard(const uint8_t *text) {
+	if (text == NULL || text[0] == '\0')
+		return;
+
+	char *encoded = base64_encode(text, strlen((const char *)text));
+	if (encoded == NULL)
+		return;
+
+	/*
+	 * OSC 52: \033]52;c;<base64>\033\\
+	 *
+	 * "c" targets the system clipboard. The ST (String Terminator)
+	 * is \033\\ (ESC backslash), which is more portable than BEL
+	 * across terminal emulators and tmux.
+	 */
+	write(STDOUT_FILENO, "\033]52;c;", 7);
+	write(STDOUT_FILENO, encoded, strlen(encoded));
+	write(STDOUT_FILENO, "\033\\", 2);
+
+	free(encoded);
+}
+
 void editorDeserializeUnicode(void) {
 	E.unicode[0] = E.macro.keys[E.playback++];
 	E.nunicode = utf8_nBytes(E.unicode[0]);
@@ -121,11 +227,9 @@ int editorReadKey(void) {
 		if (nread == -1 && errno != EAGAIN)
 			die("read");
 	}
-#ifdef EMSYS_CU_UARG
 	if (c == CTRL('u')) {
 		return UNIVERSAL_ARGUMENT;
 	}
-#endif //EMSYS_CU_UARG
 	if (c == 033) {
 		char seq[5] = { 0, 0, 0, 0, 0 };
 		if (read(STDIN_FILENO, &seq[0], 1) != 1)
@@ -250,7 +354,7 @@ ESC_UNKNOWN:;
 			} else {
 				snprintf(buf, sizeof(buf), "%c ", seq[i]);
 			}
-			emsys_strlcat(seqR, buf, sizeof(seqR));
+			emil_strlcat(seqR, buf, sizeof(seqR));
 		}
 		editorSetStatusMessage("Unknown command M-%s", seqR);
 		return 033;

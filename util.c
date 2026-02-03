@@ -45,7 +45,7 @@ char *xstrdup(const char *s) {
 	return ptr;
 }
 
-ssize_t emsys_getline(char **lineptr, size_t *n, FILE *stream) {
+ssize_t emil_getline(char **lineptr, size_t *n, FILE *stream) {
 	char *ptr, *eptr;
 
 	if (lineptr == NULL || n == NULL) {
@@ -98,7 +98,7 @@ ssize_t emsys_getline(char **lineptr, size_t *n, FILE *stream) {
 	return (*lineptr)[0] != '\0' ? (ssize_t)strlen(*lineptr) : -1;
 }
 
-size_t emsys_strlcpy(char *dst, const char *src, size_t dsize) {
+size_t emil_strlcpy(char *dst, const char *src, size_t dsize) {
 	const char *osrc = src;
 	size_t nleft = dsize;
 
@@ -121,7 +121,7 @@ size_t emsys_strlcpy(char *dst, const char *src, size_t dsize) {
 	return (src - osrc - 1); /* count does not include NUL */
 }
 
-size_t emsys_strlcat(char *dst, const char *src, size_t dsize) {
+size_t emil_strlcat(char *dst, const char *src, size_t dsize) {
 	const char *odst = dst;
 	const char *osrc = src;
 	size_t n = dsize;

@@ -37,7 +37,6 @@ int calculateRowsToScroll(struct editorBuffer *buf, struct editorWindow *win,
 			  int direction);
 void cursorBottomLine(int curs);
 void cursorBottomLineLong(long curs);
-void editorSetStatusMessage(const char *fmt, ...);
 void editorResizeScreen(int sig);
 void recenter(struct editorWindow *win);
 void editorToggleTruncateLines(void);

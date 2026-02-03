@@ -2,7 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-#include "emsys.h"
+#include "emil.h"
+#include "message.h"
 #include "buffer.h"
 #include "unicode.h"
 #include "undo.h"
@@ -95,8 +96,8 @@ int charsToDisplayColumn(erow *row, int char_pos) {
 	int col = 0;
 	for (int i = 0; i < char_pos && i < row->size; i++) {
 		if (row->chars[i] == '\t') {
-			col = (col + EMSYS_TAB_STOP) / EMSYS_TAB_STOP *
-			      EMSYS_TAB_STOP;
+			col = (col + EMIL_TAB_STOP) / EMIL_TAB_STOP *
+			      EMIL_TAB_STOP;
 		} else if (row->chars[i] < 0x20 || row->chars[i] == 0x7f) {
 			col += 2;
 		} else if (row->chars[i] < 0x80) {
@@ -130,7 +131,7 @@ void updateRow(erow *row) {
 	free(row->render);
 	/* Calculate render buffer size, checking for overflow */
 	size_t render_size = row->size;
-	size_t tab_expansion = tabs * (EMSYS_TAB_STOP - 1);
+	size_t tab_expansion = tabs * (EMIL_TAB_STOP - 1);
 
 	/* Check for overflow in size calculations */
 	if (render_size > SIZE_MAX - tab_expansion - extra - 1) {
@@ -153,9 +154,9 @@ void updateRow(erow *row) {
 		}
 
 		if (row->chars[j] == '\t') {
-			row->renderwidth += EMSYS_TAB_STOP;
+			row->renderwidth += EMIL_TAB_STOP;
 			row->render[idx++] = ' ';
-			while (idx % EMSYS_TAB_STOP != 0 &&
+			while (idx % EMIL_TAB_STOP != 0 &&
 			       (size_t)idx < render_size - 1)
 				row->render[idx++] = ' ';
 		} else if (row->chars[j] == 0x7f) {
@@ -242,6 +243,10 @@ void freeRow(erow *row) {
 }
 
 void editorDelRow(struct editorBuffer *bufr, int at) {
+	if (bufr->read_only) {
+		editorSetStatusMessage(msg_read_only);
+	}
+
 	if (at < 0 || at >= bufr->numrows)
 		return;
 	freeRow(&bufr->row[at]);
@@ -278,6 +283,11 @@ void rowInsertChar(struct editorBuffer *bufr, erow *row, int at, int c) {
 
 void editorRowInsertUnicode(struct editorConfig *ed, struct editorBuffer *bufr,
 			    erow *row, int at) {
+	if (bufr->read_only) {
+		editorSetStatusMessage(msg_read_only);
+		return;
+	}
+
 	if (at < 0 || at > row->size)
 		at = row->size;
 	row->chars = xrealloc(row->chars, row->size + 1 + ed->nunicode);
@@ -332,7 +342,7 @@ struct editorBuffer *newBuffer(void) {
 	ret->completion_state.last_completion_count = 0;
 	ret->completion_state.preserve_message = 0;
 	ret->next = NULL;
-	ret->truncate_lines = 0;
+	ret->truncate_lines = 1;
 	ret->rectangle_mode = 0;
 	ret->single_line = 0;
 	ret->screen_line_start = NULL;

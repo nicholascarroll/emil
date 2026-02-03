@@ -1,7 +1,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include "emsys.h"
+#include "emil.h"
+#include "message.h"
+#include "message.h"
 #include "edit.h"
 #include "buffer.h"
 #include "undo.h"
@@ -33,6 +35,11 @@ static void addToKillRing(const char *text) {
 /* Character insertion */
 
 void editorInsertChar(struct editorBuffer *bufr, int c, int count) {
+	if (bufr->read_only) {
+		editorSetStatusMessage(msg_read_only);
+		return;
+	}
+
 	if (count <= 0)
 		count = 1;
 
@@ -85,6 +92,11 @@ cancel:
 }
 
 void editorInsertNewline(struct editorBuffer *bufr, int count) {
+	if (bufr->read_only) {
+		editorSetStatusMessage(msg_read_only);
+		return;
+	}
+
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
 		editorUndoAppendChar(bufr, '\n');
@@ -216,6 +228,11 @@ UNINDENT_PERFORM:
 /* Character deletion */
 
 void editorDelChar(struct editorBuffer *bufr, int count) {
+	if (bufr->read_only) {
+		editorSetStatusMessage(msg_read_only);
+		return;
+	}
+
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
 		if (bufr->cy == bufr->numrows)
@@ -612,6 +629,11 @@ void editorTransposeChars(struct editorBuffer *bufr) {
 /* Line operations */
 
 void editorKillLine(int count) {
+	if (E.buf->read_only) {
+		editorSetStatusMessage(msg_read_only);
+		return;
+	}
+
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
 		if (E.buf->numrows <= 0) {
@@ -843,9 +865,61 @@ void editorPageDown(int count) {
 	}
 }
 
+void editorScrollLineUp(int count) {
+	struct editorWindow *win = E.windows[windowFocusedIdx()];
+	int times = count ? count : 1;
+
+	for (int n = 0; n < times; n++) {
+		if (win->rowoff <= 0)
+			break;
+
+		win->rowoff--;
+
+		/* If cursor is now below the visible window, move it up */
+		if (E.buf->cy >= win->rowoff + win->height) {
+			E.buf->cy = win->rowoff + win->height - 1;
+			if (E.buf->cy < 0)
+				E.buf->cy = 0;
+		}
+	}
+
+	/* Ensure cursor column is valid for new row */
+	if (E.buf->cy < E.buf->numrows &&
+	    E.buf->cx > E.buf->row[E.buf->cy].size) {
+		E.buf->cx = E.buf->row[E.buf->cy].size;
+	}
+}
+
+void editorScrollLineDown(int count) {
+	struct editorWindow *win = E.windows[windowFocusedIdx()];
+	int times = count ? count : 1;
+
+	for (int n = 0; n < times; n++) {
+		if (win->rowoff >= E.buf->numrows - 1)
+			break;
+
+		win->rowoff++;
+
+		/* If cursor is now above the visible window, move it down */
+		if (E.buf->cy < win->rowoff) {
+			E.buf->cy = win->rowoff;
+		}
+	}
+
+	/* Ensure cursor column is valid for new row */
+	if (E.buf->cy < E.buf->numrows &&
+	    E.buf->cx > E.buf->row[E.buf->cy].size) {
+		E.buf->cx = E.buf->row[E.buf->cy].size;
+	}
+}
+
+
 void editorBeginningOfLine(int count) {
-	(void)count; // Not used
-	E.buf->cx = 0;
+	if (count == 0) {
+		E.buf->cx = 0;
+	} else {
+		editorKillLineBackwards();
+	}
 }
 
 void editorEndOfLine(int count) {

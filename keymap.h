@@ -95,6 +95,9 @@ enum editorKey {
 	HISTORY_PREV,
 	HISTORY_NEXT,
 	YANK_POP,
+	SAVE_AS,
+	TOGGLE_READ_ONLY,
+	SHELL_DRAWER,
 };
 
 struct editorBuffer;

@@ -3,8 +3,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include "prompt.h"
-#include "emsys.h"
+#include "emil.h"
+#include "message.h"
 #include "terminal.h"
 #include "display.h"
 #include "keymap.h"
@@ -57,15 +59,43 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 
 		/* Handle special minibuffer keys */
 		switch (c) {
-		case '\r':
+		case '\r': {
 			if (E.minibuf->numrows > 0 &&
 			    E.minibuf->row[0].size > 0) {
-				result = (uint8_t *)xstrdup(
-					(char *)E.minibuf->row[0].chars);
+				char *current_text =
+					(char *)E.minibuf->row[0].chars;
+				struct stat st;
+
+				/* Check if this is a file prompt and the path exists */
+				if (t == PROMPT_FILES &&
+				    stat(current_text, &st) == 0) {
+					if (S_ISDIR(st.st_mode)) {
+						/* User hit Enter on a directory. 
+                 * Treat it like a Tab press instead. */
+						int len = strlen(current_text);
+						if (len > 0 &&
+						    current_text[len - 1] !=
+							    '/') {
+							/* Move cursor to end before inserting slash */
+							E.minibuf->cx = len;
+							editorInsertChar(
+								E.minibuf, '/',
+								1);
+						}
+
+						handleMinibufferCompletion(
+							E.minibuf, t);
+						break; /* Do NOT return; keep the user in the prompt */
+					}
+				}
+
+				/* If it's a file, or it doesn't exist (new file), return it */
+				result = (uint8_t *)xstrdup(current_text);
 			} else {
 				result = (uint8_t *)xstrdup("");
 			}
 			goto done;
+		}
 
 		case CTRL('g'):
 		case CTRL('c'):

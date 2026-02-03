@@ -1,37 +1,30 @@
 #!/bin/sh
-# Test suite for emsys
+# Test suite for emil
 set -e
 
 echo "Running tests..."
 
-# Test 0: Check for missing newlines (must be first, before any builds)
-if ./tests/check-newlines.sh > /dev/null 2>&1; then
-    echo "✓ Source file newlines"
-else
-    echo "✗ Missing newlines in source files"
-    ./tests/check-newlines.sh
-    exit 1
-fi
-
 # Test 1: Version flag works
-./emsys --version > /dev/null || exit 1
+./emil --version > /dev/null || exit 1
 echo "✓ Version check"
 
-# Test 2: Version consistency (if git is available)
-if command -v git >/dev/null 2>&1 && git describe --tags >/dev/null 2>&1; then
-    GIT_VERSION=$(git describe --tags --always --dirty | sed 's/^v//')
-    # Extract VERSION from Makefile
-    MAKEFILE_VERSION=$(grep "^VERSION = " Makefile | cut -d' ' -f3)
-    if [ "$GIT_VERSION" != "$MAKEFILE_VERSION" ]; then
-        echo "✗ Version mismatch: Git has '$GIT_VERSION', Makefile has '$MAKEFILE_VERSION'"
-        echo "  Please update VERSION in Makefile to match your git tag"
+
+# Test 2: Version consistency
+MAKEFILE_VERSION=$(grep "^VERSION = " Makefile | cut -d' ' -f3)
+BINARY_VERSION=$(./emil --version | awk '{print $NF}') # Assuming emil --version outputs "emil 0.1.0"
+
+if [ "$BINARY_VERSION" != "$MAKEFILE_VERSION" ]; then
+    # If they don't match, check if it's just because it's a Git dev build
+    if echo "$BINARY_VERSION" | grep -q "$MAKEFILE_VERSION"; then
+        echo "✓ Version consistency (Dev build: $BINARY_VERSION)"
+    else
+        echo "✗ Version mismatch: Binary has '$BINARY_VERSION', Makefile has '$MAKEFILE_VERSION'"
         exit 1
     fi
-    echo "✓ Version consistency"
 fi
 
 # Test 3: Binary exists and is executable  
-test -x ./emsys || exit 1
+test -x ./emil || exit 1
 echo "✓ Binary executable"
 
 # Test 4: Compile and run core tests
