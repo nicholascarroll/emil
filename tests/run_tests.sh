@@ -1,5 +1,5 @@
 #!/bin/sh
-# Test suite for emsys
+# Test suite for emil
 set -e
 
 echo "Running tests..."
@@ -14,7 +14,7 @@ else
 fi
 
 # Test 1: Version flag works
-./emsys --version > /dev/null || exit 1
+./emil --version > /dev/null || exit 1
 echo "✓ Version check"
 
 # Test 2: Version consistency (if git is available)
@@ -31,7 +31,7 @@ if command -v git >/dev/null 2>&1 && git describe --tags >/dev/null 2>&1; then
 fi
 
 # Test 3: Binary exists and is executable  
-test -x ./emsys || exit 1
+test -x ./emil || exit 1
 echo "✓ Binary executable"
 
 # Test 4: Compile and run core tests

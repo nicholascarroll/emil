@@ -1,6 +1,6 @@
 #include "util.h"
 
-#include "emsys.h"
+#include "emil.h"
 #include "fileio.h"
 #include "buffer.h"
 #include <errno.h>
@@ -65,7 +65,7 @@ void editorOpen(struct editorBuffer *bufr, char *filename) {
 	size_t linecap = 0;
 	ssize_t linelen;
 
-	while ((linelen = emsys_getline(&line, &linecap, fp)) != -1) {
+	while ((linelen = emil_getline(&line, &linecap, fp)) != -1) {
 		while (linelen > 0 &&
 		       (line[linelen - 1] == '\n' || line[linelen - 1] == '\r'))
 			linelen--;
@@ -225,7 +225,7 @@ void editorInsertFile(struct editorConfig *UNUSED(ed),
 	ssize_t linelen;
 	int lines_inserted = 0;
 
-	while ((linelen = emsys_getline(&line, &linecap, fp)) != -1) {
+	while ((linelen = emil_getline(&line, &linecap, fp)) != -1) {
 		while (linelen > 0 && (line[linelen - 1] == '\n' ||
 				       line[linelen - 1] == '\r')) {
 			linelen--;

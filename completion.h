@@ -1,7 +1,7 @@
-#ifndef EMSYS_COMPLETION_H
-#define EMSYS_COMPLETION_H
+#ifndef EMIL_COMPLETION_H
+#define EMIL_COMPLETION_H
 
-#include "emsys.h"
+#include "emil.h"
 
 void resetCompletionState(struct completion_state *state);
 void freeCompletionResult(struct completion_result *result);

@@ -1,5 +1,5 @@
-#ifndef EMSYS_H
-#define EMSYS_H 1
+#ifndef EMIL_H
+#define EMIL_H 1
 
 #include <stdint.h>
 #include <termios.h>
@@ -9,10 +9,10 @@
 
 /*** util ***/
 
-#define EMSYS_TAB_STOP 8
+#define EMIL_TAB_STOP 8
 
-#ifndef EMSYS_VERSION
-#define EMSYS_VERSION "unknown"
+#ifndef EMIL_VERSION
+#define EMIL_VERSION "unknown"
 #endif
 
 #define ESC "\033"

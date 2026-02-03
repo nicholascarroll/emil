@@ -1,7 +1,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include "emsys.h"
+#include "emil.h"
 #include "edit.h"
 #include "buffer.h"
 #include "undo.h"

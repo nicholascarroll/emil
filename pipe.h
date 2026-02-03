@@ -1,6 +1,6 @@
-#ifndef EMSYS_PIPE_H
-#define EMSYS_PIPE_H
-#include "emsys.h"
+#ifndef EMIL_PIPE_H
+#define EMIL_PIPE_H
+#include "emil.h"
 
 uint8_t *editorPipe(struct editorConfig *ed, struct editorBuffer *buf);
 void editorPipeCmd(struct editorConfig *ed, struct editorBuffer *bufr);

@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
-#include "emsys.h"
+#include "emil.h"
 #include "region.h"
 #include "buffer.h"
 #include "undo.h"
@@ -82,7 +82,7 @@ void editorDoUndo(struct editorBuffer *buf, int count) {
 	}
 }
 
-#ifdef EMSYS_DEBUG_UNDO
+#ifdef EMIL_DEBUG_UNDO
 void debugUnpair(struct editorConfig *UNUSED(ed), struct editorBuffer *buf) {
 	int undos = 0;
 	int redos = 0;

@@ -1,7 +1,7 @@
 *.o
 *.exe
 *.stackdump
-emsys
+emil
 unicodetest
 /build
 /config.h

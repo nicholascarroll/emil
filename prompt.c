@@ -4,7 +4,7 @@
 #include <string.h>
 #include <unistd.h>
 #include "prompt.h"
-#include "emsys.h"
+#include "emil.h"
 #include "terminal.h"
 #include "display.h"
 #include "keymap.h"

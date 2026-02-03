@@ -47,8 +47,8 @@ jobs:
     
     - name: Test with sanitizers
       run: |
-        echo "Testing emsys with sanitizers enabled..."
-        ./emsys --version
+        echo "Testing emil with sanitizers enabled..."
+        ./emil --version
         echo "Running unit tests with sanitizers..."
         make test
 

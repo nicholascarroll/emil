@@ -12,7 +12,7 @@
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
-#include "emsys.h"
+#include "emil.h"
 #include "fileio.h"
 #include "find.h"
 #include "pipe.h"
@@ -98,7 +98,7 @@ void initEditor(void) {
 int main(int argc, char *argv[]) {
 	// Check for --version flag before entering raw mode
 	if (argc >= 2 && strcmp(argv[1], "--version") == 0) {
-		printf("emsys %s\n", EMSYS_VERSION);
+		printf("emil %s\n", EMIL_VERSION);
 		return 0;
 	}
 
@@ -142,7 +142,7 @@ int main(int argc, char *argv[]) {
 	E.minibuf->filename = xstrdup("*minibuffer*");
 	E.edbuf = E.buf;
 
-	editorSetStatusMessage("emsys " EMSYS_VERSION " - C-x C-c to quit");
+	editorSetStatusMessage("emil " EMIL_VERSION " - C-x C-c to quit");
 	setupHandlers();
 
 	for (;;) {

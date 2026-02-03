@@ -1,4 +1,4 @@
-PROGNAME = emsys
+PROGNAME = emil
 PREFIX = /usr/local
 SHELL = /bin/sh
 
@@ -14,7 +14,7 @@ CFLAGS = -std=c99 -Wall -Wextra -Wpedantic -Wno-pointer-sign -D_DEFAULT_SOURCE -
 # Installation directories
 BINDIR = $(PREFIX)/bin
 MANDIR = $(PREFIX)/man/man1
-DOCDIR = $(PREFIX)/share/doc/emsys
+DOCDIR = $(PREFIX)/share/doc/emil
 
 # Source files
 OBJECTS = main.o wcwidth.o unicode.o buffer.o region.o undo.o transform.o \
@@ -33,7 +33,7 @@ $(PROGNAME): $(OBJECTS)
 # POSIX suffix rule for .c to .o
 .SUFFIXES: .c .o
 .c.o:
-	$(CC) $(CFLAGS) -DEMSYS_VERSION=\"$(VERSION)\" -c $<
+	$(CC) $(CFLAGS) -DEMIL_VERSION=\"$(VERSION)\" -c $<
 
 # Simple header dependency
 $(OBJECTS): config.h
@@ -89,14 +89,14 @@ format:
 
 # Platform-specific variants
 android:
-	$(MAKE) CC=clang CFLAGS="$(CFLAGS) -fPIC -fPIE -DEMSYS_DISABLE_PIPE" LDFLAGS="-pie" $(PROGNAME)
+	$(MAKE) CC=clang CFLAGS="$(CFLAGS) -fPIC -fPIE -DEMIL_DISABLE_PIPE" LDFLAGS="-pie" $(PROGNAME)
 
 
 msys2:
 	$(MAKE) CFLAGS="$(CFLAGS) -D_GNU_SOURCE" $(PROGNAME)
 
 minimal:
-	$(MAKE) CFLAGS="$(CFLAGS) -DEMSYS_DISABLE_PIPE -Os" $(PROGNAME)
+	$(MAKE) CFLAGS="$(CFLAGS) -DEMIL_DISABLE_PIPE -Os" $(PROGNAME)
 
 solaris:
 	VERSION="$(VERSION)" $(MAKE) CC=cc CFLAGS="-xc99 -D__EXTENSIONS__ -O2 -errtags=yes -erroff=E_ARG_INCOMPATIBLE_WITH_ARG_L" $(PROGNAME)
@@ -109,8 +109,8 @@ darwin:
 
 # Help
 help:
-	@echo "emsys build targets:"
-	@echo "  all       Build emsys (default)"
+	@echo "emil build targets:"
+	@echo "  all       Build emil (default)"
 	@echo "  install   Install to PREFIX ($(PREFIX))"
 	@echo "  uninstall Remove installed files"
 	@echo "  clean     Remove object files"

@@ -1,4 +1,4 @@
-/* Test framework for emsys */
+/* Test framework for emil */
 #ifndef TEST_H
 #define TEST_H
 
@@ -71,7 +71,7 @@ static const char *_current_test_name = NULL;
     _tests_failed \
 )
 
-/* Convenience macros that emsys uses */
+/* Convenience macros that emil uses */
 #define TEST_ASSERT_EQUAL_INT(expected, actual) TEST_ASSERT_EQUAL(expected, actual)
 #define TEST_ASSERT_EQUAL_UINT(expected, actual) TEST_ASSERT_EQUAL(expected, actual)
 #define TEST_ASSERT_TRUE(condition) TEST_ASSERT(condition)

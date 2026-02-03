@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <regex.h>
-#include "emsys.h"
+#include "emil.h"
 #include "region.h"
 #include "buffer.h"
 #include "undo.h"
@@ -208,7 +208,7 @@ void editorYank(struct editorConfig *ed, struct editorBuffer *buf, int count) {
 		new->datalen = killLen;
 		new->datasize = new->datalen + 1;
 		new->data = xmalloc(new->datasize);
-		emsys_strlcpy(new->data, ed->kill, new->datasize);
+		emil_strlcpy(new->data, ed->kill, new->datasize);
 		new->append = 0;
 
 		for (int i = 0; ed->kill[i] != 0; i++) {
@@ -284,7 +284,7 @@ void editorTransformRegion(struct editorConfig *ed, struct editorBuffer *buf,
 	uint8_t *okill = NULL;
 	if (ed->kill != NULL) {
 		okill = xmalloc(strlen((char *)ed->kill) + 1);
-		emsys_strlcpy(okill, ed->kill, strlen((char *)ed->kill) + 1);
+		emil_strlcpy(okill, ed->kill, strlen((char *)ed->kill) + 1);
 	}
 	editorKillRegion(ed, buf);
 
@@ -329,7 +329,7 @@ void editorReplaceRegex(struct editorConfig *ed, struct editorBuffer *buf) {
 	uint8_t *okill = NULL;
 	if (ed->kill != NULL) {
 		okill = xmalloc(strlen((char *)ed->kill) + 1);
-		emsys_strlcpy(okill, ed->kill, strlen((char *)ed->kill) + 1);
+		emil_strlcpy(okill, ed->kill, strlen((char *)ed->kill) + 1);
 	}
 	editorCopyRegion(ed, buf);
 
@@ -393,27 +393,27 @@ void editorReplaceRegex(struct editorConfig *ed, struct editorBuffer *buf) {
 							    matches[0].rm_so) :
 							   0;
 		if (i != 0)
-			emsys_strlcat((char *)new->data, "\n", new->datasize);
+			emil_strlcat((char *)new->data, "\n", new->datasize);
 		if (match_idx < 0) {
 			if (buf->cy == buf->marky) {
 				strncat((char *)new->data,
 					(char *)&row->chars[buf->cx],
 					buf->markx - buf->cx);
 			} else if (i == buf->cy) {
-				emsys_strlcat((char *)new->data,
+				emil_strlcat((char *)new->data,
 					      (char *)&row->chars[buf->cx],
 					      new->datasize);
 			} else if (i == buf->marky) {
 				strncat((char *)new->data, (char *)row->chars,
 					buf->markx);
 			} else {
-				emsys_strlcat((char *)new->data,
+				emil_strlcat((char *)new->data,
 					      (char *)row->chars,
 					      new->datasize);
 			}
 			continue;
 		} else if (i == buf->cy && match_idx < buf->cx) {
-			emsys_strlcat((char *)new->data,
+			emil_strlcat((char *)new->data,
 				      (char *)&row->chars[buf->cx],
 				      new->datasize);
 			continue;
@@ -444,7 +444,7 @@ void editorReplaceRegex(struct editorConfig *ed, struct editorBuffer *buf) {
 			strncat((char *)new->data, (char *)&row->chars[buf->cx],
 				buf->markx - buf->cx);
 		} else if (i == buf->cy) {
-			emsys_strlcat((char *)new->data,
+			emil_strlcat((char *)new->data,
 				      (char *)&row->chars[buf->cx],
 				      new->datasize);
 		} else if (i == buf->marky) {
@@ -452,7 +452,7 @@ void editorReplaceRegex(struct editorConfig *ed, struct editorBuffer *buf) {
 			strncat((char *)new->data, (char *)row->chars,
 				buf->markx);
 		} else {
-			emsys_strlcat((char *)new->data, (char *)row->chars,
+			emil_strlcat((char *)new->data, (char *)row->chars,
 				      new->datasize);
 		}
 	}
@@ -490,7 +490,7 @@ void editorStringRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	uint8_t *okill = NULL;
 	if (ed->kill != NULL) {
 		okill = xmalloc(strlen((char *)ed->kill) + 1);
-		emsys_strlcpy(okill, ed->kill, strlen((char *)ed->kill) + 1);
+		emil_strlcpy(okill, ed->kill, strlen((char *)ed->kill) + 1);
 	}
 
 	/* Do all the bookkeeping for killing the region, with a little extra
@@ -593,14 +593,14 @@ void editorStringRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	row->size += extra;
 	row->chars[row->size] = 0;
 	if (boty == topy) {
-		emsys_strlcat((char *)new->data, (char *)string, new->datasize);
+		emil_strlcat((char *)new->data, (char *)string, new->datasize);
 	} else {
-		emsys_strlcat((char *)new->data, (char *)&row->chars[topx],
+		emil_strlcat((char *)new->data, (char *)&row->chars[topx],
 			      new->datasize);
 	}
 
 	for (int i = topy + 1; i < boty; i++) {
-		emsys_strlcat((char *)new->data, "\n", new->datasize);
+		emil_strlcat((char *)new->data, "\n", new->datasize);
 		/* Next, middle lines */
 		row = &buf->row[i];
 		if (row->size < botx) {
@@ -619,13 +619,13 @@ void editorStringRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 		memcpy(&row->chars[topx], string, slen);
 		row->size += extra;
 		row->chars[row->size] = 0;
-		emsys_strlcat((char *)new->data, (char *)row->chars,
+		emil_strlcat((char *)new->data, (char *)row->chars,
 			      new->datasize);
 	}
 
 	/* Finally, end line */
 	if (topy != boty) {
-		emsys_strlcat((char *)new->data, "\n", new->datasize);
+		emil_strlcat((char *)new->data, "\n", new->datasize);
 		row = &buf->row[boty];
 		if (row->size < botx) {
 			row->chars = xrealloc(row->chars, botx + 1);
@@ -744,7 +744,7 @@ void editorKillRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	uint8_t *okill = NULL;
 	if (ed->kill != NULL) {
 		okill = xmalloc(strlen((char *)ed->kill) + 1);
-		emsys_strlcpy(okill, ed->kill, strlen((char *)ed->kill) + 1);
+		emil_strlcpy(okill, ed->kill, strlen((char *)ed->kill) + 1);
 	}
 	free(ed->rectKill);
 
@@ -820,7 +820,7 @@ void editorKillRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 			row->size -= (row->size - (botx - ed->rx));
 			row->chars[row->size] = 0;
 			if (boty != topy) {
-				emsys_strlcat(
+				emil_strlcat(
 					(char *)new->data,
 					(char *)&row->chars[botx - ed->rx],
 					new->datasize);
@@ -833,7 +833,7 @@ void editorKillRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 		row->size -= ed->rx;
 		row->chars[row->size] = 0;
 		if (boty != topy) {
-			emsys_strlcat((char *)new->data,
+			emil_strlcat((char *)new->data,
 				      (char *)&row->chars[topx], new->datasize);
 		}
 	}
@@ -841,7 +841,7 @@ void editorKillRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 
 	while ((topy + idx) < boty) {
 		/* Middle lines */
-		emsys_strlcat((char *)new->data, "\n", new->datasize);
+		emil_strlcat((char *)new->data, "\n", new->datasize);
 		row = &buf->row[topy + idx];
 
 		if (row->size < botx) {
@@ -862,14 +862,14 @@ void editorKillRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 			row->chars[row->size] = 0;
 		}
 
-		emsys_strlcat((char *)new->data, (char *)row->chars,
+		emil_strlcat((char *)new->data, (char *)row->chars,
 			      new->datasize);
 		idx++;
 	}
 
 	/* Finally, end line */
 	if (topy != boty) {
-		emsys_strlcat((char *)new->data, "\n", new->datasize);
+		emil_strlcat((char *)new->data, "\n", new->datasize);
 		row = &buf->row[topy + idx];
 
 		if (row->size < botx) {
@@ -903,7 +903,7 @@ void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	uint8_t *okill = NULL;
 	if (ed->kill != NULL) {
 		okill = xmalloc(strlen((char *)ed->kill) + 1);
-		emsys_strlcpy(okill, ed->kill, strlen((char *)ed->kill) + 1);
+		emil_strlcpy(okill, ed->kill, strlen((char *)ed->kill) + 1);
 	}
 
 	int topx, topy, botx, boty;
@@ -1014,15 +1014,15 @@ void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	row->size += ed->rx;
 	row->chars[row->size] = 0;
 	if (boty == topy) {
-		emsys_strlcat((char *)new->data, string, new->datasize);
+		emil_strlcat((char *)new->data, string, new->datasize);
 	} else {
-		emsys_strlcat((char *)new->data, (char *)&row->chars[topx],
+		emil_strlcat((char *)new->data, (char *)&row->chars[topx],
 			      new->datasize);
 	}
 	idx++;
 
 	while ((topy + idx) < boty) {
-		emsys_strlcat((char *)new->data, "\n", new->datasize);
+		emil_strlcat((char *)new->data, "\n", new->datasize);
 		/* Next, middle lines */
 		row = &buf->row[topy + idx];
 		strncpy(string, (char *)&ed->rectKill[idx * ed->rx], ed->rx);
@@ -1042,14 +1042,14 @@ void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 		memcpy(&row->chars[topx], string, ed->rx);
 		row->size += ed->rx;
 		row->chars[row->size] = 0;
-		emsys_strlcat((char *)new->data, (char *)row->chars,
+		emil_strlcat((char *)new->data, (char *)row->chars,
 			      new->datasize);
 		idx++;
 	}
 
 	/* Finally, end line */
 	if (topy != boty) {
-		emsys_strlcat((char *)new->data, "\n", new->datasize);
+		emil_strlcat((char *)new->data, "\n", new->datasize);
 		strncpy(string, (char *)&ed->rectKill[idx * ed->rx], ed->rx);
 		row = &buf->row[boty];
 		if (row->size < botx) {

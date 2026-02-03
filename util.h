@@ -1,5 +1,5 @@
-#ifndef EMSYS_UTIL_H
-#define EMSYS_UTIL_H
+#ifndef EMIL_UTIL_H
+#define EMIL_UTIL_H
 
 #include <stdlib.h>
 #include <string.h>
@@ -13,10 +13,10 @@ void *xcalloc(size_t nmemb, size_t size);
 char *xstrdup(const char *s);
 
 /* Portable getline implementation */
-ssize_t emsys_getline(char **lineptr, size_t *n, FILE *stream);
+ssize_t emil_getline(char **lineptr, size_t *n, FILE *stream);
 
 /* Safe string functions (BSD-style but portable) */
-size_t emsys_strlcpy(char *dst, const char *src, size_t dsize);
-size_t emsys_strlcat(char *dst, const char *src, size_t dsize);
+size_t emil_strlcpy(char *dst, const char *src, size_t dsize);
+size_t emil_strlcat(char *dst, const char *src, size_t dsize);
 
-#endif /* EMSYS_UTIL_H */
+#endif /* EMIL_UTIL_H */

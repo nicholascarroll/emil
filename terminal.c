@@ -1,6 +1,6 @@
 #include "util.h"
 #include "terminal.h"
-#include "emsys.h"
+#include "emil.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -121,11 +121,11 @@ int editorReadKey(void) {
 		if (nread == -1 && errno != EAGAIN)
 			die("read");
 	}
-#ifdef EMSYS_CU_UARG
+#ifdef EMIL_CU_UARG
 	if (c == CTRL('u')) {
 		return UNIVERSAL_ARGUMENT;
 	}
-#endif //EMSYS_CU_UARG
+#endif //EMIL_CU_UARG
 	if (c == 033) {
 		char seq[5] = { 0, 0, 0, 0, 0 };
 		if (read(STDIN_FILENO, &seq[0], 1) != 1)
@@ -250,7 +250,7 @@ ESC_UNKNOWN:;
 			} else {
 				snprintf(buf, sizeof(buf), "%c ", seq[i]);
 			}
-			emsys_strlcat(seqR, buf, sizeof(seqR));
+			emil_strlcat(seqR, buf, sizeof(seqR));
 		}
 		editorSetStatusMessage("Unknown command M-%s", seqR);
 		return 033;

@@ -1,8 +1,8 @@
-#ifndef EMSYS_REGION_H
-#define EMSYS_REGION_H 1
+#ifndef EMIL_REGION_H
+#define EMIL_REGION_H 1
 
 #include <stdint.h>
-#include "emsys.h"
+#include "emil.h"
 
 int markInvalid(void);
 int markInvalidSilent(void);

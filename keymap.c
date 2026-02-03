@@ -13,7 +13,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <limits.h>
-#include "emsys.h"
+#include "emil.h"
 #include "util.h"
 #include "fileio.h"
 #include "find.h"
@@ -63,7 +63,7 @@ void setupCommands(struct editorConfig *ed) {
 		{ "version", editorVersionWrapper },
 		{ "view-register", editorViewRegister },
 		{ "whitespace-cleanup", editorWhitespaceCleanup },
-#ifdef EMSYS_DEBUG_UNDO
+#ifdef EMIL_DEBUG_UNDO
 		{ "debug-unpair", debugUnpair },
 #endif
 	};
@@ -146,7 +146,7 @@ void executeCommand(int key) {
 	/* Handle prefix state transitions and commands */
 	switch (key) {
 	case CTRL('x'):
-#ifdef EMSYS_CUA
+#ifdef EMIL_CUA
 		/* CUA mode: if region marked, cut instead of prefix */
 		if (E.buf->markx != -1 && E.buf->marky != -1) {
 			/* Let the regular processing handle the cut */
@@ -416,7 +416,7 @@ void editorProcessKeypress(int c) {
 	}
 
 	if (c != CTRL('y') && c != YANK_POP
-#ifdef EMSYS_CUA
+#ifdef EMIL_CUA
 	    && c != CTRL('v')
 #endif
 	) {
@@ -427,11 +427,11 @@ void editorProcessKeypress(int c) {
 	struct editorWindow *win = E.windows[windowIdx];
 
 	if (E.micro) {
-#ifdef EMSYS_CUA
+#ifdef EMIL_CUA
 		if (E.micro == REDO && (c == CTRL('_') || c == CTRL('z'))) {
 #else
 		if (E.micro == REDO && c == CTRL('_')) {
-#endif //EMSYS_CUA
+#endif //EMIL_CUA
 			editorDoRedo(E.buf, 1);
 			return;
 		} else {
@@ -451,7 +451,7 @@ void editorProcessKeypress(int c) {
 		return;
 	}
 
-#ifdef EMSYS_CU_UARG
+#ifdef EMIL_CU_UARG
 	// Handle C-u (Universal Argument)
 	if (c == UNIVERSAL_ARGUMENT) {
 		if (!E.uarg) {
@@ -473,7 +473,7 @@ void editorProcessKeypress(int c) {
 		editorSetStatusMessage("C-u %d", E.uarg);
 		return;
 	}
-#endif //EMSYS_CU_UARG
+#endif //EMIL_CU_UARG
 
 	// Handle PIPE_CMD
 	if (c == PIPE_CMD) {
@@ -523,16 +523,16 @@ void editorProcessKeypress(int c) {
 		editorMoveCursor(ARROW_DOWN, uarg);
 		break;
 	case PAGE_UP:
-#ifndef EMSYS_CUA
+#ifndef EMIL_CUA
 	case CTRL('z'):
-#endif //EMSYS_CUA
+#endif //EMIL_CUA
 		editorPageUp(uarg);
 		break;
 
 	case PAGE_DOWN:
-#ifndef EMSYS_CUA
+#ifndef EMIL_CUA
 	case CTRL('v'):
-#endif //EMSYS_CUA
+#endif //EMIL_CUA
 		editorPageDown(uarg);
 		break;
 	case BEG_OF_FILE:
@@ -576,12 +576,12 @@ void editorProcessKeypress(int c) {
 	case UNICODE:
 		editorInsertUnicode(E.buf, uarg);
 		break;
-#ifdef EMSYS_CUA
+#ifdef EMIL_CUA
 	case CUT:
 		editorKillRegion(&E, E.buf);
 		editorClearMark();
 		break;
-#endif //EMSYS_CUA
+#endif //EMIL_CUA
 	case SAVE:
 		editorSave(E.buf);
 		break;
@@ -589,19 +589,19 @@ void editorProcessKeypress(int c) {
 		editorCopyRegion(&E, E.buf);
 		editorClearMark();
 		break;
-#ifdef EMSYS_CUA
+#ifdef EMIL_CUA
 	case CTRL('C'):
 		editorCopyRegion(&E, E.buf);
 		editorClearMark();
 		break;
-#endif //EMSYS_CUA
+#endif //EMIL_CUA
 	case CTRL('@'):
 		editorSetMark();
 		break;
 	case CTRL('y'):
-#ifdef EMSYS_CUA
+#ifdef EMIL_CUA
 	case CTRL('v'):
-#endif //EMSYS_CUA
+#endif //EMIL_CUA
 		editorYank(&E, E.buf, uarg ? uarg : 1);
 		break;
 	case YANK_POP:
@@ -612,15 +612,15 @@ void editorProcessKeypress(int c) {
 		editorClearMark();
 		break;
 	case CTRL('_'):
-#ifdef EMSYS_CUA
+#ifdef EMIL_CUA
 	case CTRL('z'):
-#endif //EMSYS_CUA
+#endif //EMIL_CUA
 		editorDoUndo(E.buf, uarg);
 		break;
 	case CTRL('k'):
 		editorKillLine(uarg);
 		break;
-#ifndef EMSYS_CU_UARG
+#ifndef EMIL_CU_UARG
 	case CTRL('u'):
 		editorKillLineBackwards();
 		break;

@@ -1,6 +1,6 @@
 #include "util.h"
 
-#ifndef EMSYS_DISABLE_PIPE
+#ifndef EMIL_DISABLE_PIPE
 
 #include <fcntl.h>
 #include <stddef.h>
@@ -16,7 +16,7 @@
 #define _POSIX_C_SOURCE 200112L
 #endif
 
-#include "emsys.h"
+#include "emil.h"
 #include "region.h"
 #include "pipe.h"
 #include "subprocess.h"
@@ -184,9 +184,9 @@ void editorPipeCmd(struct editorConfig *ed, struct editorBuffer *bufr) {
 	}
 }
 
-#else /* EMSYS_DISABLE_PIPE */
+#else /* EMIL_DISABLE_PIPE */
 
-#include "emsys.h"
+#include "emil.h"
 #include "display.h"
 
 void editorPipeCmd(struct editorConfig *ed, struct editorBuffer *bufr) {
@@ -195,4 +195,4 @@ void editorPipeCmd(struct editorConfig *ed, struct editorBuffer *bufr) {
 	editorSetStatusMessage("Pipe command not available on this platform");
 }
 
-#endif /* EMSYS_DISABLE_PIPE */
+#endif /* EMIL_DISABLE_PIPE */

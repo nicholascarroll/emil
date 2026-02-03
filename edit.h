@@ -1,7 +1,7 @@
-#ifndef EMSYS_EDIT_H
-#define EMSYS_EDIT_H
+#ifndef EMIL_EDIT_H
+#define EMIL_EDIT_H
 
-#include "emsys.h"
+#include "emil.h"
 
 /* Character insertion */
 void editorInsertChar(struct editorBuffer *bufr, int c, int count);

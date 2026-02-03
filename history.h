@@ -1,7 +1,7 @@
-#ifndef EMSYS_HISTORY_H
-#define EMSYS_HISTORY_H
+#ifndef EMIL_HISTORY_H
+#define EMIL_HISTORY_H
 
-#include "emsys.h"
+#include "emil.h"
 
 void initHistory(struct editorHistory *hist);
 void addHistory(struct editorHistory *hist, const char *str);

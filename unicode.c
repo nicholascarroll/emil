@@ -4,7 +4,7 @@
 #include <wchar.h>
 #include "wcwidth.h"
 #include "unicode.h"
-#include "emsys.h"
+#include "emil.h"
 
 /* The UCS format used by wcwidth.c. NOT a general purpose function. */
 static int utf8ToUCS(uint8_t *str, int idx) {
@@ -195,7 +195,7 @@ int nextScreenX(uint8_t *str, int *idx, int screen_x) {
 
 	if (ch == '\t') {
 		/* Move to next tab stop */
-		screen_x = ((screen_x / EMSYS_TAB_STOP) + 1) * EMSYS_TAB_STOP;
+		screen_x = ((screen_x / EMIL_TAB_STOP) + 1) * EMIL_TAB_STOP;
 	} else if (ch < 0x20 || ch == 0x7f) {
 		/* Control characters display as ^X */
 		screen_x += 2;

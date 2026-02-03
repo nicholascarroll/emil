@@ -1,5 +1,5 @@
 #include "display.h"
-#include "emsys.h"
+#include "emil.h"
 #include "terminal.h"
 #include "unicode.h"
 #include "unused.h"
@@ -192,8 +192,8 @@ static void renderLineWithHighlighting(erow *row, struct abuf *ab,
 		}
 
 		if (c == '\t') {
-			int next_tab_stop = (render_x + EMSYS_TAB_STOP) /
-					    EMSYS_TAB_STOP * EMSYS_TAB_STOP;
+			int next_tab_stop = (render_x + EMIL_TAB_STOP) /
+					    EMIL_TAB_STOP * EMIL_TAB_STOP;
 			while (render_x < next_tab_stop && render_x < end_col) {
 				if (render_x >= start_col) {
 					abAppend(ab, " ", 1);
@@ -391,9 +391,9 @@ void scroll(void) {
 					int char_width;
 					if (j < row->size &&
 					    row->chars[j] == '\t') {
-						char_width = EMSYS_TAB_STOP -
+						char_width = EMIL_TAB_STOP -
 							     (cursor_x %
-							      EMSYS_TAB_STOP);
+							      EMIL_TAB_STOP);
 					} else {
 						char_width = charInStringWidth(
 							row->chars, j);
@@ -445,8 +445,8 @@ void scroll(void) {
 			for (int j = 0; j < buf->cx;) {
 				if (j < row->size) {
 					if (row->chars[j] == '\t') {
-						rx += EMSYS_TAB_STOP -
-						      (rx % EMSYS_TAB_STOP);
+						rx += EMIL_TAB_STOP -
+						      (rx % EMIL_TAB_STOP);
 					} else {
 						int char_width =
 							charInStringWidth(
@@ -546,9 +546,9 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 						if (c == '\t') {
 							int next_tab_stop =
 								(render_x +
-								 EMSYS_TAB_STOP) /
-								EMSYS_TAB_STOP *
-								EMSYS_TAB_STOP;
+								 EMIL_TAB_STOP) /
+								EMIL_TAB_STOP *
+								EMIL_TAB_STOP;
 							int tab_end =
 								next_tab_stop;
 							if (tab_end -
@@ -720,8 +720,8 @@ void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
 			       bufr->read_only ? '%' : ' ', win->cy + 1,
 			       win->cx);
 	}
-#ifdef EMSYS_DEBUG_UNDO
-#ifdef EMSYS_DEBUG_REDO
+#ifdef EMIL_DEBUG_UNDO
+#ifdef EMIL_DEBUG_REDO
 #define DEBUG_UNDO bufr->redo
 #else
 #define DEBUG_UNDO bufr->undo
@@ -741,7 +741,7 @@ void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
 				bufr->cy);
 	}
 #endif
-#ifdef EMSYS_DEBUG_MACROS
+#ifdef EMIL_DEBUG_MACROS
 	/* This can get quite wide, you may want to boost the size of status */
 	for (int i = 0; i < E.macro.nkeys; i++) {
 		len += snprintf(&status[len], sizeof(status) - len, "%d: %d ",
@@ -1004,8 +1004,8 @@ void editorWhatCursor(void) {
 		line_len = row->size;
 		for (int j = 0; j < E.buf->cx && j < row->size; j++) {
 			if (row->chars[j] == '\t') {
-				rx = (rx + EMSYS_TAB_STOP) &
-				     ~(EMSYS_TAB_STOP - 1);
+				rx = (rx + EMIL_TAB_STOP) &
+				     ~(EMIL_TAB_STOP - 1);
 			} else {
 				int w = mk_wcwidth(row->chars[j]);
 				rx += (w > 0) ? w : 1;
@@ -1051,7 +1051,7 @@ void editorToggleTruncateLines(void) {
 }
 
 void editorVersion(void) {
-	editorSetStatusMessage("emsys version " EMSYS_VERSION);
+	editorSetStatusMessage("emil version " EMIL_VERSION);
 }
 
 /* Wrapper for command table */
