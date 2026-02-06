@@ -62,7 +62,7 @@ emil file.txt
 | Save file              | `Ctrl-x Ctrl-s` |
 | Quit                   | `Ctrl-x Ctrl-c` |
 | Suspend                | `Ctrl-x Ctrl-z` |
-| Mark (to select text)  | `Ctrl-SPACE     |
+| Mark (to select text)  | `Ctrl-SPACE`    |
 | Copy                   | `Ctrl-c`        |
 | Cut                    | `Ctrl-x`        |
 | Paste                  | `Ctrl-v`        |
