@@ -65,8 +65,8 @@ emil file.txt
 | Copy                   | `Ctrl-c`        |
 | Cut                    | `Ctrl-x`        |
 | Paste                  | `Ctrl-v`        |
-| Cancel                 | `Ctrl-g`        |
 | Undo                   | `Ctrl-z`        |
+| Cancel                 | `Ctrl-g`        |
 
 *Emacs/Readline keybindings for yank, kill and mark coexist with these keys*
 
