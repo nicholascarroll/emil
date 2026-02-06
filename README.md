@@ -62,13 +62,14 @@ emil file.txt
 | Save file              | `Ctrl-x Ctrl-s` |
 | Quit                   | `Ctrl-x Ctrl-c` |
 | Suspend                | `Ctrl-x Ctrl-z` |
+| Mark (to select text)  | `Ctrl-SPACE     |
 | Copy                   | `Ctrl-c`        |
 | Cut                    | `Ctrl-x`        |
 | Paste                  | `Ctrl-v`        |
 | Undo                   | `Ctrl-z`        |
 | Cancel                 | `Ctrl-g`        |
 
-*Emacs/Readline keybindings for yank, kill and mark coexist with these keys*
+*Emacs/Readline keybindings for copy, kill and yank coexist with these keys*
 
 ---
 
