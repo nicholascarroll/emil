@@ -54,22 +54,21 @@ Open a file:
 emil file.txt
 ```
 
-### Essential Commands
+### Essential Keys
 
 | Action                 | Keys            |
 | ---------------------- | --------------- |
 | Open file              | `Ctrl-x Ctrl-f` |
 | Save file              | `Ctrl-x Ctrl-s` |
 | Quit                   | `Ctrl-x Ctrl-c` |
-| Cancel current command | `Ctrl-g`        |
+| Suspend                | `Ctrl-x Ctrl-z` |
+| Copy                   | `Ctrl-c`        |
+| Cut                    | `Ctrl-x`        |
+| Paste                  | `Ctrl-v`        |
+| Cancel                 | `Ctrl-g`        |
 | Undo                   | `Ctrl-z`        |
 
-## CUA Shortcuts
-
-* `Ctrl-C` / `Ctrl-V` / `Ctrl-X` — copy, paste, cut
-* `Ctrl-Z` / `Ctrl-Shift-Z` — undo, redo
-
-*These shortcuts coexist with Emacs bindings and do not replace them.*
+*Emacs/Readline keybindings for yank, kill and mark coexist with these keys*
 
 ---
 
