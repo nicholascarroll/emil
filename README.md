@@ -1,7 +1,7 @@
 
 # emil
 
-`emil` is a minimalist, Emacs-style editor for editing UTF-8 plain text files on VT100-compatible terminals.
+`emil` is a minimalist, Emacs-style editor for editing UTF-8 text files on VT100-compatible terminals.
 
 `emil` has no external dependencies other than standard POSIX libraries and avoids common sources of complexity such as scripting languages, plugins, runtime configuration files, background network activity, or auto-save files.
 
