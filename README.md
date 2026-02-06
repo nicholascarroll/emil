@@ -1,13 +1,9 @@
 
 # emil
 
-`emil` is a minimalist, terminal-based text editor.
+`emil` is a minimalist, Emacs-style editor for editing UTF-8 plain text files on VT100-compatible terminals.
 
-The editing experience will feel immediately familiar to users of **Emacs** or BSD’s `mg`, while remaining lightweight and approachable for users coming from simpler editors such as `nano`.
-
-Editing and navigation keys are consistent with **Bash and zsh** shells. Shell integration (pipe text to shell command, replace regions with command output) is a compile-time option.
-
-It has no external dependencies other than standard POSIX libraries and avoids common sources of complexity such as scripting languages, plugins, runtime configuration files, background network activity, or auto-save files.
+`emil` has no external dependencies other than standard POSIX libraries and avoids common sources of complexity such as scripting languages, plugins, runtime configuration files, background network activity, or auto-save files.
 
 `emil`is built in **C99** with **POSIX.1-2001** compliance, maximising portability and long-term buildability across Unix-like systems, including older, embedded, and future platforms.
 
@@ -19,20 +15,6 @@ This project is a fork of [`japanoise/emsys`](https://github.com/japanoise/emsys
 Feature complete, but **unstable**.
 
 Current work focuses on cleaning up the architecture, fixing bugs, and improving maintainability. Contributions that simplify internal structure, improve portability, or fix correctness issues are especially welcome.
-
----
-
-## Comparison to Alternatives
-
-| Feature                           | emil | namo | mg  |
-|----------------------------------|------|------|-----|
-| Native UTF-8 support             | Yes  | Yes  | No  |
-| Highlighted selection            | Yes  | Yes  | No  |
-| Soft line wrapping               | Yes  | Yes  | No  |
-| Readline-style editing (Bash/zsh)| Yes  | No   | Yes |
-| Rectangle (column) editing       | Yes  | No   | Yes |
-| Built-in file manager (Dired)    | No   | No   | Yes |
-| CUA shortcuts (Ctrl-C / Ctrl-V)  | Yes  | No   | No  |
 
 
 ### Installation
@@ -61,6 +43,43 @@ pacman -S msys2-devel msys2-runtime-devel
 ```bash
 make && make install
 ```
+
+---
+
+## Getting Started
+
+Open a file:
+
+```
+emil file.txt
+```
+
+### Essential Commands
+
+| Action                 | Keys            |
+| ---------------------- | --------------- |
+| Open file              | `Ctrl-x Ctrl-f` |
+| Save file              | `Ctrl-x Ctrl-s` |
+| Quit                   | `Ctrl-x Ctrl-c` |
+| Cancel current command | `Ctrl-g`        |
+| Undo                   | `Ctrl-z`        |
+
+## CUA Shortcuts
+
+* `Ctrl-C` / `Ctrl-V` / `Ctrl-X` — copy, paste, cut
+* `Ctrl-Z` / `Ctrl-Shift-Z` — undo, redo
+
+*These shortcuts coexist with Emacs bindings and do not replace them.*
+
+---
+
+## Shell-Oriented Editing
+
+Basic movement and line-editing keys align with readline conventions found in Bash and zsh.
+
+Optional shell integration (enabled at compile time) allows regions to be filtered through external commands or replaced with command output.
+
+---
 
 ## Roadmap
 

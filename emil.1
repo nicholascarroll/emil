@@ -11,7 +11,7 @@
 .Op Ar file
 
 .Sh DESCRIPTION
-.Nm provides editing of UTF-8 text files on VT100/xterm terminals.
+.Nm provides editing of UTF-8 text files on VT100-compatible terminals.
 Keyboard input controls cursor movement, text entry, and commands.
 Multiple files may be open in buffers, with windows split for
 simultaneous display.
@@ -205,10 +205,12 @@ Enter a command by name.
 
 
 .Sh FILES AND ENCODING
-.Nm assumes all input and files is UTF-8 text.
+.Nm
+assumes all input and files is UTF-8 text.
 It does not recognize or convert any other encoding.
 
-.Nm always loads files in their entirety into memory as a sequence of lines.
+.Nm
+always loads files in their entirety into memory as a sequence of lines.
 Lines are separated by a single linefeed (\n) and files always
 terminate with a final linefeed.
 
@@ -216,14 +218,14 @@ Null bytes (0x00) and invalid UTF-8 sequences may cause errors.
 Other control characters are permitted.
 
 .Ss Saving Files
-.Nm writes the entire buffer to the associated file when saving.
-It does not create backup, temporary, or auto-save files.
+.Nm
+writes the entire buffer to the associated file when saving.
+It does not create auto-save files.
 If emil is interrupted during a save, the file may be partially written.
 
 .Sh UNDO HISTORY
-.Nm keeps a record of the last 1000 editing actions per buffer for undo and redo.
-The user can purge all history across all buffers with
-.It Cm M-x purge-undo-history
+.Nm
+keeps a record of the last 1000 editing actions per buffer for undo and redo.
 
 .Sh SEE ALSO
 emacs(1)
