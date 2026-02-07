@@ -32,7 +32,7 @@ make android
 ```
 
 **Windows (MSYS2)**  
-- Run inside **MSYS2 proper** (not mingw64) — termios is required.  
+- Run in an **MSYS2** terminal (not mingw64, which lacks termios).  
 - Install compilers and libraries:  
 ```bash
 pacman -S msys2-devel msys2-runtime-devel
@@ -61,7 +61,6 @@ emil file.txt
 | Open file              | `Ctrl-x Ctrl-f` |
 | Save file              | `Ctrl-x Ctrl-s` |
 | Quit                   | `Ctrl-x Ctrl-c` |
-| Suspend                | `Ctrl-x Ctrl-z` |
 | Mark (to select text)  | `Ctrl-SPACE`    |
 | Copy                   | `Ctrl-c`        |
 | Cut                    | `Ctrl-x`        |

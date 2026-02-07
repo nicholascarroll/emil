@@ -1,5 +1,3 @@
-#include "util.h"
-
 #include "emil.h"
 #include "fileio.h"
 #include "buffer.h"
@@ -18,6 +16,7 @@
 #include "undo.h"
 #include "keymap.h"
 #include "unused.h"
+#include <limits.h>
 
 /* Access global editor state */
 extern struct editorConfig E;
@@ -45,6 +44,60 @@ char *editorRowsToString(struct editorBuffer *bufr, int *buflen) {
 	}
 
 	return buf;
+}
+
+/* Validate UTF-8 in the buffer and warn if invalid sequences are present */
+/* TODO: may need to add warned_invalid_utf8 flag to struct editorBuffer to avoid repeating warning */
+
+static void checkUTF8Validity(struct editorBuffer *bufr) {
+    int invalid = 0;
+
+    for (int row = 0; row < bufr->numrows; row++) {
+        unsigned char *s = (unsigned char *)bufr->row[row].chars;
+        int i = 0;
+        while (i < bufr->row[row].size) {
+            unsigned char c = s[i];
+
+            if (c <= 0x7F) {
+                // ASCII byte
+                i++;
+            } else if ((c & 0xE0) == 0xC0) {
+                // 2-byte sequence
+                if (i + 1 >= bufr->row[row].size || (s[i+1] & 0xC0) != 0x80) {
+                    invalid++;
+                    break;
+                }
+                i += 2;
+            } else if ((c & 0xF0) == 0xE0) {
+                // 3-byte sequence
+                if (i + 2 >= bufr->row[row].size ||
+                    (s[i+1] & 0xC0) != 0x80 ||
+                    (s[i+2] & 0xC0) != 0x80) {
+                    invalid++;
+                    break;
+                }
+                i += 3;
+            } else if ((c & 0xF8) == 0xF0) {
+                // 4-byte sequence
+                if (i + 3 >= bufr->row[row].size ||
+                    (s[i+1] & 0xC0) != 0x80 ||
+                    (s[i+2] & 0xC0) != 0x80 ||
+                    (s[i+3] & 0xC0) != 0x80) {
+                    invalid++;
+                    break;
+                }
+                i += 4;
+            } else {
+                // Invalid starting byte
+                invalid++;
+                break;
+            }
+        }
+    }
+
+    if (invalid) {
+        editorSetStatusMessage("Warning: File contains invalid UTF-8 sequences");
+    }
 }
 
 void editorOpen(struct editorBuffer *bufr, char *filename) {
@@ -75,6 +128,7 @@ void editorOpen(struct editorBuffer *bufr, char *filename) {
 	free(line);
 	fclose(fp);
 	bufr->dirty = 0;
+	//checkUTF8Validity(bufr);
 }
 
 void editorRevert(struct editorConfig *ed, struct editorBuffer *buf) {
@@ -113,6 +167,8 @@ void editorRevert(struct editorConfig *ed, struct editorBuffer *buf) {
 	destroyBuffer(buf);
 }
 
+
+
 void editorSave(struct editorBuffer *bufr) {
 	if (bufr->filename == NULL) {
 		bufr->filename = (char *)editorPrompt(
@@ -126,28 +182,70 @@ void editorSave(struct editorBuffer *bufr) {
 	int len;
 	char *buf = editorRowsToString(bufr, &len);
 
-	int fd = open(bufr->filename, O_RDWR | O_CREAT, 0644);
-	if (fd != -1) {
-		if (ftruncate(fd, len) != -1) {
-			if (write(fd, buf, len)) {
-				close(fd);
-				free(buf);
-				bufr->dirty = 0;
+	/* Build temp filename: <filename>.tmpXXXXXX */
+	char tmpname[PATH_MAX];
+	snprintf(tmpname, sizeof(tmpname), "%s.tmpXXXXXX", bufr->filename);
 
-				// Clear undo/redo on successful save
-				clearUndosAndRedos(bufr);
+	int fd = mkstemp(tmpname);
+	if (fd == -1) {
+		free(buf);
+		editorSetStatusMessage("Save failed: %s", strerror(errno));
+		return;
+	}
 
-				editorSetStatusMessage(
-					"Wrote %d bytes to %s (undo history cleared)",
-					len, bufr->filename);
-				return;
-			}
-		}
+	/* Preserve permissions if file already exists */
+	struct stat st;
+	if (stat(bufr->filename, &st) == 0) {
+		fchmod(fd, st.st_mode);
+	}
+
+	/* Write buffer fully, handling partial writes and EINTR */
+ssize_t total = 0;
+while (total < len) {
+    ssize_t n = write(fd, buf + total, len - total);
+    if (n < 0) {
+        if (errno == EINTR) continue;  // interrupted, try again
+        close(fd);
+        unlink(tmpname);
+        free(buf);
+        editorSetStatusMessage("Save failed: %s", strerror(errno));
+        return;
+    } else if (n == 0) {
+        // shouldn't happen for regular files, treat as error
+        close(fd);
+        unlink(tmpname);
+        free(buf);
+        editorSetStatusMessage("Save failed: wrote 0 bytes unexpectedly");
+        return;
+    }
+    total += n;
+}
+
+
+	if (fsync(fd) == -1) {
 		close(fd);
+		unlink(tmpname);
+		free(buf);
+		editorSetStatusMessage("Save failed: %s", strerror(errno));
+		return;
+	}
+
+	close(fd);
+
+	if (rename(tmpname, bufr->filename) == -1) {
+		unlink(tmpname);
+		free(buf);
+		editorSetStatusMessage("Save failed: %s", strerror(errno));
+		return;
 	}
 
 	free(buf);
-	editorSetStatusMessage("Save failed: %s", strerror(errno));
+	bufr->dirty = 0;
+
+/* TODO Interactive fallback to direct write if temp creation fails */
+/* TODO: fsync parent dir after rename */
+
+	editorSetStatusMessage("Wrote %d bytes to %s", len, bufr->filename);
 }
 
 void findFile(void) {
