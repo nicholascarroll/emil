@@ -1,4 +1,4 @@
-.Dd February 4, 2026
+.Dd February 10, 2026
 .Dt EMIL 1
 .Os
 .Sh NAME
@@ -20,7 +20,7 @@ simultaneous display.
 .Sh OPTIONS
 .Bl -tag -width Ds
 .It +N
- Position the cursor at line number N when opening the file.
+Position the cursor at line number N when opening the file.
 .It --version
 Display version information.
 .El
@@ -36,29 +36,33 @@ denotes the Shift key.
 
 .Ss Basic Commands
 .Bl -tag -width Ds
+.It Cm C-x C-c
+Quit the editor.
 .It Cm C-x C-f
 Open a file and load it into a buffer.
 .It Cm C-x C-s
 Save the current buffer to its associated file.
 .It Cm C-x k
 Kill (close) the current buffer.
-.It Cm C-x C-c
-Quit the editor.
+.It Cm C-x b
+Switch current window to another buffer.
+.It Cm C-x C-z
+Suspend the editor to the background and return control to the shell.
+.It Cm C-s
+Interactive search in the current buffer.
 .It Cm C-g
 Cancel the current operation.
-.It Cm C-x C-z
-Suspend (sends the editor to the background and returns control to the shell).
 .El
 
 .Ss Cursor Movement
 .Bl -tag -width Ds
-.It Cm C-n , DOWN
+.It Cm C-n
 Move cursor to next line.
-.It Cm C-p , UP
+.It Cm C-p
 Move cursor to previous line.
-.It Cm C-f , RIGHT
+.It Cm C-f
 Move cursor forward.
-.It Cm C-b , LEFT
+.It Cm C-b
 Move cursor backward.
 .It Cm M-f
 Move cursor forward by word.
@@ -68,13 +72,13 @@ Move cursor backward by word.
 Move cursor to start of buffer.
 .It Cm M->
 Move cursor to end of buffer.
-.It Cm C-a , HOME
+.It Cm C-a
 Move cursor to beginning of line.
-.It Cm C-e , END
+.It Cm C-e
 Move cursor to end of line.
-.It Cm F7 , PGUP
+.It Cm F7
 Scroll up one page.
-.It Cm F8 , PGDN
+.It Cm F8
 Scroll down one page.
 .It Cm C-UP
 Scroll up one line.
@@ -84,20 +88,20 @@ Scroll down one line.
 
 .Ss Editing
 .Bl -tag -width Ds
-.It Cm C-_ , C-z
+.It Cm C-_
 Undo.
-.It Cm C-x C-_ , C-S-z
+.It Cm C-x C-_
 Redo.
-.It Cm C-w , C-x
+.It Cm C-w
 Kill (cut) region.
-.It Cm M-w , C-c
+.It Cm M-w
 Copy region.
-.It Cm C-y , C-v
+.It Cm C-y
 Yank (paste).
 .It Cm C-k
 Delete to end of line.
 .It Cm C-u
-Universal Prefix: Followed by a number it repeats the suceeding command.
+Universal Prefix: Followed by a number it repeats the succeeding command.
 .It Cm C-j
 Insert newline and indent.
 .It Cm C-o
@@ -106,8 +110,9 @@ Insert newline without moving point.
 Indent current line.
 .It Cm C-q
 Insert next character verbatim.
-.It M-/
-Completes the word at point, first using words from the current buffer, then from all other buffers.
+.It Cm M-/
+Completes the word at point, first using words from the current buffer, then all 
+other buffers.
 .El
 
 .Ss Selecting Text
@@ -127,7 +132,7 @@ Select the entire buffer (mark everything).
 .Ss Windows
 .Bl -tag -width Ds
 .It Cm C-x o
-Switch window.
+Switch to other window.
 .It Cm C-x 0
 Kill current window.
 .It Cm C-x 1
@@ -194,7 +199,7 @@ When enabled at compile time:
 .It Cm M-|
 Filter region through shell command.
 .It Cm C-u M-|
-Filter region through shell command and replace the region with the command's output. 
+Filter region through shell command and replace the region with the output. 
 .El
 
 .Ss Named Commands
@@ -212,17 +217,16 @@ It does not recognize or convert any other encoding.
 
 .Nm
 always loads files in their entirety into memory as a sequence of lines.
-Lines are separated by a single linefeed (\n) and files always
-terminate with a final linefeed.
+Lines are separated by a single linefeed and files terminate with a linefeed.
 
 Null bytes (0x00) and invalid UTF-8 sequences may cause errors.
-Other control characters are permitted.
 
 .Ss Saving Files
 .Nm
-writes the entire buffer to the associated file when saving.
+writes the entire buffer to the associated file when saving. It attempts to do 
+this atomically; if that is not possible, the option is presented of saving 
+directly to the file, which can result in data loss if write fails. 
 It does not create auto-save files.
-If emil is interrupted during a save, the file may be partially written.
 
 .Sh UNDO HISTORY
 .Nm

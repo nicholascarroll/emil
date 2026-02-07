@@ -26,7 +26,7 @@ make && sudo make install
 ```
 
 **Android (Termux)**
-- This will not include shall integration.
+- This will not include shell integration.
 ```bash
 make android
 ```
