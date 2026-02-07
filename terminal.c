@@ -121,11 +121,9 @@ int editorReadKey(void) {
 		if (nread == -1 && errno != EAGAIN)
 			die("read");
 	}
-#ifdef EMIL_CU_UARG
 	if (c == CTRL('u')) {
 		return UNIVERSAL_ARGUMENT;
 	}
-#endif //EMIL_CU_UARG
 	if (c == 033) {
 		char seq[5] = { 0, 0, 0, 0, 0 };
 		if (read(STDIN_FILENO, &seq[0], 1) != 1)
