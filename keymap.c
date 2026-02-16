@@ -53,12 +53,13 @@ void setupCommands(struct editorConfig *ed) {
 		//		{ "indent-spaces", editorIndentSpaces },
 		//		{ "indent-tabs", editorIndentTabs },
 		{ "insert-file", editorInsertFile },
+		{ "diff-buffer-with-file", editorDiffBufferWithFile },
 		{ "isearch-forward-regexp", editorRegexFindWrapper },
 		{ "query-replace", editorQueryReplace },
 		{ "replace-regexp", editorReplaceRegex },
 		{ "replace-string", editorReplaceString },
 		{ "revert", editorRevert },
-		{ "toggle-truncate-lines", editorToggleTruncateLinesWrapper },
+		{ "visual-line-mode", editorToggleVisualLineModeWrapper },
 		{ "version", editorVersionWrapper },
 		{ "view-register", editorViewRegister },
 		{ "whitespace-cleanup", editorWhitespaceCleanup },
@@ -249,8 +250,7 @@ void executeCommand(int key) {
 			{
 				int nextkey = editorReadKey();
 				if (nextkey == 't') {
-					editorProcessKeypress(
-						TOGGLE_TRUNCATE_LINES);
+					editorProcessKeypress(VISUAL_LINE_MODE);
 				} else {
 					editorSetStatusMessage(
 						"Unknown command C-x x %c",
@@ -518,7 +518,7 @@ void editorProcessKeypress(int c) {
 		editorPageDown(uarg);
 		break;
 		/* TODO rename these */
-			case HISTORY_PREV:
+	case HISTORY_PREV:
 		editorScrollLineUp(uarg);
 		break;
 	case HISTORY_NEXT:
@@ -594,8 +594,12 @@ void editorProcessKeypress(int c) {
 		editorYankPop(&E, E.buf);
 		break;
 	case CTRL('w'):
-		editorKillRegion(&E, E.buf);
-		editorClearMark();
+		if (markInvalidSilent()) {
+			editorBackspaceWord(E.buf, uarg ? uarg : 1);
+		} else {
+			editorKillRegion(&E, E.buf);
+			editorClearMark();
+		}
 		break;
 	case CTRL('_'):
 		editorDoUndo(E.buf, uarg);
@@ -690,6 +694,7 @@ void editorProcessKeypress(int c) {
 				"Command attempted to use minibuffer while in minibuffer");
 		} else {
 			editorDestroyOtherWindows();
+			refreshScreen();
 		}
 		break;
 	case KILL_BUFFER:
@@ -730,8 +735,8 @@ void editorProcessKeypress(int c) {
 	case DOWNCASE_REGION:
 		editorTransformRegion(&E, E.buf, transformerDowncase);
 		break;
-	case TOGGLE_TRUNCATE_LINES:
-		editorToggleTruncateLines();
+	case VISUAL_LINE_MODE:
+		editorToggleVisualLineMode();
 		break;
 	case TOGGLE_READ_ONLY:
 		E.buf->read_only = !E.buf->read_only;

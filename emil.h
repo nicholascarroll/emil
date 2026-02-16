@@ -76,7 +76,6 @@ struct editorBuffer {
 	int end;
 	int dirty;
 	int special_buffer;
-	int truncate_lines; // 0 for wrapped, 1 for unwrapped
 	int word_wrap;
 	int rectangle_mode;
 	int single_line;
@@ -87,6 +86,7 @@ struct editorBuffer {
 	uint8_t match;
 	struct editorUndo *undo;
 	struct editorUndo *redo;
+	int undo_count;
 	struct editorBuffer *next;
 	int *screen_line_start;
 	int screen_line_cache_size;

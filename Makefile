@@ -1,5 +1,5 @@
 # Remember to keep the version number up to date
-VERSION = 0.1.0
+VERSION = 0.1.1
 
 PROGNAME = emil
 PREFIX = /usr/local
@@ -30,7 +30,8 @@ DOCDIR = $(PREFIX)/share/doc/emil
 # Source files
 OBJECTS = main.o wcwidth.o unicode.o buffer.o region.o undo.o transform.o \
           find.o pipe.o register.o fileio.o terminal.o display.o message.o \
-          keymap.o edit.o prompt.o util.o completion.o history.o base64.o
+          keymap.o edit.o prompt.o util.o completion.o history.o base64.o \
+          abuf.o window.o
 
 # Default target
 all: $(PROGNAME)

@@ -153,7 +153,7 @@ int main(int argc, char *argv[]) {
 	/* Initialize minibuffer */
 	E.minibuf = newBuffer();
 	E.minibuf->single_line = 1;
-	E.minibuf->truncate_lines = 1;
+	E.minibuf->word_wrap = 0;
 	E.minibuf->filename = xstrdup("*minibuffer*");
 	E.edbuf = E.buf;
 

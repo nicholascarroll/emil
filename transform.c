@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include "transform.h"
-#include "edit.h"
 #include "unicode.h"
 #include "emil.h"
 #include "message.h"

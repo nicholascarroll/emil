@@ -45,12 +45,11 @@ void buildScreenCache(struct editorBuffer *buf) {
 	int screen_line = 0;
 	for (int i = 0; i < buf->numrows; i++) {
 		buf->screen_line_start[i] = screen_line;
-		if (buf->truncate_lines) {
+		if (!buf->word_wrap) {
 			screen_line += 1;
 		} else {
-			int width = calculateLineWidth(&buf->row[i]);
-			int lines_used = (width / E.screencols) + 1;
-			screen_line += lines_used;
+			screen_line +=
+				countScreenLines(&buf->row[i], E.screencols);
 		}
 	}
 
@@ -108,6 +107,128 @@ int charsToDisplayColumn(erow *row, int char_pos) {
 		}
 	}
 	return col;
+}
+
+/* Find the next word-wrap break point for a single screen line.
+ *
+ * Given a row, a screen width, and a starting position (column and byte
+ * offset), compute where this screen line ends.  On return, *break_col
+ * and *break_byte hold the position just past the last character that
+ * fits on this screen line.
+ *
+ * Returns 1 if more content follows the break (i.e. the row continues
+ * onto another screen line), or 0 if the rest of the row fits on this
+ * screen line (meaning this is the last sub-line). */
+int wordWrapBreak(erow *row, int screencols, int line_start_col,
+		  int line_start_byte, int *break_col, int *break_byte) {
+	int col = line_start_col;
+	int bidx = line_start_byte;
+	int wb_col = -1;
+	int wb_byte = -1;
+
+	while (bidx < row->size) {
+		uint8_t c = row->chars[bidx];
+		int cwidth;
+
+		if (c == '\t') {
+			cwidth = EMIL_TAB_STOP - (col % EMIL_TAB_STOP);
+		} else if (ISCTRL(c)) {
+			cwidth = 2;
+		} else {
+			cwidth = charInStringWidth(row->chars, bidx);
+		}
+
+		/* Wide char won't fit: leave a 1-col gap and break. */
+		if (cwidth > 1 && col + cwidth - line_start_col > screencols)
+			break;
+		if (col + cwidth - line_start_col > screencols)
+			break;
+
+		if (isWordBoundary(c)) {
+			wb_col = col + cwidth;
+			wb_byte = bidx + utf8_nBytes(c);
+		}
+
+		col += cwidth;
+		bidx += utf8_nBytes(c);
+	}
+
+	if (bidx >= row->size) {
+		/* Rest of row fits on this screen line. */
+		*break_col = col;
+		*break_byte = row->size;
+		return 0;
+	} else if (wb_col > line_start_col) {
+		/* Break at the last word boundary. */
+		*break_col = wb_col;
+		*break_byte = wb_byte;
+	} else {
+		/* No word boundary — hard break at column limit. */
+		*break_col = col;
+		*break_byte = bidx;
+	}
+	return 1;
+}
+
+/* Count how many screen lines a row occupies under word wrap. */
+int countScreenLines(erow *row, int screencols) {
+	if (screencols <= 0 || row->size == 0)
+		return 1;
+
+	int lines = 0;
+	int line_start_col = 0;
+	int line_start_byte = 0;
+
+	do {
+		int break_col, break_byte;
+		int more = wordWrapBreak(row, screencols, line_start_col,
+					 line_start_byte, &break_col,
+					 &break_byte);
+		lines++;
+		if (!more)
+			break;
+		line_start_col = break_col;
+		line_start_byte = break_byte;
+	} while (line_start_byte < row->size);
+
+	return lines;
+}
+
+/* Find which screen line and column a cursor position falls on
+ * under word wrap.  Sets *out_line (0-based sub-line within the
+ * row) and *out_col (column offset within that sub-line). */
+void cursorScreenLine(erow *row, int cursor_col, int screencols, int *out_line,
+		      int *out_col) {
+	*out_line = 0;
+	*out_col = 0;
+
+	if (screencols <= 0 || row->size == 0) {
+		*out_col = cursor_col;
+		return;
+	}
+
+	int line_start_col = 0;
+	int line_start_byte = 0;
+
+	while (line_start_byte < row->size) {
+		int break_col, break_byte;
+		int more = wordWrapBreak(row, screencols, line_start_col,
+					 line_start_byte, &break_col,
+					 &break_byte);
+
+		/* cursor_col falls within this screen line */
+		if (cursor_col < break_col || !more) {
+			*out_col = cursor_col - line_start_col;
+			return;
+		}
+
+		(*out_line)++;
+		line_start_col = break_col;
+		line_start_byte = break_byte;
+	}
+
+	/* Cursor is past the end — place on the last sub-line */
+	*out_col = cursor_col - line_start_col;
 }
 
 void updateRow(erow *row) {
@@ -336,13 +457,14 @@ struct editorBuffer *newBuffer(void) {
 	ret->special_buffer = 0;
 	ret->undo = newUndo();
 	ret->redo = NULL;
+	ret->undo_count = 1;
 	ret->completion_state.last_completed_text = NULL;
 	ret->completion_state.completion_start_pos = 0;
 	ret->completion_state.successive_tabs = 0;
 	ret->completion_state.last_completion_count = 0;
 	ret->completion_state.preserve_message = 0;
 	ret->next = NULL;
-	ret->truncate_lines = 1;
+	ret->word_wrap = 0;
 	ret->rectangle_mode = 0;
 	ret->single_line = 0;
 	ret->screen_line_start = NULL;

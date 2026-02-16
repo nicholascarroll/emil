@@ -126,8 +126,7 @@ void editorKillRegion(struct editorConfig *ed, struct editorBuffer *buf) {
 	new->data[new->datalen] = 0;
 	new->append = 0;
 	new->delete = 1;
-	new->prev = buf->undo;
-	buf->undo = new;
+	pushUndo(buf, new);
 
 	struct erow *row = &buf->row[buf->cy];
 	if (buf->cy == buf->marky) {
@@ -232,8 +231,7 @@ void editorYank(struct editorConfig *ed, struct editorBuffer *buf, int count) {
 
 		new->endx = buf->cx;
 		new->endy = buf->cy;
-		new->prev = buf->undo;
-		buf->undo = new;
+		pushUndo(buf, new);
 
 		// For line yanks with multiple repetitions, position cursor
 		// at the beginning of the next line for the next yank
@@ -367,8 +365,7 @@ void editorReplaceRegex(struct editorConfig *ed, struct editorBuffer *buf) {
 	new->data[new->datalen] = 0;
 	new->append = 0;
 	new->delete = 1;
-	new->prev = buf->undo;
-	buf->undo = new;
+	pushUndo(buf, new);
 
 	/* Create insert undo */
 	new = newUndo();
@@ -380,11 +377,10 @@ void editorReplaceRegex(struct editorConfig *ed, struct editorBuffer *buf) {
 		new->datasize = new->datalen + 1;
 		new->data = xrealloc(new->data, new->datasize);
 	}
-	new->prev = buf->undo;
 	new->append = 0;
 	new->delete = 0;
 	new->paired = 1;
-	buf->undo = new;
+	pushUndo(buf, new);
 
 	/* Regex boilerplate & setup */
 	regex_t pattern;
@@ -559,12 +555,10 @@ void editorStringRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	new->data[new->datalen] = 0;
 	new->append = 0;
 	new->delete = 1;
-	new->prev = buf->undo;
-	buf->undo = new;
+	pushUndo(buf, new);
 
 	/* Undo for a yank region */
 	new = newUndo();
-	new->prev = buf->undo;
 	new->startx = topx;
 	new->starty = topy;
 	new->endx = botx + extra;
@@ -581,7 +575,7 @@ void editorStringRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	new->data[0] = 0;
 	new->append = 0;
 	new->paired = 1;
-	buf->undo = new;
+	pushUndo(buf, new);
 
 	/*
 	 * We need to do the row modifying operation in three stages
@@ -804,12 +798,10 @@ void editorKillRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	new->data[new->datalen] = 0;
 	new->append = 0;
 	new->delete = 1;
-	new->prev = buf->undo;
-	buf->undo = new;
+	pushUndo(buf, new);
 
 	/* This is technically a transformation, so we need paired undos. */
 	new = newUndo();
-	new->prev = buf->undo;
 	new->startx = topx;
 	new->starty = topy;
 	new->endx = botx - ed->rx;
@@ -821,7 +813,7 @@ void editorKillRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	new->data[0] = 0;
 	new->append = 0;
 	new->paired = 1;
-	buf->undo = new;
+	pushUndo(buf, new);
 
 	/* First, topy */
 	int idx = 0;
@@ -952,10 +944,9 @@ void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 		memset(new->data, '\n', extralines);
 		new->data[extralines] = 0;
 		new->datalen = strlen((char *)new->data);
-		new->prev = buf->undo;
 		new->append = 0;
 		new->delete = 0;
-		buf->undo = new;
+		pushUndo(buf, new);
 	}
 
 	editorCopyRegion(ed, buf);
@@ -985,12 +976,10 @@ void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	new->append = 0;
 	new->delete = 1;
 	new->paired = extralines;
-	new->prev = buf->undo;
-	buf->undo = new;
+	pushUndo(buf, new);
 
 	/* Transformation (insert) undo */
 	new = newUndo();
-	new->prev = buf->undo;
 	new->startx = topx;
 	new->starty = topy;
 	new->endx = botx + ed->rx;
@@ -1007,7 +996,7 @@ void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	new->data[0] = 0;
 	new->append = 0;
 	new->paired = 1;
-	buf->undo = new;
+	pushUndo(buf, new);
 
 	/* First, topy */
 	int idx = 0;

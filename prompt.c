@@ -49,7 +49,7 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 
 		/* Position cursor on bottom line */
 		int prompt_width = stringWidth(prompt) - 2;
-		cursorBottomLineLong(prompt_width + E.minibuf->cx + 1);
+		cursorBottomLine(prompt_width + E.minibuf->cx + 1);
 
 		/* Read key */
 		int c = editorReadKey();

@@ -201,14 +201,13 @@ UNINDENT_PERFORM:
 
 	/* Create undo */
 	struct editorUndo *new = newUndo();
-	new->prev = bufr->undo;
 	new->startx = 0;
 	new->starty = bufr->cy;
 	new->endx = trunc;
 	new->endy = bufr->cy;
 	new->delete = 1;
 	new->append = 0;
-	bufr->undo = new;
+	pushUndo(bufr, new);
 	if (new->datasize < trunc - 1) {
 		new->datasize = trunc + 1;
 		new->data = xrealloc(new->data, new->datasize);
@@ -255,15 +254,6 @@ void editorDelChar(struct editorBuffer *bufr, int count) {
 }
 
 /* Boundary detection */
-
-int isWordBoundary(uint8_t c) {
-	return !(c > '~') && /* Anything outside ASCII is not a boundary */
-	       !('a' <= c && c <= 'z') && /* Lower case ASCII not boundaries */
-	       !('A' <= c && c <= 'Z') && /* Same with caps */
-	       !('0' <= c && c <= '9') && /* And numbers */
-	       ((c < '$') ||		  /* ctrl chars & some punctuation */
-		(c > '%')); /* Rest of ascii outside $% & other ranges */
-}
 
 int isParaBoundary(erow *row) {
 	return (row->size == 0);
@@ -660,8 +650,7 @@ void editorKillLine(int count) {
 			new->startx = E.buf->cx;
 			new->endx = row->size;
 			new->delete = 1;
-			new->prev = E.buf->undo;
-			E.buf->undo = new;
+			pushUndo(E.buf, new);
 
 			new->datalen = kill_len;
 			if (new->datasize < new->datalen + 1) {
@@ -703,8 +692,7 @@ void editorKillLineBackwards(void) {
 	new->startx = 0;
 	new->endx = E.buf->cx;
 	new->delete = 1;
-	new->prev = E.buf->undo;
-	E.buf->undo = new;
+	pushUndo(E.buf, new);
 
 	new->datalen = E.buf->cx;
 	if (new->datasize < new->datalen + 1) {
@@ -735,7 +723,7 @@ void editorPageUp(int count) {
 		if (scroll_lines < 1)
 			scroll_lines = 1;
 
-		if (E.buf->truncate_lines) {
+		if (!E.buf->word_wrap) {
 			/* Move view up by scroll_lines */
 			win->rowoff -= scroll_lines;
 			if (win->rowoff < 0) {
@@ -805,7 +793,7 @@ void editorPageDown(int count) {
 		if (scroll_lines < 1)
 			scroll_lines = 1;
 
-		if (E.buf->truncate_lines) {
+		if (!E.buf->word_wrap) {
 			/* Move view down by scroll_lines */
 			win->rowoff += scroll_lines;
 
@@ -912,7 +900,6 @@ void editorScrollLineDown(int count) {
 		E.buf->cx = E.buf->row[E.buf->cy].size;
 	}
 }
-
 
 void editorBeginningOfLine(int count) {
 	if (count == 0) {

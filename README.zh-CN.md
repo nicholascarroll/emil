@@ -105,17 +105,18 @@ set bind-tty-special-chars off
 "\C-w": kill-region
 "\M-w": copy-region-as-kill
 ```
+如果没有标记任何区域，它会杀死光标前面的一个词（相当于向后杀词，backward-kill-word）。
 
-Readline 支持两种删除到行首的方式：`C-x BACKSPACE`（在 *emacs* 中支持）以及更符合人体工学的 `C-u`，但后者与 *emacs* 的通用参数（universal argument）冲突。`emil` 通过将 `Ctrl-u Ctrl-a` 绑定为删除到行首来解决这一冲突。
+Readline 支持两种删除到行首的方式：`Ctrl-x BACKSPACE`（在 *emacs* 中支持）以及更符合人体工学的 `Ctrl-u`，但后者与 *emacs* 的通用参数（universal argument）冲突。`emil` 通过将 `Ctrl-u Ctrl-a` 绑定为删除到行首来解决这一冲突。
 
 ### Shell 集成
 
 Shell 集成是一个编译时选项（默认启用）。它提供了两个区域过滤命令，这些命令允许您将选定的文本区域通过 shell 命令进行管道处理：
 
-- **`M-|`** (shell-command-on-region)  
+- **`Alt-|`** (shell-command-on-region)  
   将当前区域馈送到您输入的 shell 命令，并将**输出**显示在临时 `*Shell Command Output*` 缓冲区中（如果输出较小，则显示在回显区）。
 
-- **`C-u M-|`**  
+- **`Ctrl-u Alt-|`**  
   将当前区域馈送到您输入的 shell 命令，并用命令的**输出**替换该区域。
 
 两者都支持完整的管道（例如 `sort | uniq -c | sort -nr`）。
@@ -132,38 +133,41 @@ Shell 集成可以在构建时通过编译器标志 `-DEMIL_DISABLE_PIPE` 禁用
 
 ## 路线图
 
-1. **0.1.0 Plays well with others** —— 进行中  
-   - `M-p` / `M-n` 逐行滚动  
-   - `C-x C-z` 打开 Shell Drawer  
-   - 从此开始用 emil 开发 emil
+这里是将你的内容翻译成**简体中文**的版本：
 
-2. **0.1.1 Stable**  
-   - 合并上游 bug 修复  
-   - 重构显示代码  
-   - 修复大部分已知问题  
-   - 发布带 GitHub 标签的预发布版
+1. **版本 0.1.0 [已完成]**  ✅    
+   - 从此版本开始，我们使用 `emil` 来编写 `emil`
 
-3. **0.2.0 Feature complete**  
-   - visual-line-mode（默认用于 .org、.md、.txt, .fountain）  
-   - undo 历史限制为 1000 条  
+2. **版本 0.1.1 功能完成版**  ✅    
 
-4. **Buffer 内存管理升级**  
-   评估 gap buffer 等改进方案
+3. **版本 0.2.0 稳定预览版** 🚧🔨👷  
+   - 整合上游的错误修复  
+   - 修复大部分已知 bug  
+   - 安全徽章（Security badge）  
+   - 首次在 GitHub 发布（使用预发布标签 prerelease）  
+   - 在论坛上宣布（HN、Reddit 等）
+
+如果需要调整语气（更正式/更口语化）或补充其他内容，随时告诉我！
+
+4. **缓冲区内存管理升级**  
+   调查改进内部表示的价值（可能是 gap buffer）。
 
 5. **渲染系统升级**  
-   测试 SSH 环境下的性能
+   测试 SSH 下的性能和渲染系统。
 
 6. **移除对 `subprocess.h` 的依赖**  
-   将 pipe/exec/fork 相关代码内部化
+   将用于 pipe/exec/fork 的代码内部化。
 
-7. **0.3.0 Pre-release**  
-   - 添加安全徽章  
-   - 在各大论坛正式发布
+7. **版本 1.0.0 无 bug，爱上它**  
+   - 在 Solaris、AIX、Linux、BSD、MSYS2、OSX、Android 上测试。  
+   - 使用 IME 和国际键盘测试  
+   - 包含在 Linux 发行版仓库中
 
-8. **1.0.0 Bug free and loving it**  
-   - 在 Solaris、AIX、Linux、BSD、MSYS2、macOS、Android 上全面测试  
-   - 支持 IME 和国际键盘  
-   - 进入 Linux 发行版仓库
+### 字符显示注意事项
+
+在原始的 Linux 虚拟控制台（Ctrl+Alt+F3 等）上，内核控制台无法显示中文。  
+请改用 **kmscon** 或 **fbterm**。
+
 
 ## 贡献
 

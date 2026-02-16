@@ -62,7 +62,6 @@ void disableRawModeKeepScreen(void) {
  *      region, re-enters raw mode, and redraws — closing the drawer.
  */
 
-
 void editorOpenShellDrawer(void) {
 	struct winsize ws;
 	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_row < 12)
@@ -116,7 +115,6 @@ void editorOpenShellDrawer(void) {
 	signal(SIGTSTP, SIG_DFL);
 	raise(SIGTSTP);
 }
-
 
 void enableRawMode(void) {
 	/* Saves the screen and switches to an alt screen */
@@ -196,10 +194,29 @@ void editorCopyToClipboard(const uint8_t *text) {
 	 * "c" targets the system clipboard. The ST (String Terminator)
 	 * is \033\\ (ESC backslash), which is more portable than BEL
 	 * across terminal emulators and tmux.
+	 *
+	 * When running inside tmux, the OSC 52 sequence must be wrapped
+	 * in a DCS passthrough so that tmux forwards it to the outer
+	 * terminal:  \033Ptmux;\033 <osc52> \033\033\\
+	 *
+	 * Inside the passthrough, every ESC in the inner sequence must
+	 * be doubled (\033\033 instead of \033).
 	 */
+	int in_tmux = (getenv("TMUX") != NULL);
+
+	if (in_tmux)
+		write(STDOUT_FILENO, "\033Ptmux;\033", 9);
+
 	write(STDOUT_FILENO, "\033]52;c;", 7);
 	write(STDOUT_FILENO, encoded, strlen(encoded));
-	write(STDOUT_FILENO, "\033\\", 2);
+
+	if (in_tmux) {
+		/* Doubled ESC for the inner ST, then close the DCS */
+		write(STDOUT_FILENO, "\033\033\\", 3);
+		write(STDOUT_FILENO, "\033\\", 2);
+	} else {
+		write(STDOUT_FILENO, "\033\\", 2);
+	}
 
 	free(encoded);
 }
