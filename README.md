@@ -1,7 +1,7 @@
 
 # emil ([埃米尔](./README.zh-CN.md))
 
-`emil` is a small, portable terminal text editor designed specifically for UTF-8 files. It provides a subset of Emacs commands on VT100-compatible terminals.
+`emil` is a small, portable terminal text editor designed specifically for UTF-8 files. It provides a subset of *emacs* commands on VT100-compatible terminals.
 
 `emil` is written in standard C99 and depends only on a POSIX.1-2001–compliant environment. It deliberately avoids common sources of complexity: scripting support, plugin systems, configuration files, background network activity, or auto-save files.
 
@@ -84,11 +84,11 @@ man emil
 
 ## Shell-Oriented Editing
 
-Although POSIX.1 standardises only the `vi-mode` command-line editing interface, many shells (including Bash) also provide an `emacs-mode` (activated by `set -o emacs`). 
+Although POSIX.1 standardises only the *vi-mode* command-line editing interface, many shells (including Bash) also provide an *emacs-mode* (activated by `set -o emacs`). 
 This mode was considered for standardisation but was ultimately omitted. 
 The official [rationale](https://pubs.opengroup.org/onlinepubs/007904975/utilities/sh.html) explains:
 
-> “In early proposals, the KornShell-derived *emacs* mode of command line editing was included, even though the *emacs* editor itself was not. The community of *emacs* proponents was adamant that the full *emacs* editor not be standardized because they were concerned that an attempt to standardize this very powerful environment would encourage vendors to ship strictly conforming versions lacking the extensibility required by the community. The author of the original emacs program also expressed his desire to omit the program. Furthermore, there were a number of historical systems that did not include emacs, or included it without supporting it, but there were very few that did not include and support vi. The shell emacs command line editing mode was finally omitted because it became apparent that the KornShell version and the editor being distributed with the GNU system had diverged in some respects. The author of emacs requested that the POSIX emacs mode either be deleted or have a significant number of unspecified conditions. Although the KornShell author agreed to consider changes to bring the shell into alignment, the standard developers decided to defer specification at that time. At the time, it was assumed that convergence on an acceptable definition would occur for a subsequent draft, but that has not happened, and there appears to be no impetus to do so. In any case, implementations are free to offer additional command line editing modes based on the exact models of editors their users are most comfortable with."
+> “In early proposals, the KornShell-derived *emacs* mode of command line editing was included, even though the *emacs* editor itself was not. The community of *emacs* proponents was adamant that the full *emacs* editor not be standardized because they were concerned that an attempt to standardize this very powerful environment would encourage vendors to ship strictly conforming versions lacking the extensibility required by the community. The author of the original emacs program also expressed his desire to omit the program. Furthermore, there were a number of historical systems that did not include *emacs*, or included it without supporting it, but there were very few that did not include and support vi. The shell *emacs* command line editing mode was finally omitted because it became apparent that the KornShell version and the editor being distributed with the GNU system had diverged in some respects. The author of *emacs* requested that the POSIX *emacs* mode either be deleted or have a significant number of unspecified conditions. Although the KornShell author agreed to consider changes to bring the shell into alignment, the standard developers decided to defer specification at that time. At the time, it was assumed that convergence on an acceptable definition would occur for a subsequent draft, but that has not happened, and there appears to be no impetus to do so. In any case, implementations are free to offer additional command line editing modes based on the exact models of editors their users are most comfortable with."
 
 The incompatibilities are minor; the tty driver has treated Ctrl-w as WERASE since 4BSD, and this is overridden by the following entry in ~/.inputrc:
 ```inputrc
@@ -118,6 +118,8 @@ Shell integration can be disabled at build time with the compiler flag `-DEMIL_D
 ### Shell Drawer
 `Ctrl-x Ctrl-z` suspends `emil` while preserving the current editor screen. This permits shell commands to be executed in the terminal below the editor content, after which editing may be resumed with `fg`.
 
+Note: `less` clears the terminal when it quits; `more` does not.
+
 ### System Clipboard Integration
 `Ctrl-c` copies selected text to both the kill ring and the user's system clipboard 
 when an OSC 52 enabled terminal client is used.
@@ -126,16 +128,20 @@ when an OSC 52 enabled terminal client is used.
 
 ### Roadmap
 
-1. **Version 0.1.0 Plays well with others** —[IN PROGRESS]
+1. **Version 0.1.0 Plays well with others** —[DONE]
    - `M-p`/`M-n` scrolls up/down one line
    - `C-x C-z` opens shell drawer
    - From here on we use `emil` to code `emil`
 
-2. **Version 0.1.1 Stable** 
-   - Bugfixes from upstream incorporated
-   - Display code refactored
-   - Most bugs fixed
-   - A release created with a tag in Github (as prerelease)
+emil  
+
+2. **Version 0.1.1 Stable Preview**   
+   - Bugfixes from upstream incorporated  
+   - Display code refactored  
+   - Most known bugs fixed
+   - Security badge  
+   - First GitHub release (prerelease tag)  
+   - Announced on forums (HN, Reddit, etc.)  
 
 3. **Version 0.2.0 Feature complete**
    - visual-line-mode (default for .org, .md,.txt, .fountain)
@@ -150,15 +156,20 @@ when an OSC 52 enabled terminal client is used.
 6. **Remove dependency on `subprocess.h`**
    Internalize the code being used for pipe/exec/fork.
 
-7. **Version 0.3.0 Pre-release**
-   - Security badge
-   - Announced on forums
-
-8. **Version 1.0.0 Bug free and loving it**
+7. **Version 1.0.0 Bug free and loving it**
    - Tested on Solaris, AIX, Linux, BSD, MSYS2
      OSX, Android. 
    - Tested with IME and international keyboards
    - Included in Linux distribution repositories
+
+### Display notes
+
+`emil` is UTF-8 native and correctly handles full-width CJK characters.
+
+Works perfectly in any modern terminal emulator (Alacritty, foot, Kitty, GNOME Terminal, etc.).
+
+On a raw Linux virtual console (Ctrl+Alt+F3 etc.) the in-kernel console cannot display Chinese.  
+Use **kmscon** (recommended — becoming the default in Fedora 44) or **fbterm** instead.
 
 ## Contributing
 

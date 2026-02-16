@@ -518,7 +518,7 @@ void editorProcessKeypress(int c) {
 		editorPageDown(uarg);
 		break;
 		/* TODO rename these */
-			case HISTORY_PREV:
+	case HISTORY_PREV:
 		editorScrollLineUp(uarg);
 		break;
 	case HISTORY_NEXT:
@@ -690,6 +690,7 @@ void editorProcessKeypress(int c) {
 				"Command attempted to use minibuffer while in minibuffer");
 		} else {
 			editorDestroyOtherWindows();
+			refreshScreen();
 		}
 		break;
 	case KILL_BUFFER:

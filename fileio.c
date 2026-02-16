@@ -19,7 +19,6 @@
 #include "unused.h"
 #include <limits.h>
 
-
 /* Access global editor state */
 extern struct editorConfig E;
 

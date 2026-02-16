@@ -132,38 +132,58 @@ Shell 集成可以在构建时通过编译器标志 `-DEMIL_DISABLE_PIPE` 禁用
 
 ## 路线图
 
-1. **0.1.0 Plays well with others** —— 进行中  
-   - `M-p` / `M-n` 逐行滚动  
-   - `C-x C-z` 打开 Shell Drawer  
-   - 从此开始用 emil 开发 emil
+1. **版本 0.1.0 与他人良好协作** —[已完成]  
+   - `M-p`/`M-n` 向上/向下滚动一行  
+   - `C-x C-z` 打开 shell 抽屉  
+   - 从现在起我们使用 `emil` 来编写 `emil`
 
-2. **0.1.1 Stable**  
+emil  
+
+2. **版本 0.1.1 稳定预览版**  
    - 合并上游 bug 修复  
-   - 重构显示代码  
-   - 修复大部分已知问题  
-   - 发布带 GitHub 标签的预发布版
+   - 显示代码重构  
+   - 大多数已知 bug 已修复  
+   - 安全徽章  
+   - 首次 GitHub 发布（预发布标签）  
+   - 在论坛上宣布（HN、Reddit 等）  
 
-3. **0.2.0 Feature complete**  
-   - visual-line-mode（默认用于 .org、.md、.txt, .fountain）  
-   - undo 历史限制为 1000 条  
+3. **版本 0.2.0 功能完备**  
+   - visual-line-mode（默认用于 .org、.md、.txt、.fountain 文件）  
+   - 将撤销历史限制为 1000 个操作。
 
-4. **Buffer 内存管理升级**  
-   评估 gap buffer 等改进方案
+4. **缓冲区内存管理升级**  
+   调查改进内部表示的价值（可能是 gap buffer）。
 
 5. **渲染系统升级**  
-   测试 SSH 环境下的性能
+   测试 SSH 下的性能和渲染系统。
 
 6. **移除对 `subprocess.h` 的依赖**  
-   将 pipe/exec/fork 相关代码内部化
+   将用于 pipe/exec/fork 的代码内部化。
 
-7. **0.3.0 Pre-release**  
-   - 添加安全徽章  
-   - 在各大论坛正式发布
+7. **版本 1.0.0 无 bug，爱上它**  
+   - 在 Solaris、AIX、Linux、BSD、MSYS2、OSX、Android 上测试。  
+   - 使用 IME 和国际键盘测试  
+   - 包含在 Linux 发行版仓库中
 
-8. **1.0.0 Bug free and loving it**  
-   - 在 Solaris、AIX、Linux、BSD、MSYS2、macOS、Android 上全面测试  
-   - 支持 IME 和国际键盘  
-   - 进入 Linux 发行版仓库
+### 字符显示注意事项
+
+`emil` 完全基于 UTF-8 并正确处理宽字符（汉字占两列）。
+
+- **图形终端模拟器**（Alacritty、foot、WezTerm、GNOME Terminal、Deepin Terminal 等）  
+  在 `LANG=zh_CN.UTF-8` 下配合中文字体即可完美显示。
+
+- **纯 Linux VT（Ctrl+Alt+F3 等真实控制台）**  
+  内核内置控制台（fbcon）无法正常显示中文。  
+  推荐方案（任选其一）：
+
+  - **kmscon**（强烈推荐）  
+    2026 年 Fedora 将默认采用，支持 pango 渲染，字体清晰，支持输入法。  
+    配置示例见 Arch Wiki 或 `/etc/kmscon/kmscon.conf`。
+
+  - **fbterm**  
+    经典帧缓冲终端，支持 fontconfig，可直接使用 Noto/Sarasa 等字体。
+
+  安装后用 `kmscon` 或 `fbterm` 替换 getty 即可获得完整的中文控制台体验。
 
 ## 贡献
 

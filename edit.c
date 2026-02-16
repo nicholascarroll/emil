@@ -913,7 +913,6 @@ void editorScrollLineDown(int count) {
 	}
 }
 
-
 void editorBeginningOfLine(int count) {
 	if (count == 0) {
 		E.buf->cx = 0;

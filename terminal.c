@@ -62,7 +62,6 @@ void disableRawModeKeepScreen(void) {
  *      region, re-enters raw mode, and redraws — closing the drawer.
  */
 
-
 void editorOpenShellDrawer(void) {
 	struct winsize ws;
 	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_row < 12)
@@ -116,7 +115,6 @@ void editorOpenShellDrawer(void) {
 	signal(SIGTSTP, SIG_DFL);
 	raise(SIGTSTP);
 }
-
 
 void enableRawMode(void) {
 	/* Saves the screen and switches to an alt screen */
