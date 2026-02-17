@@ -1,5 +1,6 @@
 #include "display.h"
 #include "abuf.h"
+#include "edit.h"
 #include "emil.h"
 #include "message.h"
 #include "terminal.h"
@@ -408,139 +409,121 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 					win->coloff + screencols, buf, filerow);
 				filerow++;
 			} else {
-				// Wrapped mode with visual marking support
-				int render_x = 0;
-				int char_idx = 0;
-				int current_highlight = 0;
-				int line_start_render_x = 0;
+				/* Word-wrap mode: break lines at word
+				 * boundaries when possible. */
+				int line_start_col = 0;
+				int line_start_byte = 0;
 
-				while (char_idx < row->size && y < screenrows) {
-					// Track start of current screen line
-					line_start_render_x = render_x;
+				while (line_start_byte < row->size &&
+				       y < screenrows) {
+					/* --- Find the break point for this
+					 *     screen line --- */
+					int col = line_start_col;
+					int bidx = line_start_byte;
+					/* Last word-boundary position seen */
+					int wb_col = -1;
+					int wb_byte = -1;
 
-					// Render one screen line worth of content
-					while (char_idx < row->size &&
-					       render_x - line_start_render_x <
-						       screencols) {
-						uint8_t c =
-							row->chars[char_idx];
-
-						int in_region =
-							isRenderPosInRegion(
-								buf, filerow,
-								render_x);
-						int is_current_match =
-							isRenderPosCurrentSearchMatch(
-								buf, filerow,
-								render_x);
-						updateHighlight(
-							ab, &current_highlight,
-							(in_region ||
-							 is_current_match) ?
-								1 :
-								0);
+					while (bidx < row->size) {
+						uint8_t c = row->chars[bidx];
+						int cwidth;
 
 						if (c == '\t') {
-							int next_tab_stop =
-								(render_x +
-								 EMIL_TAB_STOP) /
-								EMIL_TAB_STOP *
-								EMIL_TAB_STOP;
-							int tab_end =
-								next_tab_stop;
-							if (tab_end -
-								    line_start_render_x >
-							    screencols) {
-								tab_end =
-									line_start_render_x +
-									screencols;
-							}
-							while (render_x <
-							       tab_end) {
-								// Check highlighting for each space in tab
-								int space_in_region = isRenderPosInRegion(
-									buf,
-									filerow,
-									render_x);
-								int space_is_match = isRenderPosCurrentSearchMatch(
-									buf,
-									filerow,
-									render_x);
-								updateHighlight(
-									ab,
-									&current_highlight,
-									(space_in_region ||
-									 space_is_match) ?
-										1 :
-										0);
-								abAppend(ab,
-									 " ",
-									 1);
-								render_x++;
-							}
+							cwidth =
+								EMIL_TAB_STOP -
+								(col %
+								 EMIL_TAB_STOP);
 						} else if (ISCTRL(c)) {
-							abAppend(ab, "^", 1);
-							if (c == 0x7f) {
-								abAppend(ab,
-									 "?",
-									 1);
-							} else {
-								char sym = c |
-									   0x40;
-								abAppend(ab,
-									 &sym,
-									 1);
-							}
-							render_x += 2;
+							cwidth = 2;
 						} else {
-							int width = charInStringWidth(
+							cwidth = charInStringWidth(
 								row->chars,
-								char_idx);
-							int bytes =
-								utf8_nBytes(c);
-							abAppend(
-								ab,
-								(char *)&row->chars
-									[char_idx],
-								bytes);
-							render_x += width;
+								bidx);
 						}
 
-						char_idx += utf8_nBytes(
-							row->chars[char_idx]);
+						/* Wide char won't fit: leave
+						 * a 1-col gap and break. */
+						if (cwidth > 1 &&
+						    col + cwidth - line_start_col >
+							    screencols) {
+							break;
+						}
+
+						if (col + cwidth -
+							    line_start_col >
+						    screencols) {
+							break;
+						}
+
+						/* Track word boundaries:
+						 * the break point is
+						 * *after* the boundary
+						 * character. */
+						if (isWordBoundary(c)) {
+							int nbytes =
+								utf8_nBytes(c);
+							wb_col = col + cwidth;
+							wb_byte = bidx + nbytes;
+						}
+
+						col += cwidth;
+						bidx += utf8_nBytes(c);
 					}
 
-					// Fill rest of line with highlighted spaces if in region
-					while (render_x - line_start_render_x <
+					int break_col, break_byte;
+					if (bidx >= row->size) {
+						/* Rest of row fits on this
+						 * screen line. */
+						break_col = col;
+						break_byte = row->size;
+					} else if (wb_col > line_start_col) {
+						/* Break at the last word
+						 * boundary we found. */
+						break_col = wb_col;
+						break_byte = wb_byte;
+					} else {
+						/* No word boundary found —
+						 * hard break at column
+						 * limit. */
+						break_col = col;
+						break_byte = bidx;
+					}
+
+					/* --- Render the span --- */
+					renderLineWithHighlighting(
+						row, ab, line_start_col,
+						break_col, buf, filerow);
+
+					/* --- Fill trailing space with
+					 *     correct highlighting --- */
+					int fill_col = break_col;
+					int hl = 0;
+					while (fill_col - line_start_col <
 					       screencols) {
-						int space_in_region =
-							isRenderPosInRegion(
-								buf, filerow,
-								render_x);
-						int space_is_match =
+						int in_r = isRenderPosInRegion(
+							buf, filerow, fill_col);
+						int in_m =
 							isRenderPosCurrentSearchMatch(
 								buf, filerow,
-								render_x);
+								fill_col);
 						updateHighlight(
-							ab, &current_highlight,
-							(space_in_region ||
-							 space_is_match) ?
-								1 :
-								0);
+							ab, &hl,
+							(in_r || in_m) ? 1 : 0);
 						abAppend(ab, " ", 1);
-						render_x++;
+						fill_col++;
 					}
+					updateHighlight(ab, &hl, 0);
 
-					// Reset highlighting at end of screen line
-					updateHighlight(ab, &current_highlight,
-							0);
-
-					// Move to next screen line if there's more content
-					if (char_idx < row->size &&
+					/* --- Advance to next screen line
+					 *     if more content remains --- */
+					if (break_byte < row->size &&
 					    y < screenrows - 1) {
 						abAppend(ab, "\r\n", 2);
 						y++;
 					}
+
+					line_start_col = break_col;
+					line_start_byte = break_byte;
 				}
 
 				filerow++;
