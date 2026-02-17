@@ -143,16 +143,16 @@ when an OSC 52 enabled terminal client is used.
    - visual-line-mode (default for .org, .md,.txt, .fountain)
    - Limit undo history to 1000 actions.
 
-4. **Buffer memory management upgrade**
+3. **Buffer memory management upgrade**
    Investigate value of improved internal representations (maybe gap buffer).
 
-5. **Rendering system upgrade**
+4. **Rendering system upgrade**
    Test performance over SSH and the rendering system.
 
-6. **Remove dependency on `subprocess.h`**
+5. **Remove dependency on `subprocess.h`**
    Internalize the code being used for pipe/exec/fork.
 
-7. **Version 1.0.0 Bug free and loving it**
+6. **Version 1.0.0 Bug free and loving it**
    - Tested on Solaris, AIX, Linux, BSD, MSYS2
      OSX, Android. 
    - Tested with IME and international keyboards
