@@ -137,26 +137,30 @@ Shell 集成可以在构建时通过编译器标志 `-DEMIL_DISABLE_PIPE` 禁用
    - `C-x C-z` 打开 shell 抽屉  
    - 从现在起我们使用 `emil` 来编写 `emil`
 
-2. **版本 0.2.0 稳定预览版**  
+emil  
+
+2. **版本 0.1.1 稳定预览版**  
    - 合并上游 bug 修复  
    - 显示代码重构  
    - 大多数已知 bug 已修复  
    - 安全徽章  
    - 首次 GitHub 发布（预发布标签）  
    - 在论坛上宣布（HN、Reddit 等）  
+
+3. **版本 0.2.0 功能完备**  
    - visual-line-mode（默认用于 .org、.md、.txt、.fountain 文件）  
    - 将撤销历史限制为 1000 个操作。
 
-3. **缓冲区内存管理升级**  
+4. **缓冲区内存管理升级**  
    调查改进内部表示的价值（可能是 gap buffer）。
 
-4. **渲染系统升级**  
+5. **渲染系统升级**  
    测试 SSH 下的性能和渲染系统。
 
-5. **移除对 `subprocess.h` 的依赖**  
+6. **移除对 `subprocess.h` 的依赖**  
    将用于 pipe/exec/fork 的代码内部化。
 
-6. **版本 1.0.0 无 bug，爱上它**  
+7. **版本 1.0.0 无 bug，爱上它**  
    - 在 Solaris、AIX、Linux、BSD、MSYS2、OSX、Android 上测试。  
    - 使用 IME 和国际键盘测试  
    - 包含在 Linux 发行版仓库中

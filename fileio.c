@@ -215,6 +215,19 @@ int editorOpen(struct editorBuffer *bufr, char *filename) {
 		bufr->read_only = 1;
 	}
 
+	/* Enable word wrap by default for prose-oriented file types */
+	if (bufr->filename) {
+		char *ext = strrchr(bufr->filename, '.');
+		if (ext) {
+			if (strcmp(ext, ".org") == 0 ||
+			    strcmp(ext, ".md") == 0 ||
+			    strcmp(ext, ".txt") == 0 ||
+			    strcmp(ext, ".fountain") == 0) {
+				bufr->word_wrap = 1;
+			}
+		}
+	}
+
 	editorSetStatusMessage("%d lines, %d columns", bufr->numrows,
 			       max_width);
 	return 0;

@@ -24,7 +24,6 @@
 #endif
 
 extern struct editorConfig E;
-extern void updateRow(erow *row);
 
 const int minibuffer_height = 1;
 const int statusbar_height = 1;
@@ -705,19 +704,13 @@ void refreshScreen(void) {
 
 void cursorBottomLine(int curs) {
 	char cbuf[32];
-	snprintf(cbuf, sizeof(cbuf), CSI "%d;%dH", E.screenrows, curs);
-	write(STDOUT_FILENO, cbuf, strlen(cbuf));
-}
-
-void cursorBottomLineLong(long curs) {
-	char cbuf[32];
 	/* Calculate actual minibuffer row position */
 	int minibuf_row = 0;
 	for (int i = 0; i < E.nwindows; i++) {
 		minibuf_row += E.windows[i]->height + statusbar_height;
 	}
 	minibuf_row++; /* minibuffer is after all windows/status bars */
-	snprintf(cbuf, sizeof(cbuf), CSI "%d;%ldH", minibuf_row, curs);
+	snprintf(cbuf, sizeof(cbuf), CSI "%d;%dH", minibuf_row, curs);
 	write(STDOUT_FILENO, cbuf, strlen(cbuf));
 }
 

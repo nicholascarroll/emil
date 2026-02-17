@@ -91,9 +91,6 @@ static const char *const msg_shell_disabled = "Shell 集成已禁用";
 static const char *const msg_register_empty = "寄存器 %s 为空。";
 static const char *const msg_no_command = "未找到命令";
 
-static const char *const msg_truncate_on = "长行截断已启用";
-static const char *const msg_truncate_off = "长行截断已禁用";
-
 static const char *const msg_trailing_removed = "已删除 %d 个尾随字符";
 static const char *const msg_no_change = "无变化。";
 
@@ -189,9 +186,6 @@ static const char *const msg_shell_disabled = "Shell integration disabled";
 
 static const char *const msg_register_empty = "Register %s is empty.";
 static const char *const msg_no_command = "No command found";
-
-static const char *const msg_truncate_on = "Truncate long lines enabled";
-static const char *const msg_truncate_off = "Truncate long lines disabled";
 
 static const char *const msg_trailing_removed =
 	"%d trailing characters removed";

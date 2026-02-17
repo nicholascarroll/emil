@@ -49,9 +49,8 @@ void buildScreenCache(struct editorBuffer *buf) {
 		if (!buf->word_wrap) {
 			screen_line += 1;
 		} else {
-			int width = calculateLineWidth(&buf->row[i]);
-			int lines_used = (width / E.screencols) + 1;
-			screen_line += lines_used;
+			screen_line +=
+				countScreenLines(&buf->row[i], E.screencols);
 		}
 	}
 
