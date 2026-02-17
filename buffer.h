@@ -23,4 +23,7 @@ void buildScreenCache(struct editorBuffer *buf);
 int getScreenLineForRow(struct editorBuffer *buf, int row);
 int calculateLineWidth(erow *row);
 int charsToDisplayColumn(erow *row, int char_pos);
+int countScreenLines(erow *row, int screencols);
+void cursorScreenLine(erow *row, int cursor_col, int screencols, int *out_line,
+		      int *out_col);
 #endif

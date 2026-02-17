@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdio.h>
 #include "emil.h"
+#include "edit.h"
 #include "message.h"
 #include "buffer.h"
 #include "unicode.h"
@@ -108,6 +109,144 @@ int charsToDisplayColumn(erow *row, int char_pos) {
 		}
 	}
 	return col;
+}
+
+/* Count how many screen lines a row occupies under word wrap.
+ * Uses the same break logic as drawRows in display.c. */
+int countScreenLines(erow *row, int screencols) {
+	if (screencols <= 0)
+		return 1;
+	if (row->size == 0)
+		return 1;
+
+	int lines = 0;
+	int line_start_col = 0;
+	int line_start_byte = 0;
+
+	while (line_start_byte < row->size) {
+		int col = line_start_col;
+		int bidx = line_start_byte;
+		int wb_col = -1;
+		int wb_byte = -1;
+
+		while (bidx < row->size) {
+			uint8_t c = row->chars[bidx];
+			int cwidth;
+
+			if (c == '\t') {
+				cwidth = EMIL_TAB_STOP - (col % EMIL_TAB_STOP);
+			} else if (ISCTRL(c)) {
+				cwidth = 2;
+			} else {
+				cwidth = charInStringWidth(row->chars, bidx);
+			}
+
+			if (cwidth > 1 &&
+			    col + cwidth - line_start_col > screencols)
+				break;
+			if (col + cwidth - line_start_col > screencols)
+				break;
+
+			if (isWordBoundary(c)) {
+				wb_col = col + cwidth;
+				wb_byte = bidx + utf8_nBytes(c);
+			}
+
+			col += cwidth;
+			bidx += utf8_nBytes(c);
+		}
+
+		if (bidx >= row->size) {
+			/* Rest fits on this screen line. */
+			lines++;
+			break;
+		} else if (wb_col > line_start_col) {
+			line_start_col = wb_col;
+			line_start_byte = wb_byte;
+		} else {
+			line_start_col = col;
+			line_start_byte = bidx;
+		}
+		lines++;
+	}
+
+	return lines;
+}
+
+/* Find which screen line and column a cursor position falls on
+ * under word wrap.  Sets *out_line (0-based sub-line within the
+ * row) and *out_col (column offset within that sub-line). */
+void cursorScreenLine(erow *row, int cursor_col, int screencols, int *out_line,
+		      int *out_col) {
+	*out_line = 0;
+	*out_col = 0;
+
+	if (screencols <= 0 || row->size == 0) {
+		*out_col = cursor_col;
+		return;
+	}
+
+	int line_start_col = 0;
+	int line_start_byte = 0;
+
+	while (line_start_byte < row->size) {
+		int col = line_start_col;
+		int bidx = line_start_byte;
+		int wb_col = -1;
+		int wb_byte = -1;
+
+		while (bidx < row->size) {
+			uint8_t c = row->chars[bidx];
+			int cwidth;
+
+			if (c == '\t') {
+				cwidth = EMIL_TAB_STOP - (col % EMIL_TAB_STOP);
+			} else if (ISCTRL(c)) {
+				cwidth = 2;
+			} else {
+				cwidth = charInStringWidth(row->chars, bidx);
+			}
+
+			if (cwidth > 1 &&
+			    col + cwidth - line_start_col > screencols)
+				break;
+			if (col + cwidth - line_start_col > screencols)
+				break;
+
+			if (isWordBoundary(c)) {
+				wb_col = col + cwidth;
+				wb_byte = bidx + utf8_nBytes(c);
+			}
+
+			col += cwidth;
+			bidx += utf8_nBytes(c);
+		}
+
+		int break_col, break_byte;
+		if (bidx >= row->size) {
+			break_col = col;
+			break_byte = row->size;
+		} else if (wb_col > line_start_col) {
+			break_col = wb_col;
+			break_byte = wb_byte;
+		} else {
+			break_col = col;
+			break_byte = bidx;
+		}
+
+		/* cursor_col falls within this screen line */
+		if (cursor_col < break_col || break_byte >= row->size) {
+			*out_col = cursor_col - line_start_col;
+			return;
+		}
+
+		(*out_line)++;
+		line_start_col = break_col;
+		line_start_byte = break_byte;
+	}
+
+	/* Cursor is past the end — place on the last sub-line */
+	*out_col = cursor_col - line_start_col;
 }
 
 void updateRow(erow *row) {

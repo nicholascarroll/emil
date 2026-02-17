@@ -132,10 +132,9 @@ int calculateRowsToScroll(struct editorBuffer *buf, struct editorWindow *win,
 		if (start_row < 0 || start_row >= buf->numrows)
 			break;
 		erow *row = &buf->row[start_row];
-		int line_height =
-			!buf->word_wrap ?
-				1 :
-				((calculateLineWidth(row) / E.screencols) + 1);
+		int line_height = !buf->word_wrap ?
+					  1 :
+					  countScreenLines(row, E.screencols);
 		if (rendered_lines + line_height > win->height && direction < 0)
 			break;
 		rendered_lines += line_height;
@@ -222,22 +221,18 @@ void setScxScy(struct editorWindow *win) {
 
 	if (buf->word_wrap) {
 		if (buf->cy >= buf->numrows) {
-			// For virtual line, calculate position as if there's a line at buf->numrows
+			/* Virtual line past end of buffer */
 			if (buf->numrows > 0) {
 				int virtual_screen_line = getScreenLineForRow(
 					buf, buf->numrows - 1);
-				// Add one line for the virtual line position
-				virtual_screen_line +=
-					((calculateLineWidth(
-						  &buf->row[buf->numrows - 1]) /
-					  E.screencols) +
-					 1);
+				virtual_screen_line += countScreenLines(
+					&buf->row[buf->numrows - 1],
+					E.screencols);
 				int rowoff_screen_line =
 					getScreenLineForRow(buf, win->rowoff);
 				win->scy = virtual_screen_line -
 					   rowoff_screen_line;
 			} else {
-				// Empty buffer case - virtual line is at position 0
 				win->scy = 0 - win->rowoff;
 			}
 		} else {
@@ -260,9 +255,11 @@ void setScxScy(struct editorWindow *win) {
 	if (!buf->word_wrap) {
 		win->scx = total_width - win->coloff;
 	} else {
-		int render_pos = charsToDisplayColumn(row, buf->cx);
-		win->scy += render_pos / E.screencols;
-		win->scx = render_pos % E.screencols;
+		int sub_line, sub_col;
+		cursorScreenLine(row, total_width, E.screencols, &sub_line,
+				 &sub_col);
+		win->scy += sub_line;
+		win->scx = sub_col;
 	}
 
 	if (win->scy < 0)
@@ -294,31 +291,18 @@ void scroll(void) {
 
 			for (int i = win->rowoff;
 			     i < buf->cy && i < buf->numrows; i++) {
-				int line_height =
-					(calculateLineWidth(&buf->row[i]) /
-					 E.screencols) +
-					1;
-				cursor_screen_row += line_height;
+				cursor_screen_row += countScreenLines(
+					&buf->row[i], E.screencols);
 			}
 
 			if (buf->cy < buf->numrows) {
-				erow *row = &buf->row[buf->cy];
-				int cursor_x = 0;
-				for (int j = 0; j < buf->cx;) {
-					int char_width;
-					if (j < row->size &&
-					    row->chars[j] == '\t') {
-						char_width = EMIL_TAB_STOP -
-							     (cursor_x %
-							      EMIL_TAB_STOP);
-					} else {
-						char_width = charInStringWidth(
-							row->chars, j);
-					}
-					cursor_x += char_width;
-					j += utf8_nBytes(row->chars[j]);
-				}
-				cursor_screen_row += cursor_x / E.screencols;
+				int render_pos = charsToDisplayColumn(
+					&buf->row[buf->cy], buf->cx);
+				int sub_line, sub_col;
+				cursorScreenLine(&buf->row[buf->cy], render_pos,
+						 E.screencols, &sub_line,
+						 &sub_col);
+				cursor_screen_row += sub_line;
 			}
 
 			if (cursor_screen_row >= win->height) {
@@ -329,10 +313,9 @@ void scroll(void) {
 				for (int i = buf->cy; i >= 0; i--) {
 					if (i < buf->numrows) {
 						int line_height =
-							(calculateLineWidth(
-								 &buf->row[i]) /
-							 E.screencols) +
-							1;
+							countScreenLines(
+								&buf->row[i],
+								E.screencols);
 						if (visible_rows + line_height >
 						    win->height) {
 							win->rowoff = i + 1;
@@ -358,23 +341,7 @@ void scroll(void) {
 	if (!buf->word_wrap) {
 		int rx = 0;
 		if (buf->cy < buf->numrows) {
-			erow *row = &buf->row[buf->cy];
-			for (int j = 0; j < buf->cx;) {
-				if (j < row->size) {
-					if (row->chars[j] == '\t') {
-						rx += EMIL_TAB_STOP -
-						      (rx % EMIL_TAB_STOP);
-					} else {
-						int char_width =
-							charInStringWidth(
-								row->chars, j);
-						rx += char_width;
-					}
-					j += utf8_nBytes(row->chars[j]);
-				} else {
-					break;
-				}
-			}
+			rx = charsToDisplayColumn(&buf->row[buf->cy], buf->cx);
 		}
 		if (rx < win->coloff) {
 			win->coloff = rx;
