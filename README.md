@@ -128,22 +128,18 @@ when an OSC 52 enabled terminal client is used.
 
 ### Roadmap
 
-1. **Version 0.1.0 Plays well with others** —[DONE]
+1. **Version 0.1.0 Plays well with others** [DONE]
    - `M-p`/`M-n` scrolls up/down one line
    - `C-x C-z` opens shell drawer
-   - From here on we use `emil` to code `emil`
+   - From here on we use `emil` to code `emil`  
 
-emil  
-
-2. **Version 0.1.1 Stable Preview**   
+2. **Version 0.2.0 Stable Preview**  [WIP]
    - Bugfixes from upstream incorporated  
    - Display code refactored  
    - Most known bugs fixed
    - Security badge  
    - First GitHub release (prerelease tag)  
    - Announced on forums (HN, Reddit, etc.)  
-
-3. **Version 0.2.0 Feature complete**
    - visual-line-mode (default for .org, .md,.txt, .fountain)
    - Limit undo history to 1000 actions.
 
