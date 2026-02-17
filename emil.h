@@ -76,7 +76,6 @@ struct editorBuffer {
 	int end;
 	int dirty;
 	int special_buffer;
-	int truncate_lines; // 0 for wrapped, 1 for unwrapped
 	int word_wrap;
 	int rectangle_mode;
 	int single_line;

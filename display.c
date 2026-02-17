@@ -132,7 +132,7 @@ int calculateRowsToScroll(struct editorBuffer *buf, struct editorWindow *win,
 			break;
 		erow *row = &buf->row[start_row];
 		int line_height =
-			buf->truncate_lines ?
+			!buf->word_wrap ?
 				1 :
 				((calculateLineWidth(row) / E.screencols) + 1);
 		if (rendered_lines + line_height > win->height && direction < 0)
@@ -219,7 +219,7 @@ void setScxScy(struct editorWindow *win) {
 	win->scy = 0;
 	win->scx = 0;
 
-	if (!buf->truncate_lines) {
+	if (buf->word_wrap) {
 		if (buf->cy >= buf->numrows) {
 			// For virtual line, calculate position as if there's a line at buf->numrows
 			if (buf->numrows > 0) {
@@ -256,7 +256,7 @@ void setScxScy(struct editorWindow *win) {
 
 	int total_width = charsToDisplayColumn(row, buf->cx);
 
-	if (buf->truncate_lines) {
+	if (!buf->word_wrap) {
 		win->scx = total_width - win->coloff;
 	} else {
 		int render_pos = charsToDisplayColumn(row, buf->cx);
@@ -285,7 +285,7 @@ void scroll(void) {
 		buf->cx = buf->row[buf->cy].size;
 	}
 
-	if (!buf->truncate_lines) {
+	if (buf->word_wrap) {
 		if (buf->cy < win->rowoff) {
 			win->rowoff = buf->cy;
 		} else {
@@ -354,7 +354,7 @@ void scroll(void) {
 		}
 	}
 
-	if (buf->truncate_lines) {
+	if (!buf->word_wrap) {
 		int rx = 0;
 		if (buf->cy < buf->numrows) {
 			erow *row = &buf->row[buf->cy];
@@ -401,7 +401,7 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 			if (!row->render_valid) {
 				updateRow(row);
 			}
-			if (buf->truncate_lines) {
+			if (!buf->word_wrap) {
 				// Truncated mode with visual marking
 				renderLineWithHighlighting(
 					row, ab, win->coloff,
@@ -825,11 +825,10 @@ void recenter(struct editorWindow *win) {
 	}
 }
 
-void editorToggleTruncateLines(void) {
-	E.buf->truncate_lines = !E.buf->truncate_lines;
-	editorSetStatusMessage(E.buf->truncate_lines ?
-				       "Truncate long lines enabled" :
-				       "Truncate long lines disabled");
+void editorToggleVisualLineMode(void) {
+	E.buf->word_wrap = !E.buf->word_wrap;
+	editorSetStatusMessage(E.buf->word_wrap ? "Visual line mode enabled" :
+						  "Visual line mode disabled");
 }
 
 void editorVersion(void) {
@@ -843,7 +842,7 @@ void editorVersionWrapper(struct editorConfig *UNUSED(ed),
 }
 
 /* Wrapper for command table */
-void editorToggleTruncateLinesWrapper(struct editorConfig *UNUSED(ed),
-				      struct editorBuffer *UNUSED(buf)) {
-	editorToggleTruncateLines();
+void editorToggleVisualLineModeWrapper(struct editorConfig *UNUSED(ed),
+				       struct editorBuffer *UNUSED(buf)) {
+	editorToggleVisualLineMode();
 }

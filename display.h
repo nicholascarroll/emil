@@ -28,12 +28,12 @@ void cursorBottomLine(int curs);
 void cursorBottomLineLong(long curs);
 void editorResizeScreen(int sig);
 void recenter(struct editorWindow *win);
-void editorToggleTruncateLines(void);
+void editorToggleVisualLineMode(void);
 void editorVersion(void);
 /* Wrappers for command table */
 void editorVersionWrapper(struct editorConfig *ed, struct editorBuffer *buf);
-void editorToggleTruncateLinesWrapper(struct editorConfig *ed,
-				      struct editorBuffer *buf);
+void editorToggleVisualLineModeWrapper(struct editorConfig *ed,
+				       struct editorBuffer *buf);
 void editorWhatCursor(void);
 
 #endif /* DISPLAY_H */

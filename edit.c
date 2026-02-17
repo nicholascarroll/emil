@@ -735,7 +735,7 @@ void editorPageUp(int count) {
 		if (scroll_lines < 1)
 			scroll_lines = 1;
 
-		if (E.buf->truncate_lines) {
+		if (!E.buf->word_wrap) {
 			/* Move view up by scroll_lines */
 			win->rowoff -= scroll_lines;
 			if (win->rowoff < 0) {
@@ -805,7 +805,7 @@ void editorPageDown(int count) {
 		if (scroll_lines < 1)
 			scroll_lines = 1;
 
-		if (E.buf->truncate_lines) {
+		if (!E.buf->word_wrap) {
 			/* Move view down by scroll_lines */
 			win->rowoff += scroll_lines;
 

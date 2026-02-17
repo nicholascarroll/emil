@@ -45,7 +45,7 @@ void buildScreenCache(struct editorBuffer *buf) {
 	int screen_line = 0;
 	for (int i = 0; i < buf->numrows; i++) {
 		buf->screen_line_start[i] = screen_line;
-		if (buf->truncate_lines) {
+		if (!buf->word_wrap) {
 			screen_line += 1;
 		} else {
 			int width = calculateLineWidth(&buf->row[i]);
@@ -342,7 +342,7 @@ struct editorBuffer *newBuffer(void) {
 	ret->completion_state.last_completion_count = 0;
 	ret->completion_state.preserve_message = 0;
 	ret->next = NULL;
-	ret->truncate_lines = 1;
+	ret->word_wrap = 0;
 	ret->rectangle_mode = 0;
 	ret->single_line = 0;
 	ret->screen_line_start = NULL;
