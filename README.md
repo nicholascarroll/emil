@@ -3,7 +3,7 @@
 
 `emil` is a small, portable terminal text editor designed specifically for UTF-8 files. It provides a subset of *emacs* commands on VT100-compatible terminals.
 
-`emil` is written in standard C99 and depends only on a POSIX.1-2001–compliant environment. It deliberately avoids common sources of complexity: scripting support, plugin systems, configuration files, background network activity, or auto-save files.
+`emil` is written in standard C99 and depends only on a POSIX.1-2001–compliant environment. It eschews common sources of complexity: scripting support, plugin systems, configuration files, background network activity, or auto-save files.
 
 ## Status
 
