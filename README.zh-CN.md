@@ -105,6 +105,7 @@ set bind-tty-special-chars off
 "\C-w": kill-region
 "\M-w": copy-region-as-kill
 ```
+如果没有标记任何区域，它会杀死光标前面的一个词（相当于向后杀词，backward-kill-word）。
 
 Readline 支持两种删除到行首的方式：`C-x BACKSPACE`（在 *emacs* 中支持）以及更符合人体工学的 `C-u`，但后者与 *emacs* 的通用参数（universal argument）冲突。`emil` 通过将 `Ctrl-u Ctrl-a` 绑定为删除到行首来解决这一冲突。
 
