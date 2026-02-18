@@ -98,6 +98,8 @@ set bind-tty-special-chars off
 "\C-w": kill-region
 "\M-w": copy-region-as-kill
 ```
+In `emil`, `Ctrl-w` kills the marked region as in `emacs`, but of no region is marked, it kills the previous word.
+
 Readline supports two ways to delete to the beginning of the line: `C-x BACKSPACE` (supported in *emacs*) and the more ergonomic `C-u` which conflicts with the *emacs* universal argument. `emil` resolves the conflict by binding `Ctrl-u Ctrl-a` to delete to the beginning of the line.
 
 ### Shell Integration
