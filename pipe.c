@@ -26,6 +26,8 @@
 #include "buffer.h"
 #include "unicode.h"
 #include "util.h"
+#include "fileio.h"
+#include <errno.h>
 
 extern struct editorConfig E;
 
@@ -185,6 +187,133 @@ void editorPipeCmd(struct editorConfig *ed, struct editorBuffer *bufr) {
 	}
 }
 
+/////
+void editorDiffBufferWithFile(struct editorConfig *ed,
+			      struct editorBuffer *bufr) {
+	if (bufr->filename == NULL) {
+		editorSetStatusMessage("Buffer has no file");
+		return;
+	}
+
+	if (!bufr->dirty) {
+		editorSetStatusMessage("Buffer is not modified");
+		return;
+	}
+
+	/* Write the current buffer contents to a temp file */
+	char tmpname[] = "/tmp/emil-diff-XXXXXX";
+	int fd = mkstemp(tmpname);
+	if (fd == -1) {
+		editorSetStatusMessage("Diff failed: cannot create temp file");
+		return;
+	}
+
+	int buflen;
+	char *bufstr = editorRowsToString(bufr, &buflen);
+	ssize_t total = 0;
+	while (total < buflen) {
+		ssize_t n = write(fd, bufstr + total, buflen - total);
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			close(fd);
+			unlink(tmpname);
+			free(bufstr);
+			editorSetStatusMessage("Diff failed: write error");
+			return;
+		}
+		total += n;
+	}
+	close(fd);
+	free(bufstr);
+
+	/* Run diff directly, no shell — avoids filename quoting issues */
+	const char *command_line[5] = { "diff", "-u", bufr->filename, tmpname,
+					NULL };
+	struct subprocess_s subprocess;
+	int result = subprocess_create(command_line,
+				       subprocess_option_inherit_environment,
+				       &subprocess);
+	if (result) {
+		unlink(tmpname);
+		editorSetStatusMessage("Diff failed: cannot create subprocess");
+		return;
+	}
+
+	/* diff doesn't need stdin; just read stdout */
+	int sub_ret;
+	subprocess_join(&subprocess, &sub_ret);
+
+	FILE *p_stdout = subprocess_stdout(&subprocess);
+	int bsiz = BUFSIZ + 1;
+	char *output = xcalloc(1, bsiz);
+	int c = fgetc(p_stdout);
+	int i = 0;
+	while (c != EOF) {
+		output[i++] = c;
+		output[i] = 0;
+		if (i >= bsiz - 10) {
+			bsiz <<= 1;
+			output = xrealloc(output, bsiz);
+		}
+		c = fgetc(p_stdout);
+	}
+
+	subprocess_destroy(&subprocess);
+	unlink(tmpname);
+
+	/* diff returns 0 = identical, 1 = differences, 2 = error */
+	if (sub_ret == 0) {
+		free(output);
+		editorSetStatusMessage("No differences");
+		return;
+	}
+
+	if (sub_ret >= 2 || i == 0) {
+		free(output);
+		editorSetStatusMessage("Diff failed (exit status %d)", sub_ret);
+		return;
+	}
+
+	/* Create a *Diff* buffer with the output */
+	struct editorBuffer *diffBuf = newBuffer();
+	diffBuf->filename = xstrdup("*Diff*");
+	diffBuf->special_buffer = 1;
+	diffBuf->read_only = 1;
+
+	size_t rowStart = 0;
+	size_t rowLen = 0;
+	size_t outputLen = (size_t)i;
+	for (size_t j = 0; j < outputLen; j++) {
+		if (output[j] == '\n' || j == outputLen - 1) {
+			editorInsertRow(diffBuf, diffBuf->numrows,
+					&output[rowStart], rowLen);
+			rowStart = j + 1;
+			rowLen = 0;
+		} else {
+			rowLen++;
+		}
+	}
+
+	/* Link the new buffer into the buffer list */
+	if (ed->headbuf == NULL) {
+		ed->headbuf = diffBuf;
+	} else {
+		struct editorBuffer *temp = ed->headbuf;
+		while (temp->next != NULL) {
+			temp = temp->next;
+		}
+		temp->next = diffBuf;
+	}
+	ed->buf = diffBuf;
+
+	int idx = windowFocusedIdx();
+	ed->windows[idx]->buf = ed->buf;
+	refreshScreen();
+
+	free(output);
+}
+
 #else /* EMIL_DISABLE_PIPE */
 
 #include "emil.h"
@@ -194,6 +323,13 @@ void editorPipeCmd(struct editorConfig *ed, struct editorBuffer *bufr) {
 	(void)ed;   /* unused parameter */
 	(void)bufr; /* unused parameter */
 	editorSetStatusMessage("Pipe command not available on this platform");
+}
+
+void editorDiffBufferWithFile(struct editorConfig *ed,
+			      struct editorBuffer *bufr) {
+	(void)ed;
+	(void)bufr;
+	editorSetStatusMessage("Shell integration disabled");
 }
 
 #endif /* EMIL_DISABLE_PIPE */

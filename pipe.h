@@ -4,5 +4,7 @@
 
 uint8_t *editorPipe(struct editorConfig *ed, struct editorBuffer *buf);
 void editorPipeCmd(struct editorConfig *ed, struct editorBuffer *bufr);
+void editorDiffBufferWithFile(struct editorConfig *ed,
+			      struct editorBuffer *bufr);
 
 #endif

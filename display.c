@@ -633,11 +633,7 @@ But might be adding a packet in SSH
 write(STDOUT_FILENO, ab.b, ab.len);
 ab.len = 0;
 */
-	abAppend(&ab, "\x1b[H", 3);    // Move cursor to top-left corner
-
-
-
-
+	abAppend(&ab, "\x1b[H", 3); // Move cursor to top-left corner
 
 	int focusedIdx = windowFocusedIdx();
 

@@ -112,7 +112,8 @@ Shell integration is a compile-time option (enabled by default). It provides two
 - **`C-u M-|`**  
   Takes the current region, feeds it to the shell command, and **replaces the region** with the output of the command.  
 
-Full pipelines are supported in both cases (e.g. `sort | uniq -c | sort -nr`).
+- **`M-x diff-buffer-with-file RET`**   
+  Shows unsaved changes.
 
 Shell integration can be disabled at build time with the compiler flag `-DEMIL_DISABLE_PIPE`.
 
@@ -130,14 +131,15 @@ when an OSC 52 enabled terminal client is used.
 
 ### Roadmap
 
-1. **Version 0.1.0 [DONE]
+1. **Version 0.1.0** [DONE] ✅
    - From here on we use `emil` to code `emil`
 
-2. **Version 0.1.1 Feature complete**
-   - Display code refactored 
-   - visual-line-mode
-   - Limit undo history to 1000 actions.  
-   - diff-buffer-with-file
+2. **Version 0.1.1 Feature complete** [WIP]⚠️🚧🔨👷. 
+
+   Pending:
+   - display_cleanup.md 
+   - test visual-line-mode
+   - test diff-buffer-with-file
    - Tmux support in OCS 52 publish
 
 3. **Version 0.2.0 Stable Preview**   
