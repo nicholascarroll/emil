@@ -628,7 +628,16 @@ void drawMinibuffer(struct abuf *ab) {
 void refreshScreen(void) {
 	struct abuf ab = ABUF_INIT;
 	abAppend(&ab, "\x1b[?25l", 6); // Hide cursor
+	/* possible flicker reduction on local terminals
+But might be adding a packet in SSH
+write(STDOUT_FILENO, ab.b, ab.len);
+ab.len = 0;
+*/
 	abAppend(&ab, "\x1b[H", 3);    // Move cursor to top-left corner
+
+
+
+
 
 	int focusedIdx = windowFocusedIdx();
 
