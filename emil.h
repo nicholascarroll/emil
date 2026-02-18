@@ -86,6 +86,7 @@ struct editorBuffer {
 	uint8_t match;
 	struct editorUndo *undo;
 	struct editorUndo *redo;
+	int undo_count;
 	struct editorBuffer *next;
 	int *screen_line_start;
 	int screen_line_cache_size;

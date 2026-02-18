@@ -81,6 +81,7 @@ void editorDoUndo(struct editorBuffer *buf, int count) {
 		buf->redo = buf->undo;
 		buf->undo = buf->undo->prev;
 		buf->redo->prev = orig;
+		buf->undo_count--;
 
 		if (paired) {
 			editorDoUndo(buf, 1);
@@ -165,6 +166,7 @@ void editorDoRedo(struct editorBuffer *buf, int count) {
 		buf->undo = buf->redo;
 		buf->redo = buf->redo->prev;
 		buf->undo->prev = orig;
+		buf->undo_count++;
 
 		if (buf->redo != NULL && buf->redo->paired) {
 			editorDoRedo(buf, 1);
@@ -189,6 +191,28 @@ struct editorUndo *newUndo(void) {
 	return ret;
 }
 
+static void freeUndos(struct editorUndo *first);
+
+void pushUndo(struct editorBuffer *buf, struct editorUndo *new) {
+	new->prev = buf->undo;
+	buf->undo = new;
+	buf->undo_count++;
+
+	if (buf->undo_count > UNDO_LIMIT) {
+		/* Walk to the node just before the tail to prune */
+		struct editorUndo *cur = buf->undo;
+		for (int i = 1; i < UNDO_LIMIT && cur->prev != NULL; i++) {
+			cur = cur->prev;
+		}
+		if (cur->prev != NULL) {
+			/* If the oldest entry is paired, free both */
+			freeUndos(cur->prev);
+			cur->prev = NULL;
+		}
+		buf->undo_count = UNDO_LIMIT;
+	}
+}
+
 static void freeUndos(struct editorUndo *first) {
 	struct editorUndo *cur = first;
 	struct editorUndo *prev;
@@ -209,6 +233,7 @@ void clearRedos(struct editorBuffer *buf) {
 void clearUndosAndRedos(struct editorBuffer *buf) {
 	freeUndos(buf->undo);
 	buf->undo = NULL;
+	buf->undo_count = 0;
 	clearRedos(buf);
 }
 
@@ -221,12 +246,11 @@ void editorUndoAppendChar(struct editorBuffer *buf, uint8_t c) {
 		if (buf->undo != NULL)
 			buf->undo->append = 0;
 		struct editorUndo *new = newUndo();
-		new->prev = buf->undo;
 		new->startx = buf->cx;
 		new->starty = buf->cy;
 		new->endx = buf->cx;
 		new->endy = buf->cy;
-		buf->undo = new;
+		pushUndo(buf, new);
 	}
 	buf->undo->data[buf->undo->datalen++] = c;
 	buf->undo->data[buf->undo->datalen] = 0;
@@ -257,12 +281,11 @@ void editorUndoAppendUnicode(struct editorConfig *ed,
 		if (buf->undo != NULL)
 			buf->undo->append = 0;
 		struct editorUndo *new = newUndo();
-		new->prev = buf->undo;
 		new->startx = buf->cx;
 		new->starty = buf->cy;
 		new->endx = buf->cx;
 		new->endy = buf->cy;
-		buf->undo = new;
+		pushUndo(buf, new);
 	}
 	for (int i = 0; i < ed->nunicode; i++) {
 		buf->undo->data[buf->undo->datalen++] = ed->unicode[i];
@@ -282,7 +305,6 @@ void editorUndoBackSpace(struct editorBuffer *buf, uint8_t c) {
 		if (buf->undo != NULL)
 			buf->undo->append = 0;
 		struct editorUndo *new = newUndo();
-		new->prev = buf->undo;
 		new->endx = buf->cx;
 		if (c != '\n')
 			new->endx++;
@@ -290,7 +312,7 @@ void editorUndoBackSpace(struct editorBuffer *buf, uint8_t c) {
 		new->startx = new->endx;
 		new->starty = buf->cy;
 		new->delete = 1;
-		buf->undo = new;
+		pushUndo(buf, new);
 	}
 	buf->undo->data[buf->undo->datalen++] = c;
 	buf->undo->data[buf->undo->datalen] = 0;
@@ -317,13 +339,12 @@ void editorUndoDelChar(struct editorBuffer *buf, erow *row) {
 		if (buf->undo != NULL)
 			buf->undo->append = 0;
 		struct editorUndo *new = newUndo();
-		new->prev = buf->undo;
 		new->endx = buf->cx;
 		new->endy = buf->cy;
 		new->startx = buf->cx;
 		new->starty = buf->cy;
 		new->delete = 1;
-		buf->undo = new;
+		pushUndo(buf, new);
 	}
 
 	if (buf->cx == row->size) {
