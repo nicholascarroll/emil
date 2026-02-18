@@ -593,9 +593,13 @@ void editorProcessKeypress(int c) {
 		editorYankPop(&E, E.buf);
 		break;
 	case CTRL('w'):
-		editorKillRegion(&E, E.buf);
-		editorClearMark();
-		break;
+    if (markInvalidSilent()) {
+        editorBackspaceWord(E.buf, uarg ? uarg : 1);
+    } else {
+        editorKillRegion(&E, E.buf);
+        editorClearMark();
+    }
+    break;
 	case CTRL('_'):
 		editorDoUndo(E.buf, uarg);
 		break;
