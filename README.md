@@ -137,6 +137,8 @@ when an OSC 52 enabled terminal client is used.
    - Display code refactored 
    - visual-line-mode
    - Limit undo history to 1000 actions.  
+   - diff-buffer-with-file
+   - Tmux support in OCS 52 publish
 
 3. **Version 0.2.0 Stable Preview**   
    - Bugfixes from upstream incorporated  
