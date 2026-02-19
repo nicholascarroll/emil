@@ -397,6 +397,7 @@ void rowInsertChar(struct editorBuffer *bufr, erow *row, int at, int c) {
 	row->size++;
 	row->chars[at] = c;
 	row->render_valid = 0;
+	row->gen++;
 	bufr->dirty = 1;
 	row->width_valid = 0;
 	invalidateScreenCache(bufr);
@@ -417,6 +418,7 @@ void editorRowInsertUnicode(struct editorConfig *ed, struct editorBuffer *bufr,
 	row->size += ed->nunicode;
 	memcpy(&row->chars[at], ed->unicode, ed->nunicode);
 	row->render_valid = 0;
+	row->gen++;
 	bufr->dirty = 1;
 }
 
@@ -427,6 +429,7 @@ void rowAppendString(struct editorBuffer *bufr, erow *row, char *s,
 	row->size += len;
 	row->chars[row->size] = '\0';
 	row->render_valid = 0;
+	row->gen++;
 	bufr->dirty = 1;
 }
 
@@ -438,6 +441,7 @@ void rowDelChar(struct editorBuffer *bufr, erow *row, int at) {
 		row->size - ((at + size) - 1));
 	row->size -= size;
 	row->render_valid = 0;
+	row->gen++;
 	bufr->dirty = 1;
 }
 

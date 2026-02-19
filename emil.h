@@ -36,6 +36,7 @@ typedef struct erow {
 	int cached_width;
 	int width_valid;
 	int render_valid;
+	unsigned gen; /* bumped on every content mutation */
 } erow;
 
 struct editorUndo {
@@ -94,6 +95,20 @@ struct editorBuffer {
 	struct completion_state completion_state;
 };
 
+/* Screen line descriptor — captures everything that determines what
+ * appears on one terminal row.  Two descriptors that compare equal
+ * mean the terminal row doesn't need redrawing. */
+struct screenLine {
+	erow *row;	 /* NULL for empty/tilde lines */
+	unsigned gen;	 /* row->gen at time of last render */
+	int sub_line;	 /* which sub-line (word-wrap); 0 for truncated */
+	int start_byte;	 /* byte offset where this sub-line starts */
+	int hl_region_s; /* region highlight start display column, or -1 */
+	int hl_region_e; /* region highlight end display column, or -1 */
+	int hl_match_s;	 /* search match start display column, or -1 */
+	int hl_match_e;	 /* search match end display column, or -1 */
+};
+
 struct editorWindow {
 	int focused;
 	struct editorBuffer *buf;
@@ -102,6 +117,10 @@ struct editorWindow {
 	int rowoff;
 	int coloff;
 	int height;
+	/* Previous frame for diff-based refresh */
+	struct screenLine *prev_frame;
+	int prev_frame_size; /* allocated capacity */
+	int prev_coloff;
 };
 
 struct editorMacro {

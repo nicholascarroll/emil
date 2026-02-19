@@ -101,6 +101,7 @@ void editorDestroyWindow(int window_idx) {
 		editorSwitchWindow();
 	}
 
+	free(E.windows[window_idx]->prev_frame);
 	free(E.windows[window_idx]);
 	struct editorWindow **windows =
 		xmalloc(sizeof(struct editorWindow *) * (--E.nwindows));
@@ -129,6 +130,7 @@ void editorDestroyOtherWindows(void) {
 	struct editorWindow **windows = xmalloc(sizeof(struct editorWindow *));
 	for (int i = 0; i < E.nwindows; i++) {
 		if (i != idx) {
+			free(E.windows[i]->prev_frame);
 			free(E.windows[i]);
 		}
 	}

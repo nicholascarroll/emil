@@ -368,6 +368,250 @@ void scroll(void) {
 	setScxScy(win);
 }
 
+/* ================================================================
+ * Frame planning and diff-based refresh
+ * ================================================================ */
+
+/* Fill a screen line descriptor array for a window without emitting
+ * any output.  Returns the number of screen lines filled (always
+ * <= screenrows).  The frame[] array must have room for screenrows
+ * entries. */
+static int planFrame(struct editorWindow *win, struct screenLine *frame,
+		     int screenrows, int screencols) {
+	struct editorBuffer *buf = win->buf;
+	int y = 0;
+	int filerow = win->rowoff;
+
+	for (y = 0; y < screenrows; y++) {
+		if (filerow >= buf->numrows) {
+			/* Empty line past end of buffer */
+			frame[y].row = NULL;
+			frame[y].gen = 0;
+			frame[y].sub_line = 0;
+			frame[y].start_byte = 0;
+			frame[y].hl_region_s = -1;
+			frame[y].hl_region_e = -1;
+			frame[y].hl_match_s = -1;
+			frame[y].hl_match_e = -1;
+		} else {
+			erow *row = &buf->row[filerow];
+			if (!row->render_valid)
+				updateRow(row);
+
+			struct rowHighlight hl;
+			computeRowHighlightBounds(buf, filerow, &hl);
+
+			if (!buf->word_wrap) {
+				frame[y].row = row;
+				frame[y].gen = row->gen;
+				frame[y].sub_line = 0;
+				frame[y].start_byte = 0;
+				frame[y].hl_region_s = hl.region_start;
+				frame[y].hl_region_e = hl.region_end;
+				frame[y].hl_match_s = hl.match_start;
+				frame[y].hl_match_e = hl.match_end;
+				filerow++;
+			} else {
+				int line_start_col = 0;
+				int line_start_byte = 0;
+				int sub = 0;
+
+				while (line_start_byte < row->size &&
+				       y < screenrows) {
+					int break_col, break_byte;
+					int more = wordWrapBreak(
+						row, screencols, line_start_col,
+						line_start_byte, &break_col,
+						&break_byte);
+
+					frame[y].row = row;
+					frame[y].gen = row->gen;
+					frame[y].sub_line = sub;
+					frame[y].start_byte = line_start_byte;
+					frame[y].hl_region_s = hl.region_start;
+					frame[y].hl_region_e = hl.region_end;
+					frame[y].hl_match_s = hl.match_start;
+					frame[y].hl_match_e = hl.match_end;
+
+					if (!more)
+						break;
+					if (y < screenrows - 1)
+						y++;
+					else
+						break;
+					sub++;
+					line_start_col = break_col;
+					line_start_byte = break_byte;
+				}
+				filerow++;
+			}
+		}
+	}
+	return y;
+}
+
+/* Compare two screen line descriptors.  Returns 1 if they represent
+ * the same terminal content (no redraw needed). */
+static int screenLinesEqual(const struct screenLine *a,
+			    const struct screenLine *b) {
+	if (a->row != b->row)
+		return 0;
+	if (a->row == NULL)
+		return 1; /* both empty */
+	return a->gen == b->gen && a->sub_line == b->sub_line &&
+	       a->start_byte == b->start_byte &&
+	       a->hl_region_s == b->hl_region_s &&
+	       a->hl_region_e == b->hl_region_e &&
+	       a->hl_match_s == b->hl_match_s && a->hl_match_e == b->hl_match_e;
+}
+
+/* Detect a contiguous vertical scroll between old and new frames.
+ * Looks for the longest run where old[i] == new[i + offset].
+ * Sets *scroll_offset to the shift (positive = content moved up,
+ * i.e. new content appeared at bottom; negative = moved down).
+ * Sets *match_start and *match_end to the range in the NEW frame
+ * that matches the shifted old content (inclusive start, exclusive end).
+ * Returns the length of the matching run, or 0 if no useful scroll
+ * was found. */
+static int detectScroll(const struct screenLine *old_frame, int old_count,
+			const struct screenLine *new_frame, int new_count,
+			int *scroll_offset, int *match_start, int *match_end) {
+	/* Try small offsets first — most scrolls are by 1-3 lines.
+	 * We check offsets ±1 through ±(height/2). */
+	int max_offset = new_count / 2;
+	int best_run = 0;
+	int best_offset = 0;
+	int best_start = 0;
+
+	for (int off = -max_offset; off <= max_offset; off++) {
+		if (off == 0)
+			continue;
+
+		/* Find the longest contiguous run where
+		 * old[i] == new[i + off] */
+		int run = 0;
+		int run_start = -1;
+		int longest = 0;
+		int longest_start = 0;
+
+		/* i indexes old frame, i+off indexes new frame */
+		int i_start = (off > 0) ? 0 : -off;
+		int i_end = (off > 0) ? (old_count - off) : old_count;
+		if (i_end > old_count)
+			i_end = old_count;
+		if (i_start + off + 0 >= new_count)
+			continue;
+
+		for (int i = i_start; i < i_end; i++) {
+			int ni = i + off;
+			if (ni < 0 || ni >= new_count) {
+				if (run > longest) {
+					longest = run;
+					longest_start = run_start;
+				}
+				run = 0;
+				continue;
+			}
+			if (screenLinesEqual(&old_frame[i], &new_frame[ni])) {
+				if (run == 0)
+					run_start = ni;
+				run++;
+			} else {
+				if (run > longest) {
+					longest = run;
+					longest_start = run_start;
+				}
+				run = 0;
+			}
+		}
+		if (run > longest) {
+			longest = run;
+			longest_start = run_start;
+		}
+
+		if (longest > best_run) {
+			best_run = longest;
+			best_offset = off;
+			best_start = longest_start;
+		}
+	}
+
+	/* Only use scroll if it saves significant work — at least
+	 * half the screen lines can be preserved. */
+	if (best_run >= new_count / 2 && best_run >= 3) {
+		*scroll_offset = best_offset;
+		*match_start = best_start;
+		*match_end = best_start + best_run;
+		return best_run;
+	}
+
+	*scroll_offset = 0;
+	*match_start = 0;
+	*match_end = 0;
+	return 0;
+}
+
+/* Draw a single screen line at terminal row term_row (1-based).
+ * Uses the screen line descriptor to determine what to render. */
+static void drawSingleRow(struct editorWindow *win, struct abuf *ab,
+			  const struct screenLine *sl, int term_row,
+			  int screencols) {
+	char pos[32];
+	snprintf(pos, sizeof(pos), CSI "%d;1H", term_row);
+	abAppend(ab, pos, strlen(pos));
+
+	if (sl->row == NULL) {
+		abAppend(ab, " ", 1);
+	} else {
+		struct rowHighlight hl;
+		hl.region_start = sl->hl_region_s;
+		hl.region_end = sl->hl_region_e;
+		hl.match_start = sl->hl_match_s;
+		hl.match_end = sl->hl_match_e;
+
+		if (!win->buf->word_wrap) {
+			renderLineWithHighlighting(sl->row, ab, win->coloff,
+						   win->coloff + screencols,
+						   &hl, -1);
+		} else {
+			/* Find the end of this sub-line by running
+			 * wordWrapBreak from start_byte. */
+			int break_col, break_byte;
+			int line_start_col = 0;
+
+			/* We need line_start_col. Compute it from
+			 * start_byte by walking from byte 0.  For
+			 * sub_line 0 it's always 0. */
+			if (sl->sub_line == 0) {
+				line_start_col = 0;
+			} else {
+				line_start_col = charsToDisplayColumn(
+					sl->row, sl->start_byte);
+			}
+
+			wordWrapBreak(sl->row, screencols, line_start_col,
+				      sl->start_byte, &break_col, &break_byte);
+
+			renderLineWithHighlighting(sl->row, ab, line_start_col,
+						   break_col, &hl,
+						   sl->start_byte);
+
+			/* Fill trailing space */
+			int fill_col = break_col;
+			int fill_hl = 0;
+			while (fill_col - line_start_col < screencols) {
+				updateHighlight(
+					ab, &fill_hl,
+					isHighlighted(&hl, fill_col) ? 1 : 0);
+				abAppend(ab, " ", 1);
+				fill_col++;
+			}
+			updateHighlight(ab, &fill_hl, 0);
+		}
+	}
+	abAppend(ab, "\x1b[K", 3); /* clear to end of line */
+}
+
 void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 	      int screencols) {
 	struct editorBuffer *buf = win->buf;
@@ -588,17 +832,12 @@ void drawMinibuffer(struct abuf *ab) {
 }
 
 void refreshScreen(void) {
-	struct abuf ab = ABUF_INIT;
-	abAppend(&ab, "\x1b[?25l", 6); // Hide cursor
-	abAppend(&ab, "\x1b[H", 3);    // Move cursor to top-left corner
-
 	int focusedIdx = windowFocusedIdx();
 
-	int cumulative_height = 0;
 	int total_height = E.screenrows - minibuffer_height -
 			   (statusbar_height * E.nwindows);
 
-	/* skip if heights already set */
+	/* Ensure window heights are set */
 	int heights_set = 1;
 	for (int i = 0; i < E.nwindows; i++) {
 		if (E.windows[i]->height <= 0) {
@@ -610,7 +849,6 @@ void refreshScreen(void) {
 	if (!heights_set) {
 		int window_height = total_height / E.nwindows;
 		int remaining_height = total_height % E.nwindows;
-
 		for (int i = 0; i < E.nwindows; i++) {
 			struct editorWindow *win = E.windows[i];
 			win->height = window_height;
@@ -619,48 +857,148 @@ void refreshScreen(void) {
 		}
 	}
 
-	for (int i = 0; i < E.nwindows; i++) {
-		struct editorWindow *win = E.windows[i];
+	/* Run scroll for focused window */
+	if (E.windows[focusedIdx]->focused)
+		scroll();
 
-		if (win->focused)
-			scroll();
-		drawRows(win, &ab, win->height, E.screencols);
-		cumulative_height += win->height + statusbar_height;
+	struct abuf ab = ABUF_INIT;
+	abAppend(&ab, "\x1b[?25l", 6); /* hide cursor */
+
+	int cumulative_height = 0;
+
+	for (int w = 0; w < E.nwindows; w++) {
+		struct editorWindow *win = E.windows[w];
+		int win_top = cumulative_height + 1; /* 1-based terminal row */
+		int win_height = win->height;
+
+		/* Plan new frame */
+		struct screenLine *new_frame =
+			xmalloc(sizeof(struct screenLine) * win_height);
+		planFrame(win, new_frame, win_height, E.screencols);
+
+		struct screenLine *old_frame = win->prev_frame;
+		int old_count =
+			(old_frame && win->prev_frame_size >= win_height) ?
+				win_height :
+				0;
+
+		/* Invalidate old frame if coloff changed (truncated mode
+		 * horizontal scroll changes everything) */
+		if (win->coloff != win->prev_coloff)
+			old_count = 0;
+
+		/* Detect scroll */
+		int scroll_offset = 0, match_start = 0, match_end = 0;
+		int scroll_run = 0;
+		if (old_count > 0) {
+			scroll_run = detectScroll(old_frame, old_count,
+						  new_frame, win_height,
+						  &scroll_offset, &match_start,
+						  &match_end);
+		}
+
+		if (scroll_run > 0 && scroll_offset != 0) {
+			/* Use DECSTBM to scroll the matched region */
+			int region_top = win_top + match_start;
+			int region_bot = win_top + match_end - 1;
+			int lines = scroll_offset > 0 ? scroll_offset :
+							-scroll_offset;
+			char seq[32];
+
+			/* Set scroll region */
+			snprintf(seq, sizeof(seq), CSI "%d;%dr", region_top,
+				 region_bot);
+			abAppend(&ab, seq, strlen(seq));
+
+			if (scroll_offset > 0) {
+				/* Content moved up: new lines at bottom.
+				 * Position at bottom of region, emit \n */
+				snprintf(seq, sizeof(seq), CSI "%dH",
+					 region_bot);
+				abAppend(&ab, seq, strlen(seq));
+				for (int i = 0; i < lines; i++)
+					abAppend(&ab, "\n", 1);
+			} else {
+				/* Content moved down: new lines at top.
+				 * Position at top of region, emit RI */
+				snprintf(seq, sizeof(seq), CSI "%dH",
+					 region_top);
+				abAppend(&ab, seq, strlen(seq));
+				for (int i = 0; i < lines; i++)
+					abAppend(&ab, ESC "M", 2);
+			}
+
+			/* Reset scroll region */
+			abAppend(&ab, CSI "r", 3);
+
+			/* Draw only the lines that weren't preserved
+			 * by the scroll */
+			for (int y = 0; y < win_height; y++) {
+				if (y >= match_start && y < match_end)
+					continue; /* preserved by scroll */
+				drawSingleRow(win, &ab, &new_frame[y],
+					      win_top + y, E.screencols);
+			}
+		} else if (old_count > 0) {
+			/* No scroll — diff line by line */
+			for (int y = 0; y < win_height; y++) {
+				if (y < old_count &&
+				    screenLinesEqual(&old_frame[y],
+						     &new_frame[y]))
+					continue; /* unchanged */
+				drawSingleRow(win, &ab, &new_frame[y],
+					      win_top + y, E.screencols);
+			}
+		} else {
+			/* No previous frame — full redraw.
+			 * Position to window top and draw all rows. */
+			char pos[16];
+			snprintf(pos, sizeof(pos), CSI "%dH", win_top);
+			abAppend(&ab, pos, strlen(pos));
+			drawRows(win, &ab, win_height, E.screencols);
+		}
+
+		/* Save frame for next refresh */
+		if (win->prev_frame_size < win_height) {
+			free(win->prev_frame);
+			win->prev_frame =
+				xmalloc(sizeof(struct screenLine) * win_height);
+			win->prev_frame_size = win_height;
+		}
+		memcpy(win->prev_frame, new_frame,
+		       sizeof(struct screenLine) * win_height);
+		win->prev_coloff = win->coloff;
+		free(new_frame);
+
+		cumulative_height += win_height + statusbar_height;
 		drawStatusBar(win, &ab, cumulative_height);
 	}
 
 	drawMinibuffer(&ab);
+	abAppend(&ab, "\x1b[J", 3); /* clear below */
 
-	// Clear any remaining lines below content
-	abAppend(&ab, "\x1b[J", 3);
-
-	// Position the cursor for the focused window
+	/* Position cursor */
 	struct editorWindow *focusedWin = E.windows[focusedIdx];
 	char buf[32];
-
-	int cursor_y = focusedWin->scy + 1; // 1-based index
-	for (int i = 0; i < focusedIdx; i++) {
+	int cursor_y = focusedWin->scy + 1;
+	for (int i = 0; i < focusedIdx; i++)
 		cursor_y += E.windows[i]->height + statusbar_height;
+
+	int cumul_check = 0;
+	for (int i = 0; i < E.nwindows; i++)
+		cumul_check += E.windows[i]->height + statusbar_height;
+	if (cursor_y > cumul_check) {
+		struct editorBuffer *b = focusedWin->buf;
+		cursor_y = (b->cy >= b->numrows) ?
+				   cumul_check :
+				   cumul_check - statusbar_height;
 	}
 
-	// Ensure cursor doesn't go beyond the window's bottom
-	if (cursor_y > cumulative_height) {
-		struct editorBuffer *buf = focusedWin->buf;
-		if (buf->cy >= buf->numrows) {
-			cursor_y = cumulative_height;
-		} else {
-			cursor_y = cumulative_height - statusbar_height;
-		}
-	}
-
-	snprintf(buf, sizeof(buf), "\x1b[%d;%dH", cursor_y,
-		 focusedWin->scx + 1);
+	snprintf(buf, sizeof(buf), CSI "%d;%dH", cursor_y, focusedWin->scx + 1);
 	abAppend(&ab, buf, strlen(buf));
-
-	abAppend(&ab, "\x1b[?25h", 6); // Show cursor
+	abAppend(&ab, "\x1b[?25h", 6); /* show cursor */
 
 	write(STDOUT_FILENO, ab.b, ab.len);
-
 	abFree(&ab);
 }
 
