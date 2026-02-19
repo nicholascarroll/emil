@@ -211,6 +211,8 @@ When enabled at compile time:
 Filter the selected region through a shell command.
 .It Cm C-u M-|
 Filter the selected region through a shell command and replace the region with the output. 
+.It Cm M-x diff-buffer-with-file RET
+Show unsaved changes. 
 .El
 
 .Ss Named Commands
@@ -225,9 +227,8 @@ Enter a command by name.
 .Nm
 expects all input and files to be encoded as
 .Sy UTF-8 .
-The software does not perform character set conversion or encoding detection.
-.Pp
 Files are loaded in their entirety into memory.
+.Pp
 .Nm
 adheres to the Unix convention where lines are delimited by a single linefeed (LF) character and files terminate with a linefeed.
 The presence of null bytes (0x00) or malformed UTF-8 sequences may result in undefined behavior or error conditions.

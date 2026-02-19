@@ -14,7 +14,6 @@ void editorSetStatusMessage(const char *fmt, ...);
 #if defined(EMIL_LANG_ZH)
 
 /* 中文 */
-static const char *const msg_version = "埃米尔 (emil) 版本 0.1.0";
 static const char *const msg_quit = "退出";
 static const char *const msg_canceled = "已取消。";
 
@@ -106,7 +105,6 @@ static const char *const msg_buffer_modified_kill =
 #else
 
 /* ENGLISH (default) */
-static const char *const msg_version = "emil 0.1.0";
 static const char *const msg_quit = "Quit";
 static const char *const msg_canceled = "Canceled.";
 

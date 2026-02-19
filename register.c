@@ -29,7 +29,7 @@ static int getRegisterName(char *prompt) {
 #define GET_REGISTER(vname, prompt)             \
 	int vname = getRegisterName(prompt);    \
 	if (vname == 0x07) {                    \
-		editorSetStatusMessage("Quit"); \
+		editorSetStatusMessage(msg_quit); \
 		return;                         \
 	}
 

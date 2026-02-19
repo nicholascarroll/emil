@@ -313,8 +313,6 @@ int editorReadKey(void) {
 			return QUERY_REPLACE;
 		} else if (seq[0] == '?') {
 			return CUSTOM_INFO_MESSAGE;
-		} else if (seq[0] == '/') {
-			return EXPAND;
 		} else if (seq[0] == 127) {
 			return BACKSPACE_WORD;
 		} else if (seq[0] == CTRL('s')) {
@@ -373,7 +371,7 @@ ESC_UNKNOWN:;
 			}
 			emil_strlcat(seqR, buf, sizeof(seqR));
 		}
-		editorSetStatusMessage("Unknown command M-%s", seqR);
+		editorSetStatusMessage(msg_unknown_meta, seqR);
 		return 033;
 	} else if (utf8_is2Char(c)) {
 		/* 2-byte UTF-8 sequence */

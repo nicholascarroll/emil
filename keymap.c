@@ -146,9 +146,12 @@ void executeCommand(int key) {
 	/* Handle prefix state transitions and commands */
 	switch (key) {
 	case CTRL('x'):
+	if (prefix == PREFIX_NONE) {
 		prefix = PREFIX_CTRL_X;
 		showPrefix("C-x ");
 		return;
+	}
+	break;
 
 	case CTRL('g'):
 		/* Cancel prefix */
@@ -311,7 +314,7 @@ void executeCommand(int key) {
 			/* Unknown C-x sequence */
 			if (key < ' ') {
 				editorSetStatusMessage(
-					"Unknown command C-x C-%c", key + '`');
+					msg_unknown_cx, key + '`');
 			} else {
 				editorSetStatusMessage("Unknown command C-x %c",
 						       key);
@@ -783,7 +786,7 @@ void editorProcessKeypress(int c) {
 
 	case CTRL('g'):
 		editorClearMark();
-		editorSetStatusMessage("Quit");
+		editorSetStatusMessage(msg_quit);
 		break;
 
 	case UNIVERSAL_ARGUMENT:
@@ -851,10 +854,6 @@ void editorProcessKeypress(int c) {
 
 	case RECT_REGISTER:
 		editorRectRegister(&E, E.buf);
-		break;
-
-	case EXPAND:
-		editorCompleteWord(&E, E.buf);
 		break;
 
 	case MACRO_RECORD:

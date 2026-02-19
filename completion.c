@@ -29,7 +29,7 @@ void resetCompletionState(struct completion_state *state) {
 	state->preserve_message = 0;
 }
 
-void freeCompletionResult(struct completion_result *result) {
+static void freeCompletionResult(struct completion_result *result) {
 	if (result->matches) {
 		for (int i = 0; i < result->n_matches; i++) {
 			free(result->matches[i]);
@@ -43,7 +43,7 @@ void freeCompletionResult(struct completion_result *result) {
 	result->prefix_len = 0;
 }
 
-char *findCommonPrefix(char **strings, int count) {
+static char *findCommonPrefix(char **strings, int count) {
 	if (count == 0)
 		return NULL;
 	if (count == 1)
@@ -73,7 +73,7 @@ char *findCommonPrefix(char **strings, int count) {
 	return prefix;
 }
 
-void getFileCompletions(const char *prefix, struct completion_result *result) {
+static void getFileCompletions(const char *prefix, struct completion_result *result) {
 	glob_t globlist;
 	result->matches = NULL;
 	result->n_matches = 0;
@@ -141,7 +141,7 @@ void getFileCompletions(const char *prefix, struct completion_result *result) {
 	}
 }
 
-void getBufferCompletions(struct editorConfig *ed, const char *prefix,
+static void getBufferCompletions(struct editorConfig *ed, const char *prefix,
 			  struct editorBuffer *currentBuffer,
 			  struct completion_result *result) {
 	result->matches = NULL;
@@ -186,7 +186,7 @@ void getBufferCompletions(struct editorConfig *ed, const char *prefix,
 	}
 }
 
-void getCommandCompletions(struct editorConfig *ed, const char *prefix,
+static void getCommandCompletions(struct editorConfig *ed, const char *prefix,
 			   struct completion_result *result) {
 	result->matches = NULL;
 	result->n_matches = 0;
@@ -435,305 +435,7 @@ void closeCompletionsBuffer(void) {
 	}
 }
 
-/* Removed - using showCompletionsBuffer instead */
 
-static int alnum(uint8_t c) {
-	return ('0' <= c && c <= '9') || ('a' <= c && c <= 'z') ||
-	       ('A' <= c && c <= 'Z') || (c == '_');
-}
-
-static int sortstring(const void *str1, const void *str2) {
-	return strcasecmp(*(char **)str1, *(char **)str2);
-}
-
-void editorCompleteWord(struct editorConfig *ed, struct editorBuffer *bufr) {
-	/* TODO Finish implementing this sometime */
-	if (bufr->cy >= bufr->numrows || bufr->cx == 0) {
-		editorSetStatusMessage("Nothing to complete here.");
-		return;
-	}
-
-	/* Don't attempt word completion within special buffers */
-	if (bufr->special_buffer) {
-		return;
-	}
-
-	/* Check whether there's a word here to complete */
-	struct erow *row = &bufr->row[bufr->cy];
-	int wordStart = bufr->cx;
-	while (wordStart > 0 && alnum(row->chars[wordStart - 1])) {
-		wordStart--;
-	}
-	int wordLen = bufr->cx - wordStart;
-	if (wordLen == 0) {
-		editorSetStatusMessage("Nothing to complete here.");
-		return;
-	}
-
-	/* Copy the word and escape regex characters*/
-	char word[wordLen + 1];
-	word[wordLen] = 0;
-	char regexWord[2 * wordLen + 2]; /* worst case, we escape everything and
-					     add .* */
-	for (int i = 0; i < wordLen; i++) {
-		word[i] = row->chars[wordStart + i];
-	}
-	int regexPos = 0;
-	for (int i = 0; i < wordLen; i++) {
-		switch (word[i]) {
-		case '.':
-		case '[':
-		case '{':
-		case '}':
-		case '(':
-		case ')':
-		case '\\':
-		case '*':
-		case '+':
-		case '?':
-		case '|':
-		case '^':
-		case '$':
-			regexWord[regexPos++] = '\\';
-			/* fall through */
-		default:
-			regexWord[regexPos++] = word[i];
-		}
-	}
-	regexWord[regexPos++] = '.';
-	regexWord[regexPos++] = '*';
-	regexWord[regexPos] = 0;
-
-	/* Compile a regex out of it. This is slow, but Russ Cox said
-	 * regexes are fast, so he's probably got a C regex library
-	 * just lying around that we could use. */
-	regex_t regex;
-	int reti = regcomp(&regex, regexWord, REG_EXTENDED | REG_NEWLINE);
-	if (reti) {
-		editorSetStatusMessage("Could not compile regex: %s",
-				       regexWord);
-		return;
-	}
-
-	/* Ok. Now, search for matches. Note that we're searching for
-	 * matches that look like a C identifier, then taking everything
-	 * up to the end of the identifier. So a search for "ed" will
-	 * match "editor", not "ed". */
-	char **candidates = NULL;
-	int ncand = 0;
-	int scand = 0;
-
-	for (struct editorBuffer *scanbuf = ed->headbuf; scanbuf != NULL;
-	     scanbuf = scanbuf->next) {
-		/* Don't scan special buffers */
-		if (scanbuf->special_buffer) {
-			continue;
-		}
-		for (int rownum = 0; rownum < scanbuf->numrows; rownum++) {
-			struct erow *scanrow = &scanbuf->row[rownum];
-			regmatch_t pmatch;
-			char *line = (char *)scanrow->chars;
-			char *cursor = line;
-
-			while (regexec(&regex, cursor, 1, &pmatch, 0) == 0) {
-				/* Did we match at the beginning of the
-				 * string or is the previous character not
-				 * alnum? If not, then we didn't match the
-				 * beginning of a word. */
-				if (!((cursor == line ||
-				       !alnum(*(cursor + pmatch.rm_so - 1))))) {
-					cursor += pmatch.rm_eo;
-					continue;
-				}
-
-				/* Copy the whole word */
-				int candidateLen = pmatch.rm_eo - pmatch.rm_so;
-				while (candidateLen + pmatch.rm_so <
-					       scanrow->size &&
-				       alnum(scanrow->chars[cursor - line +
-							    pmatch.rm_so +
-							    candidateLen])) {
-					candidateLen++;
-				}
-				/* Make the copy */
-				if (ncand >= scand) {
-					/* Out of space, add more. */
-					if (scand == 0) {
-						scand = 32;
-						candidates = xmalloc(
-							sizeof(char *) * scand);
-					} else {
-						if (scand > INT_MAX / 2 ||
-						    (size_t)scand >
-							    SIZE_MAX /
-								    (2 *
-								     sizeof(char *))) {
-							die("buffer size overflow");
-						}
-						scand *= 2;
-						candidates = xrealloc(
-							candidates,
-							sizeof(char *) * scand);
-					}
-				}
-				candidates[ncand] = xmalloc(candidateLen + 1);
-				emil_strlcpy(
-					candidates[ncand],
-					(char *)&scanrow->chars[cursor - line +
-								pmatch.rm_so],
-					candidateLen + 1);
-				ncand++;
-
-				/* Onward! */
-				cursor += pmatch.rm_so + candidateLen;
-			}
-
-			/* Also add keywords if they match. */
-			const char *keywords[] = { "auto",
-						   "break",
-						   "case",
-						   "char",
-						   "const",
-						   "continue",
-						   "default",
-						   "do",
-						   "double",
-						   "else",
-						   "enum",
-						   "extern",
-						   "float",
-						   "for",
-						   "goto",
-						   "if",
-						   "inline",
-						   "int",
-						   "long",
-						   "register",
-						   "restrict",
-						   "return",
-						   "short",
-						   "signed",
-						   "sizeof",
-						   "static",
-						   "struct",
-						   "switch",
-						   "typedef",
-						   "union",
-						   "unsigned",
-						   "void",
-						   "volatile",
-						   "while",
-						   "_Alignas",
-						   "_Alignof",
-						   "_Atomic",
-						   "_Bool",
-						   "_Complex",
-						   "_Generic",
-						   "_Imaginary",
-						   "_Noreturn",
-						   "_Static_assert",
-						   "_Thread_local",
-						   NULL };
-
-			/* This is pretty dumb. We should be able to
-			 * reduce the number of regex invocations to one,
-			 * by searching for the regex only at the
-			 * beginning of the string. */
-			regmatch_t pmatch2;
-			for (int i = 0; keywords[i] != NULL; i++) {
-				if (regexec(&regex, keywords[i], 1, &pmatch2,
-					    0) == 0 &&
-				    pmatch2.rm_so == 0) {
-					/* Copy it. */
-					if (ncand >= scand) {
-						/* Out of space, add more. */
-						if (scand == 0) {
-							scand = 32;
-							candidates = xmalloc(
-								sizeof(char *) *
-								scand);
-						} else {
-							if (scand > INT_MAX /
-									    2 ||
-							    (size_t)scand >
-								    SIZE_MAX /
-									    (2 *
-									     sizeof(char *))) {
-								die("buffer size overflow");
-							}
-							scand *= 2;
-							candidates = xrealloc(
-								candidates,
-								sizeof(char *) *
-									scand);
-						}
-					}
-					candidates[ncand] =
-						xstrdup(keywords[i]);
-					ncand++;
-				}
-			}
-		}
-	}
-	/* Dunmatchin'. Restore word to non-regex contents. */
-	word[bufr->cx - wordStart] = 0;
-
-	/* No matches? Cleanup. */
-	if (ncand == 0) {
-		editorSetStatusMessage("No match for %s", word);
-		goto COMPLETE_WORD_CLEANUP;
-	}
-
-	int sel = 0;
-	/* Only one candidate? Take it. */
-	if (ncand == 1) {
-		goto COMPLETE_WORD_DONE;
-	}
-
-	/* Next, sort the list */
-	qsort(candidates, ncand, sizeof(char *), sortstring);
-
-	/* Finally, uniq' it. We now have our candidate list. */
-	int newlen = 1;
-	char *prev = NULL;
-	for (int i = 0; i < ncand; i++) {
-		if (prev == NULL) {
-			prev = candidates[i];
-			continue;
-		}
-		if (strcmp(prev, candidates[i])) {
-			/* Nonduplicate, copy it over. */
-			prev = candidates[i];
-			candidates[newlen++] = prev;
-		} else {
-			/* We don't need the memory for duplicates any more. */
-			free(candidates[i]);
-		}
-	}
-	ncand = newlen;
-
-COMPLETE_WORD_DONE:;
-	/* Replace the stem with the new word. */
-	int newWordLen = strlen(candidates[sel]);
-	if (wordLen < newWordLen) {
-		/* Insert the additional characters */
-		for (int i = wordLen; i < newWordLen; i++) {
-			editorInsertChar(bufr, candidates[sel][i], 1);
-		}
-	} else if (wordLen > newWordLen) {
-		for (int i = wordLen; i > newWordLen; i--) {
-			editorDelChar(bufr, 1);
-		}
-	}
-	/* No else clause, they're equal, nothing to do. */
-
-COMPLETE_WORD_CLEANUP:
-	regfree(&regex);
-	for (int i = 0; i < ncand; i++) {
-		free(candidates[i]);
-	}
-	free(candidates);
-}
 
 void handleMinibufferCompletion(struct editorBuffer *minibuf,
 				enum promptType type) {
@@ -769,7 +471,7 @@ void handleMinibufferCompletion(struct editorBuffer *minibuf,
 
 	/* Handle based on number of matches */
 	if (result.n_matches == 0) {
-		editorSetStatusMessage("[No match]");
+		editorSetStatusMessage(msg_no_match_bracket);
 		minibuf->completion_state.preserve_message = 1;
 	} else if (result.n_matches == 1) {
 		/* Complete fully */

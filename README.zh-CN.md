@@ -1,6 +1,9 @@
 
 # [emil](./README.md) (埃米尔)
 
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/11997/badge)](https://www.bestpractices.dev/projects/11997)
+
+
 `emil` 是一款专为 UTF-8 文件设计的小型、便携式终端文本编辑器。它在 VT100 兼容终端上提供了一套精简的 Emacs 命令子集。
 
 `emil` 使用标准 C99 编写，仅依赖符合 POSIX.1-2001 标准的运行环境。它刻意避开了常见的复杂性来源：脚本支持、插件系统、配置文件、后台网络活动或自动保存文件。
@@ -107,11 +110,13 @@ set bind-tty-special-chars off
 ```
 如果没有标记任何区域，它会杀死光标前面的一个词（相当于向后杀词，backward-kill-word）。
 
+在 Readline 和 `emil` 中，`Ctrl-h` 会删除前一个字符，但在 `emacs` 中它是帮助前缀键。
+
 Readline 支持两种删除到行首的方式：`Ctrl-x BACKSPACE`（在 *emacs* 中支持）以及更符合人体工学的 `Ctrl-u`，但后者与 *emacs* 的通用参数（universal argument）冲突。`emil` 通过将 `Ctrl-u Ctrl-a` 绑定为删除到行首来解决这一冲突。
 
 ### Shell 集成
 
-Shell 集成是一个编译时选项（默认启用）。它提供了两个区域过滤命令，这些命令允许您将选定的文本区域通过 shell 命令进行管道处理：
+Shell 集成是一个编译时选项（默认启用）。它允许在缓冲区上使用 shell 命令：   
 
 - **`Alt-|`** (shell-command-on-region)  
   将当前区域馈送到您输入的 shell 命令，并将**输出**显示在临时 `*Shell Command Output*` 缓冲区中（如果输出较小，则显示在回显区）。
@@ -119,9 +124,11 @@ Shell 集成是一个编译时选项（默认启用）。它提供了两个区�
 - **`Ctrl-u Alt-|`**  
   将当前区域馈送到您输入的 shell 命令，并用命令的**输出**替换该区域。
 
-两者都支持完整的管道（例如 `sort | uniq -c | sort -nr`）。
+- **`Alt-x diff-buffer-with-file`**  
+  显示尚未保存的更改。
 
-Shell 集成可以在构建时通过编译器标志 `-DEMIL_DISABLE_PIPE` 禁用。
+
+Shell 集成可以在构建时通过编译器标志 `-DEMIL_DISABLE_SHELL` 禁用。
 ### Shell 抽屉
 
 `Ctrl-x Ctrl-z` 会在保留当前编辑器屏幕的情况下挂起 `emil`。这允许在编辑器内容下方的终端中执行 shell 命令，之后可使用 `fg` 恢复编辑。
@@ -133,7 +140,7 @@ Shell 集成可以在构建时通过编译器标志 `-DEMIL_DISABLE_PIPE` 禁用
 
 ## 路线图
 
-这里是将你的内容翻译成**简体中文**的版本：
+Shell 集成是一个编译时选项（默认启用）。它允许在缓冲区上使用 shell 命令：  
 
 1. **版本 0.1.0 [已完成]**  ✅    
    - 从此版本开始，我们使用 `emil` 来编写 `emil`
@@ -141,9 +148,7 @@ Shell 集成可以在构建时通过编译器标志 `-DEMIL_DISABLE_PIPE` 禁用
 2. **版本 0.1.1 功能完成版**  ✅    
 
 3. **版本 0.2.0 稳定预览版** 🚧🔨👷  
-   - 整合上游的错误修复  
    - 修复大部分已知 bug  
-   - 安全徽章（Security badge）  
    - 首次在 GitHub 发布（使用预发布标签 prerelease）  
    - 在论坛上宣布（HN、Reddit 等）
 

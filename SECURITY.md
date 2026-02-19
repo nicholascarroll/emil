@@ -7,12 +7,13 @@ Do not report security issues via public PRs or Issues.
 
 ### Issue Response Times
 
-The project is not currently able to commit to any response time for security issues. 
+You will receive an initial response within 14 days.
+
 
 
 ## Hardening
 
-Shell integration can be excluded from the build with the compiler flag `-DEMIL_DISABLE_PIPE`.
+Shell integration can be excluded from the build with the compiler flag `-DEMIL_DISABLE_SHELL`.
 
 
 ## Stable Releases

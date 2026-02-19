@@ -42,7 +42,7 @@ void synchronizeBufferCursor(struct editorBuffer *buf,
 
 void editorSwitchWindow(void) {
 	if (E.nwindows == 1) {
-		editorSetStatusMessage("No other windows to select");
+		editorSetStatusMessage(msg_no_other_windows);
 		return;
 	}
 
@@ -90,7 +90,7 @@ void editorCreateWindow(void) {
 
 void editorDestroyWindow(int window_idx) {
 	if (E.nwindows == 1) {
-		editorSetStatusMessage("Can't kill last window");
+		editorSetStatusMessage(msg_cant_kill_last_window);
 		return;
 	}
 
@@ -122,7 +122,7 @@ void editorDestroyWindow(int window_idx) {
 
 void editorDestroyOtherWindows(void) {
 	if (E.nwindows == 1) {
-		editorSetStatusMessage("No other windows to delete");
+		editorSetStatusMessage(msg_no_windows_delete);
 		return;
 	}
 	int idx = windowFocusedIdx();

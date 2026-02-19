@@ -157,9 +157,9 @@ int main(int argc, char *argv[]) {
 	E.minibuf->filename = xstrdup("*minibuffer*");
 	E.edbuf = E.buf;
 
-#ifndef EMIL_DISABLE_PIPE
+#ifdef EMIL_DISABLE_SHELL
 	editorSetStatusMessage("Shell integration disabled");
-#endif /* EMIL_DISABLE_PIPE */
+#endif /* EMIL_DISABLE_SHELL */
 	setupHandlers();
 
 	for (;;) {

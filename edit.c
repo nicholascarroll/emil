@@ -84,7 +84,7 @@ void editorIndentSpaces(struct editorConfig *UNUSED(ed),
 	free(indentS);
 	if (indent <= 0) {
 cancel:
-		editorSetStatusMessage("Canceled.");
+		editorSetStatusMessage(msg_canceled);
 		return;
 	}
 	buf->indent = indent;
@@ -172,7 +172,7 @@ void editorIndent(struct editorBuffer *bufr, int rept) {
 
 void editorUnindent(struct editorBuffer *bufr, int rept) {
 	if (bufr->cy >= bufr->numrows) {
-		editorSetStatusMessage("End of buffer.");
+		editorSetStatusMessage(msg_end_of_buffer);
 		return;
 	}
 
@@ -559,12 +559,12 @@ void editorBackspaceWord(struct editorBuffer *bufr, int count) {
 
 void editorTransposeWords(struct editorBuffer *bufr) {
 	if (bufr->numrows == 0) {
-		editorSetStatusMessage("Buffer is empty");
+		editorSetStatusMessage(msg_buffer_empty);
 		return;
 	}
 
 	if (bufr->cx == 0 && bufr->cy == 0) {
-		editorSetStatusMessage("Beginning of buffer");
+		editorSetStatusMessage(msg_beginning_of_buffer);
 		return;
 	} else if (bufr->cy >= bufr->numrows ||
 		   (bufr->cy == bufr->numrows - 1 &&
@@ -759,6 +759,16 @@ void editorPageUp(int count) {
 				getScreenLineForRow(E.buf, E.buf->cy);
 			int window_start_screen_line =
 				getScreenLineForRow(E.buf, win->rowoff);
+
+			/* If not in a short buffer & cursor is off
+			   the end of the file, move it up &
+			   recalculate its position */
+			if (window_start_screen_line > 0 &&
+			    E.buf->numrows > 0 && E.buf->cy >= E.buf->numrows) {
+				E.buf->cy = E.buf->numrows - 1;
+				cursor_screen_line =
+					getScreenLineForRow(E.buf, E.buf->cy);
+			}
 
 			if (cursor_screen_line >=
 			    window_start_screen_line + win->height) {

@@ -104,7 +104,7 @@ format:
 # Platform-specific variants (POSIX Compatible)
 android:
 	$(MAKE) CC=clang \
-	CFLAGS="$(CFLAGS) -fPIC -fPIE -DEMIL_DISABLE_PIPE" \
+	CFLAGS="$(CFLAGS) -fPIC -fPIE -DEMIL_DISABLE_SHELL" \
 	LDFLAGS="-pie" \
 	$(PROGNAME)
 
@@ -112,7 +112,7 @@ msys2:
 	$(MAKE) CFLAGS="$(CFLAGS) -D_GNU_SOURCE" $(PROGNAME)
 
 minimal:
-	$(MAKE) CFLAGS="$(CFLAGS) -DEMIL_DISABLE_PIPE -Os" $(PROGNAME)
+	$(MAKE) CFLAGS="$(CFLAGS) -DEMIL_DISABLE_SHELL -Os" $(PROGNAME)
 
 solaris:
 	$(MAKE) CC=cc \

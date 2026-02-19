@@ -154,10 +154,10 @@ int editorOpen(struct editorBuffer *bufr, char *filename) {
 	FILE *fp = fopen(filename, "r");
 	if (!fp) {
 		if (errno == ENOENT) {
-			editorSetStatusMessage("(New file)", bufr->filename);
+			editorSetStatusMessage(msg_new_file, bufr->filename);
 			return 0;
 		}
-		editorSetStatusMessage("Can't open file: %s", strerror(errno));
+		editorSetStatusMessage(msg_cant_open, strerror(errno));
 		free(bufr->filename);
 		bufr->filename = NULL;
 		return -1;
@@ -205,7 +205,7 @@ int editorOpen(struct editorBuffer *bufr, char *filename) {
 		bufr->numrows = 0;
 		free(bufr->filename);
 		bufr->filename = NULL;
-		editorSetStatusMessage("File failed UTF-8 validation");
+		editorSetStatusMessage(msg_file_bad_utf8);
 		return -1;
 	}
 
@@ -351,7 +351,7 @@ void editorSave(struct editorBuffer *bufr) {
 	/* TODO Interactive fallback to direct write if temp creation fails */
 	/* TODO: fsync parent dir after rename */
 
-	editorSetStatusMessage("Wrote %d bytes to %s", len, bufr->filename);
+	editorSetStatusMessage(msg_wrote_bytes, len, bufr->filename);
 }
 
 void editorSaveAs(struct editorBuffer *bufr) {
@@ -372,7 +372,7 @@ void findFile(void) {
 		editorPrompt(E_ptr->buf, "Find File: %s", PROMPT_FILES, NULL);
 
 	if (prompt == NULL) {
-		editorSetStatusMessage("Canceled.");
+		editorSetStatusMessage(msg_canceled);
 		return;
 	}
 
@@ -470,7 +470,7 @@ void editorInsertFile(struct editorConfig *UNUSED(ed),
 	/* Validate UTF-8 before inserting */
 	if (!checkUTF8Validity(tmpbuf)) {
 		destroyBuffer(tmpbuf);
-		editorSetStatusMessage("File failed UTF-8 validation");
+		editorSetStatusMessage(msg_file_bad_utf8);
 		free(filename);
 		return;
 	}

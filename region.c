@@ -22,32 +22,37 @@ static void addToKillRing(const char *text) {
 	addHistory(&E.kill_history, text);
 	E.kill_ring_pos = -1;
 
-	free(E.kill);
+	char *oldKill = E.kill;
 	E.kill = xstrdup((uint8_t *)text);
+	free(oldKill);
 }
 
 void editorSetMark(void) {
 	E.buf->markx = E.buf->cx;
 	E.buf->marky = E.buf->cy;
-	editorSetStatusMessage("Mark set.");
+	editorSetStatusMessage(msg_mark_set);
 	if (E.buf->marky >= E.buf->numrows) {
 		E.buf->marky = E.buf->numrows - 1;
 		E.buf->markx = E.buf->row[E.buf->marky].size;
 	}
 }
 
-void editorClearMark(void) {
+static void editorClearMarkQuiet(void) {
 	E.buf->markx = -1;
 	E.buf->marky = -1;
-	editorSetStatusMessage("Mark Cleared");
+}
+
+void editorClearMark(void) {
+	editorClearMarkQuiet();
+	editorSetStatusMessage(msg_mark_cleared);
 }
 
 void editorToggleRectangleMode(void) {
 	E.buf->rectangle_mode = !E.buf->rectangle_mode;
 	if (E.buf->rectangle_mode) {
-		editorSetStatusMessage("Rectangle mode ON");
+		editorSetStatusMessage(msg_rectangle_on);
 	} else {
-		editorSetStatusMessage("Rectangle mode OFF");
+		editorSetStatusMessage(msg_rectangle_off);
 	}
 }
 
@@ -72,7 +77,7 @@ int markInvalid(void) {
 	int ret = markInvalidSilent();
 
 	if (ret) {
-		editorSetStatusMessage("Mark invalid.");
+		editorSetStatusMessage(msg_mark_invalid);
 	}
 
 	return ret;
@@ -197,7 +202,7 @@ void editorYank(struct editorConfig *ed, struct editorBuffer *buf, int count) {
 	}
 
 	if (ed->kill == NULL) {
-		editorSetStatusMessage("Kill ring empty.");
+		editorSetStatusMessage(msg_kill_ring_empty);
 		return;
 	}
 
@@ -256,12 +261,12 @@ void editorYankPop(struct editorConfig *ed, struct editorBuffer *buf) {
 	}
 
 	if (ed->kill_ring_pos < 0) {
-		editorSetStatusMessage("Previous command was not a yank");
+		editorSetStatusMessage(msg_not_after_yank);
 		return;
 	}
 
 	if (buf->undo == NULL || buf->undo->delete != 0) {
-		editorSetStatusMessage("Previous command was not a yank");
+		editorSetStatusMessage(msg_not_after_yank);
 		return;
 	}
 
@@ -280,7 +285,7 @@ void editorYankPop(struct editorConfig *ed, struct editorBuffer *buf) {
 		editorYank(ed, buf, 1);
 		ed->kill_ring_pos = saved_pos;
 	} else {
-		editorSetStatusMessage("No more kill ring entries to yank!");
+		editorSetStatusMessage(msg_no_more_kill_entries);
 	}
 }
 
@@ -494,7 +499,7 @@ void editorStringRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	uint8_t *string = editorPrompt(buf, (uint8_t *)"String rectangle: %s",
 				       PROMPT_BASIC, NULL);
 	if (string == NULL) {
-		editorSetStatusMessage("Canceled.");
+		editorSetStatusMessage(msg_canceled);
 		return;
 	}
 
@@ -658,6 +663,7 @@ void editorStringRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 
 	buf->dirty = 1;
 	editorUpdateBuffer(buf);
+	editorClearMarkQuiet();
 	ed->kill = okill;
 }
 
@@ -743,6 +749,7 @@ void editorCopyRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 				(char *)&row->chars[botx - ed->rx], ed->rx);
 		}
 	}
+	editorClearMarkQuiet();
 }
 
 void editorKillRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
@@ -902,6 +909,7 @@ void editorKillRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 
 	buf->dirty = 1;
 	editorUpdateBuffer(buf);
+	editorClearMarkQuiet();
 	ed->kill = okill;
 }
 
@@ -1077,5 +1085,6 @@ void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 
 	buf->dirty = 1;
 	editorUpdateBuffer(buf);
+	editorClearMarkQuiet();
 	ed->kill = okill;
 }

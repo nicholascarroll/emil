@@ -265,7 +265,7 @@ void editorReplaceString(struct editorConfig *ed, struct editorBuffer *buf) {
 	repl = NULL;
 	orig = editorPrompt(buf, "Replace: %s", PROMPT_BASIC, NULL);
 	if (orig == NULL) {
-		editorSetStatusMessage("Canceled replace-string.");
+		editorSetStatusMessage(msg_canceled_replace);
 		return;
 	}
 
@@ -276,7 +276,7 @@ void editorReplaceString(struct editorConfig *ed, struct editorBuffer *buf) {
 	prompt = NULL;
 	if (repl == NULL) {
 		free(orig);
-		editorSetStatusMessage("Canceled replace-string.");
+		editorSetStatusMessage(msg_canceled_replace);
 		return;
 	}
 
@@ -317,7 +317,7 @@ void editorQueryReplace(struct editorConfig *ed, struct editorBuffer *buf) {
 	repl = NULL;
 	orig = editorPrompt(buf, "Query replace: %s", PROMPT_BASIC, NULL);
 	if (orig == NULL) {
-		editorSetStatusMessage("Canceled query-replace.");
+		editorSetStatusMessage(msg_canceled_query_replace);
 		return;
 	}
 
@@ -327,7 +327,7 @@ void editorQueryReplace(struct editorConfig *ed, struct editorBuffer *buf) {
 	free(prompt);
 	if (repl == NULL) {
 		free(orig);
-		editorSetStatusMessage("Canceled query-replace.");
+		editorSetStatusMessage(msg_canceled_query_replace);
 		return;
 	}
 
@@ -470,7 +470,7 @@ void editorBackwardRegexFind(struct editorBuffer *bufr) {
 	(void)bufr;	/* Unused parameter */
 	regex_mode = 1; /* Start in regex mode */
 
-	editorSetStatusMessage("Backward regex search not yet implemented");
+	editorSetStatusMessage(msg_backward_regex_todo);
 	regex_mode = 0; /* Reset after search */
 }
 

@@ -1,7 +1,7 @@
 #include "util.h"
 #include "message.h"
 
-#ifndef EMIL_DISABLE_PIPE
+#ifndef EMIL_DISABLE_SHELL
 
 #include <fcntl.h>
 #include <stddef.h>
@@ -196,7 +196,7 @@ void editorDiffBufferWithFile(struct editorConfig *ed,
 	}
 
 	if (!bufr->dirty) {
-		editorSetStatusMessage("Buffer is not modified");
+		editorSetStatusMessage("Buffer matches file");
 		return;
 	}
 
@@ -316,7 +316,7 @@ void editorDiffBufferWithFile(struct editorConfig *ed,
 	free(output);
 }
 
-#else /* EMIL_DISABLE_PIPE */
+#else /* EMIL_DISABLE_SHELL */
 
 #include "emil.h"
 #include "display.h"
@@ -334,4 +334,4 @@ void editorDiffBufferWithFile(struct editorConfig *ed,
 	editorSetStatusMessage("Shell integration disabled");
 }
 
-#endif /* EMIL_DISABLE_PIPE */
+#endif /* EMIL_DISABLE_SHELL */
