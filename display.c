@@ -587,12 +587,80 @@ void drawMinibuffer(struct abuf *ab) {
 	}
 }
 
+/* Compute the terminal row for the cursor in the focused window. */
+static int computeCursorY(struct editorWindow *focusedWin, int focusedIdx) {
+	int cursor_y = focusedWin->scy + 1; /* 1-based */
+	for (int i = 0; i < focusedIdx; i++)
+		cursor_y += E.windows[i]->height + statusbar_height;
+
+	int cumulative = 0;
+	for (int i = 0; i < E.nwindows; i++)
+		cumulative += E.windows[i]->height + statusbar_height;
+
+	if (cursor_y > cumulative) {
+		struct editorBuffer *buf = focusedWin->buf;
+		cursor_y = (buf->cy >= buf->numrows) ?
+				   cumulative :
+				   cumulative - statusbar_height;
+	}
+	return cursor_y;
+}
+
 void refreshScreen(void) {
+	int focusedIdx = windowFocusedIdx();
+	struct editorWindow *focusedWin = E.windows[focusedIdx];
+
+	/* Always run scroll to keep cursor on screen and update scx/scy */
+	int prev_rowoff = focusedWin->rowoff;
+	int prev_coloff = focusedWin->coloff;
+	scroll();
+
+	/* If scroll changed the viewport, upgrade hint to full redraw */
+	if (focusedWin->rowoff != prev_rowoff ||
+	    focusedWin->coloff != prev_coloff) {
+		E.hint.type = REFRESH_FULL;
+	}
+
+	enum refreshType hint_type = E.hint.type;
+	E.hint.type = REFRESH_FULL; /* Reset to safe default */
+
+	/* --- Cursor-only fast path --- */
+	if (hint_type == REFRESH_CURSOR_ONLY) {
+		struct abuf ab = ABUF_INIT;
+
+		/* Redraw status bar (shows line:col) and minibuffer
+		 * (shows status messages) so they stay current. */
+		int status_row = 0;
+		for (int i = 0; i <= focusedIdx; i++)
+			status_row += E.windows[i]->height + statusbar_height;
+		drawStatusBar(focusedWin, &ab, status_row);
+
+		/* Redraw minibuffer for status messages */
+		int minibuf_row = 0;
+		for (int i = 0; i < E.nwindows; i++)
+			minibuf_row += E.windows[i]->height + statusbar_height;
+		minibuf_row++;
+		char mbuf[32];
+		snprintf(mbuf, sizeof(mbuf), CSI "%d;1H", minibuf_row);
+		abAppend(&ab, mbuf, strlen(mbuf));
+		drawMinibuffer(&ab);
+
+		/* Position cursor */
+		char buf[32];
+		int cursor_y = computeCursorY(focusedWin, focusedIdx);
+		snprintf(buf, sizeof(buf), CSI "%d;%dH", cursor_y,
+			 focusedWin->scx + 1);
+		abAppend(&ab, buf, strlen(buf));
+
+		write(STDOUT_FILENO, ab.b, ab.len);
+		abFree(&ab);
+		return;
+	}
+
+	/* --- Full redraw path (existing behavior) --- */
 	struct abuf ab = ABUF_INIT;
 	abAppend(&ab, "\x1b[?25l", 6); // Hide cursor
 	abAppend(&ab, "\x1b[H", 3);    // Move cursor to top-left corner
-
-	int focusedIdx = windowFocusedIdx();
 
 	int cumulative_height = 0;
 	int total_height = E.screenrows - minibuffer_height -
@@ -622,8 +690,7 @@ void refreshScreen(void) {
 	for (int i = 0; i < E.nwindows; i++) {
 		struct editorWindow *win = E.windows[i];
 
-		if (win->focused)
-			scroll();
+		/* scroll() was already called above for the focused window */
 		drawRows(win, &ab, win->height, E.screencols);
 		cumulative_height += win->height + statusbar_height;
 		drawStatusBar(win, &ab, cumulative_height);
@@ -635,23 +702,8 @@ void refreshScreen(void) {
 	abAppend(&ab, "\x1b[J", 3);
 
 	// Position the cursor for the focused window
-	struct editorWindow *focusedWin = E.windows[focusedIdx];
 	char buf[32];
-
-	int cursor_y = focusedWin->scy + 1; // 1-based index
-	for (int i = 0; i < focusedIdx; i++) {
-		cursor_y += E.windows[i]->height + statusbar_height;
-	}
-
-	// Ensure cursor doesn't go beyond the window's bottom
-	if (cursor_y > cumulative_height) {
-		struct editorBuffer *buf = focusedWin->buf;
-		if (buf->cy >= buf->numrows) {
-			cursor_y = cumulative_height;
-		} else {
-			cursor_y = cumulative_height - statusbar_height;
-		}
-	}
+	int cursor_y = computeCursorY(focusedWin, focusedIdx);
 
 	snprintf(buf, sizeof(buf), "\x1b[%d;%dH", cursor_y,
 		 focusedWin->scx + 1);
@@ -712,6 +764,7 @@ void editorWhatCursor(void) {
 		"Line,col (buffer:%d,%d screen:%d,%d) Char='%s' LineLen=%d Window=%dx%d",
 		E.buf->cy + 1, E.buf->cx, screen_y, rx, ch, line_len,
 		E.screencols, E.screenrows);
+	refreshHint(REFRESH_CURSOR_ONLY);
 }
 
 void recenter(struct editorWindow *win) {

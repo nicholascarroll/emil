@@ -352,6 +352,7 @@ void editorSave(struct editorBuffer *bufr) {
 	/* TODO: fsync parent dir after rename */
 
 	editorSetStatusMessage("Wrote %d bytes to %s", len, bufr->filename);
+	refreshHint(REFRESH_CURSOR_ONLY);
 }
 
 void editorSaveAs(struct editorBuffer *bufr) {

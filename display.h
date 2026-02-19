@@ -29,6 +29,7 @@ void editorResizeScreen(int sig);
 void recenter(struct editorWindow *win);
 void editorToggleVisualLineMode(void);
 void editorVersion(void);
+
 /* Wrappers for command table */
 void editorVersionWrapper(struct editorConfig *ed, struct editorBuffer *buf);
 void editorToggleVisualLineModeWrapper(struct editorConfig *ed,

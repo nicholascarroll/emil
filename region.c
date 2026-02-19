@@ -34,6 +34,7 @@ void editorSetMark(void) {
 		E.buf->marky = E.buf->numrows - 1;
 		E.buf->markx = E.buf->row[E.buf->marky].size;
 	}
+	refreshHint(REFRESH_CURSOR_ONLY);
 }
 
 void editorClearMark(void) {

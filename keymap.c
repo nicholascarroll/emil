@@ -743,6 +743,7 @@ void editorProcessKeypress(int c) {
 		editorSetStatusMessage(E.buf->read_only ?
 					       msg_read_only :
 					       "Buffer set to writable");
+		refreshHint(REFRESH_CURSOR_ONLY);
 		break;
 	case WHAT_CURSOR:
 		editorWhatCursor();

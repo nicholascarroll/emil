@@ -165,6 +165,19 @@ struct editorHistory {
 	int count;
 };
 
+enum refreshType {
+	REFRESH_FULL,	     /* Full screen redraw (safe default) */
+	REFRESH_CURSOR_ONLY, /* Only reposition cursor */
+	REFRESH_WINDOW,	     /* Redraw focused window + same-buffer windows */
+};
+
+struct refresh_hint {
+	enum refreshType type;
+};
+
+/* Set refresh hint — only upgrades, never downgrades */
+void refreshHint(enum refreshType type);
+
 struct editorConfig {
 	uint8_t *kill;
 	uint8_t *rectKill;
@@ -204,6 +217,8 @@ struct editorConfig {
 	struct editorHistory search_history;
 	struct editorHistory kill_history;
 	int kill_ring_pos; /* Current position in kill ring for M-y */
+
+	struct refresh_hint hint; /* Set by commands, read by refreshScreen */
 };
 
 /*** prototypes ***/

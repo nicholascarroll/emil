@@ -354,6 +354,8 @@ void editorMoveCursor(int key, int count) {
 			E.buf->cx = rowlen;
 		}
 	}
+	if (markInvalidSilent())
+		refreshHint(REFRESH_CURSOR_ONLY);
 }
 
 /* Word movement */
@@ -432,6 +434,8 @@ void editorForwardWord(int count) {
 	for (int i = 0; i < times; i++) {
 		bufferEndOfForwardWord(E.buf, &E.buf->cx, &E.buf->cy);
 	}
+	if (markInvalidSilent())
+		refreshHint(REFRESH_CURSOR_ONLY);
 }
 
 void editorBackWord(int count) {
@@ -439,6 +443,8 @@ void editorBackWord(int count) {
 	for (int i = 0; i < times; i++) {
 		bufferEndOfBackwardWord(E.buf, &E.buf->cx, &E.buf->cy);
 	}
+	if (markInvalidSilent())
+		refreshHint(REFRESH_CURSOR_ONLY);
 }
 
 /* Paragraph movement */
@@ -454,7 +460,7 @@ void editorBackPara(int count) {
 		}
 
 		if (E.buf->numrows == 0) {
-			return;
+			goto done;
 		}
 
 		int pre = 1;
@@ -463,7 +469,7 @@ void editorBackPara(int count) {
 			erow *row = &E.buf->row[cy];
 			if (isParaBoundary(row) && !pre) {
 				E.buf->cy = cy;
-				return;
+				goto done;
 			} else if (!isParaBoundary(row)) {
 				pre = 0;
 			}
@@ -471,6 +477,9 @@ void editorBackPara(int count) {
 
 		E.buf->cy = 0;
 	}
+done:
+	if (markInvalidSilent())
+		refreshHint(REFRESH_CURSOR_ONLY);
 }
 
 void editorForwardPara(int count) {
@@ -480,11 +489,11 @@ void editorForwardPara(int count) {
 		int icy = E.buf->cy;
 
 		if (icy >= E.buf->numrows) {
-			return;
+			goto done;
 		}
 
 		if (E.buf->numrows == 0) {
-			return;
+			goto done;
 		}
 
 		int pre = 1;
@@ -493,7 +502,7 @@ void editorForwardPara(int count) {
 			erow *row = &E.buf->row[cy];
 			if (isParaBoundary(row) && !pre) {
 				E.buf->cy = cy;
-				return;
+				goto done;
 			} else if (!isParaBoundary(row)) {
 				pre = 0;
 			}
@@ -501,6 +510,9 @@ void editorForwardPara(int count) {
 
 		E.buf->cy = E.buf->numrows;
 	}
+done:
+	if (markInvalidSilent())
+		refreshHint(REFRESH_CURSOR_ONLY);
 }
 
 /* Word transformations */
@@ -904,6 +916,8 @@ void editorScrollLineDown(int count) {
 void editorBeginningOfLine(int count) {
 	if (count == 0) {
 		E.buf->cx = 0;
+		if (markInvalidSilent())
+			refreshHint(REFRESH_CURSOR_ONLY);
 	} else {
 		editorKillLineBackwards();
 	}
@@ -914,6 +928,8 @@ void editorEndOfLine(int count) {
 	if (E.buf->row != NULL && E.buf->cy < E.buf->numrows) {
 		E.buf->cx = E.buf->row[E.buf->cy].size;
 	}
+	if (markInvalidSilent())
+		refreshHint(REFRESH_CURSOR_ONLY);
 }
 
 void editorQuit(void) {

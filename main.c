@@ -33,6 +33,14 @@
 const int page_overlap = 2;
 
 struct editorConfig E;
+
+void refreshHint(enum refreshType type) {
+	/* Only upgrade, never downgrade — if something already requested
+	 * a full redraw, a later cursor-only hint must not override it. */
+	if (type > E.hint.type)
+		E.hint.type = type;
+}
+
 void setupHandlers(void);
 
 /*** output ***/
@@ -99,6 +107,7 @@ void initEditor(void) {
 	initHistory(&E.search_history);
 	initHistory(&E.kill_history);
 	E.kill_ring_pos = -1;
+	E.hint.type = REFRESH_FULL;
 
 	if (getWindowSize(&E.screenrows, &E.screencols) == -1)
 		die("getWindowSize");

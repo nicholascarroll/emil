@@ -131,6 +131,7 @@ void editorMacroToRegister(struct editorConfig *ed) {
 	memcpy(ed->registers[reg].rdata.macro->keys, ed->macro.keys,
 	       ed->macro.nkeys * sizeof(int));
 	registerMessage("Saved macro to register %s", reg);
+	refreshHint(REFRESH_CURSOR_ONLY);
 }
 
 void editorPointToRegister(struct editorConfig *ed) {
@@ -142,6 +143,7 @@ void editorPointToRegister(struct editorConfig *ed) {
 	ed->registers[reg].rdata.point->cx = ed->buf->cx;
 	ed->registers[reg].rdata.point->cy = ed->buf->cy;
 	registerMessage("Saved point to register %s", reg);
+	refreshHint(REFRESH_CURSOR_ONLY);
 }
 
 void editorNumberToRegister(struct editorConfig *ed, int rept) {
@@ -150,6 +152,7 @@ void editorNumberToRegister(struct editorConfig *ed, int rept) {
 	ed->registers[reg].rtype = REGISTER_NUMBER;
 	ed->registers[reg].rdata.number = rept;
 	registerMessage("Saved number to register %s", reg);
+	refreshHint(REFRESH_CURSOR_ONLY);
 }
 
 void editorRegionToRegister(struct editorConfig *ed,
@@ -165,6 +168,7 @@ void editorRegionToRegister(struct editorConfig *ed,
 	ed->registers[reg].rdata.region = ed->kill;
 	ed->kill = tmp;
 	registerMessage("Saved region to register %s", reg);
+	refreshHint(REFRESH_CURSOR_ONLY);
 }
 
 void editorRectRegister(struct editorConfig *ed, struct editorBuffer *bufr) {
@@ -226,6 +230,7 @@ void editorIncrementRegister(struct editorConfig *ed,
 				reg);
 		break;
 	}
+	refreshHint(REFRESH_CURSOR_ONLY);
 }
 
 void editorInsertRegister(struct editorConfig *ed, struct editorBuffer *bufr) {
@@ -311,4 +316,5 @@ void editorViewRegister(struct editorConfig *ed,
 				       ed->registers[reg].rdata.rect->rect);
 		break;
 	}
+	refreshHint(REFRESH_CURSOR_ONLY);
 }
