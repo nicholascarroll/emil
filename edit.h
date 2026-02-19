@@ -23,7 +23,6 @@ void editorDelChar(struct editorBuffer *bufr, int count);
 void editorBackSpace(struct editorBuffer *bufr, int count);
 
 /* Boundary detection */
-int isWordBoundary(uint8_t c);
 int isParaBoundary(erow *row);
 
 /* Cursor movement */

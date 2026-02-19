@@ -100,19 +100,19 @@ set bind-tty-special-chars off
 ```
 In `emil`, `Ctrl-w` kills the marked region as in `emacs`, but if no region is marked, it kills the previous word.
 
-Readline supports two ways to delete to the beginning of the line: `C-x BACKSPACE` (supported in *emacs*) and the more ergonomic `C-u` which conflicts with the *emacs* universal argument. `emil` resolves the conflict by binding `Ctrl-u Ctrl-a` to delete to the beginning of the line.
+Readline supports two ways to delete to the beginning of the line: `Ctrl-x BACKSPACE` (supported in *emacs*) and the more ergonomic `Ctrl-u` which conflicts with the *emacs* universal argument. `emil` resolves the conflict by binding `Ctrl-u Ctrl-a` to delete to the beginning of the line.
 
 ### Shell Integration
 
 Shell integration is a compile-time option (enabled by default). It provides two region-filtering commands that enable you to pipe selected region of text through shell commands:
 
-- **`M-|`** (shell-command-on-region)  
+- **`Alt-|`** (shell-command-on-region)    
   Takes the current region, feeds it to the shell command you type, and **displays the output** in a temporary `*Shell Command Output*` buffer (or the echo area if the output is small).  
 
-- **`C-u M-|`**  
+- **`Ctrl-u Alt-|`**    
   Takes the current region, feeds it to the shell command, and **replaces the region** with the output of the command.  
 
-- **`M-x diff-buffer-with-file RET`**   
+- **`Alt-x diff-buffer-with-file RET`**    
   Shows unsaved changes.
 
 Shell integration can be disabled at build time with the compiler flag `-DEMIL_DISABLE_PIPE`.

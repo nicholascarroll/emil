@@ -1,6 +1,5 @@
 #include "display.h"
 #include "abuf.h"
-#include "edit.h"
 #include "emil.h"
 #include "message.h"
 #include "terminal.h"
@@ -9,7 +8,6 @@
 #include "region.h"
 #include "buffer.h"
 #include "util.h"
-#include "wcwidth.h"
 #include "window.h"
 #include <errno.h>
 #include <stdarg.h>
@@ -28,85 +26,90 @@ extern struct editorConfig E;
 const int minibuffer_height = 1;
 const int statusbar_height = 1;
 
-/* Check if a render position is within the marked region */
-static int isRenderPosInRegion(struct editorBuffer *buf, int row,
-			       int render_pos) {
-	if (markInvalidSilent())
-		return 0;
+/* Pre-computed highlight bounds for a single row.  Computed once per row
+ * before rendering, then checked with simple integer comparisons in the
+ * per-column loop.  This replaces the old isRenderPosInRegion /
+ * isRenderPosCurrentSearchMatch calls that each walked the row from byte 0
+ * via charsToDisplayColumn up to four times per column. */
+struct rowHighlight {
+	int region_start; /* first highlighted display column, or -1 */
+	int region_end;	  /* one past last highlighted column, or -1 */
+	int match_start;  /* search match start column, or -1 */
+	int match_end;	  /* search match end column, or -1 */
+};
 
-	erow *erow_ptr = &buf->row[row];
-	if (!erow_ptr)
-		return 0;
+static void computeRowHighlightBounds(struct editorBuffer *buf, int filerow,
+				      struct rowHighlight *hl) {
+	hl->region_start = -1;
+	hl->region_end = -1;
+	hl->match_start = -1;
+	hl->match_end = -1;
 
-	if (buf->rectangle_mode) {
-		int top_row = buf->cy < buf->marky ? buf->cy : buf->marky;
-		int bottom_row = buf->cy > buf->marky ? buf->cy : buf->marky;
-		int left_col = buf->cx < buf->markx ? buf->cx : buf->markx;
-		int right_col = buf->cx > buf->markx ? buf->cx : buf->markx;
+	erow *row = &buf->row[filerow];
 
-		if (row < top_row || row > bottom_row)
-			return 0;
-
-		int left_render = charsToDisplayColumn(erow_ptr, left_col);
-		int right_render = charsToDisplayColumn(erow_ptr, right_col);
-
-		return (render_pos >= left_render && render_pos < right_render);
-	} else {
-		int start_row = buf->cy < buf->marky ? buf->cy : buf->marky;
-		int end_row = buf->cy > buf->marky ? buf->cy : buf->marky;
-		int start_col =
-			(buf->cy < buf->marky ||
-			 (buf->cy == buf->marky && buf->cx <= buf->markx)) ?
-				buf->cx :
-				buf->markx;
-		int end_col =
-			(buf->cy > buf->marky ||
-			 (buf->cy == buf->marky && buf->cx >= buf->markx)) ?
-				buf->cx :
-				buf->markx;
-
-		if (row < start_row || row > end_row)
-			return 0;
-
-		if (row == start_row && row == end_row) {
-			int start_render =
-				charsToDisplayColumn(erow_ptr, start_col);
-			int end_render =
-				charsToDisplayColumn(erow_ptr, end_col);
-			return (render_pos >= start_render &&
-				render_pos < end_render);
+	/* Region bounds */
+	if (!markInvalidSilent()) {
+		if (buf->rectangle_mode) {
+			int top = buf->cy < buf->marky ? buf->cy : buf->marky;
+			int bot = buf->cy > buf->marky ? buf->cy : buf->marky;
+			if (filerow >= top && filerow <= bot) {
+				int left = buf->cx < buf->markx ? buf->cx :
+								  buf->markx;
+				int right = buf->cx > buf->markx ? buf->cx :
+								   buf->markx;
+				hl->region_start =
+					charsToDisplayColumn(row, left);
+				hl->region_end =
+					charsToDisplayColumn(row, right);
+			}
+		} else {
+			int sr = buf->cy < buf->marky ? buf->cy : buf->marky;
+			int er = buf->cy > buf->marky ? buf->cy : buf->marky;
+			if (filerow >= sr && filerow <= er) {
+				int sc = (buf->cy < buf->marky ||
+					  (buf->cy == buf->marky &&
+					   buf->cx <= buf->markx)) ?
+						 buf->cx :
+						 buf->markx;
+				int ec = (buf->cy > buf->marky ||
+					  (buf->cy == buf->marky &&
+					   buf->cx >= buf->markx)) ?
+						 buf->cx :
+						 buf->markx;
+				if (filerow == sr && filerow == er) {
+					hl->region_start =
+						charsToDisplayColumn(row, sc);
+					hl->region_end =
+						charsToDisplayColumn(row, ec);
+				} else if (filerow == sr) {
+					hl->region_start =
+						charsToDisplayColumn(row, sc);
+					hl->region_end = INT_MAX;
+				} else if (filerow == er) {
+					hl->region_start = 0;
+					hl->region_end =
+						charsToDisplayColumn(row, ec);
+				} else {
+					/* Middle row: entire row highlighted */
+					hl->region_start = 0;
+					hl->region_end = INT_MAX;
+				}
+			}
 		}
-		if (row == start_row) {
-			int start_render =
-				charsToDisplayColumn(erow_ptr, start_col);
-			return (render_pos >= start_render);
-		}
-		if (row == end_row) {
-			int end_render =
-				charsToDisplayColumn(erow_ptr, end_col);
-			return (render_pos < end_render);
-		}
-		return 1; /* Entire middle row is in region */
+	}
+
+	/* Search match bounds */
+	if (buf->query && buf->query[0] && buf->match && filerow == buf->cy) {
+		int match_len = strlen((char *)buf->query);
+		hl->match_start = charsToDisplayColumn(row, buf->cx);
+		hl->match_end = charsToDisplayColumn(row, buf->cx + match_len);
 	}
 }
 
-/* Check if a render position is at the current search match */
-static int isRenderPosCurrentSearchMatch(struct editorBuffer *buf, int row,
-					 int render_pos) {
-	if (!buf->query || !buf->query[0] || !buf->match)
-		return 0;
-	if (row != buf->cy)
-		return 0;
-
-	erow *erow_ptr = &buf->row[row];
-	if (!erow_ptr)
-		return 0;
-
-	int match_len = strlen((char *)buf->query);
-	int start_render = charsToDisplayColumn(erow_ptr, buf->cx);
-	int end_render = charsToDisplayColumn(erow_ptr, buf->cx + match_len);
-
-	return (render_pos >= start_render && render_pos < end_render);
+/* Check whether a display column is highlighted, using pre-computed bounds. */
+static inline int isHighlighted(const struct rowHighlight *hl, int col) {
+	return (col >= hl->region_start && col < hl->region_end) ||
+	       (col >= hl->match_start && col < hl->match_end);
 }
 
 /* Update highlight state, emitting escape sequences only on transitions */
@@ -144,23 +147,37 @@ int calculateRowsToScroll(struct editorBuffer *buf, struct editorWindow *win,
 	return rows_to_scroll;
 }
 
-/* Render a line with highlighting support */
+/* Render a line with highlighting support.
+ *
+ * start_col / end_col: the display-column range to render.
+ * start_byte: byte offset in row->chars corresponding to start_col,
+ *             or -1 to scan from the beginning.  The word-wrap caller
+ *             already knows the byte offset; passing it in avoids an
+ *             O(line-length) skip loop for every wrapped sub-line. */
 static void renderLineWithHighlighting(erow *row, struct abuf *ab,
 				       int start_col, int end_col,
-				       struct editorBuffer *buf, int filerow) {
+				       const struct rowHighlight *hl,
+				       int start_byte) {
 	int render_x = 0;
 	int char_idx = 0;
 	int current_highlight = 0;
 
-	/* Skip to start column */
-	while (char_idx < row->size && render_x < start_col) {
-		if (row->chars[char_idx] < 0x80 &&
-		    !ISCTRL(row->chars[char_idx])) {
-			render_x += 1;
-			char_idx++;
-		} else {
-			render_x = nextScreenX(row->chars, &char_idx, render_x);
-			char_idx++;
+	/* Skip to start column.  If the caller provided a byte hint we
+	 * can jump straight there; otherwise scan from byte 0. */
+	if (start_byte >= 0 && start_byte <= row->size) {
+		char_idx = start_byte;
+		render_x = start_col;
+	} else {
+		while (char_idx < row->size && render_x < start_col) {
+			if (row->chars[char_idx] < 0x80 &&
+			    !ISCTRL(row->chars[char_idx])) {
+				render_x += 1;
+				char_idx++;
+			} else {
+				render_x = nextScreenX(row->chars, &char_idx,
+						       render_x);
+				char_idx++;
+			}
 		}
 	}
 
@@ -168,11 +185,8 @@ static void renderLineWithHighlighting(erow *row, struct abuf *ab,
 	while (char_idx < row->size && render_x < end_col) {
 		uint8_t c = row->chars[char_idx];
 
-		int in_region = isRenderPosInRegion(buf, filerow, render_x);
-		int is_current_match =
-			isRenderPosCurrentSearchMatch(buf, filerow, render_x);
 		updateHighlight(ab, &current_highlight,
-				(in_region || is_current_match) ? 1 : 0);
+				isHighlighted(hl, render_x) ? 1 : 0);
 
 		if (c == '\t') {
 			int next_tab_stop = (render_x + EMIL_TAB_STOP) /
@@ -370,9 +384,11 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 			}
 			if (!buf->word_wrap) {
 				// Truncated mode with visual marking
+				struct rowHighlight hl;
+				computeRowHighlightBounds(buf, filerow, &hl);
 				renderLineWithHighlighting(
 					row, ab, win->coloff,
-					win->coloff + screencols, buf, filerow);
+					win->coloff + screencols, &hl, -1);
 				filerow++;
 			} else {
 				/* Word-wrap mode: break lines at word
@@ -380,114 +396,49 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 				int line_start_col = 0;
 				int line_start_byte = 0;
 
+				struct rowHighlight hl;
+				computeRowHighlightBounds(buf, filerow, &hl);
+
 				while (line_start_byte < row->size &&
 				       y < screenrows) {
-					/* --- Find the break point for this
-					 *     screen line --- */
-					int col = line_start_col;
-					int bidx = line_start_byte;
-					/* Last word-boundary position seen */
-					int wb_col = -1;
-					int wb_byte = -1;
-
-					while (bidx < row->size) {
-						uint8_t c = row->chars[bidx];
-						int cwidth;
-
-						if (c == '\t') {
-							cwidth =
-								EMIL_TAB_STOP -
-								(col %
-								 EMIL_TAB_STOP);
-						} else if (ISCTRL(c)) {
-							cwidth = 2;
-						} else {
-							cwidth = charInStringWidth(
-								row->chars,
-								bidx);
-						}
-
-						/* Wide char won't fit: leave
-						 * a 1-col gap and break. */
-						if (cwidth > 1 &&
-						    col + cwidth - line_start_col >
-							    screencols) {
-							break;
-						}
-
-						if (col + cwidth -
-							    line_start_col >
-						    screencols) {
-							break;
-						}
-
-						/* Track word boundaries:
-						 * the break point is
-						 * *after* the boundary
-						 * character. */
-						if (isWordBoundary(c)) {
-							int nbytes =
-								utf8_nBytes(c);
-							wb_col = col + cwidth;
-							wb_byte = bidx + nbytes;
-						}
-
-						col += cwidth;
-						bidx += utf8_nBytes(c);
-					}
-
 					int break_col, break_byte;
-					if (bidx >= row->size) {
-						/* Rest of row fits on this
-						 * screen line. */
-						break_col = col;
-						break_byte = row->size;
-					} else if (wb_col > line_start_col) {
-						/* Break at the last word
-						 * boundary we found. */
-						break_col = wb_col;
-						break_byte = wb_byte;
-					} else {
-						/* No word boundary found —
-						 * hard break at column
-						 * limit. */
-						break_col = col;
-						break_byte = bidx;
-					}
+					int more = wordWrapBreak(
+						row, screencols, line_start_col,
+						line_start_byte, &break_col,
+						&break_byte);
 
 					/* --- Render the span --- */
 					renderLineWithHighlighting(
 						row, ab, line_start_col,
-						break_col, buf, filerow);
+						break_col, &hl,
+						line_start_byte);
 
 					/* --- Fill trailing space with
 					 *     correct highlighting --- */
 					int fill_col = break_col;
-					int hl = 0;
+					int fill_hl = 0;
 					while (fill_col - line_start_col <
 					       screencols) {
-						int in_r = isRenderPosInRegion(
-							buf, filerow, fill_col);
-						int in_m =
-							isRenderPosCurrentSearchMatch(
-								buf, filerow,
-								fill_col);
 						updateHighlight(
-							ab, &hl,
-							(in_r || in_m) ? 1 : 0);
+							ab, &fill_hl,
+							isHighlighted(
+								&hl, fill_col) ?
+								1 :
+								0);
 						abAppend(ab, " ", 1);
 						fill_col++;
 					}
-					updateHighlight(ab, &hl, 0);
+					updateHighlight(ab, &fill_hl, 0);
 
 					/* --- Advance to next screen line
 					 *     if more content remains --- */
-					if (break_byte < row->size &&
-					    y < screenrows - 1) {
+					if (more && y < screenrows - 1) {
 						abAppend(ab, "\r\n", 2);
 						y++;
 					}
 
+					if (!more)
+						break;
 					line_start_col = break_col;
 					line_start_byte = break_byte;
 				}
@@ -558,49 +509,60 @@ void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
 	}
 #endif
 
-	char perc[8] = " xxx --";
-	if (bufr->numrows == 0) {
-		perc[1] = 'E';
-		perc[2] = 'm';
-		perc[3] = 'p';
-	} else if (bufr->end) {
-		if (win->rowoff == 0) {
-			perc[1] = 'A';
-			perc[2] = 'l';
-			perc[3] = 'l';
-		} else {
-			perc[1] = 'B';
-			perc[2] = 'o';
-			perc[3] = 't';
-		}
-	} else if (win->rowoff == 0) {
-		perc[1] = 'T';
-		perc[2] = 'o';
-		perc[3] = 'p';
-	} else {
+	char perc[8];
+	if (bufr->numrows == 0)
+		memcpy(perc, " Emp --", 7);
+	else if (bufr->end && win->rowoff == 0)
+		memcpy(perc, " All --", 7);
+	else if (bufr->end)
+		memcpy(perc, " Bot --", 7);
+	else if (win->rowoff == 0)
+		memcpy(perc, " Top --", 7);
+	else
 		snprintf(perc, sizeof(perc), " %2d%% --",
 			 (win->rowoff * 100) / bufr->numrows);
-	}
 
-	char fill[2] = "-";
 	if (!win->focused) {
 		perc[5] = ' ';
 		perc[6] = ' ';
-		fill[0] = ' ';
 	}
 
 	if (len > E.screencols)
 		len = E.screencols;
 	abAppend(ab, status, len);
-	while (len < E.screencols) {
-		if (E.screencols - len == 7) {
-			abAppend(ab, perc, 7);
-			break;
+
+	/* Fill the gap between status text and percentage indicator.
+	 * Use a CSI column-jump to skip to the percentage position
+	 * rather than emitting one fill byte at a time. */
+	int perc_col = E.screencols - 7 + 1; /* 1-based column */
+	if (len < E.screencols - 7) {
+		if (win->focused) {
+			/* Emit a run of dashes to fill the gap.
+			 * For very wide terminals, use a CSI jump
+			 * followed by just enough dashes. */
+			int fill_count = E.screencols - 7 - len;
+			if (fill_count <= 256) {
+				char fill_buf[256];
+				memset(fill_buf, '-', fill_count);
+				abAppend(ab, fill_buf, fill_count);
+			} else {
+				/* Jump to the percentage column and
+				 * let reverse-video fill the gap */
+				char jump[16];
+				int jlen = snprintf(jump, sizeof(jump),
+						    CSI "%dG", perc_col);
+				abAppend(ab, jump, jlen);
+			}
 		} else {
-			abAppend(ab, fill, 1);
-			len++;
+			/* Unfocused: jump directly, spaces are already the
+			 * background under reverse video */
+			char jump[16];
+			int jlen = snprintf(jump, sizeof(jump), CSI "%dG",
+					    perc_col);
+			abAppend(ab, jump, jlen);
 		}
 	}
+	abAppend(ab, perc, 7);
 	abAppend(ab, "\x1b[m" CRLF, 5);
 }
 
@@ -628,12 +590,7 @@ void drawMinibuffer(struct abuf *ab) {
 void refreshScreen(void) {
 	struct abuf ab = ABUF_INIT;
 	abAppend(&ab, "\x1b[?25l", 6); // Hide cursor
-	/* possible flicker reduction on local terminals
-But might be adding a packet in SSH
-write(STDOUT_FILENO, ab.b, ab.len);
-ab.len = 0;
-*/
-	abAppend(&ab, "\x1b[H", 3); // Move cursor to top-left corner
+	abAppend(&ab, "\x1b[H", 3);    // Move cursor to top-left corner
 
 	int focusedIdx = windowFocusedIdx();
 
@@ -726,21 +683,12 @@ void editorResizeScreen(int UNUSED(sig)) {
 }
 
 void editorWhatCursor(void) {
-	/* Calculate rendered column position (accounting for tabs and Unicode) */
 	int rx = 0;
 	int line_len = 0;
 	if (E.buf->cy < E.buf->numrows) {
-		struct erow *row = &E.buf->row[E.buf->cy];
+		erow *row = &E.buf->row[E.buf->cy];
 		line_len = row->size;
-		for (int j = 0; j < E.buf->cx && j < row->size; j++) {
-			if (row->chars[j] == '\t') {
-				rx = (rx + EMIL_TAB_STOP) &
-				     ~(EMIL_TAB_STOP - 1);
-			} else {
-				int w = mk_wcwidth(row->chars[j]);
-				rx += (w > 0) ? w : 1;
-			}
-		}
+		rx = charsToDisplayColumn(row, E.buf->cx);
 	}
 
 	/* Get character at cursor */

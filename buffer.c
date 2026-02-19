@@ -3,7 +3,6 @@
 #include <string.h>
 #include <stdio.h>
 #include "emil.h"
-#include "edit.h"
 #include "message.h"
 #include "buffer.h"
 #include "unicode.h"
@@ -110,64 +109,87 @@ int charsToDisplayColumn(erow *row, int char_pos) {
 	return col;
 }
 
-/* Count how many screen lines a row occupies under word wrap.
- * Uses the same break logic as drawRows in display.c. */
+/* Find the next word-wrap break point for a single screen line.
+ *
+ * Given a row, a screen width, and a starting position (column and byte
+ * offset), compute where this screen line ends.  On return, *break_col
+ * and *break_byte hold the position just past the last character that
+ * fits on this screen line.
+ *
+ * Returns 1 if more content follows the break (i.e. the row continues
+ * onto another screen line), or 0 if the rest of the row fits on this
+ * screen line (meaning this is the last sub-line). */
+int wordWrapBreak(erow *row, int screencols, int line_start_col,
+		  int line_start_byte, int *break_col, int *break_byte) {
+	int col = line_start_col;
+	int bidx = line_start_byte;
+	int wb_col = -1;
+	int wb_byte = -1;
+
+	while (bidx < row->size) {
+		uint8_t c = row->chars[bidx];
+		int cwidth;
+
+		if (c == '\t') {
+			cwidth = EMIL_TAB_STOP - (col % EMIL_TAB_STOP);
+		} else if (ISCTRL(c)) {
+			cwidth = 2;
+		} else {
+			cwidth = charInStringWidth(row->chars, bidx);
+		}
+
+		/* Wide char won't fit: leave a 1-col gap and break. */
+		if (cwidth > 1 && col + cwidth - line_start_col > screencols)
+			break;
+		if (col + cwidth - line_start_col > screencols)
+			break;
+
+		if (isWordBoundary(c)) {
+			wb_col = col + cwidth;
+			wb_byte = bidx + utf8_nBytes(c);
+		}
+
+		col += cwidth;
+		bidx += utf8_nBytes(c);
+	}
+
+	if (bidx >= row->size) {
+		/* Rest of row fits on this screen line. */
+		*break_col = col;
+		*break_byte = row->size;
+		return 0;
+	} else if (wb_col > line_start_col) {
+		/* Break at the last word boundary. */
+		*break_col = wb_col;
+		*break_byte = wb_byte;
+	} else {
+		/* No word boundary — hard break at column limit. */
+		*break_col = col;
+		*break_byte = bidx;
+	}
+	return 1;
+}
+
+/* Count how many screen lines a row occupies under word wrap. */
 int countScreenLines(erow *row, int screencols) {
-	if (screencols <= 0)
-		return 1;
-	if (row->size == 0)
+	if (screencols <= 0 || row->size == 0)
 		return 1;
 
 	int lines = 0;
 	int line_start_col = 0;
 	int line_start_byte = 0;
 
-	while (line_start_byte < row->size) {
-		int col = line_start_col;
-		int bidx = line_start_byte;
-		int wb_col = -1;
-		int wb_byte = -1;
-
-		while (bidx < row->size) {
-			uint8_t c = row->chars[bidx];
-			int cwidth;
-
-			if (c == '\t') {
-				cwidth = EMIL_TAB_STOP - (col % EMIL_TAB_STOP);
-			} else if (ISCTRL(c)) {
-				cwidth = 2;
-			} else {
-				cwidth = charInStringWidth(row->chars, bidx);
-			}
-
-			if (cwidth > 1 &&
-			    col + cwidth - line_start_col > screencols)
-				break;
-			if (col + cwidth - line_start_col > screencols)
-				break;
-
-			if (isWordBoundary(c)) {
-				wb_col = col + cwidth;
-				wb_byte = bidx + utf8_nBytes(c);
-			}
-
-			col += cwidth;
-			bidx += utf8_nBytes(c);
-		}
-
-		if (bidx >= row->size) {
-			/* Rest fits on this screen line. */
-			lines++;
-			break;
-		} else if (wb_col > line_start_col) {
-			line_start_col = wb_col;
-			line_start_byte = wb_byte;
-		} else {
-			line_start_col = col;
-			line_start_byte = bidx;
-		}
+	do {
+		int break_col, break_byte;
+		int more = wordWrapBreak(row, screencols, line_start_col,
+					 line_start_byte, &break_col,
+					 &break_byte);
 		lines++;
-	}
+		if (!more)
+			break;
+		line_start_col = break_col;
+		line_start_byte = break_byte;
+	} while (line_start_byte < row->size);
 
 	return lines;
 }
@@ -189,52 +211,13 @@ void cursorScreenLine(erow *row, int cursor_col, int screencols, int *out_line,
 	int line_start_byte = 0;
 
 	while (line_start_byte < row->size) {
-		int col = line_start_col;
-		int bidx = line_start_byte;
-		int wb_col = -1;
-		int wb_byte = -1;
-
-		while (bidx < row->size) {
-			uint8_t c = row->chars[bidx];
-			int cwidth;
-
-			if (c == '\t') {
-				cwidth = EMIL_TAB_STOP - (col % EMIL_TAB_STOP);
-			} else if (ISCTRL(c)) {
-				cwidth = 2;
-			} else {
-				cwidth = charInStringWidth(row->chars, bidx);
-			}
-
-			if (cwidth > 1 &&
-			    col + cwidth - line_start_col > screencols)
-				break;
-			if (col + cwidth - line_start_col > screencols)
-				break;
-
-			if (isWordBoundary(c)) {
-				wb_col = col + cwidth;
-				wb_byte = bidx + utf8_nBytes(c);
-			}
-
-			col += cwidth;
-			bidx += utf8_nBytes(c);
-		}
-
 		int break_col, break_byte;
-		if (bidx >= row->size) {
-			break_col = col;
-			break_byte = row->size;
-		} else if (wb_col > line_start_col) {
-			break_col = wb_col;
-			break_byte = wb_byte;
-		} else {
-			break_col = col;
-			break_byte = bidx;
-		}
+		int more = wordWrapBreak(row, screencols, line_start_col,
+					 line_start_byte, &break_col,
+					 &break_byte);
 
 		/* cursor_col falls within this screen line */
-		if (cursor_col < break_col || break_byte >= row->size) {
+		if (cursor_col < break_col || !more) {
 			*out_col = cursor_col - line_start_col;
 			return;
 		}

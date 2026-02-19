@@ -2,8 +2,6 @@
 *.exe
 *.stackdump
 emil
-testy
-tempy
 unicodetest
 /build
 /config.h

@@ -7,7 +7,7 @@
 
 void abAppend(struct abuf *ab, const char *s, int len) {
 	if (ab->len + len > ab->capacity) {
-		int new_capacity = ab->capacity == 0 ? 1024 : ab->capacity * 2;
+		int new_capacity = ab->capacity == 0 ? 8192 : ab->capacity * 2;
 		while (new_capacity < ab->len + len) {
 			if (new_capacity > INT_MAX / 2) {
 				die("buffer size overflow");
