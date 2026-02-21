@@ -461,7 +461,7 @@ void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
 	struct editorBuffer *bufr = win->buf;
 
 	abAppend(ab, "\x1b[7m", 4);
-	char status[80];
+	char status[E.screencols + 1]; // +1 for NUL terminator
 	int len = 0;
 
 	const char *filename = bufr->filename ? bufr->filename : "*scratch*";
