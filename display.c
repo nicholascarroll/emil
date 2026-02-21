@@ -455,8 +455,8 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 
 void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
     char buf[32];
-    /* Move cursor to the specific line for this window's status bar */
-    snprintf(buf, sizeof(buf), CSI "%d;1H", line);
+    /* Position cursor at the start of the status bar line */
+    snprintf(buf, sizeof(buf), CSI "%d;%dH", line, 1);
     abAppend(ab, buf, strlen(buf));
 
     struct editorBuffer *bufr = win->buf;
@@ -467,7 +467,7 @@ void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
     char status[1024];
     int len = 0;
 
-    /* 1. Filename truncation logic */
+    /* Filename Truncation */
     const char *filename = bufr->filename ? bufr->filename : "*scratch*";
     int fn_len = strlen(filename);
     int reserved = 30; 
@@ -483,7 +483,7 @@ void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
         snprintf(display_name, sizeof(display_name), "%s", filename);
     }
 
-    /* 2. Format left-side text */
+    /* Format the left-side text */
     if (win->focused) {
         len = snprintf(status, sizeof(status),
                "-- %s %c%c%c %2d:%2d --", display_name,
@@ -498,23 +498,20 @@ void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
                win->cx);
     }
 
+    /* Cap length and append */
     if (len > E.screencols - 7) len = E.screencols - 7;
     abAppend(ab, status, len);
 
-    /* 3. THE FLICKER FIX: Optimized Batch Fill */
+    /* THE FILL: This ensures the reverse video doesn't 'break' */
     if (len < E.screencols - 7) {
         int fill_count = (E.screencols - 7) - len;
         char fill_char = win->focused ? '-' : ' ';
-        
-        /* Create a local buffer to fill the gap in one go */
-        char fill_buffer[512]; 
-        if (fill_count > 511) fill_count = 511; // Safety cap
-        
-        memset(fill_buffer, fill_char, fill_count);
-        abAppend(ab, fill_buffer, fill_count);
+        while (fill_count-- > 0) {
+            abAppend(ab, &fill_char, 1);
+        }
     }
 
-    /* 4. Percentage Indicator */
+    /* Percentage Indicator */
     char perc[8];
     if (bufr->numrows == 0)
         memcpy(perc, " Emp --", 7);
@@ -535,7 +532,7 @@ void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
 
     abAppend(ab, perc, 7);
 
-    /* 5. Clean up: Reset attributes and move to next line */
+    /* Reset formatting and move to next line */
     abAppend(ab, "\x1b[m" CRLF, 5);
 }
 
@@ -561,80 +558,61 @@ void drawMinibuffer(struct abuf *ab) {
 }
 
 void refreshScreen(void) {
-	struct abuf ab = ABUF_INIT;
-	abAppend(&ab, "\x1b[?25l", 6); // Hide cursor
-	abAppend(&ab, "\x1b[H", 3);    // Move cursor to top-left corner
+    struct abuf ab = ABUF_INIT;
+    abAppend(&ab, "\x1b[?25l", 6); // Hide cursor
 
-	int focusedIdx = windowFocusedIdx();
+    /* DO NOT use \x1b[H or \x1b[2J here. 
+     * We will move the cursor explicitly for each section. */
 
-	int cumulative_height = 0;
-	int total_height = E.screenrows - minibuffer_height -
-			   (statusbar_height * E.nwindows);
+    int cumulative_height = 0;
 
-	/* skip if heights already set */
-	int heights_set = 1;
-	for (int i = 0; i < E.nwindows; i++) {
-		if (E.windows[i]->height <= 0) {
-			heights_set = 0;
-			break;
-		}
-	}
+    for (int i = 0; i < E.nwindows; i++) {
+        struct editorWindow *win = E.windows[i];
 
-	if (!heights_set) {
-		int window_height = total_height / E.nwindows;
-		int remaining_height = total_height % E.nwindows;
+        /* Only redraw if focused OR flagged (Lazy Redraw) */
+        if (win->focused || win->needs_redraw) {
+            if (win->focused) scroll();
+            
+            /* 1. Move to window start */
+            char move_to[32];
+            snprintf(move_to, sizeof(move_to), CSI "%d;1H", cumulative_height + 1);
+            abAppend(&ab, move_to, strlen(move_to));
 
-		for (int i = 0; i < E.nwindows; i++) {
-			struct editorWindow *win = E.windows[i];
-			win->height = window_height;
-			if (i == E.nwindows - 1)
-				win->height += remaining_height;
-		}
-	}
+            /* 2. Draw Rows (ensure drawRows uses \x1b[K at end of lines) */
+            drawRows(win, &ab, win->height, E.screencols);
+            
+            /* 3. Draw Status Bar (This now handles its own positioning) */
+            drawStatusBar(win, &ab, cumulative_height + win->height + 1);
+            
+            win->needs_redraw = 0;
+        }
+        cumulative_height += win->height + statusbar_height;
+    }
 
-	for (int i = 0; i < E.nwindows; i++) {
-		struct editorWindow *win = E.windows[i];
+    /* 4. Minibuffer Positioning */
+    char move_mini[32];
+    snprintf(move_mini, sizeof(move_mini), CSI "%d;1H", cumulative_height + 1);
+    abAppend(&ab, move_mini, strlen(move_mini));
+    drawMinibuffer(&ab);
 
-		if (win->focused)
-			scroll();
-		drawRows(win, &ab, win->height, E.screencols);
-		cumulative_height += win->height + statusbar_height;
-		drawStatusBar(win, &ab, cumulative_height);
-	}
+    /* 5. Final Cursor Position for the focused window */
+    int focusedIdx = windowFocusedIdx();
+    struct editorWindow *fWin = E.windows[focusedIdx];
+    
+    // Calculate vertical offset for the cursor based on windows above it
+    int final_cursor_y = fWin->scy + 1;
+    for (int i = 0; i < focusedIdx; i++) {
+        final_cursor_y += E.windows[i]->height + statusbar_height;
+    }
 
-	drawMinibuffer(&ab);
+    char final_pos[32];
+    snprintf(final_pos, sizeof(final_pos), CSI "%d;%dH", final_cursor_y, fWin->scx + 1);
+    abAppend(&ab, final_pos, strlen(final_pos));
 
-	// Clear any remaining lines below content
-	abAppend(&ab, "\x1b[J", 3);
+    abAppend(&ab, "\x1b[?25h", 6); // Show cursor
 
-	// Position the cursor for the focused window
-	struct editorWindow *focusedWin = E.windows[focusedIdx];
-	char buf[32];
-
-	int cursor_y = focusedWin->scy + 1; // 1-based index
-	for (int i = 0; i < focusedIdx; i++) {
-		cursor_y += E.windows[i]->height + statusbar_height;
-	}
-
-	// Ensure cursor doesn't go beyond the window's bottom
-	if (cursor_y > cumulative_height) {
-		struct editorBuffer *buf = focusedWin->buf;
-		if (buf->cy >= buf->numrows) {
-			cursor_y = cumulative_height;
-		} else {
-			cursor_y = cumulative_height - statusbar_height;
-		}
-	}
-
-	snprintf(buf, sizeof(buf), "\x1b[%d;%dH", cursor_y,
-		 focusedWin->scx + 1);
-	abAppend(&ab, buf, strlen(buf));
-
-	abAppend(&ab, "\x1b[?25h", 6); // Show cursor
-
-	write(STDOUT_FILENO, ab.b, ab.len);
-
-	abFree(&ab);
+    write(STDOUT_FILENO, ab.b, ab.len);
+    abFree(&ab);
 }
 
 void cursorBottomLine(int curs) {
