@@ -454,131 +454,86 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 }
 
 void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
-	char buf[32];
-	snprintf(buf, sizeof(buf), CSI "%d;%dH", line, 1);
-	abAppend(ab, buf, strlen(buf));
+    char buf[32];
+    /* Position cursor at the start of the status bar line */
+    snprintf(buf, sizeof(buf), CSI "%d;%dH", line, 1);
+    abAppend(ab, buf, strlen(buf));
 
-	struct editorBuffer *bufr = win->buf;
+    struct editorBuffer *bufr = win->buf;
 
-	abAppend(ab, "\x1b[7m", 4);
-	char status[1024]; // * TODO just write directly to abuf
-	int len = 0;
+    /* Start Reverse Video */
+    abAppend(ab, "\x1b[7m", 4);
+    
+    char status[1024];
+    int len = 0;
 
-	const char *filename = bufr->filename ? bufr->filename : "*scratch*";
-	int fn_len = strlen(filename);
-	int reserved = 30; // space for flags, line/col, "--"
-	int max_filename_len = E.screencols - reserved;
-	if (max_filename_len < 4)
-		max_filename_len = 4; // minimum to show "..."
+    /* Filename Truncation */
+    const char *filename = bufr->filename ? bufr->filename : "*scratch*";
+    int fn_len = strlen(filename);
+    int reserved = 30; 
+    int max_filename_len = E.screencols - reserved;
+    if (max_filename_len < 4) max_filename_len = 4;
 
-	char display_name[256];
-	if (fn_len > max_filename_len) {
-		// Left-truncate and prepend "..."
-		snprintf(display_name, sizeof(display_name), "...%.*s",
-			 max_filename_len - 3,
-			 filename + (fn_len - (max_filename_len - 3)));
-	} else {
-		snprintf(display_name, sizeof(display_name), "%s", filename);
-	}
+    char display_name[256];
+    if (fn_len > max_filename_len) {
+        snprintf(display_name, sizeof(display_name), "...%.*s",
+             max_filename_len - 3,
+             filename + (fn_len - (max_filename_len - 3)));
+    } else {
+        snprintf(display_name, sizeof(display_name), "%s", filename);
+    }
 
-	if (win->focused) {
-		len = snprintf(status, sizeof(status),
-			       "-- %s %c%c%c %2d:%2d --", display_name,
-			       bufr->dirty ? '*' : '-', bufr->dirty ? '*' : '-',
-			       bufr->read_only ? '%' : ' ', bufr->cy + 1,
-			       bufr->cx);
-	} else {
-		len = snprintf(status, sizeof(status),
-			       "   %s %c%c%c %2d:%2d   ", display_name,
-			       bufr->dirty ? '*' : '-', bufr->dirty ? '*' : '-',
-			       bufr->read_only ? '%' : ' ', win->cy + 1,
-			       win->cx);
-	}
+    /* Format the left-side text */
+    if (win->focused) {
+        len = snprintf(status, sizeof(status),
+               "-- %s %c%c%c %2d:%2d --", display_name,
+               bufr->dirty ? '*' : '-', bufr->dirty ? '*' : '-',
+               bufr->read_only ? '%' : ' ', bufr->cy + 1,
+               bufr->cx);
+    } else {
+        len = snprintf(status, sizeof(status),
+               "   %s %c%c%c %2d:%2d   ", display_name,
+               bufr->dirty ? '*' : '-', bufr->dirty ? '*' : '-',
+               bufr->read_only ? '%' : ' ', win->cy + 1,
+               win->cx);
+    }
 
-#ifdef EMIL_DEBUG_UNDO
-#ifdef EMIL_DEBUG_REDO
-#define DEBUG_UNDO bufr->redo
-#else
-#define DEBUG_UNDO bufr->undo
-#endif
-	if (DEBUG_UNDO != NULL) {
-		len = 0;
-		for (len = 0; len < DEBUG_UNDO->datalen; len++) {
-			status[len] = DEBUG_UNDO->data[len];
-			if (DEBUG_UNDO->data[len] == '\n')
-				status[len] = '#';
-		}
-		status[len++] = '"';
-		len += snprintf(&status[len], sizeof(status) - len,
-				"sx %d sy %d ex %d ey %d cx %d cy %d",
-				DEBUG_UNDO->startx, DEBUG_UNDO->starty,
-				DEBUG_UNDO->endx, DEBUG_UNDO->endy, bufr->cx,
-				bufr->cy);
-	}
-#endif
-#ifdef EMIL_DEBUG_MACROS
-	/* This can get quite wide, you may want to boost the size of status */
-	for (int i = 0; i < E.macro.nkeys; i++) {
-		len += snprintf(&status[len], sizeof(status) - len, "%d: %d ",
-				i, E.macro.keys[i]);
-	}
-#endif
+    /* Cap length and append */
+    if (len > E.screencols - 7) len = E.screencols - 7;
+    abAppend(ab, status, len);
 
-	char perc[8];
-	if (bufr->numrows == 0)
-		memcpy(perc, " Emp --", 7);
-	else if (bufr->end && win->rowoff == 0)
-		memcpy(perc, " All --", 7);
-	else if (bufr->end)
-		memcpy(perc, " Bot --", 7);
-	else if (win->rowoff == 0)
-		memcpy(perc, " Top --", 7);
-	else
-		snprintf(perc, sizeof(perc), " %2d%% --",
-			 (win->rowoff * 100) / bufr->numrows);
+    /* THE FILL: This ensures the reverse video doesn't 'break' */
+    if (len < E.screencols - 7) {
+        int fill_count = (E.screencols - 7) - len;
+        char fill_char = win->focused ? '-' : ' ';
+        while (fill_count-- > 0) {
+            abAppend(ab, &fill_char, 1);
+        }
+    }
 
-	if (!win->focused) {
-		perc[5] = ' ';
-		perc[6] = ' ';
-	}
+    /* Percentage Indicator */
+    char perc[8];
+    if (bufr->numrows == 0)
+        memcpy(perc, " Emp --", 7);
+    else if (bufr->end && win->rowoff == 0)
+        memcpy(perc, " All --", 7);
+    else if (bufr->end)
+        memcpy(perc, " Bot --", 7);
+    else if (win->rowoff == 0)
+        memcpy(perc, " Top --", 7);
+    else
+        snprintf(perc, sizeof(perc), " %2d%% --",
+             (win->rowoff * 100) / bufr->numrows);
 
-	if (len > E.screencols)
-		len = E.screencols;
-	abAppend(ab, status, len);
+    if (!win->focused) {
+        perc[5] = ' ';
+        perc[6] = ' ';
+    }
 
-	/* Fill the gap between status text and percentage indicator.
-	 * Use a CSI column-jump to skip to the percentage position
-	 * rather than emitting one fill byte at a time. */
-	int perc_col = E.screencols - 7 + 1; /* 1-based column */
-	if (len < E.screencols - 7) {
-		if (win->focused) {
-			/* Emit a run of dashes to fill the gap.
-			 * For very wide terminals, use a CSI jump
-			 * followed by just enough dashes. */
-			int fill_count = E.screencols - 7 - len;
-			if (fill_count <= 256) {
-				char fill_buf[256];
-				memset(fill_buf, '-', fill_count);
-				abAppend(ab, fill_buf, fill_count);
-			} else {
-				/* Jump to the percentage column and
-				 * let reverse-video fill the gap */
-				char jump[16];
-				int jlen = snprintf(jump, sizeof(jump),
-						    CSI "%dG", perc_col);
-				abAppend(ab, jump, jlen);
-			}
-		} else {
-			/* Unfocused: jump directly, spaces are already the
-			 * background under reverse video */
-			char jump[16];
-			int jlen = snprintf(jump, sizeof(jump), CSI "%dG",
-					    perc_col);
-			abAppend(ab, jump, jlen);
-		}
-	}
-	abAppend(ab, perc, 7);
-	abAppend(ab, "\x1b[m" CRLF, 5);
+    abAppend(ab, perc, 7);
+
+    /* Reset formatting and move to next line */
+    abAppend(ab, "\x1b[m" CRLF, 5);
 }
 
 void drawMinibuffer(struct abuf *ab) {
