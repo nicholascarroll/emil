@@ -26,11 +26,11 @@ static int getRegisterName(char *prompt) {
 	return key;
 }
 
-#define GET_REGISTER(vname, prompt)             \
-	int vname = getRegisterName(prompt);    \
-	if (vname == 0x07) {                    \
+#define GET_REGISTER(vname, prompt)               \
+	int vname = getRegisterName(prompt);      \
+	if (vname == 0x07) {                      \
 		editorSetStatusMessage(msg_quit); \
-		return;                         \
+		return;                           \
 	}
 
 static void registerMessage(char *msg, char reg) {

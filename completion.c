@@ -73,7 +73,8 @@ static char *findCommonPrefix(char **strings, int count) {
 	return prefix;
 }
 
-static void getFileCompletions(const char *prefix, struct completion_result *result) {
+static void getFileCompletions(const char *prefix,
+			       struct completion_result *result) {
 	glob_t globlist;
 	result->matches = NULL;
 	result->n_matches = 0;
@@ -142,8 +143,8 @@ static void getFileCompletions(const char *prefix, struct completion_result *res
 }
 
 static void getBufferCompletions(struct editorConfig *ed, const char *prefix,
-			  struct editorBuffer *currentBuffer,
-			  struct completion_result *result) {
+				 struct editorBuffer *currentBuffer,
+				 struct completion_result *result) {
 	result->matches = NULL;
 	result->n_matches = 0;
 	result->common_prefix = NULL;
@@ -187,7 +188,7 @@ static void getBufferCompletions(struct editorConfig *ed, const char *prefix,
 }
 
 static void getCommandCompletions(struct editorConfig *ed, const char *prefix,
-			   struct completion_result *result) {
+				  struct completion_result *result) {
 	result->matches = NULL;
 	result->n_matches = 0;
 	result->common_prefix = NULL;
@@ -434,8 +435,6 @@ void closeCompletionsBuffer(void) {
 		destroyBuffer(comp_buf);
 	}
 }
-
-
 
 void handleMinibufferCompletion(struct editorBuffer *minibuf,
 				enum promptType type) {

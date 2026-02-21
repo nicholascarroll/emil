@@ -454,8 +454,6 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 }
 
 void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
-	/* XXX: It's actually possible for the status bar to end up
-	 * outside where it should be, so set it explicitly. */
 	char buf[32];
 	snprintf(buf, sizeof(buf), CSI "%d;%dH", line, 1);
 	abAppend(ab, buf, strlen(buf));
@@ -465,21 +463,38 @@ void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
 	abAppend(ab, "\x1b[7m", 4);
 	char status[80];
 	int len = 0;
+
+	const char *filename = bufr->filename ? bufr->filename : "*scratch*";
+	int fn_len = strlen(filename);
+	int reserved = 30; // space for flags, line/col, "--"
+	int max_filename_len = E.screencols - reserved;
+	if (max_filename_len < 4)
+		max_filename_len = 4; // minimum to show "..."
+
+	char display_name[256];
+	if (fn_len > max_filename_len) {
+		// Left-truncate and prepend "..."
+		snprintf(display_name, sizeof(display_name), "...%.*s",
+			 max_filename_len - 3,
+			 filename + (fn_len - (max_filename_len - 3)));
+	} else {
+		snprintf(display_name, sizeof(display_name), "%s", filename);
+	}
+
 	if (win->focused) {
 		len = snprintf(status, sizeof(status),
-			       "-- %.20s %c%c%c %2d:%2d --",
-			       bufr->filename ? bufr->filename : "*scratch*",
+			       "-- %s %c%c%c %2d:%2d --", display_name,
 			       bufr->dirty ? '*' : '-', bufr->dirty ? '*' : '-',
 			       bufr->read_only ? '%' : ' ', bufr->cy + 1,
 			       bufr->cx);
 	} else {
 		len = snprintf(status, sizeof(status),
-			       "   %.20s %c%c%c %2d:%2d   ",
-			       bufr->filename ? bufr->filename : "*scratch*",
+			       "   %s %c%c%c %2d:%2d   ", display_name,
 			       bufr->dirty ? '*' : '-', bufr->dirty ? '*' : '-',
 			       bufr->read_only ? '%' : ' ', win->cy + 1,
 			       win->cx);
 	}
+
 #ifdef EMIL_DEBUG_UNDO
 #ifdef EMIL_DEBUG_REDO
 #define DEBUG_UNDO bufr->redo
