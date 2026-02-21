@@ -455,8 +455,8 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 
 void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
     char buf[32];
-    /* Position cursor at the start of the status bar line */
-    snprintf(buf, sizeof(buf), CSI "%d;%dH", line, 1);
+    /* Move cursor to the specific line for this window's status bar */
+    snprintf(buf, sizeof(buf), CSI "%d;1H", line);
     abAppend(ab, buf, strlen(buf));
 
     struct editorBuffer *bufr = win->buf;
@@ -467,7 +467,7 @@ void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
     char status[1024];
     int len = 0;
 
-    /* Filename Truncation */
+    /* 1. Filename truncation logic */
     const char *filename = bufr->filename ? bufr->filename : "*scratch*";
     int fn_len = strlen(filename);
     int reserved = 30; 
@@ -483,7 +483,7 @@ void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
         snprintf(display_name, sizeof(display_name), "%s", filename);
     }
 
-    /* Format the left-side text */
+    /* 2. Format left-side text */
     if (win->focused) {
         len = snprintf(status, sizeof(status),
                "-- %s %c%c%c %2d:%2d --", display_name,
@@ -498,20 +498,23 @@ void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
                win->cx);
     }
 
-    /* Cap length and append */
     if (len > E.screencols - 7) len = E.screencols - 7;
     abAppend(ab, status, len);
 
-    /* THE FILL: This ensures the reverse video doesn't 'break' */
+    /* 3. THE FLICKER FIX: Optimized Batch Fill */
     if (len < E.screencols - 7) {
         int fill_count = (E.screencols - 7) - len;
         char fill_char = win->focused ? '-' : ' ';
-        while (fill_count-- > 0) {
-            abAppend(ab, &fill_char, 1);
-        }
+        
+        /* Create a local buffer to fill the gap in one go */
+        char fill_buffer[512]; 
+        if (fill_count > 511) fill_count = 511; // Safety cap
+        
+        memset(fill_buffer, fill_char, fill_count);
+        abAppend(ab, fill_buffer, fill_count);
     }
 
-    /* Percentage Indicator */
+    /* 4. Percentage Indicator */
     char perc[8];
     if (bufr->numrows == 0)
         memcpy(perc, " Emp --", 7);
@@ -532,7 +535,7 @@ void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
 
     abAppend(ab, perc, 7);
 
-    /* Reset formatting and move to next line */
+    /* 5. Clean up: Reset attributes and move to next line */
     abAppend(ab, "\x1b[m" CRLF, 5);
 }
 
