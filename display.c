@@ -47,6 +47,23 @@ static void computeRowHighlightBounds(struct editorBuffer *buf, int filerow,
 
 	erow *row = &buf->row[filerow];
 
+	/* Completions buffer: highlight the basename portion of the
+	 * currently selected match row only.  buf->cy tracks the
+	 * selected row (set by cycleCompletion / showCompletionsBuffer). */
+	if (buf->special_buffer && buf->filename &&
+	    strcmp(buf->filename, "*Completions*") == 0 && filerow >= 2 &&
+	    filerow == buf->cy) {
+		/* Find basename: byte offset after last '/' */
+		int base_byte = 0;
+		for (int i = 0; i < row->size; i++) {
+			if (row->chars[i] == '/')
+				base_byte = i + 1;
+		}
+		hl->region_start = charsToDisplayColumn(row, base_byte);
+		hl->region_end = charsToDisplayColumn(row, row->size);
+		return;
+	}
+
 	/* Region bounds */
 	if (!markInvalidSilent()) {
 		if (buf->rectangle_mode) {
@@ -123,28 +140,118 @@ static void updateHighlight(struct abuf *ab, int *current, int desired) {
 	}
 }
 
-/* Calculate number of rows to scroll for smooth scrolling */
-int calculateRowsToScroll(struct editorBuffer *buf, struct editorWindow *win,
-			  int direction) {
-	int rendered_lines = 0;
-	int rows_to_scroll = 0;
-	int start_row = (direction > 0) ? win->rowoff : win->rowoff - 1;
+/* Scroll the viewport by `n` screen lines.  Positive = down (content
+ * moves up), negative = up (content moves down).  Handles both wrap
+ * and non-wrap modes, managing rowoff and skip_sublines.
+ *
+ * This is a pure viewport operation — it does NOT touch the cursor.
+ * Callers are responsible for adjusting the cursor afterwards. */
+void scrollViewport(struct editorWindow *win, struct editorBuffer *buf, int n) {
+	if (n == 0)
+		return;
 
-	while (rendered_lines < win->height) {
-		if (start_row < 0 || start_row >= buf->numrows)
-			break;
-		erow *row = &buf->row[start_row];
-		int line_height = !buf->word_wrap ?
-					  1 :
-					  countScreenLines(row, E.screencols);
-		if (rendered_lines + line_height > win->height && direction < 0)
-			break;
-		rendered_lines += line_height;
-		rows_to_scroll++;
-		start_row += direction;
+	if (!buf->word_wrap) {
+		win->rowoff += n;
+		if (win->rowoff < 0)
+			win->rowoff = 0;
+		if (buf->numrows > 0 && win->rowoff >= buf->numrows)
+			win->rowoff = buf->numrows - 1;
+		win->skip_sublines = 0;
+		return;
 	}
 
-	return rows_to_scroll;
+	/* Word-wrap mode: scroll by individual screen lines */
+	buildScreenCache(buf);
+
+	if (n > 0) {
+		/* Scroll down */
+		for (int i = 0; i < n; i++) {
+			if (win->rowoff >= buf->numrows)
+				break;
+
+			int row_lines = countScreenLines(&buf->row[win->rowoff],
+							 E.screencols);
+
+			if (win->skip_sublines < row_lines - 1) {
+				win->skip_sublines++;
+			} else {
+				win->rowoff++;
+				win->skip_sublines = 0;
+				if (win->rowoff >= buf->numrows)
+					break;
+			}
+		}
+	} else {
+		/* Scroll up */
+		int up = -n;
+		for (int i = 0; i < up; i++) {
+			if (win->rowoff <= 0 && win->skip_sublines <= 0)
+				break;
+
+			if (win->skip_sublines > 0) {
+				win->skip_sublines--;
+			} else {
+				win->rowoff--;
+				int prev_lines = countScreenLines(
+					&buf->row[win->rowoff], E.screencols);
+				win->skip_sublines = prev_lines - 1;
+			}
+		}
+	}
+}
+
+/* Return the absolute screen line for the top of the current viewport,
+ * accounting for skip_sublines. */
+static int viewportTopScreenLine(struct editorWindow *win,
+				 struct editorBuffer *buf) {
+	return getScreenLineForRow(buf, win->rowoff) + win->skip_sublines;
+}
+
+/* Ensure the cursor is within the visible viewport.  If it has fallen
+ * outside, drag it to the nearest visible row.  Pure cursor fixup —
+ * does not touch the viewport. */
+void clampCursorToViewport(struct editorWindow *win, struct editorBuffer *buf) {
+	if (!buf->word_wrap) {
+		if (buf->cy < win->rowoff)
+			buf->cy = win->rowoff;
+		else if (buf->cy >= win->rowoff + win->height)
+			buf->cy = win->rowoff + win->height - 1;
+	} else {
+		buildScreenCache(buf);
+		int top = viewportTopScreenLine(win, buf);
+
+		/* Handle cursor past EOF */
+		if (buf->numrows > 0 && buf->cy >= buf->numrows)
+			buf->cy = buf->numrows - 1;
+
+		int cursor_screen = getScreenLineForRow(buf, buf->cy);
+
+		if (cursor_screen < top) {
+			/* Cursor above viewport — move down */
+			while (buf->cy < buf->numrows - 1) {
+				buf->cy++;
+				cursor_screen =
+					getScreenLineForRow(buf, buf->cy);
+				if (cursor_screen >= top)
+					break;
+			}
+			buf->cx = 0;
+		} else if (cursor_screen >= top + win->height) {
+			/* Cursor below viewport — move up */
+			while (buf->cy > 0) {
+				cursor_screen =
+					getScreenLineForRow(buf, buf->cy);
+				if (cursor_screen < top + win->height)
+					break;
+				buf->cy--;
+			}
+		}
+	}
+
+	if (buf->cy < 0)
+		buf->cy = 0;
+	if (buf->cy < buf->numrows && buf->cx > buf->row[buf->cy].size)
+		buf->cx = buf->row[buf->cy].size;
 }
 
 /* Render a line with highlighting support.
@@ -244,7 +351,8 @@ void setScxScy(struct editorWindow *win) {
 				int rowoff_screen_line =
 					getScreenLineForRow(buf, win->rowoff);
 				win->scy = virtual_screen_line -
-					   rowoff_screen_line;
+					   rowoff_screen_line -
+					   win->skip_sublines;
 			} else {
 				win->scy = 0 - win->rowoff;
 			}
@@ -253,7 +361,8 @@ void setScxScy(struct editorWindow *win) {
 				getScreenLineForRow(buf, buf->cy);
 			int rowoff_screen_line =
 				getScreenLineForRow(buf, win->rowoff);
-			win->scy = cursor_screen_line - rowoff_screen_line;
+			win->scy = cursor_screen_line - rowoff_screen_line -
+				   win->skip_sublines;
 		}
 	} else {
 		win->scy = buf->cy - win->rowoff;
@@ -297,53 +406,69 @@ void scroll(void) {
 	}
 
 	if (buf->word_wrap) {
-		if (buf->cy < win->rowoff) {
-			win->rowoff = buf->cy;
+		/* Ensure cache is built (it should already be by refreshScreen) */
+		buildScreenCache(buf);
+
+		/* Compute cursor's absolute screen line position.
+		 * When cy == numrows (virtual line past EOF), the
+		 * cursor is one screen line past the last row. */
+		int cursor_screen_line;
+		int cursor_sub_line = 0;
+		if (buf->cy >= buf->numrows) {
+			if (buf->numrows > 0) {
+				cursor_screen_line =
+					getScreenLineForRow(buf,
+							    buf->numrows - 1) +
+					countScreenLines(
+						&buf->row[buf->numrows - 1],
+						E.screencols);
+			} else {
+				cursor_screen_line = 0;
+			}
 		} else {
-			int cursor_screen_row = 0;
-
-			for (int i = win->rowoff;
-			     i < buf->cy && i < buf->numrows; i++) {
-				cursor_screen_row += countScreenLines(
-					&buf->row[i], E.screencols);
-			}
-
-			if (buf->cy < buf->numrows) {
-				int render_pos = charsToDisplayColumn(
-					&buf->row[buf->cy], buf->cx);
-				int sub_line, sub_col;
-				cursorScreenLine(&buf->row[buf->cy], render_pos,
-						 E.screencols, &sub_line,
-						 &sub_col);
-				cursor_screen_row += sub_line;
-			}
-
-			if (cursor_screen_row >= win->height) {
-				int visible_rows = 0;
-				if (buf->cy == buf->numrows) {
-					visible_rows = 1;
-				}
-				for (int i = buf->cy; i >= 0; i--) {
-					if (i < buf->numrows) {
-						int line_height =
-							countScreenLines(
-								&buf->row[i],
-								E.screencols);
-						if (visible_rows + line_height >
-						    win->height) {
-							win->rowoff = i + 1;
-							break;
-						}
-						visible_rows += line_height;
-					}
-					if (i == 0) {
-						win->rowoff = 0;
-						break;
-					}
-				}
-			}
+			cursor_screen_line = getScreenLineForRow(buf, buf->cy);
+			int render_pos = charsToDisplayColumn(
+				&buf->row[buf->cy], buf->cx);
+			int sub_col;
+			cursorScreenLine(&buf->row[buf->cy], render_pos,
+					 E.screencols, &cursor_sub_line,
+					 &sub_col);
+			cursor_screen_line += cursor_sub_line;
 		}
+
+		int rowoff_screen_line = getScreenLineForRow(buf, win->rowoff);
+		/* Account for current skip_sublines in the effective
+		 * top-of-window position */
+		int effective_top = rowoff_screen_line + win->skip_sublines;
+
+		if (cursor_screen_line < effective_top) {
+			/* Cursor above window: snap rowoff to cursor row */
+			win->rowoff = buf->cy;
+			win->skip_sublines = cursor_sub_line;
+		} else if (cursor_screen_line >= effective_top + win->height) {
+			/* Cursor below window: find new rowoff using
+			 * cache-based target_top search (§5.3) */
+			int target_top = cursor_screen_line - win->height + 1;
+
+			/* Walk backwards from cursor row to find
+			 * rowoff where screen_line_start[rowoff]
+			 * <= target_top */
+			int r = buf->cy;
+			if (r >= buf->numrows)
+				r = buf->numrows - 1;
+			while (r > 0 &&
+			       getScreenLineForRow(buf, r) > target_top)
+				r--;
+			win->rowoff = r;
+			win->skip_sublines =
+				target_top - getScreenLineForRow(buf, r);
+		}
+		/* Otherwise: cursor is visible, keep rowoff and
+		 * skip_sublines as they are */
 	} else {
+		/* Reset skip_sublines in non-wrap mode */
+		win->skip_sublines = 0;
+
 		if (buf->cy < win->rowoff) {
 			win->rowoff = buf->cy;
 		} else if (buf->cy >= win->rowoff + win->height) {
@@ -373,15 +498,13 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 	struct editorBuffer *buf = win->buf;
 	int y;
 	int filerow = win->rowoff;
+	int skip = win->skip_sublines; /* sub-lines to skip on first row */
 
 	for (y = 0; y < screenrows; y++) {
 		if (filerow >= buf->numrows) {
 			abAppend(ab, " ", 1);
 		} else {
 			erow *row = &buf->row[filerow];
-			if (!row->render_valid) {
-				updateRow(row);
-			}
 			if (!buf->word_wrap) {
 				// Truncated mode with visual marking
 				struct rowHighlight hl;
@@ -395,6 +518,7 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 				 * boundaries when possible. */
 				int line_start_col = 0;
 				int line_start_byte = 0;
+				int sub_line_idx = 0;
 
 				struct rowHighlight hl;
 				computeRowHighlightBounds(buf, filerow, &hl);
@@ -406,6 +530,18 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 						row, screencols, line_start_col,
 						line_start_byte, &break_col,
 						&break_byte);
+
+					/* Skip sub-lines that are above the
+					 * visible area (only for the first
+					 * rendered row, i.e. rowoff) */
+					if (sub_line_idx < skip) {
+						sub_line_idx++;
+						if (!more)
+							break;
+						line_start_col = break_col;
+						line_start_byte = break_byte;
+						continue;
+					}
 
 					/* --- Render the span --- */
 					renderLineWithHighlighting(
@@ -441,9 +577,11 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 						break;
 					line_start_col = break_col;
 					line_start_byte = break_byte;
+					sub_line_idx++;
 				}
 
 				filerow++;
+				skip = 0; /* Only skip on the first row */
 			}
 		}
 		abAppend(ab, "\x1b[K", 3);
@@ -454,116 +592,88 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 }
 
 void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
-	/* XXX: It's actually possible for the status bar to end up
-	 * outside where it should be, so set it explicitly. */
 	char buf[32];
+	/* Position cursor at the start of the status bar line */
 	snprintf(buf, sizeof(buf), CSI "%d;%dH", line, 1);
 	abAppend(ab, buf, strlen(buf));
 
 	struct editorBuffer *bufr = win->buf;
 
+	/* Start Reverse Video */
 	abAppend(ab, "\x1b[7m", 4);
-	char status[80];
-	int len = 0;
-	if (win->focused) {
-		len = snprintf(status, sizeof(status),
-			       "-- %.20s %c%c%c %2d:%2d --",
-			       bufr->filename ? bufr->filename : "*scratch*",
-			       bufr->dirty ? '*' : '-', bufr->dirty ? '*' : '-',
-			       bufr->read_only ? '%' : ' ', bufr->cy + 1,
-			       bufr->cx);
-	} else {
-		len = snprintf(status, sizeof(status),
-			       "   %.20s %c%c%c %2d:%2d   ",
-			       bufr->filename ? bufr->filename : "*scratch*",
-			       bufr->dirty ? '*' : '-', bufr->dirty ? '*' : '-',
-			       bufr->read_only ? '%' : ' ', win->cy + 1,
-			       win->cx);
-	}
-#ifdef EMIL_DEBUG_UNDO
-#ifdef EMIL_DEBUG_REDO
-#define DEBUG_UNDO bufr->redo
-#else
-#define DEBUG_UNDO bufr->undo
-#endif
-	if (DEBUG_UNDO != NULL) {
-		len = 0;
-		for (len = 0; len < DEBUG_UNDO->datalen; len++) {
-			status[len] = DEBUG_UNDO->data[len];
-			if (DEBUG_UNDO->data[len] == '\n')
-				status[len] = '#';
-		}
-		status[len++] = '"';
-		len += snprintf(&status[len], sizeof(status) - len,
-				"sx %d sy %d ex %d ey %d cx %d cy %d",
-				DEBUG_UNDO->startx, DEBUG_UNDO->starty,
-				DEBUG_UNDO->endx, DEBUG_UNDO->endy, bufr->cx,
-				bufr->cy);
-	}
-#endif
-#ifdef EMIL_DEBUG_MACROS
-	/* This can get quite wide, you may want to boost the size of status */
-	for (int i = 0; i < E.macro.nkeys; i++) {
-		len += snprintf(&status[len], sizeof(status) - len, "%d: %d ",
-				i, E.macro.keys[i]);
-	}
-#endif
 
-	char perc[8];
+	/* Use pre-computed display name (set by computeDisplayNames) */
+	const char *dname =
+		bufr->display_name ?
+			bufr->display_name :
+			(bufr->filename ? bufr->filename : "*scratch*");
+
+	/* Build right-side indicator (fixed position, right-aligned).
+     * Format: " NNN:NNN XX% --" or " NNN:NNN Top --"
+     * This is always in the rightmost columns. */
+	char right[32];
+	int ry = win->focused ? bufr->cy + 1 : win->cy + 1;
+	int rx = win->focused ? bufr->cx : win->cx;
+
+	char pos_indicator[8];
 	if (bufr->numrows == 0)
-		memcpy(perc, " Emp --", 7);
+		memcpy(pos_indicator, "Emp", 4);
 	else if (bufr->end && win->rowoff == 0)
-		memcpy(perc, " All --", 7);
+		memcpy(pos_indicator, "All", 4);
 	else if (bufr->end)
-		memcpy(perc, " Bot --", 7);
+		memcpy(pos_indicator, "Bot", 4);
 	else if (win->rowoff == 0)
-		memcpy(perc, " Top --", 7);
+		memcpy(pos_indicator, "Top", 4);
 	else
-		snprintf(perc, sizeof(perc), " %2d%% --",
+		snprintf(pos_indicator, sizeof(pos_indicator), "%2d%%",
 			 (win->rowoff * 100) / bufr->numrows);
 
-	if (!win->focused) {
-		perc[5] = ' ';
-		perc[6] = ' ';
+	int right_len;
+	if (win->focused) {
+		right_len = snprintf(right, sizeof(right), " %d:%d %s --", ry,
+				     rx, pos_indicator);
+	} else {
+		right_len = snprintf(right, sizeof(right), " %d:%d %s   ", ry,
+				     rx, pos_indicator);
 	}
 
-	if (len > E.screencols)
-		len = E.screencols;
-	abAppend(ab, status, len);
-
-	/* Fill the gap between status text and percentage indicator.
-	 * Use a CSI column-jump to skip to the percentage position
-	 * rather than emitting one fill byte at a time. */
-	int perc_col = E.screencols - 7 + 1; /* 1-based column */
-	if (len < E.screencols - 7) {
-		if (win->focused) {
-			/* Emit a run of dashes to fill the gap.
-			 * For very wide terminals, use a CSI jump
-			 * followed by just enough dashes. */
-			int fill_count = E.screencols - 7 - len;
-			if (fill_count <= 256) {
-				char fill_buf[256];
-				memset(fill_buf, '-', fill_count);
-				abAppend(ab, fill_buf, fill_count);
-			} else {
-				/* Jump to the percentage column and
-				 * let reverse-video fill the gap */
-				char jump[16];
-				int jlen = snprintf(jump, sizeof(jump),
-						    CSI "%dG", perc_col);
-				abAppend(ab, jump, jlen);
-			}
-		} else {
-			/* Unfocused: jump directly, spaces are already the
-			 * background under reverse video */
-			char jump[16];
-			int jlen = snprintf(jump, sizeof(jump), CSI "%dG",
-					    perc_col);
-			abAppend(ab, jump, jlen);
-		}
+	/* Build left side: "-- name XX " or "   name XX " */
+	char left[1024];
+	int left_len;
+	if (win->focused) {
+		left_len = snprintf(left, sizeof(left), "-- %s %c%c%c", dname,
+				    bufr->dirty ? '*' : '-',
+				    bufr->dirty ? '*' : '-',
+				    bufr->read_only ? '%' : ' ');
+	} else {
+		left_len = snprintf(left, sizeof(left), "   %s %c%c%c", dname,
+				    bufr->dirty ? '*' : '-',
+				    bufr->dirty ? '*' : '-',
+				    bufr->read_only ? '%' : ' ');
 	}
-	abAppend(ab, perc, 7);
-	abAppend(ab, "\x1b[m" CRLF, 5);
+
+	/* Total visible = screencols - 1 (to avoid right-margin wrap).
+     * Layout: [left][fill][right]
+     * Cap left so there's room for at least the right side. */
+	int total = E.screencols - 1;
+	if (left_len > total - right_len)
+		left_len = total - right_len;
+	if (left_len < 0)
+		left_len = 0;
+
+	abAppend(ab, left, left_len);
+
+	/* Fill gap between left and right */
+	int fill = total - left_len - right_len;
+	char fill_char = win->focused ? '-' : ' ';
+	while (fill-- > 0)
+		abAppend(ab, &fill_char, 1);
+
+	abAppend(ab, right, right_len);
+
+	/* CSI K fills the last column with reverse video without
+     * triggering auto-wrap on immediate-wrap terminals. */
+	abAppend(ab, "\x1b[K\x1b[m" CRLF, 8);
 }
 
 void drawMinibuffer(struct abuf *ab) {
@@ -591,6 +701,27 @@ void refreshScreen(void) {
 	struct abuf ab = ABUF_INIT;
 	abAppend(&ab, "\x1b[?25l", 6); // Hide cursor
 	abAppend(&ab, "\x1b[H", 3);    // Move cursor to top-left corner
+
+	/* Mandatory bounds clamp for all windows (§7.2) */
+	for (int i = 0; i < E.nwindows; i++) {
+		struct editorWindow *w = E.windows[i];
+		struct editorBuffer *b = w->buf;
+		if (b->numrows == 0) {
+			w->rowoff = 0;
+			w->skip_sublines = 0;
+		} else if (w->rowoff >= b->numrows) {
+			w->rowoff = b->numrows - 1;
+			w->skip_sublines = 0;
+		}
+	}
+
+	/* Build screen line cache for each visible buffer (§4.2) */
+	for (int i = 0; i < E.nwindows; i++) {
+		struct editorBuffer *b = E.windows[i]->buf;
+		if (!b->screen_line_cache_valid) {
+			buildScreenCache(b);
+		}
+	}
 
 	int focusedIdx = windowFocusedIdx();
 
@@ -679,6 +810,18 @@ void cursorBottomLine(int curs) {
 void editorResizeScreen(int UNUSED(sig)) {
 	if (getWindowSize(&E.screenrows, &E.screencols) == -1)
 		die("getWindowSize");
+	/* Screen width changed — all cached widths are stale for word-wrap */
+	for (struct editorBuffer *b = E.headbuf; b != NULL; b = b->next) {
+		for (int i = 0; i < b->numrows; i++) {
+			b->row[i].cached_width = -1;
+		}
+		b->screen_line_cache_valid = 0;
+	}
+	/* Reset window heights so they get recalculated */
+	for (int i = 0; i < E.nwindows; i++) {
+		E.windows[i]->height = 0;
+	}
+	computeDisplayNames();
 	refreshScreen();
 }
 
@@ -719,10 +862,12 @@ void recenter(struct editorWindow *win) {
 	if (win->rowoff < 0) {
 		win->rowoff = 0;
 	}
+	win->skip_sublines = 0;
 }
 
 void editorToggleVisualLineMode(void) {
 	E.buf->word_wrap = !E.buf->word_wrap;
+	invalidateScreenCache(E.buf);
 	editorSetStatusMessage(E.buf->word_wrap ? "Visual line mode enabled" :
 						  "Visual line mode disabled");
 }

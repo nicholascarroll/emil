@@ -146,12 +146,12 @@ void executeCommand(int key) {
 	/* Handle prefix state transitions and commands */
 	switch (key) {
 	case CTRL('x'):
-	if (prefix == PREFIX_NONE) {
-		prefix = PREFIX_CTRL_X;
-		showPrefix("C-x ");
-		return;
-	}
-	break;
+		if (prefix == PREFIX_NONE) {
+			prefix = PREFIX_CTRL_X;
+			showPrefix("C-x ");
+			return;
+		}
+		break;
 
 	case CTRL('g'):
 		/* Cancel prefix */
@@ -313,8 +313,8 @@ void executeCommand(int key) {
 		default:
 			/* Unknown C-x sequence */
 			if (key < ' ') {
-				editorSetStatusMessage(
-					msg_unknown_cx, key + '`');
+				editorSetStatusMessage(msg_unknown_cx,
+						       key + '`');
 			} else {
 				editorSetStatusMessage("Unknown command C-x %c",
 						       key);

@@ -156,6 +156,7 @@ int main(int argc, char *argv[]) {
 	E.minibuf->word_wrap = 0;
 	E.minibuf->filename = xstrdup("*minibuffer*");
 	E.edbuf = E.buf;
+	computeDisplayNames();
 
 #ifdef EMIL_DISABLE_SHELL
 	editorSetStatusMessage("Shell integration disabled");

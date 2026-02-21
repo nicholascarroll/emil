@@ -12,6 +12,152 @@
 #include "unused.h"
 #include "util.h"
 
+/* Bulk-insert text from 'data' (length 'datalen') into 'buf' starting
+ * at buffer position (startx, starty).  Uses direct memmove/memcpy and
+ * editorInsertRow — no character-at-a-time primitives.  Does NOT record
+ * undo. */
+static void bulkInsert(struct editorBuffer *buf, int startx, int starty,
+		       const uint8_t *data, int datalen) {
+	if (datalen <= 0)
+		return;
+
+	/* Ensure the target row exists */
+	if (starty >= buf->numrows)
+		editorInsertRow(buf, buf->numrows, "", 0);
+
+	/* Scan for newlines to decide single-line vs multi-line */
+	const uint8_t *first_nl = memchr(data, '\n', datalen);
+
+	if (first_nl == NULL) {
+		/* Single-line insert: memmove tail right, memcpy data in */
+		struct erow *row = &buf->row[starty];
+		row->chars = xrealloc(row->chars, row->size + datalen + 1);
+		memmove(&row->chars[startx + datalen], &row->chars[startx],
+			row->size - startx + 1); /* +1 for NUL */
+		memcpy(&row->chars[startx], data, datalen);
+		row->size += datalen;
+		row->cached_width = -1;
+		buf->dirty = 1;
+		invalidateScreenCache(buf);
+		return;
+	}
+
+	/* Multi-line insert.  Strategy:
+	 *   1. Save the suffix of the start row (bytes after startx).
+	 *   2. Truncate the start row at startx.
+	 *   3. Append the first line fragment from data to the start row.
+	 *   4. Insert complete interior lines as new rows.
+	 *   5. Insert the last line fragment + saved suffix as a new row. */
+
+	struct erow *row = &buf->row[starty];
+
+	/* Save suffix */
+	int suffix_len = row->size - startx;
+	uint8_t *suffix = NULL;
+	if (suffix_len > 0) {
+		suffix = xmalloc(suffix_len);
+		memcpy(suffix, &row->chars[startx], suffix_len);
+	}
+
+	/* Truncate start row at startx, then append first fragment */
+	int first_frag_len = (int)(first_nl - data);
+	int new_size = startx + first_frag_len;
+	row->chars = xrealloc(row->chars, new_size + 1);
+	if (first_frag_len > 0)
+		memcpy(&row->chars[startx], data, first_frag_len);
+	row->size = new_size;
+	row->chars[row->size] = '\0';
+	row->cached_width = -1;
+
+	/* Walk remaining data, inserting interior and final lines */
+	int insert_at = starty + 1;
+	const uint8_t *p = first_nl + 1; /* skip past first '\n' */
+	const uint8_t *end = data + datalen;
+
+	while (p < end) {
+		const uint8_t *nl = memchr(p, '\n', end - p);
+		if (nl == NULL) {
+			/* Last fragment — combine with saved suffix */
+			int last_frag_len = (int)(end - p);
+			int combined_len = last_frag_len + suffix_len;
+			uint8_t *combined = xmalloc(combined_len + 1);
+			memcpy(combined, p, last_frag_len);
+			if (suffix_len > 0)
+				memcpy(&combined[last_frag_len], suffix,
+				       suffix_len);
+			combined[combined_len] = '\0';
+			editorInsertRow(buf, insert_at, (char *)combined,
+					combined_len);
+			free(combined);
+			free(suffix);
+			buf->dirty = 1;
+			invalidateScreenCache(buf);
+			return;
+		}
+		/* Interior complete line */
+		int line_len = (int)(nl - p);
+		editorInsertRow(buf, insert_at, (char *)p, line_len);
+		insert_at++;
+		p = nl + 1;
+	}
+
+	/* If data ended with '\n', we still need to insert the suffix
+	 * as a new row */
+	if (suffix_len > 0) {
+		editorInsertRow(buf, insert_at, (char *)suffix, suffix_len);
+	} else {
+		editorInsertRow(buf, insert_at, "", 0);
+	}
+	free(suffix);
+	buf->dirty = 1;
+	invalidateScreenCache(buf);
+}
+
+/* Bulk-delete text from (startx, starty) to (endx, endy).
+ * Uses direct memmove/memcpy and editorDelRow — no character-at-a-time
+ * primitives.  Does NOT record undo. */
+static void bulkDelete(struct editorBuffer *buf, int startx, int starty,
+		       int endx, int endy) {
+	if (buf->numrows == 0 || starty >= buf->numrows)
+		return;
+
+	if (starty == endy) {
+		/* Single-row deletion */
+		struct erow *row = &buf->row[starty];
+		memmove(&row->chars[startx], &row->chars[endx],
+			row->size - endx + 1); /* +1 for NUL */
+		row->size -= endx - startx;
+		row->cached_width = -1;
+		buf->dirty = 1;
+		invalidateScreenCache(buf);
+	} else {
+		/* Multi-row deletion:
+		 *   1. Delete interior rows (between starty and endy).
+		 *   2. Merge start row prefix with end row suffix. */
+		int rows_to_del = endy - starty - 1;
+		for (int i = 0; i < rows_to_del; i++)
+			editorDelRow(buf, starty + 1);
+
+		/* After deleting interior rows, the end row is now at
+		 * starty + 1 */
+		if (starty + 1 >= buf->numrows)
+			return;
+
+		struct erow *first = &buf->row[starty];
+		struct erow *last = &buf->row[starty + 1];
+		int new_size = startx + (last->size - endx);
+		first->chars = xrealloc(first->chars, new_size + 1);
+		memcpy(&first->chars[startx], &last->chars[endx],
+		       last->size - endx);
+		first->size = new_size;
+		first->chars[first->size] = '\0';
+		first->cached_width = -1;
+		editorDelRow(buf, starty + 1);
+		buf->dirty = 1;
+		invalidateScreenCache(buf);
+	}
+}
+
 void editorDoUndo(struct editorBuffer *buf, int count) {
 	if (buf->read_only) {
 		editorSetStatusMessage(msg_read_only);
@@ -27,50 +173,18 @@ void editorDoUndo(struct editorBuffer *buf, int count) {
 		int paired = buf->undo->paired;
 
 		if (buf->undo->delete) {
-			buf->cx = buf->undo->startx;
-			buf->cy = buf->undo->starty;
-			for (int i = buf->undo->datalen - 1; i >= 0; i--) {
-				if (buf->undo->data[i] == '\n') {
-					editorInsertNewline(buf, 1);
-				} else {
-					editorInsertChar(buf,
-							 buf->undo->data[i], 1);
-				}
-			}
+			/* Re-insert deleted text using bulk operations.
+			 * Data is in forward order (matching original
+			 * file text). */
+			bulkInsert(buf, buf->undo->startx, buf->undo->starty,
+				   buf->undo->data, buf->undo->datalen);
 			buf->cx = buf->undo->endx;
 			buf->cy = buf->undo->endy;
 		} else {
-			if (buf->numrows == 0 ||
-			    buf->undo->starty >= buf->numrows) {
-				return;
-			}
-			struct erow *row = &buf->row[buf->undo->starty];
-			if (buf->undo->starty == buf->undo->endy) {
-				memmove(&row->chars[buf->undo->startx],
-					&row->chars[buf->undo->endx],
-					row->size - buf->undo->endx);
-				row->size -=
-					buf->undo->endx - buf->undo->startx;
-				row->chars[row->size] = 0;
-			} else {
-				for (int i = buf->undo->starty + 1;
-				     i < buf->undo->endy; i++) {
-					editorDelRow(buf,
-						     buf->undo->starty + 1);
-				}
-				if (buf->undo->starty + 1 >= buf->numrows) {
-					return;
-				}
-				struct erow *last =
-					&buf->row[buf->undo->starty + 1];
-				row->size = buf->undo->startx;
-				row->size += last->size - buf->undo->endx;
-				row->chars = xrealloc(row->chars, row->size);
-				memcpy(&row->chars[buf->undo->startx],
-				       &last->chars[buf->undo->endx],
-				       last->size - buf->undo->endx);
-				editorDelRow(buf, buf->undo->starty + 1);
-			}
+			/* Delete the previously inserted text using
+			 * bulk operations. */
+			bulkDelete(buf, buf->undo->startx, buf->undo->starty,
+				   buf->undo->endx, buf->undo->endy);
 			buf->cx = buf->undo->startx;
 			buf->cy = buf->undo->starty;
 		}
@@ -119,43 +233,16 @@ void editorDoRedo(struct editorBuffer *buf, int count) {
 		}
 
 		if (buf->redo->delete) {
-			struct erow *row = &buf->row[buf->redo->starty];
-			if (buf->redo->starty == buf->redo->endy) {
-				memmove(&row->chars[buf->redo->startx],
-					&row->chars[buf->redo->endx],
-					row->size - buf->redo->endx);
-				row->size -=
-					buf->redo->endx - buf->redo->startx;
-				row->chars[row->size] = 0;
-			} else {
-				for (int i = buf->redo->starty + 1;
-				     i < buf->redo->endy; i++) {
-					editorDelRow(buf,
-						     buf->redo->starty + 1);
-				}
-				struct erow *last =
-					&buf->row[buf->redo->starty + 1];
-				row->size = buf->redo->startx;
-				row->size += last->size - buf->redo->endx;
-				row->chars = xrealloc(row->chars, row->size);
-				memcpy(&row->chars[buf->redo->startx],
-				       &last->chars[buf->redo->endx],
-				       last->size - buf->redo->endx);
-				editorDelRow(buf, buf->redo->starty + 1);
-			}
+			/* Re-delete text using bulk operations. */
+			bulkDelete(buf, buf->redo->startx, buf->redo->starty,
+				   buf->redo->endx, buf->redo->endy);
 			buf->cx = buf->redo->startx;
 			buf->cy = buf->redo->starty;
 		} else {
-			buf->cx = buf->redo->startx;
-			buf->cy = buf->redo->starty;
-			for (int i = 0; i < buf->redo->datalen; i++) {
-				if (buf->redo->data[i] == '\n') {
-					editorInsertNewline(buf, 1);
-				} else {
-					editorInsertChar(buf,
-							 buf->redo->data[i], 1);
-				}
-			}
+			/* Re-insert text using bulk operations.
+			 * Data is in forward order. */
+			bulkInsert(buf, buf->redo->startx, buf->redo->starty,
+				   buf->redo->data, buf->redo->datalen);
 			buf->cx = buf->redo->endx;
 			buf->cy = buf->redo->endy;
 		}
@@ -314,9 +401,10 @@ void editorUndoBackSpace(struct editorBuffer *buf, uint8_t c) {
 		new->delete = 1;
 		pushUndo(buf, new);
 	}
-	buf->undo->data[buf->undo->datalen++] = c;
-	buf->undo->data[buf->undo->datalen] = 0;
-	if (buf->undo->datalen >= buf->undo->datasize - 2) {
+	/* Prepend the byte so data stays in forward (file) order.
+	 * Backspace delivers bytes from right to left, so prepending
+	 * reconstructs the original left-to-right sequence. */
+	if (buf->undo->datalen + 1 >= buf->undo->datasize - 2) {
 		if ((size_t)buf->undo->datasize > SIZE_MAX / 2) {
 			die("buffer size overflow");
 		}
@@ -324,6 +412,10 @@ void editorUndoBackSpace(struct editorBuffer *buf, uint8_t c) {
 		buf->undo->data =
 			xrealloc(buf->undo->data, buf->undo->datasize);
 	}
+	memmove(&buf->undo->data[1], buf->undo->data, buf->undo->datalen);
+	buf->undo->data[0] = c;
+	buf->undo->datalen++;
+	buf->undo->data[buf->undo->datalen] = 0;
 	if (c == '\n') {
 		buf->undo->starty--;
 		buf->undo->startx = buf->row[buf->undo->starty].size;
@@ -348,7 +440,7 @@ void editorUndoDelChar(struct editorBuffer *buf, erow *row) {
 	}
 
 	if (buf->cx == row->size) {
-		buf->undo->datalen++;
+		/* Deleting a newline — append it */
 		if (buf->undo->datalen >= buf->undo->datasize - 2) {
 			if ((size_t)buf->undo->datasize > SIZE_MAX / 2) {
 				die("buffer size overflow");
@@ -357,27 +449,30 @@ void editorUndoDelChar(struct editorBuffer *buf, erow *row) {
 			buf->undo->data =
 				xrealloc(buf->undo->data, buf->undo->datasize);
 		}
-		memmove(&buf->undo->data[1], buf->undo->data,
-			buf->undo->datalen - 1);
-		buf->undo->data[0] = '\n';
+		buf->undo->data[buf->undo->datalen++] = '\n';
+		buf->undo->data[buf->undo->datalen] = 0;
 		buf->undo->endy++;
 		buf->undo->endx = 0;
 	} else {
 		int n = utf8_nBytes(row->chars[buf->cx]);
-		buf->undo->datalen += n;
-		if (buf->undo->datalen >= buf->undo->datasize - 2) {
+		if (buf->undo->datalen + n >= buf->undo->datasize - 2) {
 			if ((size_t)buf->undo->datasize > SIZE_MAX / 2) {
 				die("buffer size overflow");
 			}
 			buf->undo->datasize *= 2;
+			if (buf->undo->datalen + n >= buf->undo->datasize - 2) {
+				buf->undo->datasize =
+					buf->undo->datalen + n + 4;
+			}
 			buf->undo->data =
 				xrealloc(buf->undo->data, buf->undo->datasize);
 		}
-		memmove(&buf->undo->data[n], buf->undo->data,
-			buf->undo->datalen - n);
+		/* Append bytes in natural UTF-8 order */
 		for (int i = 0; i < n; i++) {
-			buf->undo->data[i] = row->chars[buf->cx + n - i - 1];
-			buf->undo->endx++;
+			buf->undo->data[buf->undo->datalen++] =
+				row->chars[buf->cx + i];
 		}
+		buf->undo->data[buf->undo->datalen] = 0;
+		buf->undo->endx += n;
 	}
 }

@@ -8,6 +8,7 @@ void editorInsertChar(struct editorBuffer *bufr, int c, int count);
 void editorInsertUnicode(struct editorBuffer *bufr, int count);
 
 /* Line operations */
+void editorInsertNewlineRaw(struct editorBuffer *bufr);
 void editorInsertNewline(struct editorBuffer *bufr, int count);
 void editorOpenLine(struct editorBuffer *bufr, int count);
 void editorInsertNewlineAndIndent(struct editorBuffer *bufr, int count);

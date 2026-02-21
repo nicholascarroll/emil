@@ -29,13 +29,8 @@ enum promptType {
 
 typedef struct erow {
 	int size;
-	int rsize;
-	int renderwidth;
 	uint8_t *chars;
-	uint8_t *render;
-	int cached_width;
-	int width_valid;
-	int render_valid;
+	int cached_width; /* display width in columns, or -1 if stale */
 } erow;
 
 struct editorUndo {
@@ -58,6 +53,9 @@ struct completion_state {
 	int successive_tabs;
 	int last_completion_count;
 	int preserve_message;
+	int selected;	/* Currently highlighted match index, -1 = none */
+	char **matches; /* Copy of match list for M-n/M-p navigation */
+	int n_matches;	/* Number of matches in the list */
 };
 
 struct completion_result {
@@ -82,6 +80,7 @@ struct editorBuffer {
 	int read_only;
 	erow *row;
 	char *filename;
+	char *display_name; /* Truncated name for status bar display */
 	uint8_t *query;
 	uint8_t match;
 	struct editorUndo *undo;
@@ -102,6 +101,7 @@ struct editorWindow {
 	int rowoff;
 	int coloff;
 	int height;
+	int skip_sublines; /* sub-lines of rowoff row to skip (derived per frame) */
 };
 
 struct editorMacro {
@@ -212,6 +212,7 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 		      enum promptType t,
 		      void (*callback)(struct editorBuffer *, uint8_t *, int));
 void editorUpdateBuffer(struct editorBuffer *buf);
+void editorInsertNewlineRaw(struct editorBuffer *bufr);
 void editorInsertNewline(struct editorBuffer *bufr, int count);
 void editorInsertChar(struct editorBuffer *bufr, int c, int count);
 int editorOpen(struct editorBuffer *bufr, char *filename);

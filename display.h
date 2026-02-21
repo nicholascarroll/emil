@@ -21,9 +21,9 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line);
 void drawMinibuffer(struct abuf *ab);
 void scroll(void);
+void scrollViewport(struct editorWindow *win, struct editorBuffer *buf, int n);
+void clampCursorToViewport(struct editorWindow *win, struct editorBuffer *buf);
 void setScxScy(struct editorWindow *win);
-int calculateRowsToScroll(struct editorBuffer *buf, struct editorWindow *win,
-			  int direction);
 void cursorBottomLine(int curs);
 void editorResizeScreen(int sig);
 void recenter(struct editorWindow *win);

@@ -124,10 +124,7 @@ void editorKillRegion(struct editorConfig *ed, struct editorBuffer *buf) {
 	new->datalen = strlen((char *)ed->kill);
 	new->datasize = new->datalen + 1;
 	new->data = xmalloc(new->datasize);
-	/* XXX: have to copy kill to undo in reverse */
-	for (int i = 0; i < new->datalen; i++) {
-		new->data[i] = ed->kill[new->datalen - i - 1];
-	}
+	memcpy(new->data, ed->kill, new->datalen);
 	new->data[new->datalen] = 0;
 	new->append = 0;
 	new->delete = 1;
@@ -226,9 +223,11 @@ void editorYank(struct editorConfig *ed, struct editorBuffer *buf, int count) {
 		emil_strlcpy(new->data, ed->kill, new->datasize);
 		new->append = 0;
 
+		/* Insert using raw primitives — this undo record
+		 * is built manually above. */
 		for (int i = 0; ed->kill[i] != 0; i++) {
 			if (ed->kill[i] == '\n') {
-				editorInsertNewline(buf, 1);
+				editorInsertNewlineRaw(buf);
 			} else {
 				editorInsertChar(buf, ed->kill[i], 1);
 			}
@@ -365,7 +364,7 @@ void editorReplaceRegex(struct editorConfig *ed, struct editorBuffer *buf) {
 		new->data = xrealloc(new->data, new->datasize);
 	}
 	for (int i = 0; i < new->datalen; i++) {
-		new->data[i] = ed->kill[new->datalen - i - 1];
+		new->data[i] = ed->kill[i];
 	}
 	new->data[new->datalen] = 0;
 	new->append = 0;
@@ -555,7 +554,7 @@ void editorStringRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	new->datasize = new->datalen + 1;
 	new->data = xmalloc(new->datasize);
 	for (int i = 0; i < new->datalen; i++) {
-		new->data[i] = ed->kill[new->datalen - i - 1];
+		new->data[i] = ed->kill[i];
 	}
 	new->data[new->datalen] = 0;
 	new->append = 0;
@@ -800,7 +799,7 @@ void editorKillRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	new->datasize = new->datalen + 1;
 	new->data = xmalloc(new->datasize);
 	for (int i = 0; i < new->datalen; i++) {
-		new->data[i] = ed->kill[new->datalen - i - 1];
+		new->data[i] = ed->kill[i];
 	}
 	new->data[new->datalen] = 0;
 	new->append = 0;
@@ -977,7 +976,7 @@ void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 		new->data[0] = 0;
 	} else {
 		for (int i = 0; i < new->datalen; i++) {
-			new->data[i] = ed->kill[new->datalen - i - 1];
+			new->data[i] = ed->kill[i];
 		}
 	}
 	new->data[new->datalen] = 0;

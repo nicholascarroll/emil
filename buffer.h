@@ -1,7 +1,6 @@
 #ifndef EMIL_BUFFER_H
 #define EMIL_BUFFER_H
 #include "emil.h"
-void updateRow(erow *row);
 void editorInsertRow(struct editorBuffer *bufr, int at, char *s, size_t len);
 void freeRow(erow *row);
 void editorDelRow(struct editorBuffer *bufr, int at);
@@ -18,6 +17,7 @@ void editorSwitchToNamedBuffer(struct editorConfig *ed,
 void editorNextBuffer(void);
 void editorPreviousBuffer(void);
 void editorKillBuffer(void);
+void computeDisplayNames(void);
 void invalidateScreenCache(struct editorBuffer *buf);
 void buildScreenCache(struct editorBuffer *buf);
 int getScreenLineForRow(struct editorBuffer *buf, int row);
