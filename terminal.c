@@ -12,6 +12,7 @@
 #include <sys/termios.h>
 #endif
 #include <sys/ioctl.h>
+#include <sys/select.h>
 #include <unistd.h>
 #include <string.h>
 #include <signal.h>
@@ -23,10 +24,10 @@ extern struct editorConfig E;
 void editorDeserializeUnicode(void);
 
 void die(const char *s) {
-	write(STDOUT_FILENO, CSI "2J", 4);
-	write(STDOUT_FILENO, CSI "H", 3);
+	IGNORE_RETURN(write(STDOUT_FILENO, CSI "2J", 4));
+	IGNORE_RETURN(write(STDOUT_FILENO, CSI "H", 3));
 	perror(s);
-	write(STDOUT_FILENO, CRLF, 2);
+	IGNORE_RETURN(write(STDOUT_FILENO, CRLF, 2));
 	exit(1);
 }
 
@@ -100,13 +101,13 @@ void editorOpenShellDrawer(void) {
 	char buf[64];
 	int n = snprintf(buf, sizeof(buf), CSI "%d;%dr", drawerTop, ws.ws_row);
 	if (n > 0)
-		write(STDOUT_FILENO, buf, n);
+		IGNORE_RETURN(write(STDOUT_FILENO, buf, n));
 
 	/* Move cursor to the top of the drawer and clear the area */
 	n = snprintf(buf, sizeof(buf), CSI "%d;1H", drawerTop);
 	if (n > 0)
-		write(STDOUT_FILENO, buf, n);
-	write(STDOUT_FILENO, CSI "J", 3);
+		IGNORE_RETURN(write(STDOUT_FILENO, buf, n));
+	IGNORE_RETURN(write(STDOUT_FILENO, CSI "J", 3));
 
 	/* Restore cooked mode but stay on the alt screen */
 	disableRawModeKeepScreen();
@@ -205,17 +206,17 @@ void editorCopyToClipboard(const uint8_t *text) {
 	int in_tmux = (getenv("TMUX") != NULL);
 
 	if (in_tmux)
-		write(STDOUT_FILENO, "\033Ptmux;\033", 9);
+		IGNORE_RETURN(write(STDOUT_FILENO, "\033Ptmux;\033", 9));
 
-	write(STDOUT_FILENO, "\033]52;c;", 7);
-	write(STDOUT_FILENO, encoded, strlen(encoded));
+	IGNORE_RETURN(write(STDOUT_FILENO, "\033]52;c;", 7));
+	IGNORE_RETURN(write(STDOUT_FILENO, encoded, strlen(encoded)));
 
 	if (in_tmux) {
 		/* Doubled ESC for the inner ST, then close the DCS */
-		write(STDOUT_FILENO, "\033\033\\", 3);
-		write(STDOUT_FILENO, "\033\\", 2);
+		IGNORE_RETURN(write(STDOUT_FILENO, "\033\033\\", 3));
+		IGNORE_RETURN(write(STDOUT_FILENO, "\033\\", 2));
 	} else {
-		write(STDOUT_FILENO, "\033\\", 2);
+		IGNORE_RETURN(write(STDOUT_FILENO, "\033\\", 2));
 	}
 
 	free(encoded);
@@ -226,6 +227,37 @@ void editorDeserializeUnicode(void) {
 	E.nunicode = utf8_nBytes(E.unicode[0]);
 	for (int i = 1; i < E.nunicode; i++) {
 		E.unicode[i] = E.macro.keys[E.playback++];
+	}
+}
+
+/*
+ * Drain the remainder of an unrecognized CSI (ESC [) sequence.
+ *
+ * CSI sequences follow the ECMA-48 grammar:
+ *   CSI  P..P  I..I  F
+ * where P (parameter bytes) are 0x30-0x3F, I (intermediate bytes) are
+ * 0x20-0x2F, and F (final byte) is 0x40-0x7E.  We read and discard
+ * bytes until we consume the final byte or the input dries up.
+ *
+ * last_read is the most recent byte already consumed by the caller;
+ * if it is itself a final byte there is nothing left to drain.
+ */
+static void drainCSI(uint8_t last_read) {
+	if (last_read >= 0x40 && last_read <= 0x7E)
+		return;
+
+	for (;;) {
+		fd_set fds;
+		struct timeval tv = { 0, 50000 }; /* 50 ms */
+		FD_ZERO(&fds);
+		FD_SET(STDIN_FILENO, &fds);
+		if (select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv) <= 0)
+			break;
+		uint8_t discard;
+		if (read(STDIN_FILENO, &discard, 1) != 1)
+			break;
+		if (discard >= 0x40 && discard <= 0x7E)
+			break;
 	}
 }
 
@@ -309,6 +341,14 @@ int editorReadKey(void) {
 			return END_OF_FILE;
 		} else if (seq[0] == '|') {
 			return PIPE_CMD;
+		} else if (seq[0] == '!') {
+			return SHELL_CMD;
+		} else if (seq[0] == '.') {
+			return CTAGS_JUMP;
+		} else if (seq[0] == ',') {
+			return CTAGS_BACK;
+		} else if (seq[0] == '`') {
+			return TOGGLE_HEADER_BODY;
 		} else if (seq[0] == '%') {
 			return QUERY_REPLACE;
 		} else if (seq[0] == '?') {
@@ -320,10 +360,32 @@ int editorReadKey(void) {
 		} else if (seq[0] == CTRL('r')) {
 			return REGEX_SEARCH_BACKWARD;
 		} else if (seq[0] == 'p') {
-			return HISTORY_PREV;
+			return META_P;
 		} else if (seq[0] == 'n') {
-			return HISTORY_NEXT;
+			return META_N;
+		} else if (seq[0] == '{') {
+			return BACKWARD_PARA;
+		} else if (seq[0] == '}') {
+			return FORWARD_PARA;
+		} else if (seq[0] == 'a') {
+			return SENTENCE_BACKWARD;
+		} else if (seq[0] == 'e') {
+			return SENTENCE_FORWARD;
+		} else if (seq[0] == 'h') {
+			return MARK_PARA;
+		} else if (seq[0] == 'k') {
+			return KILL_PARA;
+		} else if (seq[0] == 'z') {
+			return ZAP_TO_CHAR;
 		} else {
+			/* Check for C-M- (control+meta) combinations first */
+			if (seq[0] == CTRL('f')) {
+				return FORWARD_SEXP;
+			} else if (seq[0] == CTRL('b')) {
+				return BACKWARD_SEXP;
+			} else if (seq[0] == CTRL('k')) {
+				return KILL_SEXP;
+			}
 			switch ((seq[0] & 0x1f) | 0x40) {
 			case 'B':
 				return BACKWARD_WORD;
@@ -339,10 +401,6 @@ int editorReadKey(void) {
 				return BACKSPACE_WORD;
 			case 'L':
 				return DOWNCASE_WORD;
-			case 'N':
-				return FORWARD_PARA;
-			case 'P':
-				return BACKWARD_PARA;
 			case 'T':
 				return TRANSPOSE_WORDS;
 			case 'U':
@@ -358,20 +416,62 @@ int editorReadKey(void) {
 			}
 		}
 
-ESC_UNKNOWN:;
-		char seqR[32];
-		seqR[0] = 0;
-		char buf[8];
-		for (int i = 0; seq[i]; i++) {
-			if (seq[i] < ' ') {
-				snprintf(buf, sizeof(buf), "C-%c ",
-					 seq[i] + '`');
-			} else {
-				snprintf(buf, sizeof(buf), "%c ", seq[i]);
+ESC_UNKNOWN:
+		/*
+		 * Drain any remaining bytes that belong to this
+		 * escape sequence so they are not misinterpreted
+		 * as individual keypresses.
+		 *
+		 * CSI (ESC [): parameter/intermediate bytes may
+		 * still be in the input buffer; drain up to and
+		 * including the final byte (0x40-0x7E).
+		 *
+		 * SS3 (ESC O): exactly one follow-up byte which
+		 * was never read because seq[0]=='O' fell through
+		 * the Meta key handling above.
+		 */
+		if (seq[0] == '[') {
+			/* Find last byte we already consumed */
+			uint8_t last = 0;
+			for (int i = 4; i >= 1; i--) {
+				if (seq[i]) {
+					last = (uint8_t)seq[i];
+					break;
+				}
 			}
-			emil_strlcat(seqR, buf, sizeof(seqR));
+			if (last)
+				drainCSI(last);
+		} else if (seq[0] == 'O') {
+			/* SS3: consume the single expected byte */
+			fd_set fds;
+			struct timeval tv = { 0, 50000 };
+			FD_ZERO(&fds);
+			FD_SET(STDIN_FILENO, &fds);
+			if (select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv) >
+			    0) {
+				uint8_t discard;
+				if (read(STDIN_FILENO, &discard, 1) < 1) {
+					/* nothing to do */
+				}
+			}
 		}
-		editorSetStatusMessage(msg_unknown_meta, seqR);
+
+		{
+			char seqR[32];
+			seqR[0] = 0;
+			char buf[8];
+			for (int i = 0; seq[i]; i++) {
+				if (seq[i] < ' ') {
+					snprintf(buf, sizeof(buf), "C-%c ",
+						 seq[i] + '`');
+				} else {
+					snprintf(buf, sizeof(buf), "%c ",
+						 seq[i]);
+				}
+				emil_strlcat(seqR, buf, sizeof(seqR));
+			}
+			editorSetStatusMessage(msg_unknown_meta, seqR);
+		}
 		return 033;
 	} else if (utf8_is2Char(c)) {
 		/* 2-byte UTF-8 sequence */

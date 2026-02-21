@@ -8,6 +8,7 @@ void editorInsertChar(struct editorBuffer *bufr, int c, int count);
 void editorInsertUnicode(struct editorBuffer *bufr, int count);
 
 /* Line operations */
+void editorInsertNewlineRaw(struct editorBuffer *bufr);
 void editorInsertNewline(struct editorBuffer *bufr, int count);
 void editorOpenLine(struct editorBuffer *bufr, int count);
 void editorInsertNewlineAndIndent(struct editorBuffer *bufr, int count);
@@ -35,8 +36,21 @@ void editorForwardWord(int count);
 void editorBackWord(int count);
 
 /* Paragraph movement */
+void bufferBackwardParagraphBoundary(struct editorBuffer *buf, int *cx,
+				     int *cy);
+void bufferForwardParagraphBoundary(struct editorBuffer *buf, int *cx, int *cy);
 void editorBackPara(int count);
 void editorForwardPara(int count);
+
+/* Sexp (balanced expression) movement */
+void editorForwardSexp(int count);
+void editorBackwardSexp(int count);
+
+/* Sentence movement */
+int bufferForwardSentenceEnd(struct editorBuffer *buf, int *cx, int *cy);
+int bufferBackwardSentenceStart(struct editorBuffer *buf, int *cx, int *cy);
+void editorForwardSentence(int count);
+void editorBackwardSentence(int count);
 
 /* Word transformations */
 void wordTransform(struct editorBuffer *bufr, int times,
@@ -56,6 +70,17 @@ void editorTransposeChars(struct editorBuffer *bufr);
 /* Line operations */
 void editorKillLine(int count);
 void editorKillLineBackwards(void);
+
+/* Kill/mark operations */
+void editorKillSexp(int count);
+void editorKillParagraph(int count);
+void editorMarkParagraph(void);
+
+/* Sentence transposition */
+void editorTransposeSentences(struct editorBuffer *bufr);
+
+/* Zap to char */
+void editorZapToChar(struct editorBuffer *bufr);
 
 /* Navigation */
 void editorGotoLine(void);

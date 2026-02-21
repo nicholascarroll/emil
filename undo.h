@@ -3,7 +3,7 @@
 
 #include "emil.h"
 
-#define UNDO_LIMIT 1000
+#define UNDO_LIMIT 100
 
 void editorDoUndo(struct editorBuffer *buf, int count);
 void editorDoRedo(struct editorBuffer *buf, int count);

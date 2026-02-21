@@ -45,6 +45,21 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 			editorSetStatusMessage((char *)prompt, content);
 		}
 		E.minibuf->completion_state.preserve_message = 0;
+
+		/* Grow minibuffer if prompt + content exceeds one line */
+		int total_len = strlen(E.statusmsg);
+		int needed = (total_len + E.screencols - 1) / E.screencols;
+		if (needed < 1)
+			needed = 1;
+		if (needed > 5)
+			needed = 5;
+		if (needed != minibuffer_height) {
+			minibuffer_height = needed;
+			/* Force window height recalculation */
+			for (int w = 0; w < E.nwindows; w++)
+				E.windows[w]->height = 0;
+		}
+
 		refreshScreen();
 
 		/* Position cursor on bottom line */
@@ -89,8 +104,31 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 					}
 				}
 
+				/* PROMPT_DIR: strip trailing slash before returning */
+				if (t == PROMPT_DIR) {
+					int len = strlen(current_text);
+					if (len > 1 &&
+					    current_text[len - 1] == '/') {
+						current_text[len - 1] = '\0';
+						E.minibuf->row[0].size =
+							len - 1;
+					}
+				}
+
 				/* If it's a file, or it doesn't exist (new file), return it */
-				result = (uint8_t *)xstrdup(current_text);
+				/* If a completion is selected, return its full
+				 * path rather than the basename shown in the
+				 * minibuffer. */
+				struct completion_state *cs =
+					&E.minibuf->completion_state;
+				if (cs->matches && cs->selected >= 0 &&
+				    cs->selected < cs->n_matches) {
+					result = (uint8_t *)xstrdup(
+						cs->matches[cs->selected]);
+				} else {
+					result = (uint8_t *)xstrdup(
+						current_text);
+				}
 			} else {
 				result = (uint8_t *)xstrdup("");
 			}
@@ -110,8 +148,11 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 			/* C-s C-s: populate empty search with last search */
 			if (t == PROMPT_SEARCH && E.minibuf->numrows > 0 &&
 			    E.minibuf->row[0].size == 0) {
-				char *last_search =
+				char *last_search = NULL;
+				struct historyEntry *last_entry =
 					getLastHistory(&E.search_history);
+				if (last_entry)
+					last_search = last_entry->str;
 				if (last_search) {
 					while (E.minibuf->numrows > 0) {
 						editorDelRow(E.minibuf, 0);
@@ -128,13 +169,29 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 			}
 			break;
 
-		case HISTORY_PREV:
-		case HISTORY_NEXT: {
+		case ARROW_UP:
+		case META_P:
+		case ARROW_DOWN:
+		case META_N: {
+			/* If completions are visible, cycle selection
+			 * instead of history. */
+			if (E.minibuf->completion_state.matches &&
+			    E.minibuf->completion_state.n_matches > 0) {
+				cycleCompletion(E.minibuf,
+						c == META_P ? 1 : -1);
+				cycleCompletion(E.minibuf,
+						c == META_N || c == ARROW_DOWN ?
+							1 :
+							-1);
+				break;
+			}
+
 			struct editorHistory *hist = NULL;
 			char *history_str = NULL;
 
 			switch (t) {
 			case PROMPT_FILES:
+			case PROMPT_DIR:
 				hist = &E.file_history;
 				break;
 			case PROMPT_COMMAND:
@@ -149,7 +206,7 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 			}
 
 			if (hist && hist->count > 0) {
-				if (c == HISTORY_PREV) {
+				if (c == META_P || c == ARROW_UP) {
 					if (history_pos == -1) {
 						history_pos = hist->count - 1;
 					} else if (history_pos > 0) {
@@ -165,8 +222,10 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 				}
 
 				if (history_pos >= 0) {
-					history_str =
+					struct historyEntry *entry =
 						getHistoryAt(hist, history_pos);
+					if (entry)
+						history_str = entry->str;
 					if (history_str) {
 						while (E.minibuf->numrows > 0) {
 							editorDelRow(E.minibuf,
@@ -241,10 +300,18 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 	}
 
 done:
+	/* Restore minibuffer to single line */
+	if (minibuffer_height != 1) {
+		minibuffer_height = 1;
+		for (int w = 0; w < E.nwindows; w++)
+			E.windows[w]->height = 0;
+	}
+
 	if (result && strlen((char *)result) > 0) {
 		struct editorHistory *hist = NULL;
 		switch (t) {
 		case PROMPT_FILES:
+		case PROMPT_DIR:
 			hist = &E.file_history;
 			break;
 		case PROMPT_COMMAND:

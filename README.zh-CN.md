@@ -108,7 +108,6 @@ set bind-tty-special-chars off
 "\C-w": kill-region
 "\M-w": copy-region-as-kill
 ```
-如果没有标记任何区域，它会杀死光标前面的一个词（相当于向后杀词，backward-kill-word）。
 
 在 Readline 和 `emil` 中，`Ctrl-h` 会删除前一个字符，但在 `emacs` 中它是帮助前缀键。
 
@@ -154,16 +153,13 @@ Shell 集成是一个编译时选项（默认启用）。它允许在缓冲区�
 
 如果需要调整语气（更正式/更口语化）或补充其他内容，随时告诉我！
 
-4. **缓冲区内存管理升级**  
-   调查改进内部表示的价值（可能是 gap buffer）。
-
-5. **渲染系统升级**  
+4. **渲染系统升级**  
    测试 SSH 下的性能和渲染系统。
 
-6. **移除对 `subprocess.h` 的依赖**  
+5. **移除对 `subprocess.h` 的依赖**  
    将用于 pipe/exec/fork 的代码内部化。
 
-7. **版本 1.0.0 无 bug，爱上它**  
+6. **版本 1.0.0 无 bug，爱上它**  
    - 在 Solaris、AIX、Linux、BSD、MSYS2、OSX、Android 上测试。  
    - 使用 IME 和国际键盘测试  
    - 包含在 Linux 发行版仓库中

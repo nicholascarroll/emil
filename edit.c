@@ -3,7 +3,6 @@
 #include <string.h>
 #include "emil.h"
 #include "message.h"
-#include "message.h"
 #include "edit.h"
 #include "buffer.h"
 #include "undo.h"
@@ -17,20 +16,9 @@
 #include "terminal.h"
 #include "history.h"
 #include "util.h"
+#include "adjust.h"
 
 extern struct editorConfig E;
-
-static void addToKillRing(const char *text) {
-	if (!text || strlen(text) == 0)
-		return;
-
-	addHistory(&E.kill_history, text);
-	E.kill_ring_pos = -1; /* Reset position for M-y */
-
-	/* Update E.kill to point to the new kill */
-	free(E.kill);
-	E.kill = xstrdup((uint8_t *)text);
-}
 
 /* Character insertion */
 
@@ -39,6 +27,8 @@ void editorInsertChar(struct editorBuffer *bufr, int c, int count) {
 		editorSetStatusMessage(msg_read_only);
 		return;
 	}
+
+	bufr->mark_active = 0;
 
 	if (count <= 0)
 		count = 1;
@@ -53,6 +43,7 @@ void editorInsertChar(struct editorBuffer *bufr, int c, int count) {
 }
 
 void editorInsertUnicode(struct editorBuffer *bufr, int count) {
+	bufr->mark_active = 0;
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
 		editorUndoAppendUnicode(&E, bufr);
@@ -91,29 +82,40 @@ cancel:
 	editorSetStatusMessage("Indentation set to %i spaces", indent);
 }
 
+void editorInsertNewlineRaw(struct editorBuffer *bufr) {
+	if (bufr->read_only) {
+		editorSetStatusMessage(msg_read_only);
+		return;
+	}
+
+	if (bufr->cx == 0) {
+		editorInsertRow(bufr, bufr->cy, "", 0);
+	} else {
+		erow *row = &bufr->row[bufr->cy];
+		editorInsertRow(bufr, bufr->cy + 1, &row->chars[bufr->cx],
+				row->size - bufr->cx);
+		row = &bufr->row[bufr->cy];
+		row->size = bufr->cx;
+		row->chars[row->size] = '\0';
+		row->cached_width = -1;
+		invalidateScreenCache(bufr);
+	}
+	bufr->cy++;
+	bufr->cx = 0;
+}
+
 void editorInsertNewline(struct editorBuffer *bufr, int count) {
 	if (bufr->read_only) {
 		editorSetStatusMessage(msg_read_only);
 		return;
 	}
 
+	bufr->mark_active = 0;
+
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
 		editorUndoAppendChar(bufr, '\n');
-		if (bufr->cx == 0) {
-			editorInsertRow(bufr, bufr->cy, "", 0);
-		} else {
-			erow *row = &bufr->row[bufr->cy];
-			editorInsertRow(bufr, bufr->cy + 1,
-					&row->chars[bufr->cx],
-					row->size - bufr->cx);
-			row = &bufr->row[bufr->cy];
-			row->size = bufr->cx;
-			row->chars[row->size] = '\0';
-			row->render_valid = 0;
-		}
-		bufr->cy++;
-		bufr->cx = 0;
+		editorInsertNewlineRaw(bufr);
 	}
 }
 
@@ -135,7 +137,6 @@ void editorInsertNewlineAndIndent(struct editorBuffer *bufr, int count) {
 		count = 1;
 
 	for (int j = 0; j < count; j++) {
-		editorUndoAppendChar(bufr, '\n');
 		editorInsertNewline(bufr, 1);
 		int i = 0;
 		uint8_t c = bufr->row[bufr->cy - 1].chars[i];
@@ -158,7 +159,7 @@ void editorIndent(struct editorBuffer *bufr, int rept) {
 	bufr->cx = 0;
 	for (int i = 0; i < rept; i++) {
 		if (bufr->indent) {
-			for (int i = 0; i < bufr->indent; i++) {
+			for (int j = 0; j < bufr->indent; j++) {
 				editorUndoAppendChar(bufr, ' ');
 				editorInsertChar(bufr, ' ', 1);
 			}
@@ -175,6 +176,8 @@ void editorUnindent(struct editorBuffer *bufr, int rept) {
 		editorSetStatusMessage(msg_end_of_buffer);
 		return;
 	}
+
+	bufr->mark_active = 0;
 
 	/* Setup for indent mode */
 	int indWidth = 1;
@@ -219,9 +222,14 @@ UNINDENT_PERFORM:
 	/* Perform row operation & dirty buffer */
 	memmove(&row->chars[0], &row->chars[trunc], row->size - trunc);
 	row->size -= trunc;
+	row->chars[row->size] = '\0';
 	bufr->cx -= trunc;
-	updateRow(row);
+	row->cached_width = -1;
+	invalidateScreenCache(bufr);
 	bufr->dirty = 1;
+
+	/* Adjust tracked points for this deletion */
+	adjustAllPoints(bufr, 0, bufr->cy, trunc, bufr->cy, 1);
 }
 
 /* Character deletion */
@@ -231,6 +239,8 @@ void editorDelChar(struct editorBuffer *bufr, int count) {
 		editorSetStatusMessage(msg_read_only);
 		return;
 	}
+
+	bufr->mark_active = 0;
 
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
@@ -260,6 +270,7 @@ int isParaBoundary(erow *row) {
 }
 
 void editorBackSpace(struct editorBuffer *bufr, int count) {
+	bufr->mark_active = 0;
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
 		if (!bufr->numrows)
@@ -291,6 +302,54 @@ void editorBackSpace(struct editorBuffer *bufr, int count) {
 
 /* Cursor movement */
 
+/* Move cursor up or down by one visual (screen) row when word wrap is
+ * active.  direction: -1 = up, +1 = down. */
+static void editorMoveVisualRow(int direction) {
+	struct editorBuffer *buf = E.buf;
+	if (buf->cy >= buf->numrows)
+		return;
+
+	erow *row = &buf->row[buf->cy];
+	int display_col = charsToDisplayColumn(row, buf->cx);
+
+	int current_subline, sub_col;
+	cursorScreenLine(row, display_col, E.screencols, &current_subline,
+			 &sub_col);
+
+	int target_subline = current_subline + direction;
+	int total_sublines = countScreenLines(row, E.screencols);
+
+	if (target_subline >= 0 && target_subline < total_sublines) {
+		/* Move within the same logical row */
+		buf->cx = displayColumnToByteOffset(row, E.screencols,
+						    target_subline, sub_col);
+	} else if (target_subline < 0) {
+		/* Move to previous logical row */
+		if (buf->cy == 0)
+			return;
+		buf->cy--;
+		erow *prev = &buf->row[buf->cy];
+		int last_sub = countScreenLines(prev, E.screencols) - 1;
+		buf->cx = displayColumnToByteOffset(prev, E.screencols,
+						    last_sub, sub_col);
+	} else {
+		/* Move to next logical row */
+		if (buf->cy >= buf->numrows - 1) {
+			/* Allow moving to the virtual line past EOF */
+			buf->cy = buf->numrows;
+			buf->cx = 0;
+			return;
+		}
+		buf->cy++;
+		erow *next = &buf->row[buf->cy];
+		buf->cx = displayColumnToByteOffset(next, E.screencols, 0,
+						    sub_col);
+	}
+}
+
+/* * TODO: Refactor to take struct editorBuffer *buf parameter.
+ * Extract UTF-8 snap-to-character-boundary into a helper function
+ * with consistent bounds checking across all four directions. */
 void editorMoveCursor(int key, int count) {
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
@@ -320,7 +379,9 @@ void editorMoveCursor(int key, int count) {
 			}
 			break;
 		case ARROW_UP:
-			if (E.buf->cy > 0) {
+			if (E.buf->word_wrap) {
+				editorMoveVisualRow(-1);
+			} else if (E.buf->cy > 0) {
 				E.buf->cy--;
 				if (E.buf->row[E.buf->cy].chars == NULL)
 					break;
@@ -330,7 +391,9 @@ void editorMoveCursor(int key, int count) {
 			}
 			break;
 		case ARROW_DOWN:
-			if (E.buf->cy < E.buf->numrows) {
+			if (E.buf->word_wrap) {
+				editorMoveVisualRow(+1);
+			} else if (E.buf->cy < E.buf->numrows) {
 				E.buf->cy++;
 				if (E.buf->cy < E.buf->numrows) {
 					if (E.buf->row[E.buf->cy].chars == NULL)
@@ -443,63 +506,336 @@ void editorBackWord(int count) {
 
 /* Paragraph movement */
 
+/* Buffer-parameterized helpers for paragraph boundary scanning.
+ * These set cx=0 and update *cy to the boundary line. */
+
+void bufferBackwardParagraphBoundary(struct editorBuffer *buf, int *cx,
+				     int *cy) {
+	*cx = 0;
+	int icy = *cy;
+
+	if (icy >= buf->numrows) {
+		icy--;
+	}
+
+	if (buf->numrows == 0) {
+		return;
+	}
+
+	int pre = 1;
+
+	for (int y = icy; y >= 0; y--) {
+		erow *row = &buf->row[y];
+		if (isParaBoundary(row) && !pre) {
+			*cy = y;
+			return;
+		} else if (!isParaBoundary(row)) {
+			pre = 0;
+		}
+	}
+
+	*cy = 0;
+}
+
+void bufferForwardParagraphBoundary(struct editorBuffer *buf, int *cx,
+				    int *cy) {
+	*cx = 0;
+	int icy = *cy;
+
+	if (icy >= buf->numrows) {
+		return;
+	}
+
+	if (buf->numrows == 0) {
+		return;
+	}
+
+	int pre = 1;
+
+	for (int y = icy; y < buf->numrows; y++) {
+		erow *row = &buf->row[y];
+		if (isParaBoundary(row) && !pre) {
+			*cy = y;
+			return;
+		} else if (!isParaBoundary(row)) {
+			pre = 0;
+		}
+	}
+
+	*cy = buf->numrows;
+}
+
 void editorBackPara(int count) {
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
-		E.buf->cx = 0;
-		int icy = E.buf->cy;
-
-		if (icy >= E.buf->numrows) {
-			icy--;
-		}
-
-		if (E.buf->numrows == 0) {
-			return;
-		}
-
-		int pre = 1;
-
-		for (int cy = icy; cy >= 0; cy--) {
-			erow *row = &E.buf->row[cy];
-			if (isParaBoundary(row) && !pre) {
-				E.buf->cy = cy;
-				return;
-			} else if (!isParaBoundary(row)) {
-				pre = 0;
-			}
-		}
-
-		E.buf->cy = 0;
+		bufferBackwardParagraphBoundary(E.buf, &E.buf->cx, &E.buf->cy);
 	}
 }
 
 void editorForwardPara(int count) {
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
-		E.buf->cx = 0;
-		int icy = E.buf->cy;
+		bufferForwardParagraphBoundary(E.buf, &E.buf->cx, &E.buf->cy);
+	}
+}
 
-		if (icy >= E.buf->numrows) {
+/* Sexp (balanced expression) movement — C-M-f / C-M-b */
+
+static int matchingClose(uint8_t c) {
+	switch (c) {
+	case '(':
+		return ')';
+	case '[':
+		return ']';
+	case '{':
+		return '}';
+	default:
+		return 0;
+	}
+}
+
+static int matchingOpen(uint8_t c) {
+	switch (c) {
+	case ')':
+		return '(';
+	case ']':
+		return '[';
+	case '}':
+		return '{';
+	default:
+		return 0;
+	}
+}
+
+static int isQuoteChar(uint8_t c) {
+	return c == '"' || c == '\'';
+}
+
+/* Advance one position forward in the buffer.  Returns 0 at end. */
+static int stepForward(struct editorBuffer *buf, int *cx, int *cy) {
+	if (*cy >= buf->numrows)
+		return 0;
+	if (*cx < buf->row[*cy].size) {
+		(*cx)++;
+		return 1;
+	}
+	if (*cy + 1 < buf->numrows) {
+		*cy += 1;
+		*cx = 0;
+		return 1;
+	}
+	return 0;
+}
+
+/* Retreat one position backward in the buffer.  Returns 0 at start. */
+static int stepBackward(struct editorBuffer *buf, int *cx, int *cy) {
+	if (*cx > 0) {
+		(*cx)--;
+		return 1;
+	}
+	if (*cy > 0) {
+		*cy -= 1;
+		*cx = buf->row[*cy].size;
+		return 1;
+	}
+	return 0;
+}
+
+/* Get the character at (cx, cy).  Returns 0 at end-of-line / end-of-buffer.
+ * End-of-line positions (cx == row->size) are treated as newline. */
+static uint8_t charAt(struct editorBuffer *buf, int cx, int cy) {
+	if (cy >= buf->numrows)
+		return 0;
+	erow *row = &buf->row[cy];
+	if (cx >= row->size)
+		return '\n';
+	return row->chars[cx];
+}
+
+/* Scan forward from (*cx, *cy) past one sexp (balanced expression).
+ * On success, updates (*cx, *cy) to just past the sexp and returns 0.
+ * On failure (unmatched delimiter, end of buffer), returns -1 without
+ * modifying *cx / *cy; *errmsg is set to a description. */
+static int bufferForwardSexpEnd(struct editorBuffer *buf, int *cx, int *cy,
+				const char **errmsg) {
+	int px = *cx, py = *cy;
+
+	/* Skip whitespace and newlines */
+	while (py < buf->numrows) {
+		uint8_t ch = charAt(buf, px, py);
+		if (ch == 0) {
+			*errmsg = "End of buffer";
+			return -1;
+		}
+		if (ch != ' ' && ch != '\t' && ch != '\n')
+			break;
+		stepForward(buf, &px, &py);
+	}
+	if (py >= buf->numrows) {
+		*errmsg = "End of buffer";
+		return -1;
+	}
+
+	uint8_t ch = charAt(buf, px, py);
+
+	/* Opening delimiter: scan forward for matching close */
+	int close = matchingClose(ch);
+	if (close) {
+		int depth = 1;
+		int sx = px, sy = py;
+		stepForward(buf, &sx, &sy);
+		while (depth > 0) {
+			uint8_t c = charAt(buf, sx, sy);
+			if (c == 0) {
+				*errmsg = "Unmatched delimiter";
+				return -1;
+			}
+			if ((int)c == close)
+				depth--;
+			else if (c == ch)
+				depth++;
+			if (depth > 0)
+				stepForward(buf, &sx, &sy);
+		}
+		/* Land after the closing delimiter */
+		stepForward(buf, &sx, &sy);
+		*cx = sx;
+		*cy = sy;
+		return 0;
+	}
+
+	/* Closing delimiter while inside: jump past it */
+	if (matchingOpen(ch)) {
+		stepForward(buf, &px, &py);
+		*cx = px;
+		*cy = py;
+		return 0;
+	}
+
+	/* Quote character: scan forward for matching quote */
+	if (isQuoteChar(ch)) {
+		int sx = px, sy = py;
+		stepForward(buf, &sx, &sy);
+		while (1) {
+			uint8_t c = charAt(buf, sx, sy);
+			if (c == 0) {
+				*errmsg = "Unmatched quote";
+				return -1;
+			}
+			if (c == ch) {
+				stepForward(buf, &sx, &sy);
+				*cx = sx;
+				*cy = sy;
+				return 0;
+			}
+			stepForward(buf, &sx, &sy);
+		}
+	}
+
+	/* Word: skip to end of word */
+	*cx = px;
+	*cy = py;
+	bufferEndOfForwardWord(buf, cx, cy);
+	return 0;
+}
+
+void editorForwardSexp(int count) {
+	int times = count ? count : 1;
+	struct editorBuffer *buf = E.buf;
+
+	for (int t = 0; t < times; t++) {
+		int cx = buf->cx;
+		int cy = buf->cy;
+		const char *errmsg = NULL;
+
+		if (bufferForwardSexpEnd(buf, &cx, &cy, &errmsg) < 0) {
+			editorSetStatusMessage("%s", errmsg);
 			return;
 		}
+		buf->cx = cx;
+		buf->cy = cy;
+	}
+}
 
-		if (E.buf->numrows == 0) {
+void editorBackwardSexp(int count) {
+	int times = count ? count : 1;
+	struct editorBuffer *buf = E.buf;
+
+	for (int t = 0; t < times; t++) {
+		int cx = buf->cx;
+		int cy = buf->cy;
+
+		/* Step back once then skip whitespace and newlines */
+		if (!stepBackward(buf, &cx, &cy)) {
+			editorSetStatusMessage("Beginning of buffer");
 			return;
 		}
-
-		int pre = 1;
-
-		for (int cy = icy; cy < E.buf->numrows; cy++) {
-			erow *row = &E.buf->row[cy];
-			if (isParaBoundary(row) && !pre) {
-				E.buf->cy = cy;
+		while (1) {
+			uint8_t ch = charAt(buf, cx, cy);
+			if (ch != ' ' && ch != '\t' && ch != '\n')
+				break;
+			if (!stepBackward(buf, &cx, &cy)) {
+				editorSetStatusMessage("Beginning of buffer");
 				return;
-			} else if (!isParaBoundary(row)) {
-				pre = 0;
 			}
 		}
 
-		E.buf->cy = E.buf->numrows;
+		uint8_t ch = charAt(buf, cx, cy);
+
+		/* Closing delimiter: scan backward for matching open */
+		int open = matchingOpen(ch);
+		if (open) {
+			int depth = 1;
+			int sx = cx, sy = cy;
+			while (depth > 0) {
+				if (!stepBackward(buf, &sx, &sy)) {
+					editorSetStatusMessage(
+						"Unmatched delimiter");
+					return;
+				}
+				uint8_t c = charAt(buf, sx, sy);
+				if ((int)c == open)
+					depth--;
+				else if (c == ch)
+					depth++;
+			}
+			buf->cx = sx;
+			buf->cy = sy;
+			continue;
+		}
+
+		/* Opening delimiter while inside: land on it */
+		if (matchingClose(ch)) {
+			buf->cx = cx;
+			buf->cy = cy;
+			continue;
+		}
+
+		/* Quote character: scan backward for matching quote */
+		if (isQuoteChar(ch)) {
+			int sx = cx, sy = cy;
+			while (1) {
+				if (!stepBackward(buf, &sx, &sy)) {
+					editorSetStatusMessage(
+						"Unmatched quote");
+					return;
+				}
+				uint8_t c = charAt(buf, sx, sy);
+				if (c == ch) {
+					buf->cx = sx;
+					buf->cy = sy;
+					break;
+				}
+			}
+			continue;
+		}
+
+		/* Word: skip to beginning of word */
+		buf->cx = cx;
+		buf->cy = cy;
+		/* stepForward to undo the stepBackward, then use word movement */
+		stepForward(buf, &buf->cx, &buf->cy);
+		bufferEndOfBackwardWord(buf, &buf->cx, &buf->cy);
 	}
 }
 
@@ -532,32 +868,43 @@ void editorCapitalCaseWord(struct editorBuffer *bufr, int times) {
 /* Word deletion */
 
 void editorDeleteWord(struct editorBuffer *bufr, int count) {
+	if (bufr->read_only) {
+		editorSetStatusMessage(msg_read_only);
+		return;
+	}
+	bufr->mark_active = 0;
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
-		int origMarkx = bufr->markx;
-		int origMarky = bufr->marky;
-		bufferEndOfForwardWord(bufr, &bufr->markx, &bufr->marky);
-		editorKillRegion(&E, bufr);
-		bufr->markx = origMarkx;
-		bufr->marky = origMarky;
+		int endx = bufr->cx;
+		int endy = bufr->cy;
+		bufferEndOfForwardWord(bufr, &endx, &endy);
+		if (endx == bufr->cx && endy == bufr->cy)
+			return;
+		editorDeleteRange(bufr, bufr->cx, bufr->cy, endx, endy, 1);
 	}
 }
 
 void editorBackspaceWord(struct editorBuffer *bufr, int count) {
+	if (bufr->read_only) {
+		editorSetStatusMessage(msg_read_only);
+		return;
+	}
+	bufr->mark_active = 0;
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
-		int origMarkx = bufr->markx;
-		int origMarky = bufr->marky;
-		bufferEndOfBackwardWord(bufr, &bufr->markx, &bufr->marky);
-		editorKillRegion(&E, bufr);
-		bufr->markx = origMarkx;
-		bufr->marky = origMarky;
+		int endx = bufr->cx;
+		int endy = bufr->cy;
+		bufferEndOfBackwardWord(bufr, &endx, &endy);
+		if (endx == bufr->cx && endy == bufr->cy)
+			return;
+		editorDeleteRange(bufr, bufr->cx, bufr->cy, endx, endy, 1);
 	}
 }
 
 /* Character/word transposition */
 
 void editorTransposeWords(struct editorBuffer *bufr) {
+	bufr->mark_active = 0;
 	if (bufr->numrows == 0) {
 		editorSetStatusMessage(msg_buffer_empty);
 		return;
@@ -569,7 +916,7 @@ void editorTransposeWords(struct editorBuffer *bufr) {
 	} else if (bufr->cy >= bufr->numrows ||
 		   (bufr->cy == bufr->numrows - 1 &&
 		    bufr->cx == bufr->row[bufr->cy].size)) {
-		editorSetStatusMessage("End of buffer");
+		editorSetStatusMessage(msg_end_of_buffer);
 		return;
 	}
 
@@ -590,18 +937,19 @@ void editorTransposeWords(struct editorBuffer *bufr) {
 }
 
 void editorTransposeChars(struct editorBuffer *bufr) {
+	bufr->mark_active = 0;
 	if (bufr->numrows == 0) {
-		editorSetStatusMessage("Buffer is empty");
+		editorSetStatusMessage(msg_buffer_empty);
 		return;
 	}
 
 	if (bufr->cx == 0 && bufr->cy == 0) {
-		editorSetStatusMessage("Beginning of buffer");
+		editorSetStatusMessage(msg_beginning_of_buffer);
 		return;
 	} else if (bufr->cy >= bufr->numrows ||
 		   (bufr->cy == bufr->numrows - 1 &&
 		    bufr->cx == bufr->row[bufr->cy].size)) {
-		editorSetStatusMessage("End of buffer");
+		editorSetStatusMessage(msg_end_of_buffer);
 		return;
 	}
 
@@ -624,6 +972,8 @@ void editorKillLine(int count) {
 		return;
 	}
 
+	E.buf->mark_active = 0;
+
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
 		if (E.buf->numrows <= 0) {
@@ -633,83 +983,40 @@ void editorKillLine(int count) {
 		erow *row = &E.buf->row[E.buf->cy];
 
 		if (E.buf->cx == row->size) {
+			/* At end of logical line: join with next line */
 			editorDelChar(E.buf, 1);
+		} else if (E.buf->word_wrap) {
+			/* Kill to end of visual sub-line */
+			int display_col = charsToDisplayColumn(row, E.buf->cx);
+			int current_subline, sub_col;
+			cursorScreenLine(row, display_col, E.screencols,
+					 &current_subline, &sub_col);
+			int start_byte, end_byte;
+			sublineBounds(row, E.screencols, current_subline,
+				      &start_byte, &end_byte);
+			if (E.buf->cx >= end_byte) {
+				/* At end of sub-line: delete forward one
+				 * char to pull next sub-line content up */
+				editorDelChar(E.buf, 1);
+			} else {
+				editorDeleteRange(E.buf, E.buf->cx, E.buf->cy,
+						  end_byte, E.buf->cy, 1);
+			}
 		} else {
-			// Copy to kill ring
-			int kill_len = row->size - E.buf->cx;
-			char *killed_text = xmalloc(kill_len + 1);
-			memcpy(killed_text, &row->chars[E.buf->cx], kill_len);
-			killed_text[kill_len] = '\0';
-			addToKillRing(killed_text);
-			free(killed_text);
-
-			clearRedos(E.buf);
-			struct editorUndo *new = newUndo();
-			new->starty = E.buf->cy;
-			new->endy = E.buf->cy;
-			new->startx = E.buf->cx;
-			new->endx = row->size;
-			new->delete = 1;
-			pushUndo(E.buf, new);
-
-			new->datalen = kill_len;
-			if (new->datasize < new->datalen + 1) {
-				new->datasize = new->datalen + 1;
-				new->data = xrealloc(new->data, new->datasize);
-			}
-			for (int i = 0; i < kill_len; i++) {
-				new->data[i] = E.kill[kill_len - i - 1];
-			}
-			new->data[kill_len] = '\0';
-
-			row->size = E.buf->cx;
-			row->chars[row->size] = '\0';
-			row->render_valid = 0;
-			E.buf->dirty = 1;
-			editorClearMark();
+			/* Kill to end of logical line */
+			editorDeleteRange(E.buf, E.buf->cx, E.buf->cy,
+					  row->size, E.buf->cy, 1);
 		}
 	}
 }
 
 void editorKillLineBackwards(void) {
+	E.buf->mark_active = 0;
 	if (E.buf->cx == 0) {
 		return;
 	}
 
-	erow *row = &E.buf->row[E.buf->cy];
-
-	// Copy to kill ring
-	char *killed_text = xmalloc(E.buf->cx + 1);
-	memcpy(killed_text, row->chars, E.buf->cx);
-	killed_text[E.buf->cx] = '\0';
-	addToKillRing(killed_text);
-	free(killed_text);
-
-	clearRedos(E.buf);
-	struct editorUndo *new = newUndo();
-	new->starty = E.buf->cy;
-	new->endy = E.buf->cy;
-	new->startx = 0;
-	new->endx = E.buf->cx;
-	new->delete = 1;
-	pushUndo(E.buf, new);
-
-	new->datalen = E.buf->cx;
-	if (new->datasize < new->datalen + 1) {
-		new->datasize = new->datalen + 1;
-		new->data = xrealloc(new->data, new->datasize);
-	}
-	for (int i = 0; i < E.buf->cx; i++) {
-		new->data[i] = E.kill[E.buf->cx - i - 1];
-	}
-	new->data[E.buf->cx] = '\0';
-
-	row->size -= E.buf->cx;
-	memmove(row->chars, &row->chars[E.buf->cx], row->size);
-	row->chars[row->size] = '\0';
-	updateRow(row);
-	E.buf->cx = 0;
-	E.buf->dirty = 1;
+	editorDeleteRange(E.buf, 0, E.buf->cy, E.buf->cx, E.buf->cy, 1);
 }
 
 /* Navigation */
@@ -723,74 +1030,8 @@ void editorPageUp(int count) {
 		if (scroll_lines < 1)
 			scroll_lines = 1;
 
-		if (!E.buf->word_wrap) {
-			/* Move view up by scroll_lines */
-			win->rowoff -= scroll_lines;
-			if (win->rowoff < 0) {
-				win->rowoff = 0;
-			}
-
-			/* Ensure cursor is within visible window */
-			if (E.buf->cy >= win->rowoff + win->height) {
-				/* Cursor is below window - move it to bottom of window */
-				E.buf->cy = win->rowoff + win->height - 1;
-			}
-			/* If cursor is above window, it's already visible */
-		} else {
-			/* In wrapped mode, need to handle variable line heights */
-			int lines_scrolled = 0;
-			int new_rowoff = win->rowoff;
-
-			/* Scroll up by the desired number of screen lines */
-			while (lines_scrolled < scroll_lines &&
-			       new_rowoff > 0) {
-				new_rowoff--;
-				int line_height =
-					(calculateLineWidth(
-						 &E.buf->row[new_rowoff]) /
-					 E.screencols) +
-					1;
-				lines_scrolled += line_height;
-			}
-			win->rowoff = new_rowoff;
-
-			/* Ensure cursor is visible - calculate screen position */
-			int cursor_screen_line =
-				getScreenLineForRow(E.buf, E.buf->cy);
-			int window_start_screen_line =
-				getScreenLineForRow(E.buf, win->rowoff);
-
-			/* If not in a short buffer & cursor is off
-			   the end of the file, move it up &
-			   recalculate its position */
-			if (window_start_screen_line > 0 &&
-			    E.buf->numrows > 0 && E.buf->cy >= E.buf->numrows) {
-				E.buf->cy = E.buf->numrows - 1;
-				cursor_screen_line =
-					getScreenLineForRow(E.buf, E.buf->cy);
-			}
-
-			if (cursor_screen_line >=
-			    window_start_screen_line + win->height) {
-				/* Cursor is below window - move it up to be within window */
-				while (E.buf->cy > 0) {
-					cursor_screen_line =
-						getScreenLineForRow(E.buf,
-								    E.buf->cy);
-					if (cursor_screen_line <
-					    window_start_screen_line +
-						    win->height)
-						break;
-					E.buf->cy--;
-				}
-			}
-		}
-
-		/* Ensure cursor column is valid for new row */
-		if (E.buf->cy < E.buf->numrows &&
-		    E.buf->cx > E.buf->row[E.buf->cy].size) {
-			E.buf->cx = E.buf->row[E.buf->cy].size;
-		}
+		scrollViewport(win, E.buf, -scroll_lines);
+		clampCursorToViewport(win, E.buf);
 	}
 }
 
@@ -803,63 +1044,8 @@ void editorPageDown(int count) {
 		if (scroll_lines < 1)
 			scroll_lines = 1;
 
-		if (!E.buf->word_wrap) {
-			/* Move view down by scroll_lines */
-			win->rowoff += scroll_lines;
-
-			/* Don't scroll past end of file */
-			if (win->rowoff + win->height > E.buf->numrows) {
-				win->rowoff = E.buf->numrows - win->height;
-				if (win->rowoff < 0)
-					win->rowoff = 0;
-			}
-
-			/* Ensure cursor is within visible window */
-			if (E.buf->cy < win->rowoff) {
-				/* Cursor is above window - move it to top of window */
-				E.buf->cy = win->rowoff;
-			}
-			/* If cursor is below window, it's already visible */
-		} else {
-			/* In wrapped mode, need to handle variable line heights */
-			int lines_scrolled = 0;
-			int new_rowoff = win->rowoff;
-
-			/* Scroll down by the desired number of screen lines */
-			while (lines_scrolled < scroll_lines &&
-			       new_rowoff < E.buf->numrows) {
-				int line_height =
-					(calculateLineWidth(
-						 &E.buf->row[new_rowoff]) /
-					 E.screencols) +
-					1;
-				lines_scrolled += line_height;
-				new_rowoff++;
-			}
-
-			/* Don't scroll too far */
-			if (new_rowoff > E.buf->numrows) {
-				new_rowoff = E.buf->numrows;
-			}
-			win->rowoff = new_rowoff;
-
-			/* Ensure cursor is visible - calculate screen position */
-			int cursor_screen_line =
-				getScreenLineForRow(E.buf, E.buf->cy);
-			int window_start_screen_line =
-				getScreenLineForRow(E.buf, win->rowoff);
-
-			if (cursor_screen_line < window_start_screen_line) {
-				/* Cursor is above window - move it down to be within window */
-				E.buf->cy = win->rowoff;
-			}
-		}
-
-		/* Ensure cursor column is valid for new row */
-		if (E.buf->cy < E.buf->numrows &&
-		    E.buf->cx > E.buf->row[E.buf->cy].size) {
-			E.buf->cx = E.buf->row[E.buf->cy].size;
-		}
+		scrollViewport(win, E.buf, scroll_lines);
+		clampCursorToViewport(win, E.buf);
 	}
 }
 
@@ -867,62 +1053,69 @@ void editorScrollLineUp(int count) {
 	struct editorWindow *win = E.windows[windowFocusedIdx()];
 	int times = count ? count : 1;
 
-	for (int n = 0; n < times; n++) {
-		if (win->rowoff <= 0)
-			break;
-
-		win->rowoff--;
-
-		/* If cursor is now below the visible window, move it up */
-		if (E.buf->cy >= win->rowoff + win->height) {
-			E.buf->cy = win->rowoff + win->height - 1;
-			if (E.buf->cy < 0)
-				E.buf->cy = 0;
-		}
-	}
-
-	/* Ensure cursor column is valid for new row */
-	if (E.buf->cy < E.buf->numrows &&
-	    E.buf->cx > E.buf->row[E.buf->cy].size) {
-		E.buf->cx = E.buf->row[E.buf->cy].size;
-	}
+	scrollViewport(win, E.buf, -times);
+	clampCursorToViewport(win, E.buf);
 }
 
 void editorScrollLineDown(int count) {
 	struct editorWindow *win = E.windows[windowFocusedIdx()];
 	int times = count ? count : 1;
 
-	for (int n = 0; n < times; n++) {
-		if (win->rowoff >= E.buf->numrows - 1)
-			break;
-
-		win->rowoff++;
-
-		/* If cursor is now above the visible window, move it down */
-		if (E.buf->cy < win->rowoff) {
-			E.buf->cy = win->rowoff;
-		}
-	}
-
-	/* Ensure cursor column is valid for new row */
-	if (E.buf->cy < E.buf->numrows &&
-	    E.buf->cx > E.buf->row[E.buf->cy].size) {
-		E.buf->cx = E.buf->row[E.buf->cy].size;
-	}
+	scrollViewport(win, E.buf, times);
+	clampCursorToViewport(win, E.buf);
 }
 
 void editorBeginningOfLine(int count) {
-	if (count == 0) {
-		E.buf->cx = 0;
-	} else {
+	if (count != 0) {
 		editorKillLineBackwards();
+		return;
+	}
+
+	if (E.buf->word_wrap && E.buf->cy < E.buf->numrows) {
+		erow *row = &E.buf->row[E.buf->cy];
+		int display_col = charsToDisplayColumn(row, E.buf->cx);
+		int current_subline, sub_col;
+		cursorScreenLine(row, display_col, E.screencols,
+				 &current_subline, &sub_col);
+		int start_byte, end_byte;
+		sublineBounds(row, E.screencols, current_subline, &start_byte,
+			      &end_byte);
+		E.buf->cx = start_byte;
+	} else {
+		E.buf->cx = 0;
 	}
 }
 
 void editorEndOfLine(int count) {
-	(void)count; // Not used
-	if (E.buf->row != NULL && E.buf->cy < E.buf->numrows) {
-		E.buf->cx = E.buf->row[E.buf->cy].size;
+	(void)count;
+	if (E.buf->row == NULL || E.buf->cy >= E.buf->numrows)
+		return;
+
+	erow *row = &E.buf->row[E.buf->cy];
+
+	if (E.buf->word_wrap) {
+		int display_col = charsToDisplayColumn(row, E.buf->cx);
+		int current_subline, sub_col;
+		cursorScreenLine(row, display_col, E.screencols,
+				 &current_subline, &sub_col);
+		int start_byte, end_byte;
+		sublineBounds(row, E.screencols, current_subline, &start_byte,
+			      &end_byte);
+		if (end_byte < row->size) {
+			/* Mid-row sub-line: back up one character so we
+			 * land on the last char of this sub-line, not
+			 * the first char of the next one. */
+			int pos = end_byte;
+			do
+				pos--;
+			while (pos > start_byte &&
+			       utf8_isCont(row->chars[pos]));
+			E.buf->cx = pos;
+		} else {
+			E.buf->cx = row->size;
+		}
+	} else {
+		E.buf->cx = row->size;
 	}
 }
 
@@ -943,8 +1136,7 @@ void editorQuit(void) {
 	}
 
 	if (hasUnsavedChanges) {
-		editorSetStatusMessage(
-			"There are unsaved changes. Really quit? (y or n)");
+		editorSetStatusMessage(msg_unsaved_quit);
 		refreshScreen();
 		int c = editorReadKey();
 		if (c == 'y' || c == 'Y') {
@@ -976,9 +1168,427 @@ void editorGotoLine(void) {
 			} else if (nl > E.buf->numrows) {
 				E.buf->cy = E.buf->numrows;
 			} else {
-				E.buf->cy = nl;
+				E.buf->cy = nl - 1;
 			}
 			return;
 		}
 	}
+}
+
+/* Sentence movement */
+
+static int isSentenceEnd(uint8_t c) {
+	return c == '.' || c == '!' || c == '?';
+}
+
+static int isClosingPunct(uint8_t c) {
+	return c == ')' || c == ']' || c == '"' || c == '\'';
+}
+
+/* Scan forward from (*cx, *cy) to the position just after the end of
+ * the current sentence.  A sentence ends at . ! ? optionally followed
+ * by closing punctuation, then followed by whitespace, newline, or
+ * end-of-buffer.  A paragraph boundary (empty line) also ends a sentence.
+ * Returns 0 on success (position updated), -1 at end-of-buffer. */
+int bufferForwardSentenceEnd(struct editorBuffer *buf, int *cx, int *cy) {
+	int px = *cx, py = *cy;
+
+	while (py < buf->numrows) {
+		erow *row = &buf->row[py];
+
+		while (px < row->size) {
+			uint8_t c = row->chars[px];
+			if (isSentenceEnd(c)) {
+				/* Skip past optional closing punctuation */
+				int sx = px + 1;
+				while (sx < row->size &&
+				       isClosingPunct(row->chars[sx]))
+					sx++;
+				/* Sentence ends if followed by whitespace,
+				 * end-of-line, or end-of-buffer */
+				if (sx >= row->size || row->chars[sx] == ' ' ||
+				    row->chars[sx] == '\t') {
+					/* Land after the whitespace */
+					if (sx < row->size) {
+						/* Skip one whitespace char */
+						sx++;
+					} else if (py + 1 < buf->numrows) {
+						/* End of line — move to start
+						 * of next line */
+						py++;
+						sx = 0;
+					} else {
+						/* End of buffer */
+					}
+					*cx = sx;
+					*cy = py;
+					return 0;
+				}
+			}
+			px++;
+		}
+
+		/* Check for paragraph boundary (next line empty) */
+		if (py + 1 < buf->numrows &&
+		    isParaBoundary(&buf->row[py + 1])) {
+			/* Sentence ends at end of this line */
+			*cx = row->size;
+			*cy = py;
+			/* Advance past the blank line(s) to match Emacs
+			 * behavior: land on first non-blank line */
+			py++;
+			while (py < buf->numrows &&
+			       isParaBoundary(&buf->row[py]))
+				py++;
+			*cx = 0;
+			*cy = py < buf->numrows ? py : buf->numrows;
+			return 0;
+		}
+
+		py++;
+		px = 0;
+	}
+
+	/* Reached end of buffer */
+	*cx = 0;
+	*cy = buf->numrows;
+	return -1;
+}
+
+/* Scan backward from (*cx, *cy) to the beginning of the current sentence.
+ * Returns 0 on success, -1 at beginning-of-buffer. */
+int bufferBackwardSentenceStart(struct editorBuffer *buf, int *cx, int *cy) {
+	int px = *cx, py = *cy;
+
+	if (py >= buf->numrows) {
+		if (buf->numrows == 0)
+			return -1;
+		py = buf->numrows - 1;
+		px = buf->row[py].size;
+	}
+
+	/* Step back once to avoid detecting the current position */
+	if (!stepBackward(buf, &px, &py))
+		return -1;
+
+	/* Skip whitespace/newlines backward */
+	while (1) {
+		uint8_t c = charAt(buf, px, py);
+		if (c != ' ' && c != '\t' && c != '\n')
+			break;
+		if (!stepBackward(buf, &px, &py)) {
+			*cx = 0;
+			*cy = 0;
+			return 0;
+		}
+	}
+
+	/* Skip closing punctuation and sentence terminators backward
+	 * so we don't re-detect the end of the sentence we're at. */
+	while (1) {
+		uint8_t c = charAt(buf, px, py);
+		if (!isSentenceEnd(c) && !isClosingPunct(c))
+			break;
+		if (!stepBackward(buf, &px, &py)) {
+			*cx = 0;
+			*cy = 0;
+			return 0;
+		}
+	}
+
+	/* Now scan backward to find the previous sentence end or
+	 * paragraph boundary, then position after it. */
+	while (1) {
+		/* Check for paragraph boundary — blank line means
+		 * sentence starts on the line after the blank */
+		if (py < buf->numrows && isParaBoundary(&buf->row[py])) {
+			/* Land on the first non-blank line after */
+			int ny = py;
+			while (ny < buf->numrows &&
+			       isParaBoundary(&buf->row[ny]))
+				ny++;
+			*cx = 0;
+			*cy = ny < buf->numrows ? ny : py;
+			return 0;
+		}
+
+		uint8_t c = charAt(buf, px, py);
+		if (isSentenceEnd(c)) {
+			/* Found a sentence terminator — sentence starts
+			 * after this terminator plus any closing punct
+			 * and one whitespace char */
+			int sx = px, sy = py;
+			stepForward(buf, &sx, &sy);
+			/* Skip closing punctuation */
+			while (sy < buf->numrows) {
+				uint8_t nc = charAt(buf, sx, sy);
+				if (!isClosingPunct(nc))
+					break;
+				stepForward(buf, &sx, &sy);
+			}
+			/* Skip one whitespace */
+			if (sy < buf->numrows) {
+				uint8_t nc = charAt(buf, sx, sy);
+				if (nc == ' ' || nc == '\t' || nc == '\n')
+					stepForward(buf, &sx, &sy);
+			}
+			*cx = sx;
+			*cy = sy;
+			return 0;
+		}
+
+		if (!stepBackward(buf, &px, &py)) {
+			*cx = 0;
+			*cy = 0;
+			return 0;
+		}
+	}
+}
+
+void editorForwardSentence(int count) {
+	int times = count ? count : 1;
+	for (int i = 0; i < times; i++) {
+		bufferForwardSentenceEnd(E.buf, &E.buf->cx, &E.buf->cy);
+	}
+}
+
+void editorBackwardSentence(int count) {
+	int times = count ? count : 1;
+	for (int i = 0; i < times; i++) {
+		bufferBackwardSentenceStart(E.buf, &E.buf->cx, &E.buf->cy);
+	}
+}
+
+/* Kill sexp (C-M-k) */
+
+void editorKillSexp(int count) {
+	if (E.buf->read_only) {
+		editorSetStatusMessage(msg_read_only);
+		return;
+	}
+
+	E.buf->mark_active = 0;
+
+	int times = count ? count : 1;
+	for (int i = 0; i < times; i++) {
+		int endx = E.buf->cx;
+		int endy = E.buf->cy;
+		const char *errmsg = NULL;
+
+		if (bufferForwardSexpEnd(E.buf, &endx, &endy, &errmsg) < 0) {
+			editorSetStatusMessage("%s", errmsg);
+			return;
+		}
+		if (endx == E.buf->cx && endy == E.buf->cy)
+			return;
+		editorDeleteRange(E.buf, E.buf->cx, E.buf->cy, endx, endy, 1);
+	}
+}
+
+/* Kill paragraph (M-k) */
+
+void editorKillParagraph(int count) {
+	if (E.buf->read_only) {
+		editorSetStatusMessage(msg_read_only);
+		return;
+	}
+
+	E.buf->mark_active = 0;
+
+	int times = count ? count : 1;
+	for (int i = 0; i < times; i++) {
+		int endx = E.buf->cx;
+		int endy = E.buf->cy;
+		bufferForwardParagraphBoundary(E.buf, &endx, &endy);
+		if (endx == E.buf->cx && endy == E.buf->cy)
+			return;
+		editorDeleteRange(E.buf, E.buf->cx, E.buf->cy, endx, endy, 1);
+	}
+}
+
+/* Mark paragraph (M-h) — Emacs behavior: put point at beginning of
+ * paragraph, mark at end. */
+
+void editorMarkParagraph(void) {
+	struct editorBuffer *buf = E.buf;
+
+	/* Find paragraph end for the mark */
+	int endx = buf->cx;
+	int endy = buf->cy;
+	bufferForwardParagraphBoundary(buf, &endx, &endy);
+
+	/* Find paragraph start for point */
+	int startx = buf->cx;
+	int starty = buf->cy;
+	bufferBackwardParagraphBoundary(buf, &startx, &starty);
+
+	buf->markx = endx;
+	buf->marky = endy;
+	buf->mark_active = 1;
+	buf->cx = startx;
+	buf->cy = starty;
+
+	editorSetStatusMessage("Mark set");
+}
+
+/* Transpose sentences (C-x C-t) — swap sentence before point with
+ * sentence after point, leaving point after both. */
+
+void editorTransposeSentences(struct editorBuffer *bufr) {
+	if (bufr->read_only) {
+		editorSetStatusMessage(msg_read_only);
+		return;
+	}
+
+	bufr->mark_active = 0;
+
+	if (bufr->numrows == 0) {
+		editorSetStatusMessage(msg_buffer_empty);
+		return;
+	}
+
+	/* Find boundaries of sentence A (before point) and
+	 * sentence B (after point).
+	 *
+	 * Layout: ... [A_start .. A_end] gap [B_start .. B_end] ...
+	 * After:  ... [B] gap [A] ... with point after both.
+	 */
+
+	/* Sentence A: ends at or before point */
+	int a_start_x = bufr->cx, a_start_y = bufr->cy;
+	if (bufferBackwardSentenceStart(bufr, &a_start_x, &a_start_y) < 0) {
+		editorSetStatusMessage(msg_beginning_of_buffer);
+		return;
+	}
+
+	/* Sentence B end: forward from point */
+	int b_end_x = bufr->cx, b_end_y = bufr->cy;
+	if (bufferForwardSentenceEnd(bufr, &b_end_x, &b_end_y) < 0) {
+		editorSetStatusMessage(msg_end_of_buffer);
+		return;
+	}
+
+	/* Sentence A end / B start: forward from A start */
+	int a_end_x = a_start_x, a_end_y = a_start_y;
+	bufferForwardSentenceEnd(bufr, &a_end_x, &a_end_y);
+
+	/* Set region to span from A start to B end and use the
+	 * transpose-words transformer on the sentence boundaries.
+	 * Actually, we do a manual swap: extract both sentences,
+	 * delete the range, re-insert in swapped order. */
+
+	/* Extract sentence A text */
+	int a_len = 0;
+	char *a_text = NULL;
+	{
+		int sx = a_start_x, sy = a_start_y;
+		/* Calculate length */
+		int tx = sx, ty = sy;
+		while (ty < a_end_y || (ty == a_end_y && tx < a_end_x)) {
+			a_len++;
+			stepForward(bufr, &tx, &ty);
+		}
+		a_text = xmalloc(a_len + 1);
+		tx = sx;
+		ty = sy;
+		for (int i = 0; i < a_len; i++) {
+			a_text[i] = charAt(bufr, tx, ty);
+			stepForward(bufr, &tx, &ty);
+		}
+		a_text[a_len] = '\0';
+	}
+
+	/* Extract sentence B text */
+	int b_len = 0;
+	char *b_text = NULL;
+	{
+		int sx = a_end_x, sy = a_end_y;
+		int tx = sx, ty = sy;
+		while (ty < b_end_y || (ty == b_end_y && tx < b_end_x)) {
+			b_len++;
+			stepForward(bufr, &tx, &ty);
+		}
+		b_text = xmalloc(b_len + 1);
+		tx = sx;
+		ty = sy;
+		for (int i = 0; i < b_len; i++) {
+			b_text[i] = charAt(bufr, tx, ty);
+			stepForward(bufr, &tx, &ty);
+		}
+		b_text[b_len] = '\0';
+	}
+
+	/* Delete the entire range from A start to B end */
+	editorDeleteRange(bufr, a_start_x, a_start_y, b_end_x, b_end_y, 0);
+
+	/* Insert B text then A text at the deletion point */
+	bufr->cx = a_start_x;
+	bufr->cy = a_start_y;
+	for (int i = 0; i < b_len; i++) {
+		if (b_text[i] == '\n') {
+			editorInsertNewlineRaw(bufr);
+		} else {
+			editorInsertChar(bufr, (uint8_t)b_text[i], 1);
+		}
+	}
+	for (int i = 0; i < a_len; i++) {
+		if (a_text[i] == '\n') {
+			editorInsertNewlineRaw(bufr);
+		} else {
+			editorInsertChar(bufr, (uint8_t)a_text[i], 1);
+		}
+	}
+
+	free(a_text);
+	free(b_text);
+}
+
+/* Zap to char (M-z) — kill from point up to and including the next
+ * occurrence of a prompted character. */
+
+void editorZapToChar(struct editorBuffer *bufr) {
+	if (bufr->read_only) {
+		editorSetStatusMessage(msg_read_only);
+		return;
+	}
+
+	bufr->mark_active = 0;
+
+	editorSetStatusMessage("Zap to char: ");
+	refreshScreen();
+
+	int c = editorReadKey();
+	if (c == CTRL('g')) {
+		editorSetStatusMessage(msg_canceled);
+		return;
+	}
+	if (c == 033) {
+		editorSetStatusMessage(msg_canceled);
+		return;
+	}
+
+	/* Search forward for the character */
+	int sy = bufr->cy;
+
+	while (sy < bufr->numrows) {
+		erow *row = &bufr->row[sy];
+		int start = (sy == bufr->cy) ? bufr->cx : 0;
+		for (int x = start; x < row->size; x++) {
+			if (row->chars[x] == (uint8_t)c) {
+				/* Skip past the target if it's not at
+				 * the starting position */
+				if (x == bufr->cx && sy == bufr->cy)
+					continue;
+				/* Kill up to and including this char */
+				int endx = x + 1;
+				int endy = sy;
+				editorDeleteRange(bufr, bufr->cx, bufr->cy,
+						  endx, endy, 1);
+				return;
+			}
+		}
+		sy++;
+	}
+
+	editorSetStatusMessage("'%c' not found", c);
 }

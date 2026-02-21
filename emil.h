@@ -2,6 +2,7 @@
 #define EMIL_H 1
 
 #include <stdint.h>
+#include <stdlib.h>
 #include <termios.h>
 #include <time.h>
 #include "keymap.h"
@@ -17,11 +18,20 @@
 #define ESC "\033"
 #define CSI ESC "["
 #define CRLF "\r\n"
+
+/* Suppress GCC's warn_unused_result where the return value is
+ * intentionally discarded (e.g. best-effort write to stdout). */
+#define IGNORE_RETURN(expr) \
+	do {                \
+		if (expr) { \
+		}           \
+	} while (0)
 #define ISCTRL(c) ((0 < c && c < 0x20) || c == 0x7f)
 
 enum promptType {
 	PROMPT_BASIC,
 	PROMPT_FILES,
+	PROMPT_DIR,
 	PROMPT_COMMAND,
 	PROMPT_SEARCH,
 };
@@ -29,13 +39,8 @@ enum promptType {
 
 typedef struct erow {
 	int size;
-	int rsize;
-	int renderwidth;
 	uint8_t *chars;
-	uint8_t *render;
-	int cached_width;
-	int width_valid;
-	int render_valid;
+	int cached_width; /* display width in columns, or -1 if stale */
 } erow;
 
 struct editorUndo {
@@ -58,6 +63,9 @@ struct completion_state {
 	int successive_tabs;
 	int last_completion_count;
 	int preserve_message;
+	int selected;	/* Currently highlighted match index, -1 = none */
+	char **matches; /* Copy of match list for M-n/M-p navigation */
+	int n_matches;	/* Number of matches in the list */
 };
 
 struct completion_result {
@@ -67,10 +75,21 @@ struct completion_result {
 	int prefix_len;
 };
 
+#define MARK_RING_SIZE 8
+
+struct markRingEntry {
+	int cx;
+	int cy;
+};
+
 struct editorBuffer {
 	int indent;
 	int cx, cy;
 	int markx, marky;
+	int mark_active;
+	struct markRingEntry mark_ring[MARK_RING_SIZE];
+	int mark_ring_len; /* number of valid entries (0..MARK_RING_SIZE) */
+	int mark_ring_idx; /* next slot to write (circular) */
 	int numrows;
 	int rowcap;
 	int end;
@@ -80,13 +99,19 @@ struct editorBuffer {
 	int rectangle_mode;
 	int single_line;
 	int read_only;
+	int lock_fd;	   /* fd holding advisory lock, or -1 */
+	time_t open_mtime; /* st_mtime at open/save, 0 if unset */
+	int external_mod;  /* 1 if file changed on disk since open/save */
+	int internal_mod;
 	erow *row;
 	char *filename;
+	char *display_name; /* Truncated name for status bar display */
 	uint8_t *query;
 	uint8_t match;
 	struct editorUndo *undo;
 	struct editorUndo *redo;
 	int undo_count;
+	int undo_pruned;
 	struct editorBuffer *next;
 	int *screen_line_start;
 	int screen_line_cache_size;
@@ -102,6 +127,7 @@ struct editorWindow {
 	int rowoff;
 	int coloff;
 	int height;
+	int skip_sublines; /* sub-lines of rowoff row to skip (derived per frame) */
 };
 
 struct editorMacro {
@@ -117,13 +143,25 @@ struct editorCommand {
 	void (*cmd)(struct editorConfig *, struct editorBuffer *);
 };
 
+struct editorText {
+	uint8_t *str;	  /* NUL-terminated data */
+	int is_rectangle; /* 1 = rectangle data, 0 = plain text */
+	int rect_width;	  /* column width (meaningful when is_rectangle) */
+	int rect_height;  /* row count (meaningful when is_rectangle) */
+};
+
+static inline void clearEditorText(struct editorText *t) {
+	free(t->str);
+	t->str = NULL;
+	t->is_rectangle = 0;
+	t->rect_width = 0;
+	t->rect_height = 0;
+}
+
 enum registerType {
 	REGISTER_NULL,
-	REGISTER_REGION,
-	REGISTER_NUMBER,
 	REGISTER_POINT,
-	REGISTER_MACRO,
-	REGISTER_RECTANGLE,
+	REGISTER_TEXT,
 };
 
 struct editorPoint {
@@ -132,29 +170,21 @@ struct editorPoint {
 	struct editorBuffer *buf;
 };
 
-struct editorRectangle {
-	int rx;
-	int ry;
-	uint8_t *rect;
-};
-
-union registerData {
-	uint8_t *region;
-	int64_t number;
-	struct editorMacro *macro;
-	struct editorPoint *point;
-	struct editorRectangle *rect;
-};
-
 struct editorRegister {
 	enum registerType rtype;
-	union registerData rdata;
+	union {
+		struct editorPoint point;
+		struct editorText text;
+	} data;
 };
 
 #define HISTORY_MAX_ENTRIES 100
 
 struct historyEntry {
 	char *str;
+	int is_rectangle; /* kill ring only; zero for other histories */
+	int rect_width;	  /* kill ring only; zero for other histories */
+	int rect_height;  /* kill ring only; zero for other histories */
 	struct historyEntry *prev;
 	struct historyEntry *next;
 };
@@ -166,15 +196,12 @@ struct editorHistory {
 };
 
 struct editorConfig {
-	uint8_t *kill;
-	uint8_t *rectKill;
-	int rx;
-	int ry;
+	struct editorText kill; /* active kill entry */
 	int screenrows;
 	int screencols;
 	uint8_t unicode[4];
 	int nunicode;
-	char statusmsg[256];
+	char statusmsg[1024];
 	char prefix_display[32]; /* Display prefix commands like C-u */
 
 	/* Buffer management for minibuffer */
@@ -212,6 +239,7 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 		      enum promptType t,
 		      void (*callback)(struct editorBuffer *, uint8_t *, int));
 void editorUpdateBuffer(struct editorBuffer *buf);
+void editorInsertNewlineRaw(struct editorBuffer *bufr);
 void editorInsertNewline(struct editorBuffer *bufr, int count);
 void editorInsertChar(struct editorBuffer *bufr, int c, int count);
 int editorOpen(struct editorBuffer *bufr, char *filename);

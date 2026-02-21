@@ -8,12 +8,20 @@ int markInvalid(void);
 int markInvalidSilent(void);
 
 void editorSetMark(void);
+void editorSetMarkSilent(void);
+
+void editorDeactivateMark(void);
+
+void editorPopMark(void);
 
 void editorClearMark(void);
 
 void editorToggleRectangleMode(void);
 
 void editorMarkBuffer(void);
+
+void editorDeleteRange(struct editorBuffer *buf, int startx, int starty,
+		       int endx, int endy, int add_to_kill_ring);
 
 void editorKillRegion(struct editorConfig *ed, struct editorBuffer *buf);
 
@@ -35,5 +43,8 @@ void editorCopyRectangle(struct editorConfig *ed, struct editorBuffer *buf);
 void editorKillRectangle(struct editorConfig *ed, struct editorBuffer *buf);
 
 void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf);
+
+void addToKillRing(const char *text, int is_rect, int rect_width,
+		   int rect_height);
 
 #endif

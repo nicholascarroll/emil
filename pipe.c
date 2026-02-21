@@ -50,9 +50,11 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 	FILE *p_stdin = subprocess_stdin(&subprocess);
 	FILE *p_stdout = subprocess_stdout(&subprocess);
 
-	/* Write region to subprocess */
-	for (int i = 0; input[i]; i++) {
-		fputc(input[i], p_stdin);
+	/* If we have a region send to subprocess */
+	if (input) {
+		for (int i = 0; input[i]; i++) {
+			fputc(input[i], p_stdin);
+		}
 	}
 
 	/* Join process */
@@ -94,15 +96,15 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 	return (uint8_t *)buf;
 }
 
-uint8_t *editorPipe(struct editorConfig *ed, struct editorBuffer *bf) {
+uint8_t *editorPipe(struct editorConfig *ed, struct editorBuffer *bf,
+		    int useRegion) {
 	buf = xcalloc(1, BUFSIZ + 1);
 	cmd = NULL;
-	cmd = editorPrompt(bf, (uint8_t *)"Shell command on region: %s",
-			   PROMPT_BASIC, NULL);
+	cmd = editorPrompt(bf, (uint8_t *)"Shell: %s", PROMPT_BASIC, NULL);
 
 	if (cmd == NULL) {
 		editorSetStatusMessage("Canceled shell command.");
-	} else {
+	} else if (useRegion) {
 		if (E.uarg) {
 			E.uarg = 0;
 			editorTransformRegion(ed, bf, transformerPipeCmd);
@@ -121,14 +123,19 @@ uint8_t *editorPipe(struct editorConfig *ed, struct editorBuffer *bf) {
 			}
 
 			editorCopyRegion(
-				ed, bf); // ed->kill now holds the selected text
+				ed,
+				bf); // ed->kill.str now holds the selected text
 
 			// 2. Pass the extracted text to transformerPipeCmd
-			uint8_t *result = transformerPipeCmd(ed->kill);
+			uint8_t *result = transformerPipeCmd(ed->kill.str);
 
 			free(cmd);
 			return result;
 		}
+	} else {
+		uint8_t *result = transformerPipeCmd(NULL);
+		free(cmd);
+		return result;
 	}
 
 	free(cmd);
@@ -136,8 +143,9 @@ uint8_t *editorPipe(struct editorConfig *ed, struct editorBuffer *bf) {
 	return NULL;
 }
 
-void editorPipeCmd(struct editorConfig *ed, struct editorBuffer *bufr) {
-	uint8_t *pipeOutput = editorPipe(ed, bufr);
+void editorPipeCmd(struct editorConfig *ed, struct editorBuffer *bufr,
+		   int useRegion) {
+	uint8_t *pipeOutput = editorPipe(ed, bufr, useRegion);
 	if (pipeOutput != NULL) {
 		size_t outputLen = strlen((char *)pipeOutput);
 		if (outputLen < sizeof(ed->statusmsg) - 1) {
@@ -324,14 +332,14 @@ void editorDiffBufferWithFile(struct editorConfig *ed,
 void editorPipeCmd(struct editorConfig *ed, struct editorBuffer *bufr) {
 	(void)ed;   /* unused parameter */
 	(void)bufr; /* unused parameter */
-	editorSetStatusMessage("Pipe command not available on this platform");
+	editorSetStatusMessage(msg_shell_disabled);
 }
 
 void editorDiffBufferWithFile(struct editorConfig *ed,
 			      struct editorBuffer *bufr) {
 	(void)ed;
 	(void)bufr;
-	editorSetStatusMessage("Shell integration disabled");
+	editorSetStatusMessage(msg_shell_disabled);
 }
 
 #endif /* EMIL_DISABLE_SHELL */

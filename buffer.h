@@ -1,7 +1,6 @@
 #ifndef EMIL_BUFFER_H
 #define EMIL_BUFFER_H
 #include "emil.h"
-void updateRow(erow *row);
 void editorInsertRow(struct editorBuffer *bufr, int at, char *s, size_t len);
 void freeRow(erow *row);
 void editorDelRow(struct editorBuffer *bufr, int at);
@@ -18,9 +17,10 @@ void editorSwitchToNamedBuffer(struct editorConfig *ed,
 void editorNextBuffer(void);
 void editorPreviousBuffer(void);
 void editorKillBuffer(void);
+void computeDisplayNames(void);
 void invalidateScreenCache(struct editorBuffer *buf);
-void buildScreenCache(struct editorBuffer *buf);
-int getScreenLineForRow(struct editorBuffer *buf, int row);
+void buildScreenCache(struct editorBuffer *buf, int screencols);
+int getScreenLineForRow(struct editorBuffer *buf, int row, int screencols);
 int calculateLineWidth(erow *row);
 int charsToDisplayColumn(erow *row, int char_pos);
 int countScreenLines(erow *row, int screencols);
@@ -28,4 +28,8 @@ int wordWrapBreak(erow *row, int screencols, int line_start_col,
 		  int line_start_byte, int *break_col, int *break_byte);
 void cursorScreenLine(erow *row, int cursor_col, int screencols, int *out_line,
 		      int *out_col);
+int sublineBounds(erow *row, int screencols, int target_subline,
+		  int *start_byte, int *end_byte);
+int displayColumnToByteOffset(erow *row, int screencols, int target_subline,
+			      int target_col);
 #endif

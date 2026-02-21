@@ -5,8 +5,10 @@
 
 void initHistory(struct editorHistory *hist);
 void addHistory(struct editorHistory *hist, const char *str);
-char *getHistoryAt(struct editorHistory *hist, int index);
+void addHistoryWithRect(struct editorHistory *hist, const char *str,
+			int is_rectangle, int rect_width, int rect_height);
+struct historyEntry *getHistoryAt(struct editorHistory *hist, int index);
 void freeHistory(struct editorHistory *hist);
-char *getLastHistory(struct editorHistory *hist);
+struct historyEntry *getLastHistory(struct editorHistory *hist);
 
 #endif

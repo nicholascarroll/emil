@@ -32,6 +32,7 @@
 #include "edit.h"
 #include "region.h"
 #include "prompt.h"
+#include "clang.h"
 
 extern struct editorConfig E;
 
@@ -53,6 +54,7 @@ void setupCommands(struct editorConfig *ed) {
 		//		{ "indent-spaces", editorIndentSpaces },
 		//		{ "indent-tabs", editorIndentTabs },
 		{ "insert-file", editorInsertFile },
+		{ "cd", editorChangeDirectory },
 		{ "diff-buffer-with-file", editorDiffBufferWithFile },
 		{ "isearch-forward-regexp", editorRegexFindWrapper },
 		{ "query-replace", editorQueryReplace },
@@ -146,12 +148,12 @@ void executeCommand(int key) {
 	/* Handle prefix state transitions and commands */
 	switch (key) {
 	case CTRL('x'):
-	if (prefix == PREFIX_NONE) {
-		prefix = PREFIX_CTRL_X;
-		showPrefix("C-x ");
-		return;
-	}
-	break;
+		if (prefix == PREFIX_NONE) {
+			prefix = PREFIX_CTRL_X;
+			showPrefix("C-x ");
+			return;
+		}
+		break;
 
 	case CTRL('g'):
 		/* Cancel prefix */
@@ -179,7 +181,7 @@ void executeCommand(int key) {
 		case CTRL('w'):
 			editorProcessKeypress(SAVE_AS);
 			return;
-		case CTRL('r'):
+		case CTRL('q'):
 			editorProcessKeypress(TOGGLE_READ_ONLY);
 			return;
 		case CTRL('f'):
@@ -190,6 +192,9 @@ void executeCommand(int key) {
 			return;
 		case CTRL('x'):
 			editorProcessKeypress(SWAP_MARK);
+			return;
+		case CTRL('t'):
+			editorProcessKeypress(TRANSPOSE_SENTENCES);
 			return;
 		case 'b':
 		case 'B':
@@ -245,6 +250,10 @@ void executeCommand(int key) {
 		case CTRL('l'):
 			editorProcessKeypress(DOWNCASE_REGION);
 			return;
+		case BACKSPACE:
+			editorKillLineBackwards();
+			return;
+
 		case '=':
 			editorProcessKeypress(WHAT_CURSOR);
 			return;
@@ -310,11 +319,17 @@ void executeCommand(int key) {
 		case ARROW_RIGHT:
 			editorProcessKeypress(NEXT_BUFFER);
 			return;
+		case ' ':
+			//		case CTRL('@'):
+			if (!E.buf->mark_active)
+				editorSetMark();
+			editorToggleRectangleMode();
+			return;
 		default:
 			/* Unknown C-x sequence */
 			if (key < ' ') {
-				editorSetStatusMessage(
-					msg_unknown_cx, key + '`');
+				editorSetStatusMessage(msg_unknown_cx,
+						       key + '`');
 			} else {
 				editorSetStatusMessage("Unknown command C-x %c",
 						       key);
@@ -342,21 +357,8 @@ void executeCommand(int key) {
 		case 'J':
 			editorProcessKeypress(JUMP_REGISTER);
 			return;
-		case 'a':
-		case 'A':
-			editorProcessKeypress(MACRO_REGISTER);
-			return;
-		case 'm':
-		case 'M':
-			editorToggleRectangleMode();
-			return;
-		case CTRL('@'):
 		case ' ':
 			editorProcessKeypress(POINT_REGISTER);
-			return;
-		case 'n':
-		case 'N':
-			editorProcessKeypress(NUMBER_REGISTER);
 			return;
 		case 'r':
 		case 'R':
@@ -364,7 +366,12 @@ void executeCommand(int key) {
 			return;
 		case 's':
 		case 'S':
-			editorProcessKeypress(REGION_REGISTER);
+			if (E.buf->rectangle_mode)
+				editorProcessKeypress(RECT_REGISTER);
+			//editorRectToregister(&E, E.buf);
+			else
+				editorProcessKeypress(REGION_REGISTER);
+			//editorRegionToRegister(&E, E.buf);
 			return;
 		case 't':
 		case 'T':
@@ -468,7 +475,13 @@ void editorProcessKeypress(int c) {
 
 	// Handle PIPE_CMD
 	if (c == PIPE_CMD) {
-		editorPipeCmd(&E, E.buf);
+		editorPipeCmd(&E, E.buf, 1);
+		E.uarg = 0;
+		return;
+	}
+	// Handle SHELL_CMD
+	if (c == SHELL_CMD) {
+		editorPipeCmd(&E, E.buf, 0);
 		E.uarg = 0;
 		return;
 	}
@@ -521,13 +534,14 @@ void editorProcessKeypress(int c) {
 		editorPageDown(uarg);
 		break;
 		/* TODO rename these */
-	case HISTORY_PREV:
+	case META_P:
 		editorScrollLineUp(uarg);
 		break;
-	case HISTORY_NEXT:
+	case META_N:
 		editorScrollLineDown(uarg);
 		break;
 	case BEG_OF_FILE:
+		editorSetMarkSilent();
 		E.buf->cy = 0;
 		E.buf->cx = 0;
 		break;
@@ -542,6 +556,7 @@ void editorProcessKeypress(int c) {
 			E.screenrows, win->rowoff);
 	} break;
 	case END_OF_FILE:
+		editorSetMarkSilent();
 		E.buf->cy = E.buf->numrows;
 		E.buf->cx = 0;
 		break;
@@ -554,12 +569,15 @@ void editorProcessKeypress(int c) {
 		editorEndOfLine(uarg);
 		break;
 	case CTRL('s'):
+		editorSetMarkSilent();
 		editorFind(E.buf);
 		break;
 	case REGEX_SEARCH_FORWARD:
+		editorSetMarkSilent();
 		editorRegexFind(E.buf);
 		break;
 	case REGEX_SEARCH_BACKWARD:
+		editorSetMarkSilent();
 		editorBackwardRegexFind(E.buf);
 		break;
 	case UNICODE_ERROR:
@@ -569,8 +587,11 @@ void editorProcessKeypress(int c) {
 		editorInsertUnicode(E.buf, uarg);
 		break;
 	case CUT:
-		editorKillRegion(&E, E.buf);
-		editorClearMark();
+		if (E.buf->rectangle_mode)
+			editorKillRectangle(&E, E.buf);
+		else
+			editorKillRegion(&E, E.buf);
+		editorDeactivateMark();
 		break;
 	case SAVE:
 		editorSave(E.buf);
@@ -579,30 +600,45 @@ void editorProcessKeypress(int c) {
 		editorSaveAs(E.buf);
 		break;
 	case COPY:
-		editorCopyRegion(&E, E.buf);
-		editorClearMark();
+		if (E.buf->rectangle_mode)
+			editorCopyRectangle(&E, E.buf);
+		else
+			editorCopyRegion(&E, E.buf);
+		editorDeactivateMark();
 		break;
 	case CTRL('C'):
-		editorCopyRegion(&E, E.buf);
-		editorClearMark();
-		editorCopyToClipboard(E.kill);
+		if (!E.buf->rectangle_mode) {
+			editorCopyRegion(&E, E.buf);
+			editorDeactivateMark();
+			editorCopyToClipboard(E.kill.str);
+		} else {
+			editorSetStatusMessage(
+				"Copying rectangle to OSC 52 not supported!");
+		}
 		break;
 	case CTRL('@'):
-		editorSetMark();
+		if (uarg) {
+			editorPopMark();
+		} else {
+			editorSetMark();
+		}
 		break;
 	case CTRL('y'):
-		editorYank(&E, E.buf, uarg ? uarg : 1);
+		if (E.kill.is_rectangle)
+			editorYankRectangle(&E, E.buf);
+		else
+			editorYank(&E, E.buf, uarg ? uarg : 1);
 		break;
 	case YANK_POP:
 		editorYankPop(&E, E.buf);
 		break;
 	case CTRL('w'):
-		if (markInvalidSilent()) {
-			editorBackspaceWord(E.buf, uarg ? uarg : 1);
-		} else {
+		if (!E.buf->rectangle_mode) {
 			editorKillRegion(&E, E.buf);
-			editorClearMark();
+		} else {
+			editorKillRectangle(&E, E.buf);
 		}
+		editorDeactivateMark();
 		break;
 	case CTRL('_'):
 		editorDoUndo(E.buf, uarg);
@@ -642,6 +678,33 @@ void editorProcessKeypress(int c) {
 		break;
 	case BACKWARD_PARA:
 		editorBackPara(uarg);
+		break;
+	case FORWARD_SEXP:
+		editorForwardSexp(uarg);
+		break;
+	case BACKWARD_SEXP:
+		editorBackwardSexp(uarg);
+		break;
+	case SENTENCE_FORWARD:
+		editorForwardSentence(uarg);
+		break;
+	case SENTENCE_BACKWARD:
+		editorBackwardSentence(uarg);
+		break;
+	case KILL_SEXP:
+		editorKillSexp(uarg);
+		break;
+	case KILL_PARA:
+		editorKillParagraph(uarg);
+		break;
+	case MARK_PARA:
+		editorMarkParagraph();
+		break;
+	case TRANSPOSE_SENTENCES:
+		editorTransposeSentences(E.buf);
+		break;
+	case ZAP_TO_CHAR:
+		editorZapToChar(E.buf);
 		break;
 	case REDO:
 		editorDoRedo(E.buf, uarg);
@@ -712,6 +775,18 @@ void editorProcessKeypress(int c) {
 		editorOpenShellDrawer();
 		break;
 
+	case CTAGS_JUMP:
+		editorCtagsJump();
+		break;
+
+	case CTAGS_BACK:
+		editorCtagsBack();
+		break;
+
+	case TOGGLE_HEADER_BODY:
+		editorToggleHeaderBody();
+		break;
+
 	case DELETE_WORD:
 		editorDeleteWord(E.buf, uarg);
 		break;
@@ -756,7 +831,10 @@ void editorProcessKeypress(int c) {
 		break;
 
 	case CTRL('t'):
-		editorTransposeChars(E.buf);
+		if (E.buf->rectangle_mode && !markInvalidSilent())
+			editorStringRectangle(&E, E.buf);
+		else
+			editorTransposeChars(E.buf);
 		break;
 
 	case EXEC_CMD:;
@@ -772,6 +850,7 @@ void editorProcessKeypress(int c) {
 		break;
 
 	case GOTO_LINE:
+		editorSetMarkSilent();
 		editorGotoLine();
 		break;
 
@@ -785,7 +864,7 @@ void editorProcessKeypress(int c) {
 		break;
 
 	case CTRL('g'):
-		editorClearMark();
+		editorDeactivateMark();
 		editorSetStatusMessage(msg_quit);
 		break;
 
@@ -806,20 +885,15 @@ void editorProcessKeypress(int c) {
 			E.buf->cy = E.buf->marky;
 			E.buf->markx = swapx;
 			E.buf->marky = swapy;
+			E.buf->mark_active = 1;
 		}
 		break;
 
 	case JUMP_REGISTER:
 		editorJumpToRegister(&E);
 		break;
-	case MACRO_REGISTER:
-		editorMacroToRegister(&E);
-		break;
 	case POINT_REGISTER:
 		editorPointToRegister(&E);
-		break;
-	case NUMBER_REGISTER:
-		editorNumberToRegister(&E, uarg);
 		break;
 	case REGION_REGISTER:
 		editorRegionToRegister(&E, E.buf);
@@ -840,12 +914,12 @@ void editorProcessKeypress(int c) {
 
 	case COPY_RECT:
 		editorCopyRectangle(&E, E.buf);
-		editorClearMark();
+		editorDeactivateMark();
 		break;
 
 	case KILL_RECT:
 		editorKillRectangle(&E, E.buf);
-		editorClearMark();
+		editorDeactivateMark();
 		break;
 
 	case YANK_RECT:
@@ -853,7 +927,7 @@ void editorProcessKeypress(int c) {
 		break;
 
 	case RECT_REGISTER:
-		editorRectRegister(&E, E.buf);
+		editorRectToRegister(&E, E.buf);
 		break;
 
 	case MACRO_RECORD:

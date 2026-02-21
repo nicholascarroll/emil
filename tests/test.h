@@ -12,7 +12,7 @@ static int _tests_failed = 0;
 static int _current_test_failed = 0;
 static const char *_current_test_name = NULL;
 
-/* Main test macros - Unity compatible names */
+/* Assertion macros */
 #define TEST_ASSERT(condition) do { \
     if (!(condition)) { \
         printf("  FAIL: %s:%d: Expression '%s' is false\n", \
@@ -42,42 +42,36 @@ static const char *_current_test_name = NULL;
     } \
 } while(0)
 
+#define TEST_ASSERT_EQUAL_INT(expected, actual) TEST_ASSERT_EQUAL(expected, actual)
+#define TEST_ASSERT_EQUAL_UINT(expected, actual) TEST_ASSERT_EQUAL(expected, actual)
+
 /* Test runner macros */
 #define TEST_BEGIN() do { \
     _tests_run = 0; \
     _tests_failed = 0; \
-    printf("Running tests...\n"); \
 } while(0)
 
 #define RUN_TEST(func) do { \
     _current_test_failed = 0; \
     _current_test_name = #func; \
-    printf("%s:%d:%s:", __FILE__, __LINE__, #func); \
+    setUp(); \
     func(); \
+    tearDown(); \
     _tests_run++; \
     if (_current_test_failed) { \
         _tests_failed++; \
-        printf("FAIL\n"); \
-    } else { \
-        printf("PASS\n"); \
+        printf("  %s: FAIL\n", #func); \
     } \
 } while(0)
 
 #define TEST_END() ( \
-    printf("\n-----------------------\n"), \
-    printf("%d Tests %d Failures %d Ignored\n", \
-           _tests_run, _tests_failed, 0), \
+    printf("%d Tests %d Failures\n", \
+           _tests_run, _tests_failed), \
     (_tests_failed == 0) ? printf("OK\n") : printf("FAIL\n"), \
     _tests_failed \
 )
 
-/* Convenience macros that emil uses */
-#define TEST_ASSERT_EQUAL_INT(expected, actual) TEST_ASSERT_EQUAL(expected, actual)
-#define TEST_ASSERT_EQUAL_UINT(expected, actual) TEST_ASSERT_EQUAL(expected, actual)
-#define TEST_ASSERT_TRUE(condition) TEST_ASSERT(condition)
-#define TEST_ASSERT_FALSE(condition) TEST_ASSERT(!(condition))
-
-/* Unity's setUp/tearDown - just declare them */
+/* setUp/tearDown — implemented by each test file */
 void setUp(void);
 void tearDown(void);
 
