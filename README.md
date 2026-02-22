@@ -125,7 +125,7 @@ Shell integration can be disabled at build time with the compiler flag `-DEMIL_D
 ### Shell Drawer
 `Ctrl-x Ctrl-z` suspends `emil` while preserving the current editor screen. This permits shell commands to be executed in the terminal below the editor content, after which editing may be resumed with `fg`.
 
-Note: `less` clears the terminal when it quits; `more` does not.
+Note: `less` clears the terminal when it quits; `less -X` and `more` do not.
 
 ### System Clipboard Integration
 `Ctrl-c` copies selected text to both the kill ring and the user's system clipboard 
