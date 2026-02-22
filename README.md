@@ -48,7 +48,7 @@ make android
 
 ```bash
 pacman -S msys2-devel msys2-runtime-devel
-````
+```
 
 * Build and install:
 
