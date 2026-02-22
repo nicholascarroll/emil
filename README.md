@@ -78,7 +78,7 @@ emil file.txt
 | Search                 | `Ctrl-s`        |
 | Cancel                 | `Ctrl-g`        |
 
-For the full command reference, see the man page:
+For the complete command reference, see the man page:
 
 ```
 man emil
