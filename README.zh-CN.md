@@ -108,7 +108,6 @@ set bind-tty-special-chars off
 "\C-w": kill-region
 "\M-w": copy-region-as-kill
 ```
-如果没有标记任何区域，它会杀死光标前面的一个词（相当于向后杀词，backward-kill-word）。
 
 在 Readline 和 `emil` 中，`Ctrl-h` 会删除前一个字符，但在 `emacs` 中它是帮助前缀键。
 
