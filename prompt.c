@@ -90,7 +90,19 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 				}
 
 				/* If it's a file, or it doesn't exist (new file), return it */
-				result = (uint8_t *)xstrdup(current_text);
+				/* If a completion is selected, return its full
+				 * path rather than the basename shown in the
+				 * minibuffer. */
+				struct completion_state *cs =
+					&E.minibuf->completion_state;
+				if (cs->matches && cs->selected >= 0 &&
+				    cs->selected < cs->n_matches) {
+					result = (uint8_t *)xstrdup(
+						cs->matches[cs->selected]);
+				} else {
+					result = (uint8_t *)xstrdup(
+						current_text);
+				}
 			} else {
 				result = (uint8_t *)xstrdup("");
 			}
@@ -130,6 +142,15 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 
 		case HISTORY_PREV:
 		case HISTORY_NEXT: {
+			/* If completions are visible, cycle selection
+			 * instead of history. */
+			if (E.minibuf->completion_state.matches &&
+			    E.minibuf->completion_state.n_matches > 0) {
+				cycleCompletion(E.minibuf,
+						c == HISTORY_NEXT ? 1 : -1);
+				break;
+			}
+
 			struct editorHistory *hist = NULL;
 			char *history_str = NULL;
 

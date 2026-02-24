@@ -18,6 +18,7 @@ void editorSwitchToNamedBuffer(struct editorConfig *ed,
 void editorNextBuffer(void);
 void editorPreviousBuffer(void);
 void editorKillBuffer(void);
+void computeDisplayNames(void);
 void invalidateScreenCache(struct editorBuffer *buf);
 void buildScreenCache(struct editorBuffer *buf);
 int getScreenLineForRow(struct editorBuffer *buf, int row);

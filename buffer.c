@@ -452,6 +452,7 @@ struct editorBuffer *newBuffer(void) {
 	ret->rowcap = 0;
 	ret->row = NULL;
 	ret->filename = NULL;
+	ret->display_name = NULL;
 	ret->query = NULL;
 	ret->dirty = 0;
 	ret->special_buffer = 0;
@@ -463,6 +464,9 @@ struct editorBuffer *newBuffer(void) {
 	ret->completion_state.successive_tabs = 0;
 	ret->completion_state.last_completion_count = 0;
 	ret->completion_state.preserve_message = 0;
+	ret->completion_state.selected = -1;
+	ret->completion_state.matches = NULL;
+	ret->completion_state.n_matches = 0;
 	ret->next = NULL;
 	ret->word_wrap = 0;
 	ret->rectangle_mode = 0;
@@ -477,9 +481,15 @@ struct editorBuffer *newBuffer(void) {
 void destroyBuffer(struct editorBuffer *buf) {
 	clearUndosAndRedos(buf);
 	free(buf->filename);
+	free(buf->display_name);
 	free(buf->query);
 	free(buf->screen_line_start);
 	free(buf->completion_state.last_completed_text);
+	if (buf->completion_state.matches) {
+		for (int i = 0; i < buf->completion_state.n_matches; i++)
+			free(buf->completion_state.matches[i]);
+		free(buf->completion_state.matches);
+	}
 	for (int i = 0; i < buf->numrows; i++) {
 		freeRow(&buf->row[i]);
 	}
@@ -496,29 +506,27 @@ void editorUpdateBuffer(struct editorBuffer *buf) {
 void editorSwitchToNamedBuffer(struct editorConfig *ed,
 			       struct editorBuffer *current) {
 	char prompt[512];
-	const char *defaultBufferName = NULL;
+	struct editorBuffer *defaultBuffer = NULL;
 
 	if (ed->lastVisitedBuffer && ed->lastVisitedBuffer != current) {
-		defaultBufferName = ed->lastVisitedBuffer->filename ?
-					    ed->lastVisitedBuffer->filename :
-					    "*scratch*";
+		defaultBuffer = ed->lastVisitedBuffer;
 	} else {
-		// Find the first buffer that isn't the current one
-		struct editorBuffer *defaultBuffer = ed->headbuf;
-		while (defaultBuffer == current && defaultBuffer->next) {
-			defaultBuffer = defaultBuffer->next;
-		}
-		if (defaultBuffer != current) {
-			defaultBufferName = defaultBuffer->filename ?
-						    defaultBuffer->filename :
-						    "*scratch*";
-		}
+		/* Find the first buffer that isn't the current one */
+		struct editorBuffer *b = ed->headbuf;
+		while (b == current && b->next)
+			b = b->next;
+		if (b != current)
+			defaultBuffer = b;
 	}
 
-	if (defaultBufferName) {
+	if (defaultBuffer) {
+		const char *full = defaultBuffer->filename ?
+					   defaultBuffer->filename :
+					   "*scratch*";
+		const char *slash = strrchr(full, '/');
+		const char *base = slash ? slash + 1 : full;
 		snprintf(prompt, sizeof(prompt),
-			 "Switch to buffer (default %s): %%s",
-			 defaultBufferName);
+			 "Switch to buffer (default %s): %%s", base);
 	} else {
 		snprintf(prompt, sizeof(prompt), "Switch to buffer: %%s");
 	}
@@ -527,7 +535,6 @@ void editorSwitchToNamedBuffer(struct editorConfig *ed,
 		editorPrompt(current, (uint8_t *)prompt, PROMPT_BASIC, NULL);
 
 	if (buffer_name == NULL) {
-		// User canceled the prompt
 		editorSetStatusMessage("Buffer switch canceled");
 		return;
 	}
@@ -535,40 +542,52 @@ void editorSwitchToNamedBuffer(struct editorConfig *ed,
 	struct editorBuffer *targetBuffer = NULL;
 
 	if (buffer_name[0] == '\0') {
-		// User pressed Enter without typing anything
-		if (defaultBufferName) {
-			// Find the default buffer
-			for (struct editorBuffer *buf = ed->headbuf;
-			     buf != NULL; buf = buf->next) {
-				if (buf == current)
-					continue;
-				if ((buf->filename &&
-				     strcmp(buf->filename, defaultBufferName) ==
-					     0) ||
-				    (!buf->filename &&
-				     strcmp("*scratch*", defaultBufferName) ==
-					     0)) {
-					targetBuffer = buf;
-					break;
-				}
-			}
-		}
+		/* User pressed Enter without typing — use default */
+		targetBuffer = defaultBuffer;
 		if (!targetBuffer) {
 			editorSetStatusMessage("No buffer to switch to");
 			free(buffer_name);
 			return;
 		}
 	} else {
+		/* Try exact match on full path first */
 		for (struct editorBuffer *buf = ed->headbuf; buf != NULL;
 		     buf = buf->next) {
 			if (buf == current)
 				continue;
-
-			const char *bufName = buf->filename ? buf->filename :
-							      "*scratch*";
-			if (strcmp((char *)buffer_name, bufName) == 0) {
+			const char *name = buf->filename ? buf->filename :
+							   "*scratch*";
+			if (strcmp((char *)buffer_name, name) == 0) {
 				targetBuffer = buf;
 				break;
+			}
+		}
+
+		/* If no exact full-path match, try basename match */
+		if (!targetBuffer) {
+			struct editorBuffer *basename_match = NULL;
+			int match_count = 0;
+			for (struct editorBuffer *buf = ed->headbuf;
+			     buf != NULL; buf = buf->next) {
+				if (buf == current)
+					continue;
+				const char *name = buf->filename ?
+							   buf->filename :
+							   "*scratch*";
+				const char *slash = strrchr(name, '/');
+				const char *base = slash ? slash + 1 : name;
+				if (strcmp((char *)buffer_name, base) == 0) {
+					basename_match = buf;
+					match_count++;
+				}
+			}
+			if (match_count == 1) {
+				targetBuffer = basename_match;
+			} else if (match_count > 1) {
+				editorSetStatusMessage(
+					"[Complete, but not unique]");
+				free(buffer_name);
+				return;
 			}
 		}
 
@@ -580,20 +599,18 @@ void editorSwitchToNamedBuffer(struct editorConfig *ed,
 		}
 	}
 
-	if (targetBuffer) {
-		ed->lastVisitedBuffer =
-			current; // Update the last visited buffer
-		ed->buf = targetBuffer;
+	ed->lastVisitedBuffer = current;
+	ed->buf = targetBuffer;
 
-		const char *switchedBufferName =
-			ed->buf->filename ? ed->buf->filename : "*scratch*";
-		editorSetStatusMessage("Switched to buffer %s",
-				       switchedBufferName);
+	const char *switchedName =
+		ed->buf->display_name ?
+			ed->buf->display_name :
+			(ed->buf->filename ? ed->buf->filename : "*scratch*");
+	editorSetStatusMessage("Switched to buffer %s", switchedName);
 
-		for (int i = 0; i < ed->nwindows; i++) {
-			if (ed->windows[i]->focused) {
-				ed->windows[i]->buf = ed->buf;
-			}
+	for (int i = 0; i < ed->nwindows; i++) {
+		if (ed->windows[i]->focused) {
+			ed->windows[i]->buf = ed->buf;
 		}
 	}
 
@@ -640,9 +657,12 @@ void editorKillBuffer(void) {
 
 	// Bypass confirmation for special buffers
 	if (bufr->dirty && bufr->filename != NULL && !bufr->special_buffer) {
+		const char *killName =
+			bufr->display_name ?
+				bufr->display_name :
+				(bufr->filename ? bufr->filename : "*scratch*");
 		editorSetStatusMessage(
-			"Buffer %.20s modified; kill anyway? (y or n)",
-			bufr->filename);
+			"Buffer %s modified; kill anyway? (y or n)", killName);
 		refreshScreen();
 		int c = editorReadKey();
 		if (c != 'y' && c != 'Y') {
@@ -694,4 +714,147 @@ void editorKillBuffer(void) {
 	}
 
 	destroyBuffer(bufr);
+	computeDisplayNames();
+}
+
+/* Basename helper: returns pointer into path after the last '/'. */
+static const char *baseName(const char *path) {
+	const char *slash = strrchr(path, '/');
+	return slash ? slash + 1 : path;
+}
+
+/* Left-truncate a string to fit in max_width, prepending "...".
+ * Returns a newly allocated string. */
+static char *leftTruncate(const char *s, int max_width) {
+	int len = (int)strlen(s);
+	if (len <= max_width)
+		return xstrdup(s);
+	int tail = max_width - 3;
+	if (tail < 1)
+		tail = 1;
+	char *r = xmalloc(tail + 4);
+	snprintf(r, tail + 4, "...%s", s + (len - tail));
+	return r;
+}
+
+/* Build a middle-truncated display name for a colliding pair.
+ *
+ * Compare paths from basename upward.  Find the first directory that
+ * differs.  Replace shared directories below it with "...".  Keep
+ * everything from the differing directory upward (the full prefix).
+ * Then left-truncate the whole result to fit.
+ *
+ *   a/b/c/dira/shared/file.c  vs  a/b/c/dirb/shared/file.c
+ *   "shared" same → "..."
+ *   "dira" differs → stop. Keep "a/b/c/dira" as full prefix.
+ *   Result: a/b/c/dira/.../file.c  (left-truncated if too wide)
+ */
+static char *middleTruncate(const char *full, const char *other,
+			    int max_width) {
+	const char *base_a = baseName(full);
+	const char *base_b = baseName(other);
+	if (base_a == full)
+		return leftTruncate(full, max_width);
+
+	int nca = 0, ncb = 0;
+	const char *ca_start[64], *cb_start[64];
+	int ca_len[64], cb_len[64];
+
+	for (const char *p = full; p < base_a && nca < 64;) {
+		const char *sl = strchr(p, '/');
+		if (!sl || sl >= base_a)
+			break;
+		ca_start[nca] = p;
+		ca_len[nca] = (int)(sl - p);
+		nca++;
+		p = sl + 1;
+	}
+	for (const char *p = other; p < base_b && ncb < 64;) {
+		const char *sl = strchr(p, '/');
+		if (!sl || sl >= base_b)
+			break;
+		cb_start[ncb] = p;
+		cb_len[ncb] = (int)(sl - p);
+		ncb++;
+		p = sl + 1;
+	}
+
+	/* Walk backwards from basename to find the first differing dir. */
+	int ia = nca - 1, ib = ncb - 1;
+	int diverge_a = 0;
+	while (ia >= 0 && ib >= 0) {
+		if (ca_len[ia] != cb_len[ib] ||
+		    memcmp(ca_start[ia], cb_start[ib], ca_len[ia]) != 0) {
+			diverge_a = ia;
+			break;
+		}
+		ia--;
+		ib--;
+	}
+	if (ia >= 0 && ib < 0)
+		diverge_a = ia;
+
+	/* The prefix is everything from the start of the path up to
+	 * and including the differing directory's trailing slash. */
+	const char *prefix_end = ca_start[diverge_a] + ca_len[diverge_a];
+	int prefix_len = (int)(prefix_end - full);
+
+	/* Are there shared dirs between the differing dir and basename? */
+	int has_shared_below = (diverge_a < nca - 1);
+
+	char mid[1024];
+	if (has_shared_below) {
+		snprintf(mid, sizeof(mid), "%.*s/.../%.256s", prefix_len, full,
+			 base_a);
+	} else {
+		/* Differing dir is directly above basename — no gap. */
+		snprintf(mid, sizeof(mid), "%.*s/%.256s", prefix_len, full,
+			 base_a);
+	}
+
+	return leftTruncate(mid, max_width);
+}
+
+/* Compute display_name for every buffer's status bar display.
+ *
+ * Called on buffer open/close/rename and on terminal resize — NOT on
+ * every screen refresh.  The algorithm:
+ *
+ *  1. If the full filename fits, use it as-is.
+ *  2. If it doesn't fit, left-truncate ("...tory/file.c").
+ *  3. If two buffers collide, middle-truncate: find the first
+ *     differing directory walking up from the basename, drop shared
+ *     dirs with "...", keep the differing one, left-truncate to fit. */
+void computeDisplayNames(void) {
+	int max_width = E.screencols - 30;
+	if (max_width < 4)
+		max_width = 4;
+
+	/* Pass 1: use full name if it fits, otherwise left-truncate. */
+	for (struct editorBuffer *b = E.headbuf; b != NULL; b = b->next) {
+		free(b->display_name);
+		const char *name = b->filename ? b->filename : "*scratch*";
+		b->display_name = leftTruncate(name, max_width);
+	}
+
+	/* Pass 2: detect collisions and middle-truncate. */
+	for (struct editorBuffer *a = E.headbuf; a != NULL; a = a->next) {
+		const char *a_full = a->filename ? a->filename : "*scratch*";
+		if (strcmp(a->display_name, a_full) == 0)
+			continue; /* Not truncated — can't collide */
+
+		for (struct editorBuffer *b = a->next; b != NULL; b = b->next) {
+			if (strcmp(a->display_name, b->display_name) != 0)
+				continue;
+
+			const char *b_full = b->filename ? b->filename :
+							   "*scratch*";
+			free(a->display_name);
+			a->display_name =
+				middleTruncate(a_full, b_full, max_width);
+			free(b->display_name);
+			b->display_name =
+				middleTruncate(b_full, a_full, max_width);
+		}
+	}
 }

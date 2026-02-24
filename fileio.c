@@ -214,6 +214,7 @@ int editorOpen(struct editorBuffer *bufr, char *filename) {
 	if (access(filename, W_OK) != 0) {
 		bufr->read_only = 1;
 	}
+	computeDisplayNames();
 
 	/* Enable word wrap by default for prose-oriented file types */
 	if (bufr->filename) {
@@ -363,6 +364,7 @@ void editorSaveAs(struct editorBuffer *bufr) {
 	}
 	free(bufr->filename);
 	bufr->filename = new_filename;
+	computeDisplayNames();
 	editorSave(bufr);
 }
 

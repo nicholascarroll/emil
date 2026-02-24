@@ -58,6 +58,9 @@ struct completion_state {
 	int successive_tabs;
 	int last_completion_count;
 	int preserve_message;
+	int selected;	/* Currently highlighted match index, -1 = none */
+	char **matches; /* Copy of match list for M-n/M-p navigation */
+	int n_matches;	/* Number of matches in the list */
 };
 
 struct completion_result {
@@ -82,6 +85,7 @@ struct editorBuffer {
 	int read_only;
 	erow *row;
 	char *filename;
+	char *display_name; /* Truncated name for status bar display */
 	uint8_t *query;
 	uint8_t match;
 	struct editorUndo *undo;

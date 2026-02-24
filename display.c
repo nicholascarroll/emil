@@ -47,6 +47,23 @@ static void computeRowHighlightBounds(struct editorBuffer *buf, int filerow,
 
 	erow *row = &buf->row[filerow];
 
+	/* Completions buffer: highlight the basename portion of the
+	 * currently selected match row only.  buf->cy tracks the
+	 * selected row (set by cycleCompletion / showCompletionsBuffer). */
+	if (buf->special_buffer && buf->filename &&
+	    strcmp(buf->filename, "*Completions*") == 0 && filerow >= 2 &&
+	    filerow == buf->cy) {
+		/* Find basename: byte offset after last '/' */
+		int base_byte = 0;
+		for (int i = 0; i < row->size; i++) {
+			if (row->chars[i] == '/')
+				base_byte = i + 1;
+		}
+		hl->region_start = charsToDisplayColumn(row, base_byte);
+		hl->region_end = charsToDisplayColumn(row, row->size);
+		return;
+	}
+
 	/* Region bounds */
 	if (!markInvalidSilent()) {
 		if (buf->rectangle_mode) {
@@ -464,84 +481,77 @@ void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
 	/* Start Reverse Video */
 	abAppend(ab, "\x1b[7m", 4);
 
-	char status[1024];
-	int len = 0;
+	/* Use pre-computed display name (set by computeDisplayNames) */
+	const char *dname =
+		bufr->display_name ?
+			bufr->display_name :
+			(bufr->filename ? bufr->filename : "*scratch*");
 
-	/* Filename Truncation */
-	const char *filename = bufr->filename ? bufr->filename : "*scratch*";
-	int fn_len = strlen(filename);
-	int reserved = 30;
-	int max_filename_len = E.screencols - reserved;
-	if (max_filename_len < 4)
-		max_filename_len = 4;
+	/* Build right-side indicator (fixed position, right-aligned).
+     * Format: " NNN:NNN XX% --" or " NNN:NNN Top --"
+     * This is always in the rightmost columns. */
+	char right[32];
+	int ry = win->focused ? bufr->cy + 1 : win->cy + 1;
+	int rx = win->focused ? bufr->cx : win->cx;
 
-	char display_name[256];
-	if (fn_len > max_filename_len) {
-		snprintf(display_name, sizeof(display_name), "...%.*s",
-			 max_filename_len - 3,
-			 filename + (fn_len - (max_filename_len - 3)));
-	} else {
-		snprintf(display_name, sizeof(display_name), "%s", filename);
-	}
-
-	/* Format the left-side text */
-	if (win->focused) {
-		len = snprintf(status, sizeof(status),
-			       "-- %s %c%c%c %2d:%2d --", display_name,
-			       bufr->dirty ? '*' : '-', bufr->dirty ? '*' : '-',
-			       bufr->read_only ? '%' : ' ', bufr->cy + 1,
-			       bufr->cx);
-	} else {
-		len = snprintf(status, sizeof(status),
-			       "   %s %c%c%c %2d:%2d   ", display_name,
-			       bufr->dirty ? '*' : '-', bufr->dirty ? '*' : '-',
-			       bufr->read_only ? '%' : ' ', win->cy + 1,
-			       win->cx);
-	}
-
-	/* Cap length and append.  We write screencols-1 visible characters
-     * total (len + fill + 7) and use CSI K to fill the last column.
-     * This avoids triggering auto-wrap on terminals without deferred
-     * wrap, which would cause a double line-advance and flicker in
-     * multi-window mode. */
-	if (len > E.screencols - 8)
-		len = E.screencols - 8;
-	abAppend(ab, status, len);
-
-	/* THE FILL: This ensures the reverse video doesn't 'break' */
-	if (len < E.screencols - 8) {
-		int fill_count = (E.screencols - 8) - len;
-		char fill_char = win->focused ? '-' : ' ';
-		while (fill_count-- > 0) {
-			abAppend(ab, &fill_char, 1);
-		}
-	}
-
-	/* Percentage Indicator */
-	char perc[8];
+	char pos_indicator[8];
 	if (bufr->numrows == 0)
-		memcpy(perc, " Emp --", 7);
+		memcpy(pos_indicator, "Emp", 4);
 	else if (bufr->end && win->rowoff == 0)
-		memcpy(perc, " All --", 7);
+		memcpy(pos_indicator, "All", 4);
 	else if (bufr->end)
-		memcpy(perc, " Bot --", 7);
+		memcpy(pos_indicator, "Bot", 4);
 	else if (win->rowoff == 0)
-		memcpy(perc, " Top --", 7);
+		memcpy(pos_indicator, "Top", 4);
 	else
-		snprintf(perc, sizeof(perc), " %2d%% --",
+		snprintf(pos_indicator, sizeof(pos_indicator), "%2d%%",
 			 (win->rowoff * 100) / bufr->numrows);
 
-	if (!win->focused) {
-		perc[5] = ' ';
-		perc[6] = ' ';
+	int right_len;
+	if (win->focused) {
+		right_len = snprintf(right, sizeof(right), " %d:%d %s --", ry,
+				     rx, pos_indicator);
+	} else {
+		right_len = snprintf(right, sizeof(right), " %d:%d %s   ", ry,
+				     rx, pos_indicator);
 	}
 
-	abAppend(ab, perc, 7);
+	/* Build left side: "-- name XX " or "   name XX " */
+	char left[1024];
+	int left_len;
+	if (win->focused) {
+		left_len = snprintf(left, sizeof(left), "-- %s %c%c%c", dname,
+				    bufr->dirty ? '*' : '-',
+				    bufr->dirty ? '*' : '-',
+				    bufr->read_only ? '%' : ' ');
+	} else {
+		left_len = snprintf(left, sizeof(left), "   %s %c%c%c", dname,
+				    bufr->dirty ? '*' : '-',
+				    bufr->dirty ? '*' : '-',
+				    bufr->read_only ? '%' : ' ');
+	}
 
-	/* Reset formatting and move to next line.  CSI K erases from the
-     * cursor to EOL using the current attributes (reverse video),
-     * filling the last column without writing a character there —
-     * this avoids auto-wrap on immediate-wrap terminals. */
+	/* Total visible = screencols - 1 (to avoid right-margin wrap).
+     * Layout: [left][fill][right]
+     * Cap left so there's room for at least the right side. */
+	int total = E.screencols - 1;
+	if (left_len > total - right_len)
+		left_len = total - right_len;
+	if (left_len < 0)
+		left_len = 0;
+
+	abAppend(ab, left, left_len);
+
+	/* Fill gap between left and right */
+	int fill = total - left_len - right_len;
+	char fill_char = win->focused ? '-' : ' ';
+	while (fill-- > 0)
+		abAppend(ab, &fill_char, 1);
+
+	abAppend(ab, right, right_len);
+
+	/* CSI K fills the last column with reverse video without
+     * triggering auto-wrap on immediate-wrap terminals. */
 	abAppend(ab, "\x1b[K\x1b[m" CRLF, 8);
 }
 
@@ -658,6 +668,7 @@ void cursorBottomLine(int curs) {
 void editorResizeScreen(int UNUSED(sig)) {
 	if (getWindowSize(&E.screenrows, &E.screencols) == -1)
 		die("getWindowSize");
+	computeDisplayNames();
 	refreshScreen();
 }
 
