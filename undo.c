@@ -39,10 +39,14 @@ void editorDoUndo(struct editorBuffer *buf, int count) {
 					i++;
 				} else {
 					int n = utf8_nBytes(buf->undo->data[i]);
-					for (int b = 0; b < n && i + b < buf->undo->datalen; b++) {
+					for (int b = 0;
+					     b < n &&
+					     i + b < buf->undo->datalen;
+					     b++) {
 						editorInsertChar(
 							buf,
-							buf->undo->data[i + b], 1);
+							buf->undo->data[i + b],
+							1);
 					}
 					i += n;
 				}

@@ -101,8 +101,7 @@ void editorInsertNewlineRaw(struct editorBuffer *bufr) {
 		editorInsertRow(bufr, bufr->cy, "", 0);
 	} else {
 		erow *row = &bufr->row[bufr->cy];
-		editorInsertRow(bufr, bufr->cy + 1,
-				&row->chars[bufr->cx],
+		editorInsertRow(bufr, bufr->cy + 1, &row->chars[bufr->cx],
 				row->size - bufr->cx);
 		row = &bufr->row[bufr->cy];
 		row->size = bufr->cx;
