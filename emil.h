@@ -212,6 +212,7 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 		      enum promptType t,
 		      void (*callback)(struct editorBuffer *, uint8_t *, int));
 void editorUpdateBuffer(struct editorBuffer *buf);
+void editorInsertNewlineRaw(struct editorBuffer *bufr);
 void editorInsertNewline(struct editorBuffer *bufr, int count);
 void editorInsertChar(struct editorBuffer *bufr, int c, int count);
 int editorOpen(struct editorBuffer *bufr, char *filename);

@@ -91,6 +91,28 @@ cancel:
 	editorSetStatusMessage("Indentation set to %i spaces", indent);
 }
 
+void editorInsertNewlineRaw(struct editorBuffer *bufr) {
+	if (bufr->read_only) {
+		editorSetStatusMessage(msg_read_only);
+		return;
+	}
+
+	if (bufr->cx == 0) {
+		editorInsertRow(bufr, bufr->cy, "", 0);
+	} else {
+		erow *row = &bufr->row[bufr->cy];
+		editorInsertRow(bufr, bufr->cy + 1,
+				&row->chars[bufr->cx],
+				row->size - bufr->cx);
+		row = &bufr->row[bufr->cy];
+		row->size = bufr->cx;
+		row->chars[row->size] = '\0';
+		row->render_valid = 0;
+	}
+	bufr->cy++;
+	bufr->cx = 0;
+}
+
 void editorInsertNewline(struct editorBuffer *bufr, int count) {
 	if (bufr->read_only) {
 		editorSetStatusMessage(msg_read_only);
@@ -100,20 +122,7 @@ void editorInsertNewline(struct editorBuffer *bufr, int count) {
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
 		editorUndoAppendChar(bufr, '\n');
-		if (bufr->cx == 0) {
-			editorInsertRow(bufr, bufr->cy, "", 0);
-		} else {
-			erow *row = &bufr->row[bufr->cy];
-			editorInsertRow(bufr, bufr->cy + 1,
-					&row->chars[bufr->cx],
-					row->size - bufr->cx);
-			row = &bufr->row[bufr->cy];
-			row->size = bufr->cx;
-			row->chars[row->size] = '\0';
-			row->render_valid = 0;
-		}
-		bufr->cy++;
-		bufr->cx = 0;
+		editorInsertNewlineRaw(bufr);
 	}
 }
 
@@ -135,7 +144,6 @@ void editorInsertNewlineAndIndent(struct editorBuffer *bufr, int count) {
 		count = 1;
 
 	for (int j = 0; j < count; j++) {
-		editorUndoAppendChar(bufr, '\n');
 		editorInsertNewline(bufr, 1);
 		int i = 0;
 		uint8_t c = bufr->row[bufr->cy - 1].chars[i];
@@ -657,9 +665,7 @@ void editorKillLine(int count) {
 				new->datasize = new->datalen + 1;
 				new->data = xrealloc(new->data, new->datasize);
 			}
-			for (int i = 0; i < kill_len; i++) {
-				new->data[i] = E.kill[kill_len - i - 1];
-			}
+			memcpy(new->data, E.kill, kill_len);
 			new->data[kill_len] = '\0';
 
 			row->size = E.buf->cx;
@@ -699,9 +705,7 @@ void editorKillLineBackwards(void) {
 		new->datasize = new->datalen + 1;
 		new->data = xrealloc(new->data, new->datasize);
 	}
-	for (int i = 0; i < E.buf->cx; i++) {
-		new->data[i] = E.kill[E.buf->cx - i - 1];
-	}
+	memcpy(new->data, E.kill, new->datalen);
 	new->data[E.buf->cx] = '\0';
 
 	row->size -= E.buf->cx;

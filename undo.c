@@ -27,14 +27,24 @@ void editorDoUndo(struct editorBuffer *buf, int count) {
 		int paired = buf->undo->paired;
 
 		if (buf->undo->delete) {
+			/* Re-insert deleted text.  Data is in forward
+			 * order (matching original file text). Use raw
+			 * primitives — no undo recording. */
 			buf->cx = buf->undo->startx;
 			buf->cy = buf->undo->starty;
-			for (int i = buf->undo->datalen - 1; i >= 0; i--) {
+			int i = 0;
+			while (i < buf->undo->datalen) {
 				if (buf->undo->data[i] == '\n') {
-					editorInsertNewline(buf, 1);
+					editorInsertNewlineRaw(buf);
+					i++;
 				} else {
-					editorInsertChar(buf,
-							 buf->undo->data[i], 1);
+					int n = utf8_nBytes(buf->undo->data[i]);
+					for (int b = 0; b < n && i + b < buf->undo->datalen; b++) {
+						editorInsertChar(
+							buf,
+							buf->undo->data[i + b], 1);
+					}
+					i += n;
 				}
 			}
 			buf->cx = buf->undo->endx;
@@ -146,14 +156,19 @@ void editorDoRedo(struct editorBuffer *buf, int count) {
 			buf->cx = buf->redo->startx;
 			buf->cy = buf->redo->starty;
 		} else {
+			/* Re-insert text.  Data is in forward order.
+			 * Use raw primitives — no undo recording. */
 			buf->cx = buf->redo->startx;
 			buf->cy = buf->redo->starty;
-			for (int i = 0; i < buf->redo->datalen; i++) {
+			int i = 0;
+			while (i < buf->redo->datalen) {
 				if (buf->redo->data[i] == '\n') {
-					editorInsertNewline(buf, 1);
+					editorInsertNewlineRaw(buf);
+					i++;
 				} else {
 					editorInsertChar(buf,
 							 buf->redo->data[i], 1);
+					i++;
 				}
 			}
 			buf->cx = buf->redo->endx;
@@ -314,9 +329,10 @@ void editorUndoBackSpace(struct editorBuffer *buf, uint8_t c) {
 		new->delete = 1;
 		pushUndo(buf, new);
 	}
-	buf->undo->data[buf->undo->datalen++] = c;
-	buf->undo->data[buf->undo->datalen] = 0;
-	if (buf->undo->datalen >= buf->undo->datasize - 2) {
+	/* Prepend the byte so data stays in forward (file) order.
+	 * Backspace delivers bytes from right to left, so prepending
+	 * reconstructs the original left-to-right sequence. */
+	if (buf->undo->datalen + 1 >= buf->undo->datasize - 2) {
 		if ((size_t)buf->undo->datasize > SIZE_MAX / 2) {
 			die("buffer size overflow");
 		}
@@ -324,6 +340,10 @@ void editorUndoBackSpace(struct editorBuffer *buf, uint8_t c) {
 		buf->undo->data =
 			xrealloc(buf->undo->data, buf->undo->datasize);
 	}
+	memmove(&buf->undo->data[1], buf->undo->data, buf->undo->datalen);
+	buf->undo->data[0] = c;
+	buf->undo->datalen++;
+	buf->undo->data[buf->undo->datalen] = 0;
 	if (c == '\n') {
 		buf->undo->starty--;
 		buf->undo->startx = buf->row[buf->undo->starty].size;
@@ -348,7 +368,7 @@ void editorUndoDelChar(struct editorBuffer *buf, erow *row) {
 	}
 
 	if (buf->cx == row->size) {
-		buf->undo->datalen++;
+		/* Deleting a newline — append it */
 		if (buf->undo->datalen >= buf->undo->datasize - 2) {
 			if ((size_t)buf->undo->datasize > SIZE_MAX / 2) {
 				die("buffer size overflow");
@@ -357,27 +377,30 @@ void editorUndoDelChar(struct editorBuffer *buf, erow *row) {
 			buf->undo->data =
 				xrealloc(buf->undo->data, buf->undo->datasize);
 		}
-		memmove(&buf->undo->data[1], buf->undo->data,
-			buf->undo->datalen - 1);
-		buf->undo->data[0] = '\n';
+		buf->undo->data[buf->undo->datalen++] = '\n';
+		buf->undo->data[buf->undo->datalen] = 0;
 		buf->undo->endy++;
 		buf->undo->endx = 0;
 	} else {
 		int n = utf8_nBytes(row->chars[buf->cx]);
-		buf->undo->datalen += n;
-		if (buf->undo->datalen >= buf->undo->datasize - 2) {
+		if (buf->undo->datalen + n >= buf->undo->datasize - 2) {
 			if ((size_t)buf->undo->datasize > SIZE_MAX / 2) {
 				die("buffer size overflow");
 			}
 			buf->undo->datasize *= 2;
+			if (buf->undo->datalen + n >= buf->undo->datasize - 2) {
+				buf->undo->datasize =
+					buf->undo->datalen + n + 4;
+			}
 			buf->undo->data =
 				xrealloc(buf->undo->data, buf->undo->datasize);
 		}
-		memmove(&buf->undo->data[n], buf->undo->data,
-			buf->undo->datalen - n);
+		/* Append bytes in natural UTF-8 order */
 		for (int i = 0; i < n; i++) {
-			buf->undo->data[i] = row->chars[buf->cx + n - i - 1];
-			buf->undo->endx++;
+			buf->undo->data[buf->undo->datalen++] =
+				row->chars[buf->cx + i];
 		}
+		buf->undo->data[buf->undo->datalen] = 0;
+		buf->undo->endx += n;
 	}
 }

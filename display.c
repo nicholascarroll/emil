@@ -300,13 +300,10 @@ void scroll(void) {
 		if (buf->cy < win->rowoff) {
 			win->rowoff = buf->cy;
 		} else {
-			int cursor_screen_row = 0;
-
-			for (int i = win->rowoff;
-			     i < buf->cy && i < buf->numrows; i++) {
-				cursor_screen_row += countScreenLines(
-					&buf->row[i], E.screencols);
-			}
+			/* Use cached screen-line positions for stable
+			 * scroll calculations. */
+			int cursor_screen_line =
+				getScreenLineForRow(buf, buf->cy);
 
 			if (buf->cy < buf->numrows) {
 				int render_pos = charsToDisplayColumn(
@@ -315,32 +312,32 @@ void scroll(void) {
 				cursorScreenLine(&buf->row[buf->cy], render_pos,
 						 E.screencols, &sub_line,
 						 &sub_col);
-				cursor_screen_row += sub_line;
+				cursor_screen_line += sub_line;
 			}
 
-			if (cursor_screen_row >= win->height) {
-				int visible_rows = 0;
-				if (buf->cy == buf->numrows) {
-					visible_rows = 1;
+			int rowoff_screen_line =
+				getScreenLineForRow(buf, win->rowoff);
+
+			if (cursor_screen_line - rowoff_screen_line >=
+			    win->height) {
+				/* Cursor is below the window.  Find the new
+				 * rowoff that places the cursor on the last
+				 * visible screen line. */
+				int target_top = cursor_screen_line -
+						 win->height + 1;
+				int new_rowoff = buf->cy;
+				while (new_rowoff > 0 &&
+				       getScreenLineForRow(buf, new_rowoff) >
+					       target_top) {
+					new_rowoff--;
 				}
-				for (int i = buf->cy; i >= 0; i--) {
-					if (i < buf->numrows) {
-						int line_height =
-							countScreenLines(
-								&buf->row[i],
-								E.screencols);
-						if (visible_rows + line_height >
-						    win->height) {
-							win->rowoff = i + 1;
-							break;
-						}
-						visible_rows += line_height;
-					}
-					if (i == 0) {
-						win->rowoff = 0;
-						break;
-					}
+				while (new_rowoff < buf->numrows - 1 &&
+				       getScreenLineForRow(buf,
+							   new_rowoff + 1) <=
+					       target_top) {
+					new_rowoff++;
 				}
+				win->rowoff = new_rowoff;
 			}
 		}
 	} else {
@@ -563,6 +560,15 @@ void refreshScreen(void) {
 	abAppend(&ab, "\x1b[H", 3);    // Move cursor to top-left corner
 
 	int focusedIdx = windowFocusedIdx();
+
+	/* Ensure screen line caches are up-to-date for all visible buffers
+	 * before scroll/draw so that scroll() and drawRows() agree. */
+	for (int i = 0; i < E.nwindows; i++) {
+		struct editorBuffer *b = E.windows[i]->buf;
+		if (b->word_wrap && !b->screen_line_cache_valid) {
+			buildScreenCache(b);
+		}
+	}
 
 	int cumulative_height = 0;
 	int total_height = E.screenrows - minibuffer_height -
