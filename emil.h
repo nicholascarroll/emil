@@ -33,8 +33,7 @@ typedef struct erow {
 	int renderwidth;
 	uint8_t *chars;
 	uint8_t *render;
-	int cached_width;
-	int width_valid;
+	int cached_width; /* display width in columns, or -1 if stale */
 	int render_valid;
 } erow;
 

@@ -127,7 +127,9 @@ void editorWhitespaceCleanup(struct editorConfig *UNUSED(ed),
 			}
 		}
 		row->render_valid = 0;
+		row->cached_width = -1;
 	}
+	invalidateScreenCache(buf);
 
 	if (buf->cx > buf->row[buf->cy].size) {
 		buf->cx = buf->row[buf->cy].size;

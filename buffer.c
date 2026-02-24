@@ -16,9 +16,6 @@ extern struct editorConfig E;
 
 void invalidateScreenCache(struct editorBuffer *buf) {
 	buf->screen_line_cache_valid = 0;
-	for (int i = 0; i < buf->numrows; i++) {
-		buf->row[i].width_valid = 0;
-	}
 }
 
 void buildScreenCache(struct editorBuffer *buf) {
@@ -48,6 +45,11 @@ void buildScreenCache(struct editorBuffer *buf) {
 		if (!buf->word_wrap) {
 			screen_line += 1;
 		} else {
+			/* Recompute only if cached_width is stale (-1) */
+			if (buf->row[i].cached_width < 0) {
+				buf->row[i].cached_width =
+					calculateLineWidth(&buf->row[i]);
+			}
 			screen_line +=
 				countScreenLines(&buf->row[i], E.screencols);
 		}
@@ -66,7 +68,7 @@ int getScreenLineForRow(struct editorBuffer *buf, int row) {
 }
 
 int calculateLineWidth(erow *row) {
-	if (row->width_valid) {
+	if (row->cached_width >= 0) {
 		return row->cached_width;
 	}
 
@@ -81,7 +83,6 @@ int calculateLineWidth(erow *row) {
 	}
 
 	row->cached_width = screen_x;
-	row->width_valid = 1;
 	return screen_x;
 }
 
@@ -347,15 +348,12 @@ void editorInsertRow(struct editorBuffer *bufr, int at, char *s, size_t len) {
 
 	bufr->row[at].rsize = 0;
 	bufr->row[at].render = NULL;
-	bufr->row[at].cached_width = 0;
-	bufr->row[at].width_valid = 0;
+	bufr->row[at].cached_width = -1;
 	bufr->row[at].render_valid = 0;
 
 	bufr->numrows++;
 	bufr->dirty = 1;
-	if (at < bufr->numrows - 1 || bufr->screen_line_cache_valid) {
-		invalidateScreenCache(bufr);
-	}
+	invalidateScreenCache(bufr);
 }
 
 void freeRow(erow *row) {
@@ -398,7 +396,7 @@ void rowInsertChar(struct editorBuffer *bufr, erow *row, int at, int c) {
 	row->chars[at] = c;
 	row->render_valid = 0;
 	bufr->dirty = 1;
-	row->width_valid = 0;
+	row->cached_width = -1;
 	invalidateScreenCache(bufr);
 }
 
@@ -417,7 +415,9 @@ void editorRowInsertUnicode(struct editorConfig *ed, struct editorBuffer *bufr,
 	row->size += ed->nunicode;
 	memcpy(&row->chars[at], ed->unicode, ed->nunicode);
 	row->render_valid = 0;
+	row->cached_width = -1;
 	bufr->dirty = 1;
+	invalidateScreenCache(bufr);
 }
 
 void rowAppendString(struct editorBuffer *bufr, erow *row, char *s,
@@ -427,7 +427,9 @@ void rowAppendString(struct editorBuffer *bufr, erow *row, char *s,
 	row->size += len;
 	row->chars[row->size] = '\0';
 	row->render_valid = 0;
+	row->cached_width = -1;
 	bufr->dirty = 1;
+	invalidateScreenCache(bufr);
 }
 
 void rowDelChar(struct editorBuffer *bufr, erow *row, int at) {
@@ -438,7 +440,9 @@ void rowDelChar(struct editorBuffer *bufr, erow *row, int at) {
 		row->size - ((at + size) - 1));
 	row->size -= size;
 	row->render_valid = 0;
+	row->cached_width = -1;
 	bufr->dirty = 1;
+	invalidateScreenCache(bufr);
 }
 
 struct editorBuffer *newBuffer(void) {
@@ -500,7 +504,9 @@ void destroyBuffer(struct editorBuffer *buf) {
 void editorUpdateBuffer(struct editorBuffer *buf) {
 	for (int i = 0; i < buf->numrows; i++) {
 		buf->row[i].render_valid = 0;
+		buf->row[i].cached_width = -1;
 	}
+	invalidateScreenCache(buf);
 }
 
 void editorSwitchToNamedBuffer(struct editorConfig *ed,

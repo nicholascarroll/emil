@@ -314,50 +314,61 @@ void scroll(void) {
 	}
 
 	if (buf->word_wrap) {
+		/* Ensure cache is built (it should already be by refreshScreen) */
+		buildScreenCache(buf);
+
 		if (buf->cy < win->rowoff) {
 			win->rowoff = buf->cy;
 		} else {
-			int cursor_screen_row = 0;
-
-			for (int i = win->rowoff;
-			     i < buf->cy && i < buf->numrows; i++) {
-				cursor_screen_row += countScreenLines(
-					&buf->row[i], E.screencols);
-			}
-
-			if (buf->cy < buf->numrows) {
+			/* Compute cursor's absolute screen line position.
+			 * When cy == numrows (virtual line past EOF), the
+			 * cursor is one screen line past the last row. */
+			int cursor_screen_line;
+			if (buf->cy >= buf->numrows) {
+				if (buf->numrows > 0) {
+					cursor_screen_line =
+						getScreenLineForRow(
+							buf, buf->numrows - 1) +
+						countScreenLines(
+							&buf->row[buf->numrows -
+								  1],
+							E.screencols);
+				} else {
+					cursor_screen_line = 0;
+				}
+			} else {
+				cursor_screen_line =
+					getScreenLineForRow(buf, buf->cy);
 				int render_pos = charsToDisplayColumn(
 					&buf->row[buf->cy], buf->cx);
 				int sub_line, sub_col;
 				cursorScreenLine(&buf->row[buf->cy], render_pos,
 						 E.screencols, &sub_line,
 						 &sub_col);
-				cursor_screen_row += sub_line;
+				cursor_screen_line += sub_line;
 			}
 
+			int rowoff_screen_line =
+				getScreenLineForRow(buf, win->rowoff);
+			int cursor_screen_row =
+				cursor_screen_line - rowoff_screen_line;
+
 			if (cursor_screen_row >= win->height) {
-				int visible_rows = 0;
-				if (buf->cy == buf->numrows) {
-					visible_rows = 1;
-				}
-				for (int i = buf->cy; i >= 0; i--) {
-					if (i < buf->numrows) {
-						int line_height =
-							countScreenLines(
-								&buf->row[i],
-								E.screencols);
-						if (visible_rows + line_height >
-						    win->height) {
-							win->rowoff = i + 1;
-							break;
-						}
-						visible_rows += line_height;
-					}
-					if (i == 0) {
-						win->rowoff = 0;
-						break;
-					}
-				}
+				/* Cursor below window: find new rowoff using
+				 * cache-based target_top search (§5.3) */
+				int target_top =
+					cursor_screen_line - win->height + 1;
+
+				/* Walk backwards from cursor row to find
+				 * rowoff where screen_line_start[rowoff]
+				 * <= target_top */
+				int r = buf->cy;
+				if (r >= buf->numrows)
+					r = buf->numrows - 1;
+				while (r > 0 &&
+				       getScreenLineForRow(buf, r) > target_top)
+					r--;
+				win->rowoff = r;
 			}
 		}
 	} else {
@@ -581,6 +592,25 @@ void refreshScreen(void) {
 	abAppend(&ab, "\x1b[?25l", 6); // Hide cursor
 	abAppend(&ab, "\x1b[H", 3);    // Move cursor to top-left corner
 
+	/* Mandatory bounds clamp for all windows (§7.2) */
+	for (int i = 0; i < E.nwindows; i++) {
+		struct editorWindow *w = E.windows[i];
+		struct editorBuffer *b = w->buf;
+		if (b->numrows == 0) {
+			w->rowoff = 0;
+		} else if (w->rowoff >= b->numrows) {
+			w->rowoff = b->numrows - 1;
+		}
+	}
+
+	/* Build screen line cache for each visible buffer (§4.2) */
+	for (int i = 0; i < E.nwindows; i++) {
+		struct editorBuffer *b = E.windows[i]->buf;
+		if (!b->screen_line_cache_valid) {
+			buildScreenCache(b);
+		}
+	}
+
 	int focusedIdx = windowFocusedIdx();
 
 	int cumulative_height = 0;
@@ -668,6 +698,17 @@ void cursorBottomLine(int curs) {
 void editorResizeScreen(int UNUSED(sig)) {
 	if (getWindowSize(&E.screenrows, &E.screencols) == -1)
 		die("getWindowSize");
+	/* Screen width changed — all cached widths are stale for word-wrap */
+	for (struct editorBuffer *b = E.headbuf; b != NULL; b = b->next) {
+		for (int i = 0; i < b->numrows; i++) {
+			b->row[i].cached_width = -1;
+		}
+		b->screen_line_cache_valid = 0;
+	}
+	/* Reset window heights so they get recalculated */
+	for (int i = 0; i < E.nwindows; i++) {
+		E.windows[i]->height = 0;
+	}
 	computeDisplayNames();
 	refreshScreen();
 }
@@ -713,6 +754,7 @@ void recenter(struct editorWindow *win) {
 
 void editorToggleVisualLineMode(void) {
 	E.buf->word_wrap = !E.buf->word_wrap;
+	invalidateScreenCache(E.buf);
 	editorSetStatusMessage(E.buf->word_wrap ? "Visual line mode enabled" :
 						  "Visual line mode disabled");
 }
