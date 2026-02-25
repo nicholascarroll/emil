@@ -17,7 +17,7 @@ portability, or fix correctness issues are especially welcome.
 
 ## Functional Capabilities
 
-- Kill ring
+- Kill ring ('clipboard history')
 - Visual text selection
 - Incremental regexp search and replace
 - Word wrap
@@ -25,6 +25,7 @@ portability, or fix correctness issues are especially welcome.
 - Rectangle editing
 - Keystroke macros
 - Registers
+- Mark ring
 - Shell integration
 
 ## Installation
@@ -86,21 +87,22 @@ man emil
 
 ## Shell-Oriented Editing
 
-Although POSIX.1 standardises only the *vi-mode* command-line editing interface, many shells (including Bash) also provide an *emacs-mode* (activated by `set -o emacs`). 
-This mode was considered for standardisation but was ultimately omitted. 
-The official [rationale](https://pubs.opengroup.org/onlinepubs/007904975/utilities/sh.html) explains:
+`emil` is designed to be used with the shell set to *emacs-mode* [^1] . 
+In Bash the mode is set in the user's `~/.bashrc`:
 
-> “In early proposals, the KornShell-derived *emacs* mode of command line editing was included, even though the *emacs* editor itself was not. The community of *emacs* proponents was adamant that the full *emacs* editor not be standardized because they were concerned that an attempt to standardize this very powerful environment would encourage vendors to ship strictly conforming versions lacking the extensibility required by the community. The author of the original *emacs* program also expressed his desire to omit the program. Furthermore, there were a number of historical systems that did not include *emacs*, or included it without supporting it, but there were very few that did not include and support *vi*. The shell *emacs* command line editing mode was finally omitted because it became apparent that the KornShell version and the editor being distributed with the GNU system had diverged in some respects. The author of *emacs* requested that the POSIX *emacs* mode either be deleted or have a significant number of unspecified conditions. Although the KornShell author agreed to consider changes to bring the shell into alignment, the standard developers decided to defer specification at that time. At the time, it was assumed that convergence on an acceptable definition would occur for a subsequent draft, but that has not happened, and there appears to be no impetus to do so."
+```bash
+set -o emacs
+```
+An entry in `~/.inputrc` is usually also needed for the copy and kill keybindings:
 
-The incompatibilities are minor; the tty driver has treated Ctrl-w as WERASE since 4BSD, which can be overridden by the following entry in ~/.inputrc:
 ```inputrc
 $include /etc/inputrc          # retain system-wide defaults
 set bind-tty-special-chars off
 
 "\C-w": kill-region
-"\M-w": copy-region-as-kill
+"\ew": copy-region-as-kill 
 ```
-In Readline and in `emil`, `Ctrl-h` deletes the previous character, whereas in `emacs` it is the help prefix key.
+In `emil`, as in Readline,  `Ctrl-h` deletes the previous character, whereas in `emacs` it is the help prefix key.
 
 Readline supports two ways to delete to the beginning of the line: `Ctrl-x BACKSPACE` (supported in *emacs*) and the more ergonomic `Ctrl-u` which conflicts with the *emacs* universal argument. `emil` resolves the conflict by binding `Ctrl-u Ctrl-a` to delete to the beginning of the line.
 
@@ -119,11 +121,12 @@ Shell integration is a compile-time option (enabled by default). It enables shel
 
 Shell integration can be disabled at build time with the compiler flag `-DEMIL_DISABLE_SHELL`.
 
-
 ### Shell Drawer
 `Ctrl-x Ctrl-z` suspends `emil` while preserving the current editor screen. This permits shell commands to be executed in the terminal below the editor content, after which editing may be resumed with `fg`.
 
-Note: `less` clears the terminal when it quits; `less -X` and `more` do not.
+Notes: 
+   - `less` clears the terminal when it quits; `less -X` and `more` do not.
+   - The named command `cd` (change directory) in `emil` does not also change the directory in the shell.
 
 ### System Clipboard Integration
 `Ctrl-c` copies selected text to both the kill ring and the user's system clipboard 
@@ -131,20 +134,26 @@ when an OSC 52 enabled terminal client is used.
 
 —-
 
-### Roadmap
+## Roadmap
 
 1. **Version 0.1.0** [DONE] ✅
    - From here on we use `emil` to code `emil`
 
-2. **Version 0.1.1 Feature complete**  [DONE] ✅.   
+2. **Version 0.1.1 Feature complete**  [WIP] 🔨
+   - `Alt-x cd`: 'change directory' named command
+   - Mark ring (local buffer)
+   - Polishing up filename display UX
+   - Visual row up/down (C-p / C-n)
 
 3. **Version 0.2.0 Stable Preview**  [WIP]⚠️🚧🔨👷    
    - Most known bugs fixed
    - First GitHub release (prerelease tag)  
    - Announced on forums (HN, Reddit, etc.)  
 
-4. **Rendering system upgrade**
-   Test performance over SSH and the rendering system.
+4. **Rendering optimizations**
+   Reduce bytes over wire with a grab bag of   
+   render hints sent by edit, move and scroll operations.
+   - controlled by a compiler flag
 
 5. **Remove dependency on `subprocess.h`**
    Internalize the code being used for pipe/exec/fork.
@@ -152,13 +161,36 @@ when an OSC 52 enabled terminal client is used.
 6. **Version 1.0.0 Bug free and loving it**
    - Tested on Solaris, AIX, Linux, BSD, MSYS2
      OSX, Android. 
+   - Tested with raw console and various terminal emulators
    - Tested with IME and international keyboards
    - Included in Linux distribution repositories
 
-### Display notes
+---
 
-On a raw Linux virtual console (Ctrl+Alt+F3 etc.) the in-kernel console cannot display Chinese.  
-Use **kmscon** or **fbterm** instead.
+## Raw Console
+
+On a raw Linux virtual console (Ctrl+Alt+F3 etc.) the in-kernel console cannot display Chinese. Use **kmscon** or **fbterm**.
+
+# Internals
+
+`emil` maintains a single in-memory representation of the buffer as an array of lines. All buffers contain valid UTF-8. Files that fail validation are rejected at load time. 
+
+There are one or more non-overlapping windows, each displaying exactly one buffer. Each spans the entire screen width. The focused buffer can be displayed in multiple windows simultaneously. These windows are clamped to buffer actual line range. At any instant, only the focused buffer can be modified. 
+
+The buffer is never modified by rendering or text layout concerns. Text layout (tab spacing, word wrap etc) is derived data and rebuilt as needed.
+
+On each frame, the renderer reads raw bytes from the buffer and emits terminal-ready sequences directly into a disposable append buffer. No intermediate render buffers exist. The append buffer is written to the terminal in a single `write()` call.
+
+The rendering system uses only cursor positioning (CSI H), erase-to-end-of-line (CSI K), reverse video (CSI 7m / CSI 0m), and clear-below (CSI J). Scroll region manipulation and line insert/delete are not used by the core renderer; they are planned to be added in future as distinct and optional render optimizations (compile time option).
+
+Thus all input is processed in a single loop:
+
+1. Read keystroke
+2. Modify buffer
+3. Clamp window offsets
+4. Rebuild derived data if required
+5. Redraw screen
+
 
 ## Contributing
 
@@ -169,6 +201,10 @@ first: `emil` is deliberately small.
 
 ## Credits and License
 
-emil is a derivative of [`japanoise/emsys`](https://github.com/japanoise/emsys) 
-and is not affiliated with the Free Software Foundation or the GNU Project. 
+emil is a derivative of [`japanoise/emsys`](https://github.com/japanoise/emsys) and is not affiliated with the Free Software Foundation or the GNU Project. 
 Distributed under the MIT License.
+
+---
+
+[^1]: Omitted from POSIX.1, see [Rationale](https://pubs.opengroup.org/onlinepubs/007904975/utilities/sh.html).
+
