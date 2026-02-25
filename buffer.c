@@ -72,10 +72,6 @@ int calculateLineWidth(erow *row) {
 		return row->cached_width;
 	}
 
-	if (!row->render_valid) {
-		updateRow(row);
-	}
-
 	int screen_x = 0;
 	for (int i = 0; i < row->size;) {
 		screen_x = nextScreenX(row->chars, &i, screen_x);
@@ -232,93 +228,6 @@ void cursorScreenLine(erow *row, int cursor_col, int screencols, int *out_line,
 	*out_col = cursor_col - line_start_col;
 }
 
-void updateRow(erow *row) {
-	int tabs = 0;
-	int extra = 0;
-	int j;
-	for (j = 0; j < row->size; j++) {
-		if (row->chars[j] == '\t') {
-			tabs++;
-		} else if (ISCTRL(row->chars[j])) {
-			/*
-			 * These need an extra few bytes to display
-			 * CSI 7 m - 4 bytes
-			 * CSI m - 3 bytes
-			 * preceding ^ - 1 byte
-			 */
-			extra += 8;
-		}
-	}
-
-	free(row->render);
-	/* Calculate render buffer size, checking for overflow */
-	size_t render_size = row->size;
-	size_t tab_expansion = tabs * (EMIL_TAB_STOP - 1);
-
-	/* Check for overflow in size calculations */
-	if (render_size > SIZE_MAX - tab_expansion - extra - 1) {
-		/* Line too long to render */
-		row->render = xmalloc(1);
-		row->render[0] = '\0';
-		row->renderwidth = 0;
-		return;
-	}
-
-	render_size += tab_expansion + extra + 1;
-	row->render = xmalloc(render_size);
-	row->renderwidth = 0;
-
-	int idx = 0;
-	for (j = 0; j < row->size; j++) {
-		/* Ensure we have enough space for worst case (control char = 9 bytes) */
-		if ((size_t)(idx + 10) >= render_size) {
-			break;
-		}
-
-		if (row->chars[j] == '\t') {
-			row->renderwidth += EMIL_TAB_STOP;
-			row->render[idx++] = ' ';
-			while (idx % EMIL_TAB_STOP != 0 &&
-			       (size_t)idx < render_size - 1)
-				row->render[idx++] = ' ';
-		} else if (row->chars[j] == 0x7f) {
-			row->renderwidth += 2;
-			row->render[idx++] = 0x1b;
-			row->render[idx++] = '[';
-			row->render[idx++] = '7';
-			row->render[idx++] = 'm';
-			row->render[idx++] = '^';
-			row->render[idx++] = '?';
-			row->render[idx++] = 0x1b;
-			row->render[idx++] = '[';
-			row->render[idx++] = 'm';
-		} else if (ISCTRL(row->chars[j])) {
-			row->renderwidth += 2;
-			row->render[idx++] = 0x1b;
-			row->render[idx++] = '[';
-			row->render[idx++] = '7';
-			row->render[idx++] = 'm';
-			row->render[idx++] = '^';
-			row->render[idx++] = row->chars[j] | 0x40;
-			row->render[idx++] = 0x1b;
-			row->render[idx++] = '[';
-			row->render[idx++] = 'm';
-		} else if (row->chars[j] > 0x7f) {
-			int width = charInStringWidth(row->chars, j);
-			row->render[idx++] = row->chars[j];
-			row->renderwidth += width;
-		} else if (utf8_isCont(row->chars[j])) {
-			row->render[idx++] = row->chars[j];
-		} else {
-			row->renderwidth += 1;
-			row->render[idx++] = row->chars[j];
-		}
-	}
-	row->render[idx] = 0;
-	row->rsize = idx;
-	row->render_valid = 1;
-}
-
 void editorInsertRow(struct editorBuffer *bufr, int at, char *s, size_t len) {
 	if (at < 0 || at > bufr->numrows)
 		return;
@@ -346,10 +255,7 @@ void editorInsertRow(struct editorBuffer *bufr, int at, char *s, size_t len) {
 	memcpy(bufr->row[at].chars, s, len);
 	bufr->row[at].chars[len] = '\0';
 
-	bufr->row[at].rsize = 0;
-	bufr->row[at].render = NULL;
 	bufr->row[at].cached_width = -1;
-	bufr->row[at].render_valid = 0;
 
 	bufr->numrows++;
 	bufr->dirty = 1;
@@ -357,7 +263,6 @@ void editorInsertRow(struct editorBuffer *bufr, int at, char *s, size_t len) {
 }
 
 void freeRow(erow *row) {
-	free(row->render);
 	free(row->chars);
 }
 
@@ -394,7 +299,6 @@ void rowInsertChar(struct editorBuffer *bufr, erow *row, int at, int c) {
 	memmove(&row->chars[at + 1], &row->chars[at], row->size - at + 1);
 	row->size++;
 	row->chars[at] = c;
-	row->render_valid = 0;
 	bufr->dirty = 1;
 	row->cached_width = -1;
 	invalidateScreenCache(bufr);
@@ -414,7 +318,6 @@ void editorRowInsertUnicode(struct editorConfig *ed, struct editorBuffer *bufr,
 		row->size - at + 1);
 	row->size += ed->nunicode;
 	memcpy(&row->chars[at], ed->unicode, ed->nunicode);
-	row->render_valid = 0;
 	row->cached_width = -1;
 	bufr->dirty = 1;
 	invalidateScreenCache(bufr);
@@ -426,7 +329,6 @@ void rowAppendString(struct editorBuffer *bufr, erow *row, char *s,
 	memcpy(&row->chars[row->size], s, len);
 	row->size += len;
 	row->chars[row->size] = '\0';
-	row->render_valid = 0;
 	row->cached_width = -1;
 	bufr->dirty = 1;
 	invalidateScreenCache(bufr);
@@ -439,7 +341,6 @@ void rowDelChar(struct editorBuffer *bufr, erow *row, int at) {
 	memmove(&row->chars[at], &row->chars[at + size],
 		row->size - ((at + size) - 1));
 	row->size -= size;
-	row->render_valid = 0;
 	row->cached_width = -1;
 	bufr->dirty = 1;
 	invalidateScreenCache(bufr);
@@ -503,7 +404,6 @@ void destroyBuffer(struct editorBuffer *buf) {
 
 void editorUpdateBuffer(struct editorBuffer *buf) {
 	for (int i = 0; i < buf->numrows; i++) {
-		buf->row[i].render_valid = 0;
 		buf->row[i].cached_width = -1;
 	}
 	invalidateScreenCache(buf);

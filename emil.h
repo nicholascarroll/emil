@@ -29,12 +29,8 @@ enum promptType {
 
 typedef struct erow {
 	int size;
-	int rsize;
-	int renderwidth;
 	uint8_t *chars;
-	uint8_t *render;
 	int cached_width; /* display width in columns, or -1 if stale */
-	int render_valid;
 } erow;
 
 struct editorUndo {

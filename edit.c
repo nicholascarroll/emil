@@ -106,7 +106,6 @@ void editorInsertNewlineRaw(struct editorBuffer *bufr) {
 		row = &bufr->row[bufr->cy];
 		row->size = bufr->cx;
 		row->chars[row->size] = '\0';
-		row->render_valid = 0;
 		row->cached_width = -1;
 		invalidateScreenCache(bufr);
 	}
@@ -229,7 +228,6 @@ UNINDENT_PERFORM:
 	memmove(&row->chars[0], &row->chars[trunc], row->size - trunc);
 	row->size -= trunc;
 	bufr->cx -= trunc;
-	updateRow(row);
 	row->cached_width = -1;
 	invalidateScreenCache(bufr);
 	bufr->dirty = 1;
@@ -673,7 +671,6 @@ void editorKillLine(int count) {
 
 			row->size = E.buf->cx;
 			row->chars[row->size] = '\0';
-			row->render_valid = 0;
 			row->cached_width = -1;
 			invalidateScreenCache(E.buf);
 			E.buf->dirty = 1;
@@ -716,7 +713,6 @@ void editorKillLineBackwards(void) {
 	row->size -= E.buf->cx;
 	memmove(row->chars, &row->chars[E.buf->cx], row->size);
 	row->chars[row->size] = '\0';
-	updateRow(row);
 	row->cached_width = -1;
 	invalidateScreenCache(E.buf);
 	E.buf->cx = 0;

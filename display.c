@@ -407,9 +407,6 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 			abAppend(ab, " ", 1);
 		} else {
 			erow *row = &buf->row[filerow];
-			if (!row->render_valid) {
-				updateRow(row);
-			}
 			if (!buf->word_wrap) {
 				// Truncated mode with visual marking
 				struct rowHighlight hl;
