@@ -101,6 +101,7 @@ struct editorWindow {
 	int rowoff;
 	int coloff;
 	int height;
+	int skip_sublines; /* sub-lines of rowoff row to skip (derived per frame) */
 };
 
 struct editorMacro {

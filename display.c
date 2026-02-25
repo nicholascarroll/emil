@@ -140,28 +140,118 @@ static void updateHighlight(struct abuf *ab, int *current, int desired) {
 	}
 }
 
-/* Calculate number of rows to scroll for smooth scrolling */
-int calculateRowsToScroll(struct editorBuffer *buf, struct editorWindow *win,
-			  int direction) {
-	int rendered_lines = 0;
-	int rows_to_scroll = 0;
-	int start_row = (direction > 0) ? win->rowoff : win->rowoff - 1;
+/* Scroll the viewport by `n` screen lines.  Positive = down (content
+ * moves up), negative = up (content moves down).  Handles both wrap
+ * and non-wrap modes, managing rowoff and skip_sublines.
+ *
+ * This is a pure viewport operation — it does NOT touch the cursor.
+ * Callers are responsible for adjusting the cursor afterwards. */
+void scrollViewport(struct editorWindow *win, struct editorBuffer *buf, int n) {
+	if (n == 0)
+		return;
 
-	while (rendered_lines < win->height) {
-		if (start_row < 0 || start_row >= buf->numrows)
-			break;
-		erow *row = &buf->row[start_row];
-		int line_height = !buf->word_wrap ?
-					  1 :
-					  countScreenLines(row, E.screencols);
-		if (rendered_lines + line_height > win->height && direction < 0)
-			break;
-		rendered_lines += line_height;
-		rows_to_scroll++;
-		start_row += direction;
+	if (!buf->word_wrap) {
+		win->rowoff += n;
+		if (win->rowoff < 0)
+			win->rowoff = 0;
+		if (buf->numrows > 0 && win->rowoff >= buf->numrows)
+			win->rowoff = buf->numrows - 1;
+		win->skip_sublines = 0;
+		return;
 	}
 
-	return rows_to_scroll;
+	/* Word-wrap mode: scroll by individual screen lines */
+	buildScreenCache(buf);
+
+	if (n > 0) {
+		/* Scroll down */
+		for (int i = 0; i < n; i++) {
+			if (win->rowoff >= buf->numrows)
+				break;
+
+			int row_lines = countScreenLines(&buf->row[win->rowoff],
+							 E.screencols);
+
+			if (win->skip_sublines < row_lines - 1) {
+				win->skip_sublines++;
+			} else {
+				win->rowoff++;
+				win->skip_sublines = 0;
+				if (win->rowoff >= buf->numrows)
+					break;
+			}
+		}
+	} else {
+		/* Scroll up */
+		int up = -n;
+		for (int i = 0; i < up; i++) {
+			if (win->rowoff <= 0 && win->skip_sublines <= 0)
+				break;
+
+			if (win->skip_sublines > 0) {
+				win->skip_sublines--;
+			} else {
+				win->rowoff--;
+				int prev_lines = countScreenLines(
+					&buf->row[win->rowoff], E.screencols);
+				win->skip_sublines = prev_lines - 1;
+			}
+		}
+	}
+}
+
+/* Return the absolute screen line for the top of the current viewport,
+ * accounting for skip_sublines. */
+static int viewportTopScreenLine(struct editorWindow *win,
+				 struct editorBuffer *buf) {
+	return getScreenLineForRow(buf, win->rowoff) + win->skip_sublines;
+}
+
+/* Ensure the cursor is within the visible viewport.  If it has fallen
+ * outside, drag it to the nearest visible row.  Pure cursor fixup —
+ * does not touch the viewport. */
+void clampCursorToViewport(struct editorWindow *win, struct editorBuffer *buf) {
+	if (!buf->word_wrap) {
+		if (buf->cy < win->rowoff)
+			buf->cy = win->rowoff;
+		else if (buf->cy >= win->rowoff + win->height)
+			buf->cy = win->rowoff + win->height - 1;
+	} else {
+		buildScreenCache(buf);
+		int top = viewportTopScreenLine(win, buf);
+
+		/* Handle cursor past EOF */
+		if (buf->numrows > 0 && buf->cy >= buf->numrows)
+			buf->cy = buf->numrows - 1;
+
+		int cursor_screen = getScreenLineForRow(buf, buf->cy);
+
+		if (cursor_screen < top) {
+			/* Cursor above viewport — move down */
+			while (buf->cy < buf->numrows - 1) {
+				buf->cy++;
+				cursor_screen =
+					getScreenLineForRow(buf, buf->cy);
+				if (cursor_screen >= top)
+					break;
+			}
+			buf->cx = 0;
+		} else if (cursor_screen >= top + win->height) {
+			/* Cursor below viewport — move up */
+			while (buf->cy > 0) {
+				cursor_screen =
+					getScreenLineForRow(buf, buf->cy);
+				if (cursor_screen < top + win->height)
+					break;
+				buf->cy--;
+			}
+		}
+	}
+
+	if (buf->cy < 0)
+		buf->cy = 0;
+	if (buf->cy < buf->numrows && buf->cx > buf->row[buf->cy].size)
+		buf->cx = buf->row[buf->cy].size;
 }
 
 /* Render a line with highlighting support.
@@ -261,7 +351,8 @@ void setScxScy(struct editorWindow *win) {
 				int rowoff_screen_line =
 					getScreenLineForRow(buf, win->rowoff);
 				win->scy = virtual_screen_line -
-					   rowoff_screen_line;
+					   rowoff_screen_line -
+					   win->skip_sublines;
 			} else {
 				win->scy = 0 - win->rowoff;
 			}
@@ -270,7 +361,8 @@ void setScxScy(struct editorWindow *win) {
 				getScreenLineForRow(buf, buf->cy);
 			int rowoff_screen_line =
 				getScreenLineForRow(buf, win->rowoff);
-			win->scy = cursor_screen_line - rowoff_screen_line;
+			win->scy = cursor_screen_line - rowoff_screen_line -
+				   win->skip_sublines;
 		}
 	} else {
 		win->scy = buf->cy - win->rowoff;
@@ -317,61 +409,66 @@ void scroll(void) {
 		/* Ensure cache is built (it should already be by refreshScreen) */
 		buildScreenCache(buf);
 
-		if (buf->cy < win->rowoff) {
-			win->rowoff = buf->cy;
-		} else {
-			/* Compute cursor's absolute screen line position.
-			 * When cy == numrows (virtual line past EOF), the
-			 * cursor is one screen line past the last row. */
-			int cursor_screen_line;
-			if (buf->cy >= buf->numrows) {
-				if (buf->numrows > 0) {
-					cursor_screen_line =
-						getScreenLineForRow(
-							buf, buf->numrows - 1) +
-						countScreenLines(
-							&buf->row[buf->numrows -
-								  1],
-							E.screencols);
-				} else {
-					cursor_screen_line = 0;
-				}
-			} else {
+		/* Compute cursor's absolute screen line position.
+		 * When cy == numrows (virtual line past EOF), the
+		 * cursor is one screen line past the last row. */
+		int cursor_screen_line;
+		int cursor_sub_line = 0;
+		if (buf->cy >= buf->numrows) {
+			if (buf->numrows > 0) {
 				cursor_screen_line =
-					getScreenLineForRow(buf, buf->cy);
-				int render_pos = charsToDisplayColumn(
-					&buf->row[buf->cy], buf->cx);
-				int sub_line, sub_col;
-				cursorScreenLine(&buf->row[buf->cy], render_pos,
-						 E.screencols, &sub_line,
-						 &sub_col);
-				cursor_screen_line += sub_line;
+					getScreenLineForRow(buf,
+							    buf->numrows - 1) +
+					countScreenLines(
+						&buf->row[buf->numrows - 1],
+						E.screencols);
+			} else {
+				cursor_screen_line = 0;
 			}
-
-			int rowoff_screen_line =
-				getScreenLineForRow(buf, win->rowoff);
-			int cursor_screen_row =
-				cursor_screen_line - rowoff_screen_line;
-
-			if (cursor_screen_row >= win->height) {
-				/* Cursor below window: find new rowoff using
-				 * cache-based target_top search (§5.3) */
-				int target_top =
-					cursor_screen_line - win->height + 1;
-
-				/* Walk backwards from cursor row to find
-				 * rowoff where screen_line_start[rowoff]
-				 * <= target_top */
-				int r = buf->cy;
-				if (r >= buf->numrows)
-					r = buf->numrows - 1;
-				while (r > 0 &&
-				       getScreenLineForRow(buf, r) > target_top)
-					r--;
-				win->rowoff = r;
-			}
+		} else {
+			cursor_screen_line = getScreenLineForRow(buf, buf->cy);
+			int render_pos = charsToDisplayColumn(
+				&buf->row[buf->cy], buf->cx);
+			int sub_col;
+			cursorScreenLine(&buf->row[buf->cy], render_pos,
+					 E.screencols, &cursor_sub_line,
+					 &sub_col);
+			cursor_screen_line += cursor_sub_line;
 		}
+
+		int rowoff_screen_line = getScreenLineForRow(buf, win->rowoff);
+		/* Account for current skip_sublines in the effective
+		 * top-of-window position */
+		int effective_top = rowoff_screen_line + win->skip_sublines;
+
+		if (cursor_screen_line < effective_top) {
+			/* Cursor above window: snap rowoff to cursor row */
+			win->rowoff = buf->cy;
+			win->skip_sublines = cursor_sub_line;
+		} else if (cursor_screen_line >= effective_top + win->height) {
+			/* Cursor below window: find new rowoff using
+			 * cache-based target_top search (§5.3) */
+			int target_top = cursor_screen_line - win->height + 1;
+
+			/* Walk backwards from cursor row to find
+			 * rowoff where screen_line_start[rowoff]
+			 * <= target_top */
+			int r = buf->cy;
+			if (r >= buf->numrows)
+				r = buf->numrows - 1;
+			while (r > 0 &&
+			       getScreenLineForRow(buf, r) > target_top)
+				r--;
+			win->rowoff = r;
+			win->skip_sublines =
+				target_top - getScreenLineForRow(buf, r);
+		}
+		/* Otherwise: cursor is visible, keep rowoff and
+		 * skip_sublines as they are */
 	} else {
+		/* Reset skip_sublines in non-wrap mode */
+		win->skip_sublines = 0;
+
 		if (buf->cy < win->rowoff) {
 			win->rowoff = buf->cy;
 		} else if (buf->cy >= win->rowoff + win->height) {
@@ -401,6 +498,7 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 	struct editorBuffer *buf = win->buf;
 	int y;
 	int filerow = win->rowoff;
+	int skip = win->skip_sublines; /* sub-lines to skip on first row */
 
 	for (y = 0; y < screenrows; y++) {
 		if (filerow >= buf->numrows) {
@@ -420,6 +518,7 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 				 * boundaries when possible. */
 				int line_start_col = 0;
 				int line_start_byte = 0;
+				int sub_line_idx = 0;
 
 				struct rowHighlight hl;
 				computeRowHighlightBounds(buf, filerow, &hl);
@@ -431,6 +530,18 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 						row, screencols, line_start_col,
 						line_start_byte, &break_col,
 						&break_byte);
+
+					/* Skip sub-lines that are above the
+					 * visible area (only for the first
+					 * rendered row, i.e. rowoff) */
+					if (sub_line_idx < skip) {
+						sub_line_idx++;
+						if (!more)
+							break;
+						line_start_col = break_col;
+						line_start_byte = break_byte;
+						continue;
+					}
 
 					/* --- Render the span --- */
 					renderLineWithHighlighting(
@@ -466,9 +577,11 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 						break;
 					line_start_col = break_col;
 					line_start_byte = break_byte;
+					sub_line_idx++;
 				}
 
 				filerow++;
+				skip = 0; /* Only skip on the first row */
 			}
 		}
 		abAppend(ab, "\x1b[K", 3);
@@ -595,8 +708,10 @@ void refreshScreen(void) {
 		struct editorBuffer *b = w->buf;
 		if (b->numrows == 0) {
 			w->rowoff = 0;
+			w->skip_sublines = 0;
 		} else if (w->rowoff >= b->numrows) {
 			w->rowoff = b->numrows - 1;
+			w->skip_sublines = 0;
 		}
 	}
 
@@ -747,6 +862,7 @@ void recenter(struct editorWindow *win) {
 	if (win->rowoff < 0) {
 		win->rowoff = 0;
 	}
+	win->skip_sublines = 0;
 }
 
 void editorToggleVisualLineMode(void) {
