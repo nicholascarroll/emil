@@ -628,13 +628,15 @@ void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
 		snprintf(pos_indicator, sizeof(pos_indicator), "%2d%%",
 			 (win->rowoff * 100) / bufr->numrows);
 
+
+	const char *wrap = bufr->word_wrap ? " (Wrap)" : (win->focused ? "-------" : "       ");
 	int right_len;
 	if (win->focused) {
-		right_len = snprintf(right, sizeof(right), " %d:%d %s --", ry,
-				     rx, pos_indicator);
+	    right_len = snprintf(right, sizeof(right), " %d:%d -- %s --%s", 
+	                         ry, rx, pos_indicator, wrap);
 	} else {
-		right_len = snprintf(right, sizeof(right), " %d:%d %s   ", ry,
-				     rx, pos_indicator);
+	    right_len = snprintf(right, sizeof(right), " %d:%d    %s   %s", 
+	                         ry, rx, pos_indicator, wrap);
 	}
 
 	/* Build left side: "-- name XX " or "   name XX " */

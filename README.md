@@ -171,11 +171,9 @@ when an OSC 52 enabled terminal client is used.
 
 On a raw Linux virtual console (Ctrl+Alt+F3 etc.) the in-kernel console cannot display Chinese. Use **kmscon** or **fbterm**.
 
-# Internals
+## Internals
 
 `emil` maintains a single in-memory representation of the buffer as an array of lines. All buffers contain valid UTF-8. Files that fail validation are rejected at load time. 
-
-There are one or more non-overlapping windows, each displaying exactly one buffer. Each spans the entire screen width. The focused buffer can be displayed in multiple windows simultaneously. These windows are clamped to buffer actual line range. At any instant, only the focused buffer can be modified. 
 
 The buffer is never modified by rendering or text layout concerns. Text layout (tab spacing, word wrap etc) is derived data and rebuilt as needed.
 
@@ -183,7 +181,7 @@ On each frame, the renderer reads raw bytes from the buffer and emits terminal-r
 
 The rendering system uses only cursor positioning (CSI H), erase-to-end-of-line (CSI K), reverse video (CSI 7m / CSI 0m), and clear-below (CSI J). Scroll region manipulation and line insert/delete are not used by the core renderer; they are planned to be added in future as distinct and optional render optimizations (compile time option).
 
-Thus all input is processed in a single loop:
+All input is processed in a single loop:
 
 1. Read keystroke
 2. Modify buffer
