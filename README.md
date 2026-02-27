@@ -121,6 +121,34 @@ Shell integration is a compile-time option (enabled by default). It enables shel
 
 Shell integration can be disabled at build time with the compiler flag `-DEMIL_DISABLE_SHELL`.
 
+
+#### Example uses of Shell Command
+
+Below are common "recipes" using standard Unix utilities. 
+
+| Task | Command | Recommended Binding |
+| :--- | :--- | :--- |
+| **Wrap Text** | `fmt -w 80` | `C-u M-|` |
+| **Sort & Cleanup** | `sort -u` | `C-u M-|` |
+| **Align Columns** | `column -t` | `C-u M-|` |
+| **Number Lines** | `cat -n` | `C-u M-|` |
+| **Word Count** | `wc -w` | `M-|` |
+| **Solve Math** | `bc -l` | `M-|` or `C-u M-|` |
+| **Format JSON** | `jq .` | `C-u M-|` |
+| **Find Typos** | `aspell list` | `M-|` |
+| **Code Formatting** | `make format` | `C-u M-|` |
+
+More complex commands can be converted into shell scripts. For example: to add a dictionary lookup, create a file named `edict` in your `$PATH`:
+
+```bash
+#!/bin/sh
+# edict: Look up the word provided via stdin
+word=$(cat)
+curl -s "dict://dict.org/d:${word}"
+
+Now, you can simply highlight a word in emil and type M-| edict to see the definition.
+
+
 ### Shell Drawer
 `Ctrl-x Ctrl-z` suspends `emil` while preserving the current editor screen. This permits shell commands to be executed in the terminal below the editor content, after which editing may be resumed with `fg`.
 
