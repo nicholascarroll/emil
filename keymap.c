@@ -53,6 +53,7 @@ void setupCommands(struct editorConfig *ed) {
 		//		{ "indent-spaces", editorIndentSpaces },
 		//		{ "indent-tabs", editorIndentTabs },
 		{ "insert-file", editorInsertFile },
+		{ "cd", editorChangeDirectory },
 		{ "diff-buffer-with-file", editorDiffBufferWithFile },
 		{ "isearch-forward-regexp", editorRegexFindWrapper },
 		{ "query-replace", editorQueryReplace },

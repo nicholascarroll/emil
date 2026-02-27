@@ -501,3 +501,31 @@ void editorInsertFile(struct editorConfig *UNUSED(ed),
 
 	buf->dirty++;
 }
+
+void editorChangeDirectory(struct editorConfig *ed,
+                           struct editorBuffer *buf) {
+    (void)buf; /* unused parameter */
+
+    uint8_t *dir = editorPrompt(ed->buf,
+                                (uint8_t *)"Directory: %s",
+                                PROMPT_FILES, NULL);
+    if (dir == NULL) {
+        editorSetStatusMessage(msg_canceled);
+        return;
+    }
+
+    if (chdir((char *)dir) == 0) {
+        char cwd[PATH_MAX];
+        if (getcwd(cwd, sizeof(cwd))) {
+            editorSetStatusMessage("Current directory: %s", cwd);
+        } else {
+            editorSetStatusMessage("Changed directory");
+        }
+    } else {
+        editorSetStatusMessage("cd: %s: %s",
+                               (char *)dir, strerror(errno));
+    }
+
+    free(dir);
+}
+
