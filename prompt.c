@@ -140,14 +140,19 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 			}
 			break;
 
+		case ARROW_UP:
 		case HISTORY_PREV:
+		case ARROW_DOWN:
 		case HISTORY_NEXT: {
 			/* If completions are visible, cycle selection
 			 * instead of history. */
 			if (E.minibuf->completion_state.matches &&
 			    E.minibuf->completion_state.n_matches > 0) {
-				cycleCompletion(E.minibuf,
-						c == HISTORY_NEXT ? 1 : -1);
+				cycleCompletion(
+					E.minibuf,
+					c == HISTORY_NEXT || c == ARROW_DOWN ?
+						1 :
+						-1);
 				break;
 			}
 
@@ -170,7 +175,7 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 			}
 
 			if (hist && hist->count > 0) {
-				if (c == HISTORY_PREV) {
+				if (c == HISTORY_PREV || c == ARROW_UP) {
 					if (history_pos == -1) {
 						history_pos = hist->count - 1;
 					} else if (history_pos > 0) {
