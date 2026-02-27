@@ -5,7 +5,7 @@
 
 `emil` is a small, portable terminal text editor designed specifically for UTF-8 files. It provides a subset of *emacs* commands on VT100-compatible terminals.
 
-`emil` is written in standard C99 and depends only on a POSIX.1-2001–compliant environment. It eschews common sources of complexity: scripting support, plugin systems, configuration files, background network activity, or auto-save files.
+`emil` is written in standard C99 and depends only on a POSIX.1-2001 compliant environment. It eschews common sources of complexity: scripting support, plugin systems, configuration files, background network activity, or auto-save files.
 
 ## Status
 
@@ -128,15 +128,15 @@ Below are common "recipes" using standard Unix utilities.
 
 | Task | Command | Recommended Binding |
 | :--- | :--- | :--- |
-| **Fill region** | `fmt` | `C-u M-\|` |
-| **Sort lines** | `sort` | `C-u M-\|` |
-| **Align Columns** | `column -t` | `C-u M-\|` |
-| **Number Lines** | `cat -n` | `C-u M-\|` |
-| **Word Count** | `wc` | `M-\|` |
-| **Solve Math** | `bc` | `M-\|` or `C-u M-\|` |
-| **Format JSON** | `jq .` | `C-u M-\|` |
-| **Find Typos** | `aspell list` | `M-\|` |
-| **Code Formatting** | `make format` | `C-u M-\|` |
+| **Fill region** | `fmt` | `Ctrl-u Alt-\|` |
+| **Sort lines** | `sort` | `Ctrl-u Alt-\|` |
+| **Align Columns** | `column -t` | `Ctrl-u Alt-\|` |
+| **Number Lines** | `cat -n` | `Ctrl-u Alt-\|` |
+| **Word Count** | `wc` | `Alt-\|` |
+| **Solve Math** | `bc` | `Alt-\|` or `Ctrl-u Alt-\|` |
+| **Format JSON** | `jq .` | `Ctrl-u Alt-\|` |
+| **Find Typos** | `aspell list` | `Alt-\|` |
+| **Code Formatting** | `make format` | `Ctrl-u Alt-\|` |
 
 More complex commands can be converted into shell scripts. For example: to add a dictionary lookup, create a file named `edict` in your `$PATH`:
 
@@ -169,7 +169,6 @@ when an OSC 52 enabled terminal client is used.
    - From here on we use `emil` to code `emil`
 
 2. **Version 0.1.1 Feature complete**  [WIP] 🔨
-   - `Alt-x cd`: 'change directory' named command
    - Mark ring (local buffer)
    - Polishing up filename display UX
    - Visual row up/down (C-p / C-n)

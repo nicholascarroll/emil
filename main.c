@@ -104,6 +104,72 @@ void initEditor(void) {
 		die("getWindowSize");
 }
 
+/*
+ * Read all available data from a file descriptor into a malloc'd buffer.
+ * Sets *out_len to the number of bytes read.  Returns NULL on allocation
+ * failure; returns an empty buffer (out_len == 0) if nothing was read.
+ */
+static char *readAllFromFd(int fd, size_t *out_len) {
+	size_t cap = BUFSIZ;
+	size_t len = 0;
+	char *buf = xmalloc(cap);
+	ssize_t n;
+	while ((n = read(fd, buf + len, cap - len)) > 0) {
+		len += (size_t)n;
+		if (len >= cap) {
+			cap <<= 1;
+			buf = xrealloc(buf, cap);
+		}
+	}
+	*out_len = len;
+	return buf;
+}
+
+/*
+ * Load piped stdin data into a new editor buffer.  The data is split
+ * on newline boundaries and inserted row by row, matching the same
+ * approach used by editorOpen().  The buffer is named "*stdin*" and
+ * marked dirty so the user is prompted before discarding.
+ *
+ * Returns the new buffer, or NULL if the data contains null bytes
+ * (which would indicate binary / non-UTF-8 content).
+ */
+static struct editorBuffer *loadStdinBuffer(const char *data, size_t len) {
+	/* Reject binary data: null bytes can't be represented */
+	if (memchr(data, '\0', len) != NULL) {
+		return NULL;
+	}
+
+	struct editorBuffer *buf = newBuffer();
+	buf->filename = xstrdup("*stdin*");
+
+	size_t start = 0;
+	for (size_t i = 0; i < len; i++) {
+		if (data[i] == '\n') {
+			/* Strip trailing \r for DOS line endings */
+			size_t end = i;
+			if (end > start && data[end - 1] == '\r')
+				end--;
+			editorInsertRow(buf, buf->numrows, (char *)&data[start],
+					(int)(end - start));
+			start = i + 1;
+		}
+	}
+	/* Handle final line without trailing newline */
+	if (start < len) {
+		size_t end = len;
+		if (end > start && data[end - 1] == '\r')
+			end--;
+		editorInsertRow(buf, buf->numrows, (char *)&data[start],
+				(int)(end - start));
+	}
+
+	buf->dirty = 0;
+	buf->read_only = 1;
+	buf->word_wrap = 1;
+	return buf;
+}
+
 int main(int argc, char *argv[]) {
 	// Check for --version flag before entering raw mode
 	if (argc >= 2 && strcmp(argv[1], "--version") == 0) {
@@ -111,11 +177,59 @@ int main(int argc, char *argv[]) {
 		return 0;
 	}
 
+	/*
+	 * Detect piped stdin: if stdin is not a terminal, slurp the
+	 * data before entering raw mode, then reopen /dev/tty so the
+	 * terminal works normally.  This enables:
+	 *   git diff | emil
+	 *   curl ... | emil
+	 *   grep -rn foo | emil
+	 */
+	char *stdin_data = NULL;
+	size_t stdin_len = 0;
+	if (!isatty(STDIN_FILENO)) {
+		stdin_data = readAllFromFd(STDIN_FILENO, &stdin_len);
+
+		/* Reopen /dev/tty as stdin so the terminal works */
+		int tty_fd = open("/dev/tty", O_RDWR);
+		if (tty_fd < 0) {
+			free(stdin_data);
+			fprintf(stderr, "emil: cannot open /dev/tty: %s\n",
+				strerror(errno));
+			exit(1);
+		}
+		dup2(tty_fd, STDIN_FILENO);
+		if (tty_fd != STDIN_FILENO)
+			close(tty_fd);
+	}
+
 	enableRawMode();
 	initEditor();
 
 	E.headbuf = newBuffer();
 	E.buf = E.headbuf;
+
+	/* Load piped stdin data if present */
+	if (stdin_data != NULL) {
+		if (stdin_len > 0) {
+			struct editorBuffer *stdinBuf =
+				loadStdinBuffer(stdin_data, stdin_len);
+			if (stdinBuf == NULL) {
+				/* Binary data — bail out cleanly */
+				free(stdin_data);
+				disableRawMode();
+				fprintf(stderr,
+					"stdin: data failed UTF-8 validation\n");
+				exit(1);
+			}
+			stdinBuf->next = E.headbuf;
+			E.headbuf = stdinBuf;
+			E.buf = stdinBuf;
+		}
+		free(stdin_data);
+		stdin_data = NULL;
+	}
+
 	if (argc >= 2) {
 		int i = 1;
 		int linum = -1;

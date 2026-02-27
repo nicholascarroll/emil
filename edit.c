@@ -300,6 +300,9 @@ void editorBackSpace(struct editorBuffer *bufr, int count) {
 
 /* Cursor movement */
 
+/* * TODO: Refactor to take struct editorBuffer *buf parameter.
+ * Extract UTF-8 snap-to-character-boundary into a helper function
+ * with consistent bounds checking across all four directions. */
 void editorMoveCursor(int key, int count) {
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
