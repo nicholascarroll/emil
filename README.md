@@ -128,7 +128,7 @@ Below are common "recipes" using standard Unix utilities.
 
 | Task | Command | Recommended Binding |
 | :--- | :--- | :--- |
-| **Wrap Text** | `fmt -w 80` | `C-u M-|` |
+| **Wrap Text** | `fmt -w 80` | `C-u M-&#124;` |
 | **Sort & Cleanup** | `sort -u` | `C-u M-|` |
 | **Align Columns** | `column -t` | `C-u M-|` |
 | **Number Lines** | `cat -n` | `C-u M-|` |
