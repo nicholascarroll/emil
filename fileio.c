@@ -506,7 +506,7 @@ void editorChangeDirectory(struct editorConfig *ed, struct editorBuffer *buf) {
 	(void)buf; /* unused parameter */
 
 	uint8_t *dir = editorPrompt(ed->buf, (uint8_t *)"Directory: %s",
-				    PROMPT_FILES, NULL);
+				    PROMPT_DIR, NULL);
 	if (dir == NULL) {
 		editorSetStatusMessage(msg_canceled);
 		return;

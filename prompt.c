@@ -89,6 +89,17 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 					}
 				}
 
+				/* PROMPT_DIR: strip trailing slash before returning */
+				if (t == PROMPT_DIR) {
+					int len = strlen(current_text);
+					if (len > 1 &&
+					    current_text[len - 1] == '/') {
+						current_text[len - 1] = '\0';
+						E.minibuf->row[0].size =
+							len - 1;
+					}
+				}
+
 				/* If it's a file, or it doesn't exist (new file), return it */
 				/* If a completion is selected, return its full
 				 * path rather than the basename shown in the
@@ -148,6 +159,8 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 			 * instead of history. */
 			if (E.minibuf->completion_state.matches &&
 			    E.minibuf->completion_state.n_matches > 0) {
+				cycleCompletion(E.minibuf,
+						c == HISTORY_NEXT ? 1 : -1);
 				cycleCompletion(
 					E.minibuf,
 					c == HISTORY_NEXT || c == ARROW_DOWN ?
@@ -161,6 +174,7 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 
 			switch (t) {
 			case PROMPT_FILES:
+			case PROMPT_DIR:
 				hist = &E.file_history;
 				break;
 			case PROMPT_COMMAND:
@@ -271,6 +285,7 @@ done:
 		struct editorHistory *hist = NULL;
 		switch (t) {
 		case PROMPT_FILES:
+		case PROMPT_DIR:
 			hist = &E.file_history;
 			break;
 		case PROMPT_COMMAND:

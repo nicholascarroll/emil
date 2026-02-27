@@ -128,15 +128,15 @@ Below are common "recipes" using standard Unix utilities.
 
 | Task | Command | Recommended Binding |
 | :--- | :--- | :--- |
-| **Wrap Text** | `fmt -w 80` | `C-u M-&#124;` |
-| **Sort & Cleanup** | `sort -u` | `C-u M-|` |
-| **Align Columns** | `column -t` | `C-u M-|` |
-| **Number Lines** | `cat -n` | `C-u M-|` |
-| **Word Count** | `wc -w` | `M-|` |
-| **Solve Math** | `bc -l` | `M-|` or `C-u M-|` |
-| **Format JSON** | `jq .` | `C-u M-|` |
-| **Find Typos** | `aspell list` | `M-|` |
-| **Code Formatting** | `make format` | `C-u M-|` |
+| **Fill region** | `fmt` | `C-u M-\|` |
+| **Sort lines** | `sort` | `C-u M-\|` |
+| **Align Columns** | `column -t` | `C-u M-\|` |
+| **Number Lines** | `cat -n` | `C-u M-\|` |
+| **Word Count** | `wc` | `M-\|` |
+| **Solve Math** | `bc` | `M-\|` or `C-u M-\|` |
+| **Format JSON** | `jq .` | `C-u M-\|` |
+| **Find Typos** | `aspell list` | `M-\|` |
+| **Code Formatting** | `make format` | `C-u M-\|` |
 
 More complex commands can be converted into shell scripts. For example: to add a dictionary lookup, create a file named `edict` in your `$PATH`:
 
@@ -145,8 +145,9 @@ More complex commands can be converted into shell scripts. For example: to add a
 # edict: Look up the word provided via stdin
 word=$(cat)
 curl -s "dict://dict.org/d:${word}"
+```
 
-Now, you can simply highlight a word in emil and type M-| edict to see the definition.
+Now, you can simply highlight a word in emil and type `M-| edict` to see the definition.
 
 
 ### Shell Drawer
@@ -201,21 +202,29 @@ On a raw Linux virtual console (Ctrl+Alt+F3 etc.) the in-kernel console cannot d
 
 ## Internals
 
-`emil` maintains a single in-memory representation of the buffer as an array of lines. All buffers contain valid UTF-8. Files that fail validation are rejected at load time. 
+Each buffer is an array of logical lines (`erow`), where each line stores its raw
+UTF-8 bytes. All buffers contain valid UTF-8; files that fail validation are rejected
+at load time. The buffer is never modified by rendering or text layout concerns.
 
-The buffer is never modified by rendering or text layout concerns. Text layout (tab spacing, word wrap etc) is derived data and rebuilt as needed.
+Display widths are cached per-row and recomputed only when a row is edited.
+A cumulative screen-line cache maps logical rows to screen positions, enabling
+efficient scrolling when word wrap is active.
 
-On each frame, the renderer reads raw bytes from the buffer and emits terminal-ready sequences directly into a disposable append buffer. No intermediate render buffers exist. The append buffer is written to the terminal in a single `write()` call.
+On each frame, the renderer reads raw bytes from the buffer and emits
+terminal-ready sequences directly into a disposable append buffer. No intermediate
+render buffers exist. The append buffer is written to the terminal in a single
+`write()` call.
 
-The rendering system uses only cursor positioning (CSI H), erase-to-end-of-line (CSI K), reverse video (CSI 7m / CSI 0m), and clear-below (CSI J). Scroll region manipulation and line insert/delete are not used by the core renderer; they are planned to be added in future as distinct and optional render optimizations (compile time option).
+The rendering system uses only cursor positioning (CSI H), erase-to-end-of-line
+(CSI K), reverse video (CSI 7m / CSI 0m), and clear-below (CSI J). Scroll region
+manipulation and line insert/delete are not used by the core renderer; they are
+planned as optional render optimisations behind a compile-time flag.
 
 All input is processed in a single loop:
 
 1. Read keystroke
-2. Modify buffer
-3. Clamp window offsets
-4. Rebuild derived data if required
-5. Redraw screen
+2. Execute command (may modify buffer)
+3. Refresh screen: clamp window offsets, rebuild caches if stale, scroll, redraw, flush
 
 
 ## Contributing

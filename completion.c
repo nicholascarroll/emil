@@ -520,6 +520,40 @@ void handleMinibufferCompletion(struct editorBuffer *minibuf,
 	case PROMPT_FILES:
 		getFileCompletions(current_text, &result);
 		break;
+	case PROMPT_DIR:
+		getFileCompletions(current_text, &result);
+		/* Filter to directories only (trailing '/') */
+		if (result.n_matches > 0) {
+			int dst = 0;
+			for (int i = 0; i < result.n_matches; i++) {
+				int len = (int)strlen(result.matches[i]);
+				if (len > 0 &&
+				    result.matches[i][len - 1] == '/') {
+					if (dst != i) {
+						free(result.matches[dst]);
+						result.matches[dst] =
+							result.matches[i];
+						result.matches[i] = NULL;
+					}
+					dst++;
+				} else {
+					free(result.matches[i]);
+					result.matches[i] = NULL;
+				}
+			}
+			result.n_matches = dst;
+			if (result.n_matches > 0) {
+				free(result.common_prefix);
+				result.common_prefix = findCommonPrefix(
+					result.matches, result.n_matches);
+			} else {
+				free(result.common_prefix);
+				result.common_prefix = NULL;
+				free(result.matches);
+				result.matches = NULL;
+			}
+		}
+		break;
 	case PROMPT_BASIC:
 		getBufferCompletions(&E, current_text, E.edbuf, &result);
 		break;
