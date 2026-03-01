@@ -1,4 +1,4 @@
-# Hardening Options
+## Hardening Options
 
 `emil` allows you to strip high-risk features at compile time for use in restricted environments:
 
