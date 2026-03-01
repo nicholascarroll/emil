@@ -28,7 +28,7 @@ If macros are enabled, they are governed by several security constraints:
 * **Non-recursive:** Macros cannot call other macros.
 * **Restricted Commands:** Dangerous actions (specifically: opening file; save files
 ) are blocked during recording to prevent accidental or malicious effects in the filesystem.
-* **Fixed Bindings:** Macros can only be triggered via specific register keys (e.g., `@a`), preventing the hijacking of standard keys like `Enter` or `Save`.
+* **Fixed Bindings:** Macros recording and execution can only be triggered via specific keys, preventing the hijacking of standard keys.
 * **Read-only Registers:** To prevent payload injection, macro registers cannot be manually edited or modified.
 
 ---
