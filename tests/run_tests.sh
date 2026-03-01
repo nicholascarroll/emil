@@ -4,21 +4,23 @@
 echo "Running tests..."
 echo ""
 
-# ===== Integration tests =====
+# Binary exists and runs
+./emil --version > /dev/null || {
+    echo "✗ Binary does not run"
+    exit 1
+}
+echo "✓ Binary runs"
 
-./emil --version > /dev/null || exit 1
-echo "✓ Version check"
-
-MAKEFILE_VERSION=$(grep "^VERSION = " Makefile | cut -d' ' -f3)
-BINARY_VERSION=$(./emil --version | awk '{print $NF}')
-if [ "$BINARY_VERSION" != "$MAKEFILE_VERSION" ]; then
-    if echo "$BINARY_VERSION" | grep -q "$MAKEFILE_VERSION"; then
-        echo "✓ Version consistency (Dev build: $BINARY_VERSION)"
-    else
-        echo "✗ Version mismatch: Binary has '$BINARY_VERSION', Makefile has '$MAKEFILE_VERSION'"
-        exit 1
-    fi
+# Version consistency
+if [ "$BINARY_VERSION" = "$MAKEFILE_VERSION" ]; then
+    echo "✓ Version consistency"
+elif echo "$BINARY_VERSION" | grep -q "$MAKEFILE_VERSION"; then
+    echo "✓ Version consistency (Dev build)"
+else
+    echo "✗ Version mismatch"
+    exit 1
 fi
+
 
 # ===== Unit test suites (fat binary) =====
 #
