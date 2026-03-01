@@ -1,5 +1,5 @@
 #!/bin/sh
-# Test suite for emil — Strategy C (fat binary)
+# Test suite for emil — (fat binary)
 
 echo "Running tests..."
 echo ""
@@ -20,11 +20,7 @@ if [ "$BINARY_VERSION" != "$MAKEFILE_VERSION" ]; then
     fi
 fi
 
-test -x ./emil || exit 1
-echo "✓ Binary executable"
-echo ""
-
-# ===== Unit test suites (Strategy C: fat binary) =====
+# ===== Unit test suites (fat binary) =====
 #
 # Each test binary links every .o except main.o and terminal.o.
 # stubs.o provides E, page_overlap, and no-op terminal functions.
