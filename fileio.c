@@ -74,8 +74,10 @@ int editorLockFile(struct editorBuffer *bufr, const char *filename) {
 		query.l_start = 0;
 		query.l_len = 0;
 
-		if (fcntl(fd, F_GETLK, &query) == 0 && query.l_type != F_UNLCK) {
-			editorSetStatusMessage(msg_file_locked, (int)query.l_pid);
+		if (fcntl(fd, F_GETLK, &query) == 0 &&
+		    query.l_type != F_UNLCK) {
+			editorSetStatusMessage(msg_file_locked,
+					       (int)query.l_pid);
 		} else {
 			editorSetStatusMessage(msg_file_locked, 0);
 		}
@@ -329,8 +331,8 @@ int editorOpen(struct editorBuffer *bufr, char *filename) {
 		}
 	}
 
-//	editorSetStatusMessage("%d lines, %d columns", bufr->numrows,
-//			       max_width);
+	editorSetStatusMessage("%d lines, %d columns", bufr->numrows,
+			       max_width);
 	return 0;
 }
 

@@ -205,7 +205,8 @@ void scrollViewport(struct editorWindow *win, struct editorBuffer *buf, int n) {
  * accounting for skip_sublines. */
 static int viewportTopScreenLine(struct editorWindow *win,
 				 struct editorBuffer *buf) {
-	return getScreenLineForRow(buf, win->rowoff, E.screencols) + win->skip_sublines;
+	return getScreenLineForRow(buf, win->rowoff, E.screencols) +
+	       win->skip_sublines;
 }
 
 /* Ensure the cursor is within the visible viewport.  If it has fallen
@@ -225,14 +226,15 @@ void clampCursorToViewport(struct editorWindow *win, struct editorBuffer *buf) {
 		if (buf->numrows > 0 && buf->cy >= buf->numrows)
 			buf->cy = buf->numrows - 1;
 
-		int cursor_screen = getScreenLineForRow(buf, buf->cy, E.screencols);
+		int cursor_screen =
+			getScreenLineForRow(buf, buf->cy, E.screencols);
 
 		if (cursor_screen < top) {
 			/* Cursor above viewport — move down */
 			while (buf->cy < buf->numrows - 1) {
 				buf->cy++;
-				cursor_screen =
-					getScreenLineForRow(buf, buf->cy, E.screencols);
+				cursor_screen = getScreenLineForRow(
+					buf, buf->cy, E.screencols);
 				if (cursor_screen >= top)
 					break;
 			}
@@ -240,8 +242,8 @@ void clampCursorToViewport(struct editorWindow *win, struct editorBuffer *buf) {
 		} else if (cursor_screen >= top + win->height) {
 			/* Cursor below viewport — move up */
 			while (buf->cy > 0) {
-				cursor_screen =
-					getScreenLineForRow(buf, buf->cy, E.screencols);
+				cursor_screen = getScreenLineForRow(
+					buf, buf->cy, E.screencols);
 				if (cursor_screen < top + win->height)
 					break;
 				buf->cy--;
@@ -349,8 +351,8 @@ void setScxScy(struct editorWindow *win) {
 				virtual_screen_line += countScreenLines(
 					&buf->row[buf->numrows - 1],
 					E.screencols);
-				int rowoff_screen_line =
-					getScreenLineForRow(buf, win->rowoff, E.screencols);
+				int rowoff_screen_line = getScreenLineForRow(
+					buf, win->rowoff, E.screencols);
 				win->scy = virtual_screen_line -
 					   rowoff_screen_line -
 					   win->skip_sublines;
@@ -360,8 +362,8 @@ void setScxScy(struct editorWindow *win) {
 		} else {
 			int cursor_screen_line =
 				getScreenLineForRow(buf, buf->cy, E.screencols);
-			int rowoff_screen_line =
-				getScreenLineForRow(buf, win->rowoff, E.screencols);
+			int rowoff_screen_line = getScreenLineForRow(
+				buf, win->rowoff, E.screencols);
 			win->scy = cursor_screen_line - rowoff_screen_line -
 				   win->skip_sublines;
 		}
@@ -419,7 +421,8 @@ void scroll(void) {
 			if (buf->numrows > 0) {
 				cursor_screen_line =
 					getScreenLineForRow(buf,
-							    buf->numrows - 1, E.screencols) +
+							    buf->numrows - 1,
+							    E.screencols) +
 					countScreenLines(
 						&buf->row[buf->numrows - 1],
 						E.screencols);
@@ -427,7 +430,8 @@ void scroll(void) {
 				cursor_screen_line = 0;
 			}
 		} else {
-			cursor_screen_line = getScreenLineForRow(buf, buf->cy, E.screencols);
+			cursor_screen_line =
+				getScreenLineForRow(buf, buf->cy, E.screencols);
 			int render_pos = charsToDisplayColumn(
 				&buf->row[buf->cy], buf->cx);
 			int sub_col;
@@ -437,7 +441,8 @@ void scroll(void) {
 			cursor_screen_line += cursor_sub_line;
 		}
 
-		int rowoff_screen_line = getScreenLineForRow(buf, win->rowoff, E.screencols);
+		int rowoff_screen_line =
+			getScreenLineForRow(buf, win->rowoff, E.screencols);
 		/* Account for current skip_sublines in the effective
 		 * top-of-window position */
 		int effective_top = rowoff_screen_line + win->skip_sublines;
@@ -458,11 +463,13 @@ void scroll(void) {
 			if (r >= buf->numrows)
 				r = buf->numrows - 1;
 			while (r > 0 &&
-			       getScreenLineForRow(buf, r, E.screencols) > target_top)
+			       getScreenLineForRow(buf, r, E.screencols) >
+				       target_top)
 				r--;
 			win->rowoff = r;
 			win->skip_sublines =
-				target_top - getScreenLineForRow(buf, r, E.screencols);
+				target_top -
+				getScreenLineForRow(buf, r, E.screencols);
 		}
 		/* Otherwise: cursor is visible, keep rowoff and
 		 * skip_sublines as they are */
@@ -649,14 +656,12 @@ void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
 		left_len = snprintf(left, sizeof(left), "-- %s %c%c%c%s", dname,
 				    bufr->dirty ? '*' : '-',
 				    bufr->dirty ? '*' : '-',
-				    bufr->read_only ? '%' : ' ',
-				    mod_flag);
+				    bufr->read_only ? '%' : ' ', mod_flag);
 	} else {
 		left_len = snprintf(left, sizeof(left), "   %s %c%c%c%s", dname,
 				    bufr->dirty ? '*' : '-',
 				    bufr->dirty ? '*' : '-',
-				    bufr->read_only ? '%' : ' ',
-				    mod_flag);
+				    bufr->read_only ? '%' : ' ', mod_flag);
 	}
 
 	/* Total visible = screencols - 1 (to avoid right-margin wrap).
