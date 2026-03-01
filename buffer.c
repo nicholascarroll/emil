@@ -18,7 +18,7 @@ void invalidateScreenCache(struct editorBuffer *buf) {
 	buf->screen_line_cache_valid = 0;
 }
 
-void buildScreenCache(struct editorBuffer *buf) {
+void buildScreenCache(struct editorBuffer *buf, int screencols) {
 	if (buf->screen_line_cache_valid)
 		return;
 
@@ -51,16 +51,16 @@ void buildScreenCache(struct editorBuffer *buf) {
 					calculateLineWidth(&buf->row[i]);
 			}
 			screen_line +=
-				countScreenLines(&buf->row[i], E.screencols);
+				countScreenLines(&buf->row[i], screencols);
 		}
 	}
 
 	buf->screen_line_cache_valid = 1;
 }
 
-int getScreenLineForRow(struct editorBuffer *buf, int row) {
+int getScreenLineForRow(struct editorBuffer *buf, int row, int screencols) {
 	if (!buf->screen_line_cache_valid) {
-		buildScreenCache(buf);
+		buildScreenCache(buf, screencols);
 	}
 	if (row >= buf->numrows || row < 0)
 		return 0;
