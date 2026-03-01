@@ -27,7 +27,7 @@ If macros are enabled, they are governed by several security constraints:
 * **Session-only:** Macros are stored in memory and cleared when the editor closes.
 * **Non-recursive:** Macros cannot call other macros.
 * **Restricted Commands:** Dangerous actions (specifically: opening file; save files
-) are blocked during recording to prevent accidental or malicious effects in the filesystem.
+) are blocked during recording to prevent accidental or malicious impacts in the filesystem.
 * **Fixed Bindings:** Macros recording and execution can only be triggered via specific keys, preventing the hijacking of standard keys.
 * **Read-only Registers:** To prevent payload injection, macro registers cannot be manually edited or modified.
 
