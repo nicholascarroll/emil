@@ -2,46 +2,40 @@
 ## Reporting a Vulnerability
 
 We use GitHub's **Private Vulnerability Reporting**.
-Please navigate to the [Security tab](https://github.com/nicholascarroll/emil/security) and click "Report a vulnerability" to submit a report privately.
 
-**Do not report security issues via public Pull Requests or Issues.**
+Please navigate to the [Security tab](https://github.com/nicholascarroll/emil/security) and click "Report a vulnerability."
 
-### Issue Response Times
+**Do not report security issues via public PRs or Issues.**
 
-* **Initial Acknowledgment:** Within 7 days.
-* **Status Updates:** Every 14 days until resolution.
+### Response Times
 
----
-
-## Security Architecture & Hardening
-
-`emil` is designed for high-assurance environments. We provide two levels of hardening to satisfy different compliance requirements.
-
-### 1. Compile-Time Feature Stripping
-
-For environments requiring a minimal attack surface, specific high-risk features can be physically removed from the binary at compile time:
-
-| Feature | Compiler Flag | Description |
-| --- | --- | --- |
-| **Shell Integration** | `-DEMIL_DISABLE_SHELL` | Disables all system shell escapes and external command execution. |
-| **Macro System** | `-DEMIL_DISABLE_MACROS` | Completely removes the macro recording and playback engine. |
-
-### 2. Runtime Macro Guardrails
-
-When macros are enabled, `emil` enforces a **"High-Assurance Macro"** model:
-
-* **Volatile Memory Only:** Macros exist only in RAM and are wiped immediately upon session exit.
-* **Command Filtering:** High-risk operations (e.g., `Save`, `Open File`, `Quit`) are blocked during the recording phase.
-* **Anti-Hijacking:** Macros are mapped only to fixed `@` registers; standard keybindings cannot be remapped to macros.
-* **Integrity Protection:** Macro registers are "Opaque." They cannot be manually edited, "pasted" into, or modified, preventing malicious payload injection.
-* **Recursion Block:** To prevent DoS attacks, a macro cannot call another macro or itself.
+You will receive an initial response within 14 days.
 
 ---
 
-## Stable Releases
+## Hardening Options
 
-`emil` is currently in active development (**Version 0.1.0**). We are prioritizing security architecture over feature parity during this phase.
+`emil` allows you to strip high-risk features at compile time for use in restricted environments:
 
-* **Early 2026:** Alpha Prerelease (Feature Freeze).
-* **Early 2027:** Version 1.0 (Stable Release & Security Audit).
+* **Shell Integration:** Use `-DEMIL_DISABLE_SHELL` to disable all external command execution.
+* **Macro System:** Use `-DEMIL_DISABLE_MACROS` to completely remove the macro engine from the build.
 
+### Macro Guardrails
+
+If macros are enabled, they are governed by several security constraints:
+
+* **Session-only:** Macros are stored in memory and cleared when the editor closes.
+* **Non-recursive:** Macros cannot call other macros.
+* **Restricted Commands:** Dangerous actions (specifically: opening file; save files
+) are blocked during recording to prevent accidental or malicious "runaway" scripts.
+* **Fixed Bindings:** Macros can only be triggered via specific register keys (e.g., `@a`), preventing the hijacking of standard keys like `Enter` or `Save`.
+* **Read-only Registers:** To prevent payload injection, macro registers cannot be manually edited or modified.
+
+---
+
+## Project Roadmap
+
+`emil` is currently at version **0.1.0** (Development).
+
+* **Early 2026:** Planned Prerelease.
+* **Early 2027:** Version 1.0 Release.
