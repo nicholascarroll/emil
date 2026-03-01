@@ -16,6 +16,7 @@ void editorSave(struct editorBuffer *bufr);
 void editorSaveAs(struct editorBuffer *bufr);
 void editorRevert(struct editorConfig *ed, struct editorBuffer *buf);
 void findFile(void);
+struct editorBuffer *editorSwitchToFile(const char *filename);
 void editorInsertFile(struct editorConfig *ed, struct editorBuffer *buf);
 void editorChangeDirectory(struct editorConfig *ed, struct editorBuffer *buf);
 #endif /* FILEIO_H */

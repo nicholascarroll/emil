@@ -32,6 +32,7 @@
 #include "edit.h"
 #include "region.h"
 #include "prompt.h"
+#include "clang.h"
 
 extern struct editorConfig E;
 
@@ -711,6 +712,18 @@ void editorProcessKeypress(int c) {
 
 	case SHELL_DRAWER:
 		editorOpenShellDrawer();
+		break;
+
+	case CTAGS_JUMP:
+		editorCtagsJump();
+		break;
+
+	case CTAGS_BACK:
+		editorCtagsBack();
+		break;
+
+	case TOGGLE_HEADER_BODY:
+		editorToggleHeaderBody();
 		break;
 
 	case DELETE_WORD:

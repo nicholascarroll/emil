@@ -3,9 +3,10 @@
 
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/11997/badge)](https://www.bestpractices.dev/projects/11997)
 
-`emil` is a small, portable terminal text editor designed specifically for UTF-8 files. It provides a subset of *emacs* commands on VT100-compatible terminals.
+`emil` is a small, portable text editor for UTF-8 files, providing a core subset of emacs commands in the terminal. 
 
-`emil` is written in standard C99 and depends only on a POSIX.1-2001 compliant environment. It eschews common sources of complexity: scripting support, plugin systems, configuration files, background network activity, or auto-save files.
+Written in standard C99, `emil` runs on any system providing a minimal POSIX.1-2001 interface (single-process subset) and a VT100-compatible terminal. It eschews common sources of complexity: scripting, plugins, configuration files, background network activity, or auto-save files. 
+
 
 ## Status
 
@@ -19,7 +20,7 @@ portability, or fix correctness issues are especially welcome.
 
 - Kill ring ('clipboard history')
 - Visual text selection
-- Incremental regexp search and replace
+- Incremental regex search and replace
 - Word wrap
 - Multiple windows
 - Rectangle editing
@@ -27,6 +28,7 @@ portability, or fix correctness issues are especially welcome.
 - Registers
 - Mark ring
 - Shell integration
+- Jump to symbol definition (Ctags)
 
 ## Installation
 
@@ -172,6 +174,10 @@ when an OSC 52 enabled terminal client is used.
    - Mark ring (local buffer)
    - Polishing up filename display UX
    - Visual row up/down (C-p / C-n)
+   - M-. / M-, to jump to/back function def using CTAGS or dumb-jump
+   - Parenthesis matching with reverse video
+   - jump to matching parenthesis
+   - jump to definition per CTAGS
 
 3. **Version 0.2.0 Stable Preview**  [WIP]⚠️🚧🔨👷    
    - Most known bugs fixed
@@ -188,8 +194,9 @@ when an OSC 52 enabled terminal client is used.
 
 6. **Version 1.0.0 Bug free and loving it**
    - Tested on Solaris, AIX, Linux, BSD, MSYS2
-     OSX, Android. 
+     macOS, Android. 
    - Tested with raw console and various terminal emulators
+   - Tested on RTEMS and NuttX
    - Tested with IME and international keyboards
    - Included in Linux distribution repositories
 

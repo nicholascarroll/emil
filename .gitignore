@@ -9,3 +9,4 @@ unicodetest
 !/tests/test_*.c
 !/tests/test_*.h
 !/tests/test_*.sh
+tags

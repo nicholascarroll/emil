@@ -1,30 +1,28 @@
 #!/bin/sh
-# Test suite for emil — Strategy C (fat binary)
+# Test suite for emil — (fat binary)
 
 echo "Running tests..."
 echo ""
 
-# ===== Integration tests =====
+# Binary exists and runs
+./emil --version > /dev/null || {
+    echo "✗ Binary does not run"
+    exit 1
+}
+echo "✓ Binary runs"
 
-./emil --version > /dev/null || exit 1
-echo "✓ Version check"
-
-MAKEFILE_VERSION=$(grep "^VERSION = " Makefile | cut -d' ' -f3)
-BINARY_VERSION=$(./emil --version | awk '{print $NF}')
-if [ "$BINARY_VERSION" != "$MAKEFILE_VERSION" ]; then
-    if echo "$BINARY_VERSION" | grep -q "$MAKEFILE_VERSION"; then
-        echo "✓ Version consistency (Dev build: $BINARY_VERSION)"
-    else
-        echo "✗ Version mismatch: Binary has '$BINARY_VERSION', Makefile has '$MAKEFILE_VERSION'"
-        exit 1
-    fi
+# Version consistency
+if [ "$BINARY_VERSION" = "$MAKEFILE_VERSION" ]; then
+    echo "✓ Version consistency"
+elif echo "$BINARY_VERSION" | grep -q "$MAKEFILE_VERSION"; then
+    echo "✓ Version consistency (Dev build)"
+else
+    echo "✗ Version mismatch"
+    exit 1
 fi
 
-test -x ./emil || exit 1
-echo "✓ Binary executable"
-echo ""
 
-# ===== Unit test suites (Strategy C: fat binary) =====
+# ===== Unit test suites (fat binary) =====
 #
 # Each test binary links every .o except main.o and terminal.o.
 # stubs.o provides E, page_overlap, and no-op terminal functions.

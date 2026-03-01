@@ -309,6 +309,12 @@ int editorReadKey(void) {
 			return END_OF_FILE;
 		} else if (seq[0] == '|') {
 			return PIPE_CMD;
+		} else if (seq[0] == '.') {
+			return CTAGS_JUMP;
+		} else if (seq[0] == ',') {
+			return CTAGS_BACK;
+		} else if (seq[0] == '/') {
+			return TOGGLE_HEADER_BODY;
 		} else if (seq[0] == '%') {
 			return QUERY_REPLACE;
 		} else if (seq[0] == '?') {

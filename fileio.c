@@ -480,10 +480,35 @@ void editorSaveAs(struct editorBuffer *bufr) {
 	editorSave(bufr);
 }
 
+/* Switch the focused window to the named file.  If a buffer with that
+ * filename already exists, reuse it; otherwise open a new one.
+ * Returns the buffer on success, NULL on failure. */
+struct editorBuffer *editorSwitchToFile(const char *filename) {
+	/* Check if already open */
+	for (struct editorBuffer *buf = E.headbuf; buf; buf = buf->next) {
+		if (buf->filename && strcmp(buf->filename, filename) == 0) {
+			E.buf = buf;
+			E.windows[windowFocusedIdx()]->buf = buf;
+			return buf;
+		}
+	}
+
+	/* Open new buffer */
+	struct editorBuffer *nb = newBuffer();
+	if (editorOpen(nb, (char *)filename) < 0) {
+		destroyBuffer(nb);
+		return NULL;
+	}
+	nb->next = E.headbuf;
+	E.headbuf = nb;
+	E.buf = nb;
+	E.windows[windowFocusedIdx()]->buf = nb;
+	return nb;
+}
+
 void findFile(void) {
-	struct editorConfig *E_ptr = &E;
 	uint8_t *prompt =
-		editorPrompt(E_ptr->buf, "Find File: %s", PROMPT_FILES, NULL);
+		editorPrompt(E.buf, "Find File: %s", PROMPT_FILES, NULL);
 
 	if (prompt == NULL) {
 		editorSetStatusMessage(msg_canceled);
@@ -496,41 +521,10 @@ void findFile(void) {
 		return;
 	}
 
-	// Check if a buffer with the same filename already exists
-	struct editorBuffer *buf = E_ptr->headbuf;
-	while (buf != NULL) {
-		if (buf->filename != NULL &&
-		    strcmp(buf->filename, (char *)prompt) == 0) {
-			editorSetStatusMessage(
-				"File '%s' already open in a buffer.", prompt);
-			free(prompt);
-			E_ptr->buf = buf; // Switch to the existing buffer
-
-			// Update the focused window to display the found buffer
-			int idx = windowFocusedIdx();
-			E_ptr->windows[idx]->buf = E_ptr->buf;
-
-			refreshScreen(); // Refresh to reflect the change
-			return;
-		}
-		buf = buf->next;
-	}
-
-	// Create new buffer for the file
-	struct editorBuffer *newBuf = newBuffer();
-	if (editorOpen(newBuf, (char *)prompt) < 0) {
-		/* Validation failed — discard the buffer */
-		destroyBuffer(newBuf);
-		free(prompt);
-		return;
-	}
+	struct editorBuffer *buf = editorSwitchToFile((char *)prompt);
 	free(prompt);
-
-	newBuf->next = E_ptr->headbuf;
-	E_ptr->headbuf = newBuf;
-	E_ptr->buf = newBuf;
-	int idx = windowFocusedIdx();
-	E_ptr->windows[idx]->buf = E_ptr->buf;
+	if (buf)
+		refreshScreen();
 }
 
 void editorInsertFile(struct editorConfig *UNUSED(ed),

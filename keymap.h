@@ -98,6 +98,9 @@ enum editorKey {
 	SAVE_AS,
 	TOGGLE_READ_ONLY,
 	SHELL_DRAWER,
+	CTAGS_JUMP,
+	CTAGS_BACK,
+	TOGGLE_HEADER_BODY,
 };
 
 struct editorBuffer;
