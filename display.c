@@ -1,6 +1,7 @@
 #include "display.h"
 #include "abuf.h"
 #include "emil.h"
+#include "fileio.h"
 #include "message.h"
 #include "terminal.h"
 #include "unicode.h"
@@ -643,16 +644,19 @@ void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
 	/* Build left side: "-- name XX " or "   name XX " */
 	char left[1024];
 	int left_len;
+	const char *mod_flag = bufr->external_mod ? "!" : "";
 	if (win->focused) {
-		left_len = snprintf(left, sizeof(left), "-- %s %c%c%c", dname,
+		left_len = snprintf(left, sizeof(left), "-- %s %c%c%c%s", dname,
 				    bufr->dirty ? '*' : '-',
 				    bufr->dirty ? '*' : '-',
-				    bufr->read_only ? '%' : ' ');
+				    bufr->read_only ? '%' : ' ',
+				    mod_flag);
 	} else {
-		left_len = snprintf(left, sizeof(left), "   %s %c%c%c", dname,
+		left_len = snprintf(left, sizeof(left), "   %s %c%c%c%s", dname,
 				    bufr->dirty ? '*' : '-',
 				    bufr->dirty ? '*' : '-',
-				    bufr->read_only ? '%' : ' ');
+				    bufr->read_only ? '%' : ' ',
+				    mod_flag);
 	}
 
 	/* Total visible = screencols - 1 (to avoid right-margin wrap).
@@ -701,6 +705,9 @@ void drawMinibuffer(struct abuf *ab) {
 }
 
 void refreshScreen(void) {
+	/* Check for external modification of the focused buffer's file */
+	editorCheckFileModified(E.buf);
+
 	struct abuf ab = ABUF_INIT;
 	abAppend(&ab, "\x1b[?25l", 6); // Hide cursor
 	abAppend(&ab, "\x1b[H", 3);    // Move cursor to top-left corner

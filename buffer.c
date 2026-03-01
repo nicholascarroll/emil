@@ -5,6 +5,7 @@
 #include "emil.h"
 #include "message.h"
 #include "buffer.h"
+#include "fileio.h"
 #include "unicode.h"
 #include "undo.h"
 #include "prompt.h"
@@ -380,10 +381,14 @@ struct editorBuffer *newBuffer(void) {
 	ret->screen_line_cache_size = 0;
 	ret->screen_line_cache_valid = 0;
 	ret->read_only = 0;
+	ret->lock_fd = -1;
+	ret->open_mtime = 0;
+	ret->external_mod = 0;
 	return ret;
 }
 
 void destroyBuffer(struct editorBuffer *buf) {
+	editorReleaseLock(buf);
 	clearUndosAndRedos(buf);
 	free(buf->filename);
 	free(buf->display_name);

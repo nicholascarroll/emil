@@ -79,6 +79,9 @@ struct editorBuffer {
 	int rectangle_mode;
 	int single_line;
 	int read_only;
+	int lock_fd;		  /* fd holding advisory lock, or -1 */
+	time_t open_mtime;	  /* st_mtime at open/save, 0 if unset */
+	int external_mod;	  /* 1 if file changed on disk since open/save */
 	erow *row;
 	char *filename;
 	char *display_name; /* Truncated name for status bar display */

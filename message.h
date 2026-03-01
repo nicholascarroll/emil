@@ -44,6 +44,8 @@ static const char *const msg_save_aborted = "保存已中止。";
 static const char *const msg_save_failed = "保存失败：%s";
 static const char *const msg_file_not_found = "文件未找到：%s";
 static const char *const msg_file_bad_utf8 = "文件 UTF-8 验证失败";
+static const char *const msg_file_locked = "[文件被 PID %d 锁定]";
+static const char *const msg_file_changed_on_disk = "[文件已被外部修改]";
 static const char *const msg_lines_columns = "%d 行，%d 列";
 static const char *const msg_dir_not_supported = "不支持编辑目录。";
 static const char *const msg_inserted_lines = "从 %s 插入了 %d 行";
@@ -135,6 +137,8 @@ static const char *const msg_save_aborted = "Save aborted.";
 static const char *const msg_save_failed = "Save failed: %s";
 static const char *const msg_file_not_found = "File not found: %s";
 static const char *const msg_file_bad_utf8 = "File failed UTF-8 validation";
+static const char *const msg_file_locked = "[FILE LOCKED BY PID %d]";
+static const char *const msg_file_changed_on_disk = "[FILE CHANGED ON DISK]";
 static const char *const msg_lines_columns = "%d lines, %d columns";
 static const char *const msg_dir_not_supported =
 	"Directory editing not supported.";

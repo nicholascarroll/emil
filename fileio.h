@@ -4,6 +4,11 @@
 struct editorBuffer;
 struct editorConfig;
 
+/* File locking */
+int editorLockFile(struct editorBuffer *bufr, const char *filename);
+void editorReleaseLock(struct editorBuffer *bufr);
+void editorCheckFileModified(struct editorBuffer *bufr);
+
 /* File I/O operations */
 char *editorRowsToString(struct editorBuffer *bufr, int *buflen);
 int editorOpen(struct editorBuffer *bufr, char *filename);

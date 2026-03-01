@@ -25,6 +25,96 @@ extern struct editorConfig E;
 /* External functions we need */
 extern void die(const char *s);
 
+/*** file locking ***/
+
+/* Try to acquire an advisory write lock on a file.
+ * Returns 0 on success (lock acquired), -1 if already locked (sets
+ * status message with the blocking PID), or -2 on error.
+ * On success, bufr->lock_fd is set and must be released later. */
+
+int editorLockFile(struct editorBuffer *bufr, const char *filename) {
+	/* Try O_RDWR first (needed for F_WRLCK per POSIX).
+	 * Fall back to O_RDONLY + F_RDLCK if the file isn't writable. */
+	int fd = open(filename, O_RDWR);
+	int use_rdlck = 0;
+	if (fd < 0) {
+		if (errno == ENOENT)
+			return -2; /* file doesn't exist yet — nothing to lock */
+		fd = open(filename, O_RDONLY);
+		if (fd < 0)
+			return -2;
+		use_rdlck = 1;
+	}
+
+	struct flock fl;
+	memset(&fl, 0, sizeof(fl));
+	fl.l_type = use_rdlck ? F_RDLCK : F_WRLCK;
+	fl.l_whence = SEEK_SET;
+	fl.l_start = 0;
+	fl.l_len = 0; /* whole file */
+
+	if (fcntl(fd, F_SETLK, &fl) == 0) {
+		/* Lock acquired */
+		bufr->lock_fd = fd;
+
+		/* Record mtime for external modification detection */
+		struct stat st;
+		if (fstat(fd, &st) == 0)
+			bufr->open_mtime = st.st_mtime;
+
+		return 0;
+	}
+
+	/* Lock failed — find out who holds it */
+	if (errno == EACCES || errno == EAGAIN) {
+		struct flock query;
+		memset(&query, 0, sizeof(query));
+		query.l_type = F_WRLCK;
+		query.l_whence = SEEK_SET;
+		query.l_start = 0;
+		query.l_len = 0;
+
+		if (fcntl(fd, F_GETLK, &query) == 0 && query.l_type != F_UNLCK) {
+			editorSetStatusMessage(msg_file_locked, (int)query.l_pid);
+		} else {
+			editorSetStatusMessage(msg_file_locked, 0);
+		}
+	}
+
+	close(fd);
+	return -1;
+}
+
+/* Release the advisory lock held by this buffer. */
+
+void editorReleaseLock(struct editorBuffer *bufr) {
+	if (bufr->lock_fd >= 0) {
+		close(bufr->lock_fd);
+		bufr->lock_fd = -1;
+	}
+	bufr->open_mtime = 0;
+	bufr->external_mod = 0;
+}
+
+/* Check whether the underlying file has been modified externally.
+ * Called periodically (e.g. from refreshScreen).  Sets bufr->external_mod
+ * and fires a one-time status message. */
+
+void editorCheckFileModified(struct editorBuffer *bufr) {
+	if (bufr->filename == NULL || bufr->open_mtime == 0)
+		return;
+	if (bufr->external_mod)
+		return; /* already flagged */
+
+	struct stat st;
+	if (stat(bufr->filename, &st) == 0) {
+		if (st.st_mtime != bufr->open_mtime) {
+			bufr->external_mod = 1;
+			editorSetStatusMessage(msg_file_changed_on_disk);
+		}
+	}
+}
+
 /*** file i/o ***/
 
 char *editorRowsToString(struct editorBuffer *bufr, int *buflen) {
@@ -214,6 +304,16 @@ int editorOpen(struct editorBuffer *bufr, char *filename) {
 	if (access(filename, W_OK) != 0) {
 		bufr->read_only = 1;
 	}
+
+	/* Try to acquire advisory lock */
+	int lock_result = editorLockFile(bufr, filename);
+	if (lock_result == -1) {
+		/* File is locked by another process — open read-only */
+		bufr->read_only = 1;
+	} else if (lock_result == 0) {
+		/* Lock acquired — mtime already recorded by editorLockFile */
+	}
+
 	computeDisplayNames();
 
 	/* Enable word wrap by default for prose-oriented file types */
@@ -229,8 +329,8 @@ int editorOpen(struct editorBuffer *bufr, char *filename) {
 		}
 	}
 
-	editorSetStatusMessage("%d lines, %d columns", bufr->numrows,
-			       max_width);
+//	editorSetStatusMessage("%d lines, %d columns", bufr->numrows,
+//			       max_width);
 	return 0;
 }
 
@@ -348,6 +448,16 @@ void editorSave(struct editorBuffer *bufr) {
 
 	free(buf);
 	bufr->dirty = 0;
+
+	/* Update stored mtime after save */
+	struct stat save_st;
+	if (stat(bufr->filename, &save_st) == 0)
+		bufr->open_mtime = save_st.st_mtime;
+	bufr->external_mod = 0;
+
+	/* If we didn't have a lock yet (new file), acquire one now */
+	if (bufr->lock_fd < 0)
+		editorLockFile(bufr, bufr->filename);
 
 	/* TODO Interactive fallback to direct write if temp creation fails */
 	/* TODO: fsync parent dir after rename */
