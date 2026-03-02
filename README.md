@@ -174,10 +174,8 @@ when an OSC 52 enabled terminal client is used.
    - Mark ring (local buffer)
    - Polishing up filename display UX
    - Visual row up/down (C-p / C-n)
-   - M-. / M-, to jump to/back function def using CTAGS or dumb-jump
    - Parenthesis matching with reverse video
    - jump to matching parenthesis
-   - jump to definition per CTAGS
 
 3. **Version 0.2.0 Stable Preview**  [WIP]⚠️🚧🔨👷    
    - Most known bugs fixed
