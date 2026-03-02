@@ -222,7 +222,7 @@ render buffers exist. The append buffer is written to the terminal in a single
 The rendering system uses only cursor positioning (CSI H), erase-to-end-of-line
 (CSI K), reverse video (CSI 7m / CSI 0m), and clear-below (CSI J). Scroll region
 manipulation and line insert/delete are not used by the core renderer; they are
-planned as optional render optimisations behind a compile-time flag.
+planned as optional render optimisations enabled by a run-time toggle.
 
 All input is processed in a single loop:
 
