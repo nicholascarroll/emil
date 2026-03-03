@@ -153,6 +153,28 @@ curl -s "dict://dict.org/d:${word}"
 
 Now, you can simply highlight a word in emil and type `M-| edict` to see the definition.
 
+ChatGPT:
+
+```bash
+#!/bin/sh
+# Send stdin to an AI API and print the reply
+
+[ -z "$OPENAI_API_KEY" ] && {
+    echo "OPENAI_API_KEY not set" >&2
+    exit 1
+}
+
+prompt=$(cat)
+
+payload=$(jq -n \
+  --arg input "$prompt" \
+  '{model:"gpt-4.1-mini", input:$input}')
+
+curl -s https://api.openai.com/v1/responses \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer '"$OPENAI_API_KEY"'" \
+  -d "$payload"
+```
 
 ### Shell Drawer
 `Ctrl-x Ctrl-z` suspends `emil` while preserving the current editor screen. This permits shell commands to be executed in the terminal below the editor content, after which editing may be resumed with `fg`.
