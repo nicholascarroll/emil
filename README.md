@@ -185,7 +185,7 @@ when an OSC 52 enabled terminal client is used.
 4. **Rendering optimizations**
    Reduce bytes over wire with a grab bag of   
    render hints sent by edit, move and scroll operations.
-   - controlled by a compiler flag
+   - enabled by a run-time toggle.
 
 5. **Remove dependency on `subprocess.h`**
    Internalize the code being used for pipe/exec/fork.
