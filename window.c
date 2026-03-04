@@ -3,6 +3,7 @@
 #include "message.h"
 #include "util.h"
 #include <stdlib.h>
+#include "display.h"
 
 extern struct editorConfig E;
 
@@ -12,7 +13,6 @@ int windowFocusedIdx(void) {
 			return i;
 		}
 	}
-	/* You're in trouble m80 */
 	return 0;
 }
 
@@ -138,4 +138,6 @@ void editorDestroyOtherWindows(void) {
 	E.nwindows = 1;
 	free(E.windows);
 	E.windows = windows;
+
+	editorResizeScreen(0);
 }
