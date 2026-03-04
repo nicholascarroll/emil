@@ -23,7 +23,7 @@ portability, or fix correctness issues are especially welcome.
 - Incremental regex search and replace
 - Word wrap
 - Split windows
-- Edit Rectangular text regions
+- Edit rectangular text regions
 - Keystroke macros
 - Registers
 - Mark ring
