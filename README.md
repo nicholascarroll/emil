@@ -155,11 +155,11 @@ curl -s "dict://dict.org/d:${word}"
 
 Now, you can simply highlight a word in emil and type `M-| edict` to see the definition.
 
-ChatGPT:
+You can access **ChatGPT** from within `emil`:
 
 ```bash
 #!/bin/sh
-# Send stdin to an AI API and print the reply
+# Send stdin to ChatGPT and print the reply
 
 [ -z "$OPENAI_API_KEY" ] && {
     echo "OPENAI_API_KEY not set" >&2
