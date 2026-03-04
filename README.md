@@ -22,8 +22,8 @@ portability, or fix correctness issues are especially welcome.
 - Visual text selection
 - Incremental regex search and replace
 - Word wrap
-- Multiple windows
-- Rectangle editing
+- Split windows
+- Edit Rectangular text regions
 - Keystroke macros
 - Registers
 - Mark ring
