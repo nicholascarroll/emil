@@ -142,6 +142,7 @@ Below are common "recipes" using standard Unix utilities.
 | **Format C Code** | `make format` | `Ctrl-u Alt-\|` |
 | **Lint Shell Script** | `shellcheck` | `Ctrl-u Alt-\|` |
 | **Trim Trailing Whitespace** | `sed 's/[[:space:]]\+$//'` | `Ctrl-u Alt-\|` |
+| **Remove Duplicate Lines** | `awk '!seen[$0]++'` | `Ctrl-u Alt-\|` |
 
 More complex commands can be converted into shell scripts. For example: to add a dictionary lookup, create a file named `edict` in your `$PATH`:
 
