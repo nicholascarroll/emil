@@ -19,11 +19,13 @@ extern struct editorConfig E;
 
 #define CTAGS_STACK_SIZE 32
 
-static struct { char *filename; int cx, cy; } jstack[CTAGS_STACK_SIZE];
+static struct {
+	char *filename;
+	int cx, cy;
+} jstack[CTAGS_STACK_SIZE];
 static int jsp;
 
-static void pushLocation(void)
-{
+static void pushLocation(void) {
 	const char *fn = E.buf->filename ? E.buf->filename : "*scratch*";
 	if (jsp >= CTAGS_STACK_SIZE) {
 		free(jstack[0].filename);
@@ -39,14 +41,12 @@ static void pushLocation(void)
 
 /* ---- word at point ---- */
 
-static int isIdentChar(uint8_t c)
-{
+static int isIdentChar(uint8_t c) {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
 	       (c >= '0' && c <= '9') || c == '_';
 }
 
-static char *wordAtPoint(struct editorBuffer *buf)
-{
+static char *wordAtPoint(struct editorBuffer *buf) {
 	if (buf->cy >= buf->numrows)
 		return NULL;
 	erow *row = &buf->row[buf->cy];
@@ -71,8 +71,7 @@ static char *wordAtPoint(struct editorBuffer *buf)
 /* ---- ctags file lookup (prefers .c over .h) ---- */
 
 static int ctagsLookup(const char *sym, char *out_file, size_t filesz,
-		       int *out_line, char *out_pat, size_t patsz)
-{
+		       int *out_line, char *out_pat, size_t patsz) {
 	FILE *fp = fopen("tags", "r");
 	if (!fp)
 		return -1;
@@ -82,8 +81,8 @@ static int ctagsLookup(const char *sym, char *out_file, size_t filesz,
 	int found = 0;
 
 	while (fgets(line, sizeof(line), fp)) {
-		if (line[0] == '!' ||
-		    strncmp(line, sym, symlen) != 0 || line[symlen] != '\t')
+		if (line[0] == '!' || strncmp(line, sym, symlen) != 0 ||
+		    line[symlen] != '\t')
 			continue;
 
 		char *fstart = &line[symlen] + 1;
@@ -124,12 +123,14 @@ static int ctagsLookup(const char *sym, char *out_file, size_t filesz,
 			 * unescape \/ and \\ */
 			size_t pi = 0;
 			while (*p && pi < patsz - 1) {
-				if (p[0] == '\\' && (p[1] == '/' ||
-				    p[1] == '?' || p[1] == '\\')) {
+				if (p[0] == '\\' &&
+				    (p[1] == '/' || p[1] == '?' ||
+				     p[1] == '\\')) {
 					out_pat[pi++] = p[1];
 					p += 2;
-				} else if ((*p == '$' && (p[1] == delim ||
-					   p[1] == '\0')) || *p == delim) {
+				} else if ((*p == '$' &&
+					    (p[1] == delim || p[1] == '\0')) ||
+					   *p == delim) {
 					break;
 				} else {
 					out_pat[pi++] = *p++;
@@ -149,8 +150,7 @@ static int ctagsLookup(const char *sym, char *out_file, size_t filesz,
 
 /* ---- public API ---- */
 
-void editorCtagsJump(void)
-{
+void editorCtagsJump(void) {
 	char *sym = wordAtPoint(E.buf);
 	if (!sym) {
 		editorSetStatusMessage("No symbol at point");
@@ -160,8 +160,8 @@ void editorCtagsJump(void)
 	char tagfile[PATH_MAX];
 	char tagpat[1024];
 	int tagline;
-	if (ctagsLookup(sym, tagfile, sizeof(tagfile),
-			 &tagline, tagpat, sizeof(tagpat)) < 0) {
+	if (ctagsLookup(sym, tagfile, sizeof(tagfile), &tagline, tagpat,
+			sizeof(tagpat)) < 0) {
 		editorSetStatusMessage("Tag not found: %s", sym);
 		free(sym);
 		return;
@@ -171,15 +171,15 @@ void editorCtagsJump(void)
 	struct editorBuffer *buf = editorSwitchToFile(tagfile);
 	if (buf) {
 		if (tagline > 0) {
-			buf->cy = (tagline - 1 < buf->numrows) ?
-					  tagline - 1 : 0;
+			buf->cy = (tagline - 1 < buf->numrows) ? tagline - 1 :
+								 0;
 			buf->cx = 0;
 		} else if (tagpat[0]) {
 			size_t plen = strlen(tagpat);
 			for (int r = 0; r < buf->numrows; r++) {
 				if ((size_t)buf->row[r].size >= plen &&
-				    memcmp(buf->row[r].chars, tagpat,
-					   plen) == 0) {
+				    memcmp(buf->row[r].chars, tagpat, plen) ==
+					    0) {
 					buf->cy = r;
 					buf->cx = 0;
 					break;
@@ -192,8 +192,7 @@ void editorCtagsJump(void)
 	free(sym);
 }
 
-void editorCtagsBack(void)
-{
+void editorCtagsBack(void) {
 	if (jsp == 0) {
 		editorSetStatusMessage("Tag stack empty");
 		return;
@@ -208,8 +207,7 @@ void editorCtagsBack(void)
 	jstack[jsp].filename = NULL;
 }
 
-void editorToggleHeaderBody(void)
-{
+void editorToggleHeaderBody(void) {
 	if (!E.buf->filename)
 		return;
 	char *ext = strrchr(E.buf->filename, '.');

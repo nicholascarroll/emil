@@ -12,6 +12,7 @@
 #include "history.h"
 #include "prompt.h"
 #include "util.h"
+#include "adjust.h"
 
 extern struct editorConfig E;
 
@@ -151,6 +152,10 @@ void editorKillRegion(struct editorConfig *ed, struct editorBuffer *buf) {
 
 	buf->dirty = 1;
 	editorUpdateBuffer(buf);
+
+	/* Adjust tracked points for the deleted region.
+	 * The undo record has the exact range. */
+	adjustAllPoints(buf, new->startx, new->starty, new->endx, new->endy, 1);
 }
 
 void editorCopyRegion(struct editorConfig *ed, struct editorBuffer *buf) {
@@ -236,6 +241,10 @@ void editorYank(struct editorConfig *ed, struct editorBuffer *buf, int count) {
 		new->endx = buf->cx;
 		new->endy = buf->cy;
 		pushUndo(buf, new);
+
+		/* Adjust tracked points for this insertion */
+		adjustAllPoints(buf, new->startx, new->starty, new->endx,
+				new->endy, 0);
 
 		// For line yanks with multiple repetitions, position cursor
 		// at the beginning of the next line for the next yank
@@ -605,6 +614,10 @@ void editorStringRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	memcpy(&row->chars[topx], string, slen);
 	row->size += extra;
 	row->chars[row->size] = 0;
+	/* Adjust for the column replacement: delete old range, insert new */
+	adjustAllPoints(buf, topx, topy, botx, topy, 1);
+	if (slen > 0)
+		adjustAllPoints(buf, topx, topy, topx + slen, topy, 0);
 	if (boty == topy) {
 		emil_strlcat((char *)new->data, (char *)string, new->datasize);
 	} else {
@@ -632,6 +645,9 @@ void editorStringRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 		memcpy(&row->chars[topx], string, slen);
 		row->size += extra;
 		row->chars[row->size] = 0;
+		adjustAllPoints(buf, topx, i, botx, i, 1);
+		if (slen > 0)
+			adjustAllPoints(buf, topx, i, topx + slen, i, 0);
 		emil_strlcat((char *)new->data, (char *)row->chars,
 			     new->datasize);
 	}
@@ -656,6 +672,9 @@ void editorStringRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 		memcpy(&row->chars[topx], string, slen);
 		row->size += extra;
 		row->chars[row->size] = 0;
+		adjustAllPoints(buf, topx, boty, botx, boty, 1);
+		if (slen > 0)
+			adjustAllPoints(buf, topx, boty, topx + slen, boty, 0);
 		strncat((char *)new->data, (char *)row->chars, botx + extra);
 	}
 	new->datalen = strlen((char *)new->data);
@@ -827,11 +846,13 @@ void editorKillRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	if (row->size < botx) {
 		memset(&ed->rectKill[idx * ed->rx], ' ', ed->rx);
 		if (row->size > botx - ed->rx) {
+			int old_size = row->size;
 			strncpy((char *)&ed->rectKill[idx * ed->rx],
 				(char *)&row->chars[botx - ed->rx],
 				row->size - (botx - ed->rx));
 			row->size -= (row->size - (botx - ed->rx));
 			row->chars[row->size] = 0;
+			adjustAllPoints(buf, topx, topy, old_size, topy, 1);
 			if (boty != topy) {
 				emil_strlcat((char *)new->data,
 					     (char *)&row->chars[botx - ed->rx],
@@ -844,6 +865,7 @@ void editorKillRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 		memcpy(&row->chars[topx], &row->chars[botx], row->size - botx);
 		row->size -= ed->rx;
 		row->chars[row->size] = 0;
+		adjustAllPoints(buf, topx, topy, botx, topy, 1);
 		if (boty != topy) {
 			emil_strlcat((char *)new->data,
 				     (char *)&row->chars[topx], new->datasize);
@@ -853,17 +875,21 @@ void editorKillRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 
 	while ((topy + idx) < boty) {
 		/* Middle lines */
+		int cur_row = topy + idx;
 		emil_strlcat((char *)new->data, "\n", new->datasize);
-		row = &buf->row[topy + idx];
+		row = &buf->row[cur_row];
 
 		if (row->size < botx) {
 			memset(&ed->rectKill[idx * ed->rx], ' ', ed->rx);
 			if (row->size > botx - ed->rx) {
+				int old_size = row->size;
 				strncpy((char *)&ed->rectKill[idx * ed->rx],
 					(char *)&row->chars[botx - ed->rx],
 					row->size - (botx - ed->rx));
 				row->size -= (row->size - (botx - ed->rx));
 				row->chars[row->size] = 0;
+				adjustAllPoints(buf, topx, cur_row, old_size,
+						cur_row, 1);
 			}
 		} else {
 			strncpy((char *)&ed->rectKill[idx * ed->rx],
@@ -872,6 +898,7 @@ void editorKillRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 			       row->size - botx);
 			row->size -= ed->rx;
 			row->chars[row->size] = 0;
+			adjustAllPoints(buf, topx, cur_row, botx, cur_row, 1);
 		}
 
 		emil_strlcat((char *)new->data, (char *)row->chars,
@@ -881,17 +908,21 @@ void editorKillRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 
 	/* Finally, end line */
 	if (topy != boty) {
+		int cur_row = topy + idx;
 		emil_strlcat((char *)new->data, "\n", new->datasize);
-		row = &buf->row[topy + idx];
+		row = &buf->row[cur_row];
 
 		if (row->size < botx) {
 			memset(&ed->rectKill[idx * ed->rx], ' ', ed->rx);
 			if (row->size > botx - ed->rx) {
+				int old_size = row->size;
 				strncpy((char *)&ed->rectKill[idx * ed->rx],
 					(char *)&row->chars[botx - ed->rx],
 					row->size - (botx - ed->rx));
 				row->size -= (row->size - (botx - ed->rx));
 				row->chars[row->size] = 0;
+				adjustAllPoints(buf, topx, cur_row, old_size,
+						cur_row, 1);
 			}
 		} else {
 			strncpy((char *)&ed->rectKill[idx * ed->rx],
@@ -900,6 +931,7 @@ void editorKillRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 			       row->size - botx);
 			row->size -= ed->rx;
 			row->chars[row->size] = 0;
+			adjustAllPoints(buf, topx, cur_row, botx, cur_row, 1);
 		}
 
 		strncat((char *)new->data, (char *)row->chars, topx);
@@ -954,6 +986,10 @@ void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 		new->append = 0;
 		new->delete = 0;
 		pushUndo(buf, new);
+
+		/* Adjust for the new rows added at the end of the buffer */
+		adjustAllPoints(buf, new->startx, new->starty, new->endx,
+				new->endy, 0);
 	}
 
 	editorCopyRegion(ed, buf);
@@ -1023,6 +1059,8 @@ void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	memcpy(&row->chars[topx], string, ed->rx);
 	row->size += ed->rx;
 	row->chars[row->size] = 0;
+	if (ed->rx > 0)
+		adjustAllPoints(buf, topx, topy, topx + ed->rx, topy, 0);
 	if (boty == topy) {
 		emil_strlcat((char *)new->data, string, new->datasize);
 	} else {
@@ -1032,9 +1070,10 @@ void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	idx++;
 
 	while ((topy + idx) < boty) {
+		int cur_row = topy + idx;
 		emil_strlcat((char *)new->data, "\n", new->datasize);
 		/* Next, middle lines */
-		row = &buf->row[topy + idx];
+		row = &buf->row[cur_row];
 		strncpy(string, (char *)&ed->rectKill[idx * ed->rx], ed->rx);
 		if (row->size < botx) {
 			row->chars = xrealloc(row->chars, botx + 1);
@@ -1052,6 +1091,9 @@ void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 		memcpy(&row->chars[topx], string, ed->rx);
 		row->size += ed->rx;
 		row->chars[row->size] = 0;
+		if (ed->rx > 0)
+			adjustAllPoints(buf, topx, cur_row, topx + ed->rx,
+					cur_row, 0);
 		emil_strlcat((char *)new->data, (char *)row->chars,
 			     new->datasize);
 		idx++;
@@ -1078,6 +1120,9 @@ void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 		memcpy(&row->chars[topx], string, ed->rx);
 		row->size += ed->rx;
 		row->chars[row->size] = 0;
+		if (ed->rx > 0)
+			adjustAllPoints(buf, topx, boty, topx + ed->rx, boty,
+					0);
 		strncat((char *)new->data, (char *)row->chars, botx + ed->rx);
 	}
 	new->datalen = strlen((char *)new->data);

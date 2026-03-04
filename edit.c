@@ -17,6 +17,7 @@
 #include "terminal.h"
 #include "history.h"
 #include "util.h"
+#include "adjust.h"
 
 extern struct editorConfig E;
 
@@ -231,6 +232,9 @@ UNINDENT_PERFORM:
 	row->cached_width = -1;
 	invalidateScreenCache(bufr);
 	bufr->dirty = 1;
+
+	/* Adjust tracked points for this deletion */
+	adjustAllPoints(bufr, 0, bufr->cy, trunc, bufr->cy, 1);
 }
 
 /* Character deletion */
@@ -550,6 +554,13 @@ void editorDeleteWord(struct editorBuffer *bufr, int count) {
 		int origMarky = bufr->marky;
 		bufferEndOfForwardWord(bufr, &bufr->markx, &bufr->marky);
 		editorKillRegion(&E, bufr);
+		/* The saved mark must be adjusted for the deletion that
+		 * just happened, otherwise we restore stale coordinates.
+		 * The undo record on top has the exact range. */
+		if (origMarkx >= 0 && origMarky >= 0 && bufr->undo != NULL)
+			adjustPoint(&origMarkx, &origMarky, bufr->undo->startx,
+				    bufr->undo->starty, bufr->undo->endx,
+				    bufr->undo->endy, 1);
 		bufr->markx = origMarkx;
 		bufr->marky = origMarky;
 	}
@@ -562,6 +573,12 @@ void editorBackspaceWord(struct editorBuffer *bufr, int count) {
 		int origMarky = bufr->marky;
 		bufferEndOfBackwardWord(bufr, &bufr->markx, &bufr->marky);
 		editorKillRegion(&E, bufr);
+		/* Adjust the saved mark for the deletion (same issue as
+		 * editorDeleteWord — restored coordinates would be stale). */
+		if (origMarkx >= 0 && origMarky >= 0 && bufr->undo != NULL)
+			adjustPoint(&origMarkx, &origMarky, bufr->undo->startx,
+				    bufr->undo->starty, bufr->undo->endx,
+				    bufr->undo->endy, 1);
 		bufr->markx = origMarkx;
 		bufr->marky = origMarky;
 	}
@@ -677,6 +694,11 @@ void editorKillLine(int count) {
 			row->cached_width = -1;
 			invalidateScreenCache(E.buf);
 			E.buf->dirty = 1;
+
+			/* Adjust tracked points for this deletion */
+			adjustAllPoints(E.buf, new->startx, new->starty,
+					new->endx, new->endy, 1);
+
 			editorClearMark();
 		}
 	}
@@ -718,6 +740,12 @@ void editorKillLineBackwards(void) {
 	row->chars[row->size] = '\0';
 	row->cached_width = -1;
 	invalidateScreenCache(E.buf);
+
+	/* Adjust tracked points for this deletion.
+	 * The deleted range is (0, cy) to (cx, cy). */
+	adjustAllPoints(E.buf, new->startx, new->starty, new->endx, new->endy,
+			1);
+
 	E.buf->cx = 0;
 	E.buf->dirty = 1;
 }

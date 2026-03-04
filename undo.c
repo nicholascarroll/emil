@@ -11,6 +11,7 @@
 #include "display.h"
 #include "unused.h"
 #include "util.h"
+#include "adjust.h"
 
 /* Bulk-insert text from 'data' (length 'datalen') into 'buf' starting
  * at buffer position (startx, starty).  Uses direct memmove/memcpy and
@@ -39,6 +40,8 @@ static void bulkInsert(struct editorBuffer *buf, int startx, int starty,
 		row->cached_width = -1;
 		buf->dirty = 1;
 		invalidateScreenCache(buf);
+		adjustAllPoints(buf, startx, starty, startx + datalen, starty,
+				0);
 		return;
 	}
 
@@ -48,6 +51,19 @@ static void bulkInsert(struct editorBuffer *buf, int startx, int starty,
 	 *   3. Append the first line fragment from data to the start row.
 	 *   4. Insert complete interior lines as new rows.
 	 *   5. Insert the last line fragment + saved suffix as a new row. */
+
+	/* Pre-compute the end position of this insert for point adjustment.
+	 * Walk the data to count newlines and find the last line length. */
+	int ins_endx = startx;
+	int ins_endy = starty;
+	for (int i = 0; i < datalen; i++) {
+		if (data[i] == '\n') {
+			ins_endy++;
+			ins_endx = 0;
+		} else {
+			ins_endx++;
+		}
+	}
 
 	struct erow *row = &buf->row[starty];
 
@@ -92,6 +108,8 @@ static void bulkInsert(struct editorBuffer *buf, int startx, int starty,
 			free(suffix);
 			buf->dirty = 1;
 			invalidateScreenCache(buf);
+			adjustAllPoints(buf, startx, starty, ins_endx, ins_endy,
+					0);
 			return;
 		}
 		/* Interior complete line */
@@ -111,6 +129,7 @@ static void bulkInsert(struct editorBuffer *buf, int startx, int starty,
 	free(suffix);
 	buf->dirty = 1;
 	invalidateScreenCache(buf);
+	adjustAllPoints(buf, startx, starty, ins_endx, ins_endy, 0);
 }
 
 /* Bulk-delete text from (startx, starty) to (endx, endy).
@@ -120,6 +139,9 @@ static void bulkDelete(struct editorBuffer *buf, int startx, int starty,
 		       int endx, int endy) {
 	if (buf->numrows == 0 || starty >= buf->numrows)
 		return;
+
+	/* Adjust tracked points before the mutation changes row structure */
+	adjustAllPoints(buf, startx, starty, endx, endy, 1);
 
 	if (starty == endy) {
 		/* Single-row deletion */
@@ -356,6 +378,25 @@ void editorUndoAppendChar(struct editorBuffer *buf, uint8_t c) {
 	} else {
 		buf->undo->endx++;
 	}
+
+	/* Adjust tracked points for this single-char insertion.
+	 * The char is inserted at (cx, cy) — which is the old endx/endy
+	 * before the increment above.  After insertion, the new end is
+	 * (endx, endy).  But the *insertion point* is the old end, which
+	 * equals (cx, cy) since ALIGNED was checked above. */
+	{
+		int sx = buf->cx;
+		int sy = buf->cy;
+		int ex, ey;
+		if (c == '\n') {
+			ex = 0;
+			ey = sy + 1;
+		} else {
+			ex = sx + 1;
+			ey = sy;
+		}
+		adjustAllPoints(buf, sx, sy, ex, ey, 0);
+	}
 }
 
 void editorUndoAppendUnicode(struct editorConfig *ed,
@@ -380,6 +421,10 @@ void editorUndoAppendUnicode(struct editorConfig *ed,
 	buf->undo->data[buf->undo->datalen] = 0;
 	buf->undo->append = !(buf->undo->datalen >= buf->undo->datasize - 2);
 	buf->undo->endx += ed->nunicode;
+
+	/* Adjust tracked points for this unicode insertion (always same-line) */
+	adjustAllPoints(buf, buf->cx, buf->cy, buf->cx + ed->nunicode, buf->cy,
+			0);
 }
 
 void editorUndoBackSpace(struct editorBuffer *buf, uint8_t c) {
@@ -416,12 +461,22 @@ void editorUndoBackSpace(struct editorBuffer *buf, uint8_t c) {
 	buf->undo->data[0] = c;
 	buf->undo->datalen++;
 	buf->undo->data[buf->undo->datalen] = 0;
+
+	/* Capture old start before adjusting the undo range */
+	int old_startx = buf->undo->startx;
+	int old_starty = buf->undo->starty;
+
 	if (c == '\n') {
 		buf->undo->starty--;
 		buf->undo->startx = buf->row[buf->undo->starty].size;
 	} else {
 		buf->undo->startx--;
 	}
+
+	/* Adjust tracked points for this single-char deletion.
+	 * The deleted range is from the new start to the old start. */
+	adjustAllPoints(buf, buf->undo->startx, buf->undo->starty, old_startx,
+			old_starty, 1);
 }
 
 void editorUndoDelChar(struct editorBuffer *buf, erow *row) {
@@ -453,6 +508,9 @@ void editorUndoDelChar(struct editorBuffer *buf, erow *row) {
 		buf->undo->data[buf->undo->datalen] = 0;
 		buf->undo->endy++;
 		buf->undo->endx = 0;
+
+		/* Deleting newline: merges (cx, cy) with (0, cy+1) */
+		adjustAllPoints(buf, buf->cx, buf->cy, 0, buf->cy + 1, 1);
 	} else {
 		int n = utf8_nBytes(row->chars[buf->cx]);
 		if (buf->undo->datalen + n >= buf->undo->datasize - 2) {
@@ -474,5 +532,8 @@ void editorUndoDelChar(struct editorBuffer *buf, erow *row) {
 		}
 		buf->undo->data[buf->undo->datalen] = 0;
 		buf->undo->endx += n;
+
+		/* Deleting n bytes on same line at cursor */
+		adjustAllPoints(buf, buf->cx, buf->cy, buf->cx + n, buf->cy, 1);
 	}
 }
