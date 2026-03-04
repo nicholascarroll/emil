@@ -139,8 +139,8 @@ Below are common "recipes" using standard Unix utilities.
 | **Solve Math** | `bc` | `Alt-\|` or `Ctrl-u Alt-\|` |
 | **Format JSON** | `jq .` | `Alt-\|` or `Ctrl-u Alt-\|` |
 | **Find Typos** | `aspell list` | `Alt-\|` |
-| **Format Code** | `make format` | `Ctrl-u Alt-\|` |
-| **Lint Code** | `shellcheck` | `Ctrl-u Alt-\|` |
+| **Format C Code** | `make format` | `Ctrl-u Alt-\|` |
+| **Lint Shell Script** | `shellcheck` | `Ctrl-u Alt-\|` |
 
 
 More complex commands can be converted into shell scripts. For example: to add a dictionary lookup, create a file named `edict` in your `$PATH`:
