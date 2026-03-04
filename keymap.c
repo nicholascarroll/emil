@@ -181,7 +181,7 @@ void executeCommand(int key) {
 		case CTRL('w'):
 			editorProcessKeypress(SAVE_AS);
 			return;
-		case CTRL('r'):
+		case CTRL('q'):
 			editorProcessKeypress(TOGGLE_READ_ONLY);
 			return;
 		case CTRL('f'):
