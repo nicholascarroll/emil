@@ -192,6 +192,10 @@ when an OSC 52 enabled terminal client is used.
    - C-M-k kill bracketed range
    - M-k kill paragraph
    - C-k kill visual line
+   - M-h mark paragraph
+   - C-x C-t transpose sentences
+   - M-z zap-to-char
+   - M-SPC delete excess spaces
 
 3. **Version 0.2.0 Stable Preview**  [WIP]⚠️🚧🔨👷    
    - Most known bugs fixed
