@@ -106,7 +106,7 @@ set bind-tty-special-chars off
 ```
 In `emil`, as in Readline,  `Ctrl-h` deletes the previous character, whereas in `emacs` it is the help prefix key.
 
-Readline supports two ways to delete to the beginning of the line: `Ctrl-x BACKSPACE` (supported in *emacs*) and the more ergonomic `Ctrl-u` which conflicts with the *emacs* universal argument. `emil` resolves the conflict by binding `Ctrl-u Ctrl-a` to delete to the beginning of the line.
+Readline supports two ways to kill to the beginning of the line: `Ctrl-x BACKSPACE` (supported in *emacs*) and the more ergonomic `Ctrl-u` which conflicts with the *emacs* universal argument. `emil` resolves the conflict by binding `Ctrl-u Ctrl-a` to kill to the beginning of the line.
 
 ### Shell Integration
 
@@ -189,7 +189,7 @@ when an OSC 52 enabled terminal client is used.
    - M-a / M-e sentence start/end
    - Jump to matching parenthesis (C-M-f / C-M-b)
      also [,{,',"
-   - C-M-k delete bracketed range
+   - C-M-k kill bracketed range
 
 3. **Version 0.2.0 Stable Preview**  [WIP]⚠️🚧🔨👷    
    - Most known bugs fixed
