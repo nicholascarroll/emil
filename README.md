@@ -185,7 +185,7 @@ when an OSC 52 enabled terminal client is used.
    - Polishing up filename display UX
    - Visual line up/down (C-p / C-n)
    - Visual line start/end (C-a / C-e)
-   - Jump to matching parenthesis
+   - Jump to matching parenthesis (C-M-f / C-M-b)
    - M-{ / M-} paragraph up/down
    - M-a / M-e sentence start/end
 
