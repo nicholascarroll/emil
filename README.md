@@ -155,7 +155,6 @@ curl -s "dict://dict.org/d:${word}"
 
 Now, you can simply highlight a word in emil and type `Alt-| edict` to see the definition.
 
-#### Integrating with AI
 If you have an OpenAI API account you can place the included shell script [gpt](filters/gpt) in your `$PATH` and use:
 
 ```
@@ -185,8 +184,7 @@ when an OSC 52 enabled terminal client is used.
    - Mark ring (local buffer)
    - Polishing up filename display UX
    - Visual row up/down (C-p / C-n)
-   - Parenthesis matching with reverse video
-   - jump to matching parenthesis
+   - Jump to matching parenthesis
 
 3. **Version 0.2.0 Stable Preview**  [WIP]⚠️🚧🔨👷    
    - Most known bugs fixed
