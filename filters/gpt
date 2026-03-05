@@ -1,0 +1,25 @@
+#!/bin/sh
+# gpt: send stdin + instruction to ChatGPT
+
+[ -z "$OPENAI_API_KEY" ] && {
+    echo "OPENAI_API_KEY not set" >&2
+    exit 1
+}
+
+instruction="$1"
+input=$(cat)
+
+payload=$(jq -n \
+  --arg instruction "$instruction" \
+  --arg input "$input" \
+  '{model:"gpt-4.1-mini",
+    input:[
+      {role:"system",content:$instruction},
+      {role:"user",content:$input}
+    ]}')
+
+curl -s https://api.openai.com/v1/responses \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer '"$OPENAI_API_KEY"'" \
+  -d "$payload"
+
