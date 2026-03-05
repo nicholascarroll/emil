@@ -10,7 +10,9 @@ Written in standard C99, `emil` runs on any system providing a minimal POSIX.1-2
 
 ## Status
 
-Feature complete, but **unstable**.
+Most features complete, but **unstable**.
+
+The roadmap section in this README list features yet to be added.
 
 Current work focuses on cleaning up the architecture, fixing bugs, and improving 
 maintainability. Contributions that simplify internal structure, improve 
@@ -182,6 +184,7 @@ when an OSC 52 enabled terminal client is used.
 
 2. **Version 0.1.1 Feature complete**  [WIP] 🔨
    - Mark ring (local buffer)
+   - Rectangles
    - Polishing up filename display UX
    - Visual line up/down (C-p / C-n)
    - Visual line start/end (C-a / C-e)
