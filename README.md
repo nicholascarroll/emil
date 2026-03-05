@@ -113,7 +113,7 @@ Readline supports two ways to delete to the beginning of the line: `Ctrl-x BACKS
 Shell integration is a compile-time option (enabled by default). It enables shell commands to be used on the buffer:
 
 - **`Alt-|`** (shell-command-on-region)    
-  Takes the current region, feeds it to the shell command you type, and **displays the output** in a temporary `*Shell Command Output*` buffer (or the echo area if the output is small).  
+  Takes the current region, feeds it to the shell command you type, and **displays the output** in a temporary `*Shell Output*` buffer (or the echo area if the output is small).  
 
 - **`Ctrl-u Alt-|`**    
   Takes the current region, feeds it to the shell command, and **replaces the region** with the output of the command.  
@@ -124,7 +124,7 @@ Shell integration is a compile-time option (enabled by default). It enables shel
 Shell integration can be disabled at build time with the compiler flag `-DEMIL_DISABLE_SHELL`.
 
 
-#### Example uses of Shell Command
+#### Example uses of Shell Integration
 
 Below are common "recipes" using standard Unix utilities. 
 
@@ -161,7 +161,7 @@ If you have an OpenAI API account you can place the included shell script [gpt](
 ```
 Ctrl-x h Alt-| gpt "translate to Spanish"
 ```
-Which translates the entire buffer and shows the result in a read-only buffer *Shell Output*.
+Which translates the entire buffer and shows the result in `*Shell Output*`.
 
 ### Shell Drawer
 `Ctrl-x Ctrl-z` suspends `emil` while preserving the current editor screen. This permits shell commands to be executed in the terminal below the editor content, after which editing may be resumed with `fg`.
