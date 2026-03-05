@@ -190,6 +190,8 @@ when an OSC 52 enabled terminal client is used.
    - Jump to matching parenthesis (C-M-f / C-M-b)
      also [,{,',"
    - C-M-k kill bracketed range
+   - M-k kill paragraph
+   - C-k kill visual line
 
 3. **Version 0.2.0 Stable Preview**  [WIP]⚠️🚧🔨👷    
    - Most known bugs fixed
