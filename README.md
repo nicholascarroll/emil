@@ -183,8 +183,11 @@ when an OSC 52 enabled terminal client is used.
 2. **Version 0.1.1 Feature complete**  [WIP] 🔨
    - Mark ring (local buffer)
    - Polishing up filename display UX
-   - Visual row up/down (C-p / C-n)
+   - Visual line up/down (C-p / C-n)
+   - Visual line start/end (C-a / C-e)
    - Jump to matching parenthesis
+   - M-{ / M-} paragraph up/down
+   - M-a / M-e sentence start/end
 
 3. **Version 0.2.0 Stable Preview**  [WIP]⚠️🚧🔨👷    
    - Most known bugs fixed
