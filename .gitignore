@@ -1,6 +1,7 @@
 *.o
 *.exe
 *.stackdump
+tempy
 emil
 unicodetest
 /build

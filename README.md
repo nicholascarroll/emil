@@ -133,7 +133,7 @@ Below are common "recipes" using standard Unix utilities.
 | **Fill region** | `fmt` | `Ctrl-u Alt-\|` |
 | **Sort lines** | `sort` | `Ctrl-u Alt-\|` |
 | **Align Columns** | `column -t` | `Ctrl-u Alt-\|` |
-| **Align Org Table** | `column -t -s '\|'` | `Ctrl-u Alt-\|` |
+| **Align Org Table** | `column -t -s '\|'` -o '\|' | `Ctrl-u Alt-\|` |
 | **Number Lines** | `cat -n` | `Ctrl-u Alt-\|` |
 | **Word Count** | `wc` | `Alt-\|` |
 | **Solve Math** | `bc` | `Alt-\|` or `Ctrl-u Alt-\|` |
