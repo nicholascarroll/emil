@@ -155,25 +155,13 @@ curl -s "dict://dict.org/d:${word}"
 
 Now, you can simply highlight a word in emil and type `Alt-| edict` to see the definition.
 
-### Integrating with AI
+#### Integrating with AI
 If you have an OpenAI API account you can place the included shell script [gpt](filters/gpt) in your `$PATH` and use:
 
 ```
 Ctrl-x h Alt-| gpt "translate to Spanish"
 ```
-Which translates the entire buffer and shows the result in a read-only buffer *Shell Output*. This output can be reviewed and then added to your buffer as described in the next section.
-
-#### Read-only Buffer Special Commands
-Any read-only buffer (such as *Shell Output*) has the following commands available:
-
-
-| Action                                 | Command  |
-| -------------------------------------- | -------- |
-| Close the buffer                       | `q`      |
-| Insert shell output after piped region | `i`      |
-| Replace piped region with shell output | `r`      |
-| Append shell output to any buffer      | `a`      | 
-
+Which translates the entire buffer and shows the result in a read-only buffer *Shell Output*.
 
 ### Shell Drawer
 `Ctrl-x Ctrl-z` suspends `emil` while preserving the current editor screen. This permits shell commands to be executed in the terminal below the editor content, after which editing may be resumed with `fg`.
