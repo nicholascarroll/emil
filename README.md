@@ -185,9 +185,11 @@ when an OSC 52 enabled terminal client is used.
    - Polishing up filename display UX
    - Visual line up/down (C-p / C-n)
    - Visual line start/end (C-a / C-e)
-   - Jump to matching parenthesis (C-M-f / C-M-b)
    - M-{ / M-} paragraph up/down
    - M-a / M-e sentence start/end
+   - Jump to matching parenthesis (C-M-f / C-M-b)
+     also [,{,',"
+   - C-M-k delete bracketed range
 
 3. **Version 0.2.0 Stable Preview**  [WIP]⚠️🚧🔨👷    
    - Most known bugs fixed
