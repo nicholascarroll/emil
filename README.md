@@ -185,6 +185,10 @@ when an OSC 52 enabled terminal client is used.
 2. **Version 0.1.1 Feature complete**  [WIP] 🔨
    - Mark ring (local buffer)
    - Rectangles
+     - C-x SPC
+   - Registers
+     - maybe refactor
+     - make view-register same ax emacs
    - Polishing up filename display UX
    - Visual line up/down (C-p / C-n)
    - Visual line start/end (C-a / C-e)
