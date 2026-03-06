@@ -184,11 +184,15 @@ when an OSC 52 enabled terminal client is used.
 
 2. **Version 0.1.1 Feature complete**  [WIP] 🔨
    - Mark ring (local buffer)
-   - Rectangles
+   - Modern Rectangle editing
      - C-x SPC
+     - C-w, C-y, M-w, C-t
+     - kill ring compatibility
    - Registers
-     - maybe refactor
-     - make view-register same ax emacs
+     - refactor
+     - only point and text types
+       - text type includes rectangles
+     - make view-register like in emacs
    - Polishing up filename display UX
    - Visual line up/down (C-p / C-n)
    - Visual line start/end (C-a / C-e)
