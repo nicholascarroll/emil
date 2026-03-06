@@ -21,18 +21,6 @@
 
 extern struct editorConfig E;
 
-static void addToKillRing(const char *text) {
-	if (!text || strlen(text) == 0)
-		return;
-
-	addHistory(&E.kill_history, text);
-	E.kill_ring_pos = -1; /* Reset position for M-y */
-
-	/* Update E.kill to point to the new kill */
-	free(E.kill);
-	E.kill = xstrdup((uint8_t *)text);
-}
-
 /* Character insertion */
 
 void editorInsertChar(struct editorBuffer *bufr, int c, int count) {
@@ -669,7 +657,7 @@ void editorKillLine(int count) {
 			char *killed_text = xmalloc(kill_len + 1);
 			memcpy(killed_text, &row->chars[E.buf->cx], kill_len);
 			killed_text[kill_len] = '\0';
-			addToKillRing(killed_text);
+			addToKillRing(killed_text, 0, 0, 0);
 			free(killed_text);
 
 			clearRedos(E.buf);
@@ -686,7 +674,7 @@ void editorKillLine(int count) {
 				new->datasize = new->datalen + 1;
 				new->data = xrealloc(new->data, new->datasize);
 			}
-			memcpy(new->data, E.kill, kill_len);
+			memcpy(new->data, E.kill.str, kill_len);
 			new->data[kill_len] = '\0';
 
 			row->size = E.buf->cx;
@@ -715,7 +703,7 @@ void editorKillLineBackwards(void) {
 	char *killed_text = xmalloc(E.buf->cx + 1);
 	memcpy(killed_text, row->chars, E.buf->cx);
 	killed_text[E.buf->cx] = '\0';
-	addToKillRing(killed_text);
+	addToKillRing(killed_text, 0, 0, 0);
 	free(killed_text);
 
 	clearRedos(E.buf);
@@ -732,7 +720,7 @@ void editorKillLineBackwards(void) {
 		new->datasize = new->datalen + 1;
 		new->data = xrealloc(new->data, new->datasize);
 	}
-	memcpy(new->data, E.kill, new->datalen);
+	memcpy(new->data, E.kill.str, new->datalen);
 	new->data[E.buf->cx] = '\0';
 
 	row->size -= E.buf->cx;

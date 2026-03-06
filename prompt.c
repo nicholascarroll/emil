@@ -133,8 +133,11 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 			/* C-s C-s: populate empty search with last search */
 			if (t == PROMPT_SEARCH && E.minibuf->numrows > 0 &&
 			    E.minibuf->row[0].size == 0) {
-				char *last_search =
+				char *last_search = NULL;
+				struct historyEntry *last_entry =
 					getLastHistory(&E.search_history);
+				if (last_entry)
+					last_search = last_entry->str;
 				if (last_search) {
 					while (E.minibuf->numrows > 0) {
 						editorDelRow(E.minibuf, 0);
@@ -205,8 +208,10 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 				}
 
 				if (history_pos >= 0) {
-					history_str =
+					struct historyEntry *entry =
 						getHistoryAt(hist, history_pos);
+					if (entry)
+						history_str = entry->str;
 					if (history_str) {
 						while (E.minibuf->numrows > 0) {
 							editorDelRow(E.minibuf,

@@ -80,10 +80,9 @@ void adjustAllPoints(struct editorBuffer *buf, int startx, int starty, int endx,
 	/* Adjust register points for this buffer */
 	for (int r = 0; r < 127; r++) {
 		if (E.registers[r].rtype == REGISTER_POINT &&
-		    E.registers[r].rdata.point != NULL &&
-		    E.registers[r].rdata.point->buf == buf) {
-			adjustPoint(&E.registers[r].rdata.point->cx,
-				    &E.registers[r].rdata.point->cy, startx,
+		    E.registers[r].data.point.buf == buf) {
+			adjustPoint(&E.registers[r].data.point.cx,
+				    &E.registers[r].data.point.cy, startx,
 				    starty, endx, endy, is_delete);
 		}
 	}

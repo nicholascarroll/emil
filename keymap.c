@@ -344,10 +344,6 @@ void executeCommand(int key) {
 		case 'J':
 			editorProcessKeypress(JUMP_REGISTER);
 			return;
-		case 'a':
-		case 'A':
-			editorProcessKeypress(MACRO_REGISTER);
-			return;
 		case 'm':
 		case 'M':
 			editorToggleRectangleMode();
@@ -355,10 +351,6 @@ void executeCommand(int key) {
 		case CTRL('@'):
 		case ' ':
 			editorProcessKeypress(POINT_REGISTER);
-			return;
-		case 'n':
-		case 'N':
-			editorProcessKeypress(NUMBER_REGISTER);
 			return;
 		case 'r':
 		case 'R':
@@ -571,7 +563,10 @@ void editorProcessKeypress(int c) {
 		editorInsertUnicode(E.buf, uarg);
 		break;
 	case CUT:
-		editorKillRegion(&E, E.buf);
+		if (E.buf->rectangle_mode)
+			editorKillRectangle(&E, E.buf);
+		else
+			editorKillRegion(&E, E.buf);
 		editorClearMark();
 		break;
 	case SAVE:
@@ -581,19 +576,25 @@ void editorProcessKeypress(int c) {
 		editorSaveAs(E.buf);
 		break;
 	case COPY:
-		editorCopyRegion(&E, E.buf);
+		if (E.buf->rectangle_mode)
+			editorCopyRectangle(&E, E.buf);
+		else
+			editorCopyRegion(&E, E.buf);
 		editorClearMark();
 		break;
 	case CTRL('C'):
 		editorCopyRegion(&E, E.buf);
 		editorClearMark();
-		editorCopyToClipboard(E.kill);
+		editorCopyToClipboard(E.kill.str);
 		break;
 	case CTRL('@'):
 		editorSetMark();
 		break;
 	case CTRL('y'):
-		editorYank(&E, E.buf, uarg ? uarg : 1);
+		if (E.kill.is_rectangle)
+			editorYankRectangle(&E, E.buf);
+		else
+			editorYank(&E, E.buf, uarg ? uarg : 1);
 		break;
 	case YANK_POP:
 		editorYankPop(&E, E.buf);
@@ -826,14 +827,8 @@ void editorProcessKeypress(int c) {
 	case JUMP_REGISTER:
 		editorJumpToRegister(&E);
 		break;
-	case MACRO_REGISTER:
-		editorMacroToRegister(&E);
-		break;
 	case POINT_REGISTER:
 		editorPointToRegister(&E);
-		break;
-	case NUMBER_REGISTER:
-		editorNumberToRegister(&E, uarg);
 		break;
 	case REGION_REGISTER:
 		editorRegionToRegister(&E, E.buf);
@@ -867,7 +862,7 @@ void editorProcessKeypress(int c) {
 		break;
 
 	case RECT_REGISTER:
-		editorRectRegister(&E, E.buf);
+		editorRectToRegister(&E, E.buf);
 		break;
 
 	case MACRO_RECORD:

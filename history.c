@@ -13,18 +13,30 @@ void initHistory(struct editorHistory *hist) {
 }
 
 void addHistory(struct editorHistory *hist, const char *str) {
+	addHistoryWithRect(hist, str, 0, 0, 0);
+}
+
+void addHistoryWithRect(struct editorHistory *hist, const char *str,
+                        int is_rectangle, int rect_width, int rect_height) {
 	if (!str || strlen(str) == 0) {
 		return;
 	}
 
 	/* Don't add duplicates of the most recent entry */
-	if (hist->tail && strcmp(hist->tail->str, str) == 0) {
+	if (hist->tail &&
+	    strcmp(hist->tail->str, str) == 0 &&
+	    hist->tail->is_rectangle == is_rectangle &&
+	    hist->tail->rect_width == rect_width &&
+	    hist->tail->rect_height == rect_height) {
 		return;
 	}
 
 	/* Create new entry */
 	struct historyEntry *entry = xmalloc(sizeof(struct historyEntry));
 	entry->str = xstrdup(str);
+	entry->is_rectangle = is_rectangle;
+	entry->rect_width = rect_width;
+	entry->rect_height = rect_height;
 	entry->next = NULL;
 	entry->prev = hist->tail;
 
@@ -50,7 +62,7 @@ void addHistory(struct editorHistory *hist, const char *str) {
 	}
 }
 
-char *getHistoryAt(struct editorHistory *hist, int index) {
+struct historyEntry *getHistoryAt(struct editorHistory *hist, int index) {
 	if (index < 0 || index >= hist->count) {
 		return NULL;
 	}
@@ -60,7 +72,7 @@ char *getHistoryAt(struct editorHistory *hist, int index) {
 		entry = entry->prev;
 	}
 
-	return entry ? entry->str : NULL;
+	return entry;
 }
 
 void freeHistory(struct editorHistory *hist) {
@@ -74,9 +86,6 @@ void freeHistory(struct editorHistory *hist) {
 	initHistory(hist);
 }
 
-char *getLastHistory(struct editorHistory *hist) {
-	if (hist->tail) {
-		return hist->tail->str;
-	}
-	return NULL;
+struct historyEntry *getLastHistory(struct editorHistory *hist) {
+	return hist->tail;
 }

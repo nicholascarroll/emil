@@ -22,8 +22,7 @@ static void initTestEditor(void) {
 	memset(&E, 0, sizeof(E));
 	E.screencols = 80;
 	E.screenrows = 24;
-	E.kill = NULL;
-	E.rectKill = NULL;
+	E.kill = (struct editorText){0};
 	E.windows = malloc(sizeof(struct editorWindow *));
 	E.windows[0] = calloc(1, sizeof(struct editorWindow));
 	E.windows[0]->focused = 1;

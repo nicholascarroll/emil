@@ -2,6 +2,7 @@
 #define EMIL_H 1
 
 #include <stdint.h>
+#include <stdlib.h>
 #include <termios.h>
 #include <time.h>
 #include "keymap.h"
@@ -121,13 +122,25 @@ struct editorCommand {
 	void (*cmd)(struct editorConfig *, struct editorBuffer *);
 };
 
+struct editorText {
+	uint8_t *str;         /* NUL-terminated data */
+	int is_rectangle;     /* 1 = rectangle data, 0 = plain text */
+	int rect_width;       /* column width (meaningful when is_rectangle) */
+	int rect_height;      /* row count (meaningful when is_rectangle) */
+};
+
+static inline void clearEditorText(struct editorText *t) {
+	free(t->str);
+	t->str = NULL;
+	t->is_rectangle = 0;
+	t->rect_width = 0;
+	t->rect_height = 0;
+}
+
 enum registerType {
 	REGISTER_NULL,
-	REGISTER_REGION,
-	REGISTER_NUMBER,
 	REGISTER_POINT,
-	REGISTER_MACRO,
-	REGISTER_RECTANGLE,
+	REGISTER_TEXT,
 };
 
 struct editorPoint {
@@ -136,29 +149,21 @@ struct editorPoint {
 	struct editorBuffer *buf;
 };
 
-struct editorRectangle {
-	int rx;
-	int ry;
-	uint8_t *rect;
-};
-
-union registerData {
-	uint8_t *region;
-	int64_t number;
-	struct editorMacro *macro;
-	struct editorPoint *point;
-	struct editorRectangle *rect;
-};
-
 struct editorRegister {
 	enum registerType rtype;
-	union registerData rdata;
+	union {
+		struct editorPoint point;
+		struct editorText text;
+	} data;
 };
 
 #define HISTORY_MAX_ENTRIES 100
 
 struct historyEntry {
 	char *str;
+	int is_rectangle;     /* kill ring only; zero for other histories */
+	int rect_width;       /* kill ring only; zero for other histories */
+	int rect_height;      /* kill ring only; zero for other histories */
 	struct historyEntry *prev;
 	struct historyEntry *next;
 };
@@ -170,10 +175,7 @@ struct editorHistory {
 };
 
 struct editorConfig {
-	uint8_t *kill;
-	uint8_t *rectKill;
-	int rx;
-	int ry;
+	struct editorText kill;    /* active kill entry */
 	int screenrows;
 	int screencols;
 	uint8_t unicode[4];

@@ -121,10 +121,10 @@ uint8_t *editorPipe(struct editorConfig *ed, struct editorBuffer *bf) {
 			}
 
 			editorCopyRegion(
-				ed, bf); // ed->kill now holds the selected text
+				ed, bf); // ed->kill.str now holds the selected text
 
 			// 2. Pass the extracted text to transformerPipeCmd
-			uint8_t *result = transformerPipeCmd(ed->kill);
+			uint8_t *result = transformerPipeCmd(ed->kill.str);
 
 			free(cmd);
 			return result;

@@ -36,4 +36,7 @@ void editorKillRectangle(struct editorConfig *ed, struct editorBuffer *buf);
 
 void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf);
 
+void addToKillRing(const char *text, int is_rect, int rect_width,
+                   int rect_height);
+
 #endif
