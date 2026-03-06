@@ -27,7 +27,7 @@ portability, or fix correctness issues are especially welcome.
 - Split windows
 - Edit rectangular text regions
 - Keystroke macros
-- Registers for point and text
+- Registers for cursor positions and text
 - Mark ring
 - Shell integration
 - Jump to symbol definition (Ctags)
@@ -188,6 +188,7 @@ when an OSC 52 enabled terminal client is used.
      - C-x SPC
      - C-w, C-y, M-w, C-t
      - kill ring compatibility
+   - M-x string-insert-rectange
    - Registers
      - refactor
      - only point and text types
