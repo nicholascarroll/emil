@@ -27,7 +27,8 @@ portability, or fix correctness issues are especially welcome.
 - Split windows
 - Edit rectangular text regions
 - Keystroke macros
-- Registers for bookmarks and snippets
+- Bookmarks (as session local registers)
+- Snippets (as session local registers)
 - Mark ring
 - Shell integration
 - Jump to symbol definition (Ctags)
