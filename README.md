@@ -27,7 +27,7 @@ portability, or fix correctness issues are especially welcome.
 - Split windows
 - Edit rectangular text regions
 - Keystroke macros
-- Registers
+- Registers for point and text
 - Mark ring
 - Shell integration
 - Jump to symbol definition (Ctags)
