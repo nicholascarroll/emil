@@ -20,17 +20,17 @@ portability, or fix correctness issues are especially welcome.
 
 ## Functional Capabilities
 
-- Kill ring ('clipboard history')
 - Visual text selection
+- Edit rectangular text regions
+- Kill ring ('clipboard history')
+- Snippets (as session local registers)
 - Incremental regex search and replace
+- Keystroke macros
+- Shell integration
 - Word wrap
 - Split windows
-- Edit rectangular text regions
-- Keystroke macros
-- Bookmarks (as session local registers)
-- Snippets (as session local registers)
 - Mark ring
-- Shell integration
+- Bookmarks (as session local registers)
 - Jump to symbol definition (Ctags)
 
 ## Installation
@@ -79,8 +79,9 @@ emil file.txt
 | Quit emil              | `Ctrl-x Ctrl-c` |
 | Mark (to select text)  | `Ctrl-SPACE`    |
 | Cut                    | `Ctrl-w`        |
-| Copy                   | `Alt-w`         |
+| Copy                   | `Alt-w` or `Ctrl-c` |
 | Paste                  | `Ctrl-y`        |
+| Undo                   | `Ctrl-_`        |
 | Search                 | `Ctrl-s`        |
 | Cancel                 | `Ctrl-g`        |
 
