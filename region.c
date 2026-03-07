@@ -215,7 +215,111 @@ static void normalizeRegion(struct editorBuffer *buf) {
 	}
 }
 
+void editorDeleteRange(struct editorBuffer *buf, int startx, int starty,
+		       int endx, int endy, int add_to_kill_ring) {
+	/* Normalise: ensure start comes before end */
+	if (starty > endy || (starty == endy && startx > endx)) {
+		int tx = startx, ty = starty;
+		startx = endx;
+		starty = endy;
+		endx = tx;
+		endy = ty;
+	}
+
+	/* Clamp end position within buffer */
+	if (endy >= buf->numrows) {
+		endy = buf->numrows - 1;
+		endx = buf->row[endy].size;
+	}
+
+	/* Nothing to delete if start == end */
+	if (startx == endx && starty == endy)
+		return;
+
+	/* Collect text between (startx, starty) and (endx, endy) using
+	 * local variables — do NOT move buf->cx or buf->cy during
+	 * collection. */
+	int regionSize = 32;
+	uint8_t *collected = xmalloc(regionSize);
+	int cpos = 0;
+	int lx = startx;
+	int ly = starty;
+	while (!(ly == endy && lx == endx)) {
+		if (lx >= buf->row[ly].size) {
+			collected[cpos++] = '\n';
+			ly++;
+			lx = 0;
+		} else {
+			collected[cpos++] = buf->row[ly].chars[lx];
+			lx++;
+		}
+		if (cpos >= regionSize - 2) {
+			regionSize *= 2;
+			collected = xrealloc(collected, regionSize);
+		}
+	}
+	collected[cpos] = 0;
+
+	/* Kill ring */
+	if (add_to_kill_ring) {
+		clearEditorText(&E.kill);
+		E.kill.str = (uint8_t *)xstrdup((char *)collected);
+		addToKillRing((char *)collected, 0, 0, 0);
+	}
+
+	/* Undo record */
+	clearRedos(buf);
+
+	struct editorUndo *new = newUndo();
+	new->startx = startx;
+	new->starty = starty;
+	new->endx = endx;
+	new->endy = endy;
+	free(new->data);
+	new->datalen = cpos;
+	new->datasize = cpos + 1;
+	new->data = xmalloc(new->datasize);
+	memcpy(new->data, collected, cpos);
+	new->data[cpos] = 0;
+	new->append = 0;
+	new->delete = 1;
+	pushUndo(buf, new);
+
+	free(collected);
+
+	/* Splice rows — same logic as the old editorKillRegion */
+	struct erow *row = &buf->row[starty];
+	if (starty == endy) {
+		memmove(&row->chars[startx], &row->chars[endx],
+			row->size - endx);
+		row->size -= endx - startx;
+		row->chars[row->size] = 0;
+	} else {
+		for (int i = starty + 1; i < endy; i++) {
+			editorDelRow(buf, starty + 1);
+		}
+		struct erow *last = &buf->row[starty + 1];
+		row->size = startx;
+		row->size += last->size - endx;
+		row->chars = xrealloc(row->chars, row->size);
+		memcpy(&row->chars[startx], &last->chars[endx],
+		       last->size - endx);
+		editorDelRow(buf, starty + 1);
+	}
+
+	buf->dirty = 1;
+	editorUpdateBuffer(buf);
+
+	/* Adjust tracked points for the deleted region */
+	adjustAllPoints(buf, new->startx, new->starty, new->endx, new->endy, 1);
+
+	/* Set cursor to start of deleted range */
+	buf->cx = startx;
+	buf->cy = starty;
+}
+
 void editorKillRegion(struct editorConfig *ed, struct editorBuffer *buf) {
+	(void)ed;
 	if (buf->read_only) {
 		editorSetStatusMessage(msg_read_only);
 		return;
@@ -223,51 +327,7 @@ void editorKillRegion(struct editorConfig *ed, struct editorBuffer *buf) {
 
 	if (markInvalid())
 		return;
-	editorCopyRegion(ed, buf);
-	normalizeRegion(buf);
-
-	clearRedos(buf);
-
-	struct editorUndo *new = newUndo();
-	new->startx = buf->cx;
-	new->starty = buf->cy;
-	new->endx = buf->markx;
-	new->endy = buf->marky;
-	free(new->data);
-	new->datalen = strlen((char *)ed->kill.str);
-	new->datasize = new->datalen + 1;
-	new->data = xmalloc(new->datasize);
-	memcpy(new->data, ed->kill.str, new->datalen);
-	new->data[new->datalen] = 0;
-	new->append = 0;
-	new->delete = 1;
-	pushUndo(buf, new);
-
-	struct erow *row = &buf->row[buf->cy];
-	if (buf->cy == buf->marky) {
-		memmove(&row->chars[buf->cx], &row->chars[buf->markx],
-			row->size - buf->markx);
-		row->size -= buf->markx - buf->cx;
-		row->chars[row->size] = 0;
-	} else {
-		for (int i = buf->cy + 1; i < buf->marky; i++) {
-			editorDelRow(buf, buf->cy + 1);
-		}
-		struct erow *last = &buf->row[buf->cy + 1];
-		row->size = buf->cx;
-		row->size += last->size - buf->markx;
-		row->chars = xrealloc(row->chars, row->size);
-		memcpy(&row->chars[buf->cx], &last->chars[buf->markx],
-		       last->size - buf->markx);
-		editorDelRow(buf, buf->cy + 1);
-	}
-
-	buf->dirty = 1;
-	editorUpdateBuffer(buf);
-
-	/* Adjust tracked points for the deleted region.
-	 * The undo record has the exact range. */
-	adjustAllPoints(buf, new->startx, new->starty, new->endx, new->endy, 1);
+	editorDeleteRange(buf, buf->cx, buf->cy, buf->markx, buf->marky, 1);
 }
 
 void editorCopyRegion(struct editorConfig *ed, struct editorBuffer *buf) {

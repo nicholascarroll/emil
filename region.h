@@ -20,6 +20,9 @@ void editorToggleRectangleMode(void);
 
 void editorMarkBuffer(void);
 
+void editorDeleteRange(struct editorBuffer *buf, int startx, int starty,
+		       int endx, int endy, int add_to_kill_ring);
+
 void editorKillRegion(struct editorConfig *ed, struct editorBuffer *buf);
 
 void editorCopyRegion(struct editorConfig *ed, struct editorBuffer *buf);

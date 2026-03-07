@@ -3,7 +3,6 @@
 #include <string.h>
 #include "emil.h"
 #include "message.h"
-#include "message.h"
 #include "edit.h"
 #include "buffer.h"
 #include "undo.h"
@@ -160,7 +159,7 @@ void editorIndent(struct editorBuffer *bufr, int rept) {
 	bufr->cx = 0;
 	for (int i = 0; i < rept; i++) {
 		if (bufr->indent) {
-			for (int i = 0; i < bufr->indent; i++) {
+			for (int j = 0; j < bufr->indent; j++) {
 				editorUndoAppendChar(bufr, ' ');
 				editorInsertChar(bufr, ' ', 1);
 			}
@@ -791,41 +790,36 @@ void editorCapitalCaseWord(struct editorBuffer *bufr, int times) {
 /* Word deletion */
 
 void editorDeleteWord(struct editorBuffer *bufr, int count) {
+	if (bufr->read_only) {
+		editorSetStatusMessage(msg_read_only);
+		return;
+	}
 	bufr->mark_active = 0;
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
-		int origMarkx = bufr->markx;
-		int origMarky = bufr->marky;
-		bufferEndOfForwardWord(bufr, &bufr->markx, &bufr->marky);
-		editorKillRegion(&E, bufr);
-		/* The saved mark must be adjusted for the deletion that
-		 * just happened, otherwise we restore stale coordinates.
-		 * The undo record on top has the exact range. */
-		if (origMarkx >= 0 && origMarky >= 0 && bufr->undo != NULL)
-			adjustPoint(&origMarkx, &origMarky, bufr->undo->startx,
-				    bufr->undo->starty, bufr->undo->endx,
-				    bufr->undo->endy, 1);
-		bufr->markx = origMarkx;
-		bufr->marky = origMarky;
+		int endx = bufr->cx;
+		int endy = bufr->cy;
+		bufferEndOfForwardWord(bufr, &endx, &endy);
+		if (endx == bufr->cx && endy == bufr->cy)
+			return;
+		editorDeleteRange(bufr, bufr->cx, bufr->cy, endx, endy, 1);
 	}
 }
 
 void editorBackspaceWord(struct editorBuffer *bufr, int count) {
+	if (bufr->read_only) {
+		editorSetStatusMessage(msg_read_only);
+		return;
+	}
 	bufr->mark_active = 0;
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
-		int origMarkx = bufr->markx;
-		int origMarky = bufr->marky;
-		bufferEndOfBackwardWord(bufr, &bufr->markx, &bufr->marky);
-		editorKillRegion(&E, bufr);
-		/* Adjust the saved mark for the deletion (same issue as
-		 * editorDeleteWord — restored coordinates would be stale). */
-		if (origMarkx >= 0 && origMarky >= 0 && bufr->undo != NULL)
-			adjustPoint(&origMarkx, &origMarky, bufr->undo->startx,
-				    bufr->undo->starty, bufr->undo->endx,
-				    bufr->undo->endy, 1);
-		bufr->markx = origMarkx;
-		bufr->marky = origMarky;
+		int endx = bufr->cx;
+		int endy = bufr->cy;
+		bufferEndOfBackwardWord(bufr, &endx, &endy);
+		if (endx == bufr->cx && endy == bufr->cy)
+			return;
+		editorDeleteRange(bufr, bufr->cx, bufr->cy, endx, endy, 1);
 	}
 }
 
@@ -844,7 +838,7 @@ void editorTransposeWords(struct editorBuffer *bufr) {
 	} else if (bufr->cy >= bufr->numrows ||
 		   (bufr->cy == bufr->numrows - 1 &&
 		    bufr->cx == bufr->row[bufr->cy].size)) {
-		editorSetStatusMessage("End of buffer");
+		editorSetStatusMessage(msg_end_of_buffer);
 		return;
 	}
 
@@ -867,17 +861,17 @@ void editorTransposeWords(struct editorBuffer *bufr) {
 void editorTransposeChars(struct editorBuffer *bufr) {
 	bufr->mark_active = 0;
 	if (bufr->numrows == 0) {
-		editorSetStatusMessage("Buffer is empty");
+		editorSetStatusMessage(msg_buffer_empty);
 		return;
 	}
 
 	if (bufr->cx == 0 && bufr->cy == 0) {
-		editorSetStatusMessage("Beginning of buffer");
+		editorSetStatusMessage(msg_beginning_of_buffer);
 		return;
 	} else if (bufr->cy >= bufr->numrows ||
 		   (bufr->cy == bufr->numrows - 1 &&
 		    bufr->cx == bufr->row[bufr->cy].size)) {
-		editorSetStatusMessage("End of buffer");
+		editorSetStatusMessage(msg_end_of_buffer);
 		return;
 	}
 
@@ -911,44 +905,12 @@ void editorKillLine(int count) {
 		erow *row = &E.buf->row[E.buf->cy];
 
 		if (E.buf->cx == row->size) {
+			/* At end of line: join with next line */
 			editorDelChar(E.buf, 1);
 		} else {
-			// Copy to kill ring
-			int kill_len = row->size - E.buf->cx;
-			char *killed_text = xmalloc(kill_len + 1);
-			memcpy(killed_text, &row->chars[E.buf->cx], kill_len);
-			killed_text[kill_len] = '\0';
-			addToKillRing(killed_text, 0, 0, 0);
-			free(killed_text);
-
-			clearRedos(E.buf);
-			struct editorUndo *new = newUndo();
-			new->starty = E.buf->cy;
-			new->endy = E.buf->cy;
-			new->startx = E.buf->cx;
-			new->endx = row->size;
-			new->delete = 1;
-			pushUndo(E.buf, new);
-
-			new->datalen = kill_len;
-			if (new->datasize < new->datalen + 1) {
-				new->datasize = new->datalen + 1;
-				new->data = xrealloc(new->data, new->datasize);
-			}
-			memcpy(new->data, E.kill.str, kill_len);
-			new->data[kill_len] = '\0';
-
-			row->size = E.buf->cx;
-			row->chars[row->size] = '\0';
-			row->cached_width = -1;
-			invalidateScreenCache(E.buf);
-			E.buf->dirty = 1;
-
-			/* Adjust tracked points for this deletion */
-			adjustAllPoints(E.buf, new->startx, new->starty,
-					new->endx, new->endy, 1);
-
-			editorClearMark();
+			/* Kill to end of line */
+			editorDeleteRange(E.buf, E.buf->cx, E.buf->cy,
+					  row->size, E.buf->cy, 1);
 		}
 	}
 }
@@ -959,45 +921,7 @@ void editorKillLineBackwards(void) {
 		return;
 	}
 
-	erow *row = &E.buf->row[E.buf->cy];
-
-	// Copy to kill ring
-	char *killed_text = xmalloc(E.buf->cx + 1);
-	memcpy(killed_text, row->chars, E.buf->cx);
-	killed_text[E.buf->cx] = '\0';
-	addToKillRing(killed_text, 0, 0, 0);
-	free(killed_text);
-
-	clearRedos(E.buf);
-	struct editorUndo *new = newUndo();
-	new->starty = E.buf->cy;
-	new->endy = E.buf->cy;
-	new->startx = 0;
-	new->endx = E.buf->cx;
-	new->delete = 1;
-	pushUndo(E.buf, new);
-
-	new->datalen = E.buf->cx;
-	if (new->datasize < new->datalen + 1) {
-		new->datasize = new->datalen + 1;
-		new->data = xrealloc(new->data, new->datasize);
-	}
-	memcpy(new->data, E.kill.str, new->datalen);
-	new->data[E.buf->cx] = '\0';
-
-	row->size -= E.buf->cx;
-	memmove(row->chars, &row->chars[E.buf->cx], row->size);
-	row->chars[row->size] = '\0';
-	row->cached_width = -1;
-	invalidateScreenCache(E.buf);
-
-	/* Adjust tracked points for this deletion.
-	 * The deleted range is (0, cy) to (cx, cy). */
-	adjustAllPoints(E.buf, new->startx, new->starty, new->endx, new->endy,
-			1);
-
-	E.buf->cx = 0;
-	E.buf->dirty = 1;
+	editorDeleteRange(E.buf, 0, E.buf->cy, E.buf->cx, E.buf->cy, 1);
 }
 
 /* Navigation */
@@ -1078,8 +1002,7 @@ void editorQuit(void) {
 	}
 
 	if (hasUnsavedChanges) {
-		editorSetStatusMessage(
-			"There are unsaved changes. Really quit? (y or n)");
+		editorSetStatusMessage(msg_unsaved_quit);
 		refreshScreen();
 		int c = editorReadKey();
 		if (c == 'y' || c == 'Y') {
@@ -1111,7 +1034,7 @@ void editorGotoLine(void) {
 			} else if (nl > E.buf->numrows) {
 				E.buf->cy = E.buf->numrows;
 			} else {
-				E.buf->cy = nl;
+				E.buf->cy = nl - 1;
 			}
 			return;
 		}
