@@ -53,7 +53,7 @@ TEST_OBJECTS="wcwidth.o unicode.o buffer.o region.o undo.o transform.o \
 
 echo "Unit tests:"
 
-for suite in unicode wcwidth buffer undo edit fileio; do
+for suite in unicode wcwidth buffer undo edit fileio relpath; do
     src="tests/test_${suite}.c"
     bin="tests/test_${suite}"
     printf "  %-12s " "$suite"

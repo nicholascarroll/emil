@@ -608,6 +608,145 @@ void editorInsertFile(struct editorConfig *UNUSED(ed),
 	buf->dirty++;
 }
 
+/* Compute the relative path from directory 'from' to directory 'to'.
+ * Both must be absolute paths.  Returns a malloc'd string.
+ * Example: from="/a/b/c", to="/a/d" => "../../d" */
+char *relativePath(const char *from, const char *to) {
+	/* Find the common prefix, breaking on '/' boundaries.
+	 * split will point just past the last shared '/' separator,
+	 * so from[split..] and to[split..] are the diverging tails. */
+	int split = 0;
+	int i = 0;
+	while (from[i] && to[i] && from[i] == to[i]) {
+		if (from[i] == '/')
+			split = i + 1;
+		i++;
+	}
+	/* Handle one being a prefix of the other:
+	 * e.g. from="/a/b/c" to="/a/b"  (to ends, from continues with '/')
+	 *      from="/a/b"   to="/a/b/c" (from ends, to continues with '/')
+	 *      from="/a/b"   to="/a/b"   (both end) */
+	if (from[i] == '\0' && to[i] == '\0')
+		split = i;
+	else if (from[i] == '\0' && to[i] == '/')
+		split = i;
+	else if (to[i] == '\0' && from[i] == '/')
+		split = i + 1;
+
+	/* Count directory segments remaining in 'from' after split */
+	int ups = 0;
+	for (int j = split; from[j]; j++) {
+		if (from[j] == '/' && from[j + 1] != '\0')
+			ups++;
+	}
+	if (from[split] != '\0')
+		ups++;
+
+	/* Tail of 'to' after split — careful not to read past end */
+	const char *to_tail = "";
+	if ((int)strlen(to) > split) {
+		to_tail = to + split;
+		if (*to_tail == '/')
+			to_tail++;
+	}
+
+	int tail_len = strlen(to_tail);
+	int result_len = ups * 3 + tail_len + 1;
+	char *result = xmalloc(result_len);
+	result[0] = '\0';
+
+	for (int j = 0; j < ups; j++)
+		emil_strlcat(result, "../", result_len);
+
+	if (tail_len > 0)
+		emil_strlcat(result, to_tail, result_len);
+	else if (ups > 0)
+		result[strlen(result) - 1] = '\0'; /* trim trailing / */
+
+	return result;
+}
+
+/* Canonicalize an absolute path by resolving . and .. segments.
+ * Does NOT resolve symlinks — purely string-level.
+ * Modifies the string in place and returns it. */
+static char *cleanPath(char *path) {
+	/* Stack of pointers to segment starts within path */
+	char *segs[256];
+	int depth = 0;
+
+	char *p = path;
+	if (*p == '/')
+		p++;
+
+	while (*p) {
+		char *seg = p;
+		while (*p && *p != '/')
+			p++;
+		int len = p - seg;
+		if (*p == '/')
+			p++;
+
+		if (len == 1 && seg[0] == '.') {
+			continue;
+		} else if (len == 2 && seg[0] == '.' && seg[1] == '.') {
+			if (depth > 0)
+				depth--;
+		} else {
+			if (depth < 256)
+				segs[depth++] = seg;
+			/* null-terminate this segment for later copy */
+			if (seg[len] != '\0')
+				seg[len] = '\0';
+		}
+	}
+
+	/* Reassemble */
+	char *out = path;
+	*out++ = '/';
+	for (int i = 0; i < depth; i++) {
+		int slen = strlen(segs[i]);
+		memmove(out, segs[i], slen);
+		out += slen;
+		if (i < depth - 1)
+			*out++ = '/';
+	}
+	*out = '\0';
+	return path;
+}
+
+/* Rebase a relative filename from old_cwd to new_cwd.
+ * Returns a new malloc'd string.  Absolute paths are returned as-is (duped).
+ * Used by editorChangeDirectory and exposed for testing. */
+char *rebaseFilename(const char *filename, const char *old_cwd,
+		     const char *new_cwd) {
+	if (filename[0] == '/')
+		return xstrdup(filename);
+
+	/* Absolutize against old cwd and clean up any .. segments */
+	int abs_len = strlen(old_cwd) + 1 + strlen(filename) + 1;
+	char *abs = xmalloc(abs_len);
+	snprintf(abs, abs_len, "%s/%s", old_cwd, filename);
+	cleanPath(abs);
+
+	/* Relativize the directory part against new cwd,
+	 * then reattach the basename */
+	char *slash = strrchr(abs, '/');
+	char *base = xstrdup(slash + 1);
+	*slash = '\0'; /* abs is now the directory */
+	char *reldir = relativePath(new_cwd, abs);
+	int new_len = strlen(reldir) + 1 + strlen(base) + 1;
+	char *new_name = xmalloc(new_len);
+	if (reldir[0] == '\0')
+		snprintf(new_name, new_len, "%s", base);
+	else
+		snprintf(new_name, new_len, "%s/%s", reldir, base);
+
+	free(abs);
+	free(base);
+	free(reldir);
+	return new_name;
+}
+
 void editorChangeDirectory(struct editorConfig *ed, struct editorBuffer *buf) {
 	(void)buf; /* unused parameter */
 
@@ -618,17 +757,46 @@ void editorChangeDirectory(struct editorConfig *ed, struct editorBuffer *buf) {
 		return;
 	}
 
-	if (chdir((char *)dir) == 0) {
-		char cwd[PATH_MAX];
-		if (getcwd(cwd, sizeof(cwd))) {
-			editorSetStatusMessage("Current directory: %s", cwd);
-		} else {
-			editorSetStatusMessage("Changed directory");
-		}
-	} else {
-		editorSetStatusMessage("cd: %s: %s", (char *)dir,
-				       strerror(errno));
+	/* Grab the old cwd before changing */
+	char old_cwd[PATH_MAX];
+	if (getcwd(old_cwd, sizeof(old_cwd)) == NULL) {
+		editorSetStatusMessage(
+			"cd: cannot determine current directory");
+		free(dir);
+		return;
 	}
 
+	if (chdir((char *)dir) != 0) {
+		editorSetStatusMessage("cd: %s: %s", (char *)dir,
+				       strerror(errno));
+		free(dir);
+		return;
+	}
+
+	char new_cwd[PATH_MAX];
+	if (getcwd(new_cwd, sizeof(new_cwd)) == NULL) {
+		/* chdir succeeded but getcwd failed — unlikely but
+		 * leave filenames as-is */
+		editorSetStatusMessage("Changed directory");
+		free(dir);
+		return;
+	}
+
+	/* If the directory actually changed, update relative filenames */
+	if (strcmp(old_cwd, new_cwd) != 0) {
+		for (struct editorBuffer *b = ed->headbuf; b != NULL;
+		     b = b->next) {
+			if (b->filename == NULL || b->special_buffer)
+				continue;
+			char *new_name =
+				rebaseFilename(b->filename, old_cwd, new_cwd);
+			free(b->filename);
+			b->filename = new_name;
+		}
+
+		computeDisplayNames();
+	}
+
+	editorSetStatusMessage("Current directory: %s", new_cwd);
 	free(dir);
 }

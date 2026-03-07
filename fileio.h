@@ -19,4 +19,8 @@ void findFile(void);
 struct editorBuffer *editorSwitchToFile(const char *filename);
 void editorInsertFile(struct editorConfig *ed, struct editorBuffer *buf);
 void editorChangeDirectory(struct editorConfig *ed, struct editorBuffer *buf);
+
+char *relativePath(const char *from, const char *to);
+char *rebaseFilename(const char *filename, const char *old_cwd,
+		     const char *new_cwd);
 #endif /* FILEIO_H */
