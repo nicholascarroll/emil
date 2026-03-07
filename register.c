@@ -107,7 +107,7 @@ void editorRegionToRegister(struct editorConfig *ed,
 	clearRegister(ed, reg);
 
 	struct editorText saved = ed->kill;
-	ed->kill = (struct editorText){0};
+	ed->kill = (struct editorText){ 0 };
 	editorCopyRegion(ed, bufr);
 	ed->registers[reg].rtype = REGISTER_TEXT;
 	ed->registers[reg].data.text.str = ed->kill.str;
@@ -126,7 +126,7 @@ void editorRectToRegister(struct editorConfig *ed, struct editorBuffer *bufr) {
 	clearRegister(ed, reg);
 
 	struct editorText saved = ed->kill;
-	ed->kill = (struct editorText){0};
+	ed->kill = (struct editorText){ 0 };
 	editorCopyRectangle(ed, bufr);
 	ed->registers[reg].rtype = REGISTER_TEXT;
 	ed->registers[reg].data.text = ed->kill;
@@ -152,15 +152,14 @@ void editorIncrementRegister(struct editorConfig *ed,
 		}
 		{
 			struct editorText saved = ed->kill;
-			ed->kill = (struct editorText){0};
+			ed->kill = (struct editorText){ 0 };
 			editorCopyRegion(ed, bufr);
 			size_t kill_len = strlen((char *)ed->kill.str);
-			size_t region_len =
-				strlen((char *)ed->registers[reg].data.text.str);
+			size_t region_len = strlen(
+				(char *)ed->registers[reg].data.text.str);
 			size_t new_len = region_len + kill_len + 1;
-			ed->registers[reg].data.text.str =
-				xrealloc(ed->registers[reg].data.text.str,
-					 new_len);
+			ed->registers[reg].data.text.str = xrealloc(
+				ed->registers[reg].data.text.str, new_len);
 			memcpy(ed->registers[reg].data.text.str + region_len,
 			       ed->kill.str, kill_len + 1);
 			clearEditorText(&ed->kill);
@@ -230,8 +229,9 @@ void editorViewRegister(struct editorConfig *ed,
 				ed->registers[reg].data.text.rect_height,
 				ed->registers[reg].data.text.str);
 		} else {
-			editorSetStatusMessage("%s (text): %.60s", str,
-					       ed->registers[reg].data.text.str);
+			editorSetStatusMessage(
+				"%s (text): %.60s", str,
+				ed->registers[reg].data.text.str);
 		}
 		break;
 	case REGISTER_POINT:;

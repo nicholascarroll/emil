@@ -80,8 +80,8 @@ struct editorBuffer {
 	int markx, marky;
 	int mark_active;
 	struct markRingEntry mark_ring[MARK_RING_SIZE];
-	int mark_ring_len;   /* number of valid entries (0..MARK_RING_SIZE) */
-	int mark_ring_idx;   /* next slot to write (circular) */
+	int mark_ring_len; /* number of valid entries (0..MARK_RING_SIZE) */
+	int mark_ring_idx; /* next slot to write (circular) */
 	int numrows;
 	int rowcap;
 	int end;
@@ -134,10 +134,10 @@ struct editorCommand {
 };
 
 struct editorText {
-	uint8_t *str;         /* NUL-terminated data */
-	int is_rectangle;     /* 1 = rectangle data, 0 = plain text */
-	int rect_width;       /* column width (meaningful when is_rectangle) */
-	int rect_height;      /* row count (meaningful when is_rectangle) */
+	uint8_t *str;	  /* NUL-terminated data */
+	int is_rectangle; /* 1 = rectangle data, 0 = plain text */
+	int rect_width;	  /* column width (meaningful when is_rectangle) */
+	int rect_height;  /* row count (meaningful when is_rectangle) */
 };
 
 static inline void clearEditorText(struct editorText *t) {
@@ -172,9 +172,9 @@ struct editorRegister {
 
 struct historyEntry {
 	char *str;
-	int is_rectangle;     /* kill ring only; zero for other histories */
-	int rect_width;       /* kill ring only; zero for other histories */
-	int rect_height;      /* kill ring only; zero for other histories */
+	int is_rectangle; /* kill ring only; zero for other histories */
+	int rect_width;	  /* kill ring only; zero for other histories */
+	int rect_height;  /* kill ring only; zero for other histories */
 	struct historyEntry *prev;
 	struct historyEntry *next;
 };
@@ -186,7 +186,7 @@ struct editorHistory {
 };
 
 struct editorConfig {
-	struct editorText kill;    /* active kill entry */
+	struct editorText kill; /* active kill entry */
 	int screenrows;
 	int screencols;
 	uint8_t unicode[4];

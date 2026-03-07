@@ -330,6 +330,12 @@ int editorReadKey(void) {
 		} else if (seq[0] == 'n') {
 			return HISTORY_NEXT;
 		} else {
+			/* Check for C-M- (control+meta) combinations first */
+			if (seq[0] == CTRL('f')) {
+				return FORWARD_SEXP;
+			} else if (seq[0] == CTRL('b')) {
+				return BACKWARD_SEXP;
+			}
 			switch ((seq[0] & 0x1f) | 0x40) {
 			case 'B':
 				return BACKWARD_WORD;

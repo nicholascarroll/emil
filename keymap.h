@@ -99,6 +99,8 @@ enum editorKey {
 	CTAGS_JUMP,
 	CTAGS_BACK,
 	TOGGLE_HEADER_BODY,
+	FORWARD_SEXP,
+	BACKWARD_SEXP,
 };
 
 struct editorBuffer;

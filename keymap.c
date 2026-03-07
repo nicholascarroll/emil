@@ -655,6 +655,12 @@ void editorProcessKeypress(int c) {
 	case BACKWARD_PARA:
 		editorBackPara(uarg);
 		break;
+	case FORWARD_SEXP:
+		editorForwardSexp(uarg);
+		break;
+	case BACKWARD_SEXP:
+		editorBackwardSexp(uarg);
+		break;
 	case REDO:
 		editorDoRedo(E.buf, uarg);
 		if (E.buf->redo != NULL) {

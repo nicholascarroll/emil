@@ -517,6 +517,251 @@ void editorForwardPara(int count) {
 	}
 }
 
+/* Sexp (balanced expression) movement — C-M-f / C-M-b */
+
+static int matchingClose(uint8_t c) {
+	switch (c) {
+	case '(':
+		return ')';
+	case '[':
+		return ']';
+	case '{':
+		return '}';
+	default:
+		return 0;
+	}
+}
+
+static int matchingOpen(uint8_t c) {
+	switch (c) {
+	case ')':
+		return '(';
+	case ']':
+		return '[';
+	case '}':
+		return '{';
+	default:
+		return 0;
+	}
+}
+
+static int isQuoteChar(uint8_t c) {
+	return c == '"' || c == '\'';
+}
+
+/* Advance one position forward in the buffer.  Returns 0 at end. */
+static int stepForward(struct editorBuffer *buf, int *cx, int *cy) {
+	if (*cy >= buf->numrows)
+		return 0;
+	if (*cx < buf->row[*cy].size) {
+		(*cx)++;
+		return 1;
+	}
+	if (*cy + 1 < buf->numrows) {
+		*cy += 1;
+		*cx = 0;
+		return 1;
+	}
+	return 0;
+}
+
+/* Retreat one position backward in the buffer.  Returns 0 at start. */
+static int stepBackward(struct editorBuffer *buf, int *cx, int *cy) {
+	if (*cx > 0) {
+		(*cx)--;
+		return 1;
+	}
+	if (*cy > 0) {
+		*cy -= 1;
+		*cx = buf->row[*cy].size;
+		return 1;
+	}
+	return 0;
+}
+
+/* Get the character at (cx, cy).  Returns 0 at end-of-line / end-of-buffer.
+ * End-of-line positions (cx == row->size) are treated as newline. */
+static uint8_t charAt(struct editorBuffer *buf, int cx, int cy) {
+	if (cy >= buf->numrows)
+		return 0;
+	erow *row = &buf->row[cy];
+	if (cx >= row->size)
+		return '\n';
+	return row->chars[cx];
+}
+
+void editorForwardSexp(int count) {
+	int times = count ? count : 1;
+	struct editorBuffer *buf = E.buf;
+
+	for (int t = 0; t < times; t++) {
+		int cx = buf->cx;
+		int cy = buf->cy;
+
+		/* Skip whitespace and newlines */
+		while (cy < buf->numrows) {
+			uint8_t ch = charAt(buf, cx, cy);
+			if (ch == 0) {
+				editorSetStatusMessage("End of buffer");
+				return;
+			}
+			if (ch != ' ' && ch != '\t' && ch != '\n')
+				break;
+			stepForward(buf, &cx, &cy);
+		}
+		if (cy >= buf->numrows) {
+			editorSetStatusMessage("End of buffer");
+			return;
+		}
+
+		uint8_t ch = charAt(buf, cx, cy);
+
+		/* Opening delimiter: scan forward for matching close */
+		int close = matchingClose(ch);
+		if (close) {
+			int depth = 1;
+			int sx = cx, sy = cy;
+			stepForward(buf, &sx, &sy);
+			while (depth > 0) {
+				uint8_t c = charAt(buf, sx, sy);
+				if (c == 0) {
+					editorSetStatusMessage(
+						"Unmatched delimiter");
+					return;
+				}
+				if ((int)c == close)
+					depth--;
+				else if (c == ch)
+					depth++;
+				if (depth > 0)
+					stepForward(buf, &sx, &sy);
+			}
+			/* Land after the closing delimiter */
+			stepForward(buf, &sx, &sy);
+			buf->cx = sx;
+			buf->cy = sy;
+			continue;
+		}
+
+		/* Closing delimiter while inside: jump past it */
+		if (matchingOpen(ch)) {
+			stepForward(buf, &cx, &cy);
+			buf->cx = cx;
+			buf->cy = cy;
+			continue;
+		}
+
+		/* Quote character: scan forward for matching quote */
+		if (isQuoteChar(ch)) {
+			int sx = cx, sy = cy;
+			stepForward(buf, &sx, &sy);
+			while (1) {
+				uint8_t c = charAt(buf, sx, sy);
+				if (c == 0) {
+					editorSetStatusMessage(
+						"Unmatched quote");
+					return;
+				}
+				if (c == ch) {
+					stepForward(buf, &sx, &sy);
+					buf->cx = sx;
+					buf->cy = sy;
+					break;
+				}
+				stepForward(buf, &sx, &sy);
+			}
+			continue;
+		}
+
+		/* Word: skip to end of word */
+		buf->cx = cx;
+		buf->cy = cy;
+		bufferEndOfForwardWord(buf, &buf->cx, &buf->cy);
+	}
+}
+
+void editorBackwardSexp(int count) {
+	int times = count ? count : 1;
+	struct editorBuffer *buf = E.buf;
+
+	for (int t = 0; t < times; t++) {
+		int cx = buf->cx;
+		int cy = buf->cy;
+
+		/* Step back once then skip whitespace and newlines */
+		if (!stepBackward(buf, &cx, &cy)) {
+			editorSetStatusMessage("Beginning of buffer");
+			return;
+		}
+		while (1) {
+			uint8_t ch = charAt(buf, cx, cy);
+			if (ch != ' ' && ch != '\t' && ch != '\n')
+				break;
+			if (!stepBackward(buf, &cx, &cy)) {
+				editorSetStatusMessage("Beginning of buffer");
+				return;
+			}
+		}
+
+		uint8_t ch = charAt(buf, cx, cy);
+
+		/* Closing delimiter: scan backward for matching open */
+		int open = matchingOpen(ch);
+		if (open) {
+			int depth = 1;
+			int sx = cx, sy = cy;
+			while (depth > 0) {
+				if (!stepBackward(buf, &sx, &sy)) {
+					editorSetStatusMessage(
+						"Unmatched delimiter");
+					return;
+				}
+				uint8_t c = charAt(buf, sx, sy);
+				if ((int)c == open)
+					depth--;
+				else if (c == ch)
+					depth++;
+			}
+			buf->cx = sx;
+			buf->cy = sy;
+			continue;
+		}
+
+		/* Opening delimiter while inside: land on it */
+		if (matchingClose(ch)) {
+			buf->cx = cx;
+			buf->cy = cy;
+			continue;
+		}
+
+		/* Quote character: scan backward for matching quote */
+		if (isQuoteChar(ch)) {
+			int sx = cx, sy = cy;
+			while (1) {
+				if (!stepBackward(buf, &sx, &sy)) {
+					editorSetStatusMessage(
+						"Unmatched quote");
+					return;
+				}
+				uint8_t c = charAt(buf, sx, sy);
+				if (c == ch) {
+					buf->cx = sx;
+					buf->cy = sy;
+					break;
+				}
+			}
+			continue;
+		}
+
+		/* Word: skip to beginning of word */
+		buf->cx = cx;
+		buf->cy = cy;
+		/* stepForward to undo the stepBackward, then use word movement */
+		stepForward(buf, &buf->cx, &buf->cy);
+		bufferEndOfBackwardWord(buf, &buf->cx, &buf->cy);
+	}
+}
+
 /* Word transformations */
 
 void wordTransform(struct editorBuffer *bufr, int times,

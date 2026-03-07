@@ -17,14 +17,13 @@ void addHistory(struct editorHistory *hist, const char *str) {
 }
 
 void addHistoryWithRect(struct editorHistory *hist, const char *str,
-                        int is_rectangle, int rect_width, int rect_height) {
+			int is_rectangle, int rect_width, int rect_height) {
 	if (!str || strlen(str) == 0) {
 		return;
 	}
 
 	/* Don't add duplicates of the most recent entry */
-	if (hist->tail &&
-	    strcmp(hist->tail->str, str) == 0 &&
+	if (hist->tail && strcmp(hist->tail->str, str) == 0 &&
 	    hist->tail->is_rectangle == is_rectangle &&
 	    hist->tail->rect_width == rect_width &&
 	    hist->tail->rect_height == rect_height) {

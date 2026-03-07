@@ -76,7 +76,7 @@ void setupHandlers(void) {
 
 void initEditor(void) {
 	E.statusmsg[0] = 0;
-	E.kill = (struct editorText){0};
+	E.kill = (struct editorText){ 0 };
 	E.windows = xmalloc(sizeof(struct editorWindow *) * 1);
 	E.windows[0] = xcalloc(1, sizeof(struct editorWindow));
 	E.windows[0]->focused = 1;

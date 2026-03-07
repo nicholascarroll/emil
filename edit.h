@@ -39,6 +39,10 @@ void editorBackWord(int count);
 void editorBackPara(int count);
 void editorForwardPara(int count);
 
+/* Sexp (balanced expression) movement */
+void editorForwardSexp(int count);
+void editorBackwardSexp(int count);
+
 /* Word transformations */
 void wordTransform(struct editorBuffer *bufr, int times,
 		   uint8_t *(*transformer)(uint8_t *));

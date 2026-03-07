@@ -17,7 +17,7 @@
 extern struct editorConfig E;
 
 void addToKillRing(const char *text, int is_rect, int rect_width,
-                   int rect_height) {
+		   int rect_height) {
 	if (!text || strlen(text) == 0)
 		return;
 
@@ -125,8 +125,8 @@ void editorPopMark(void) {
 	/* Step 2: pop-mark — rotate ring into the mark.  */
 	if (buf->mark_ring_len > 0) {
 		/* Newest entry index */
-		int n = (buf->mark_ring_idx - 1 + MARK_RING_SIZE)
-			% MARK_RING_SIZE;
+		int n = (buf->mark_ring_idx - 1 + MARK_RING_SIZE) %
+			MARK_RING_SIZE;
 
 		/* This becomes the new mark */
 		int new_cx = buf->mark_ring[n].cx;
@@ -135,8 +135,9 @@ void editorPopMark(void) {
 		/* Shift all entries one position toward newest,
 		 * opening a slot at the oldest position for
 		 * the current mark. */
-		int oldest = (buf->mark_ring_idx - buf->mark_ring_len
-			      + MARK_RING_SIZE) % MARK_RING_SIZE;
+		int oldest = (buf->mark_ring_idx - buf->mark_ring_len +
+			      MARK_RING_SIZE) %
+			     MARK_RING_SIZE;
 		for (int i = n; i != oldest;) {
 			int prev = (i - 1 + MARK_RING_SIZE) % MARK_RING_SIZE;
 			buf->mark_ring[i] = buf->mark_ring[prev];
@@ -396,8 +397,8 @@ void editorYankPop(struct editorConfig *ed, struct editorBuffer *buf) {
 		ed->kill_ring_pos = ed->kill_history.count - 1;
 	}
 
-	struct historyEntry *entry = getHistoryAt(&ed->kill_history,
-						  ed->kill_ring_pos);
+	struct historyEntry *entry =
+		getHistoryAt(&ed->kill_history, ed->kill_ring_pos);
 	if (entry) {
 		clearEditorText(&ed->kill);
 		ed->kill.str = (uint8_t *)xstrdup(entry->str);
@@ -429,7 +430,8 @@ void editorTransformRegion(struct editorConfig *ed, struct editorBuffer *buf,
 	uint8_t *okill = NULL;
 	if (ed->kill.str != NULL) {
 		okill = xmalloc(strlen((char *)ed->kill.str) + 1);
-		emil_strlcpy(okill, ed->kill.str, strlen((char *)ed->kill.str) + 1);
+		emil_strlcpy(okill, ed->kill.str,
+			     strlen((char *)ed->kill.str) + 1);
 	}
 	editorKillRegion(ed, buf);
 
@@ -474,7 +476,8 @@ void editorReplaceRegex(struct editorConfig *ed, struct editorBuffer *buf) {
 	uint8_t *okill = NULL;
 	if (ed->kill.str != NULL) {
 		okill = xmalloc(strlen((char *)ed->kill.str) + 1);
-		emil_strlcpy(okill, ed->kill.str, strlen((char *)ed->kill.str) + 1);
+		emil_strlcpy(okill, ed->kill.str,
+			     strlen((char *)ed->kill.str) + 1);
 	}
 	editorCopyRegion(ed, buf);
 
@@ -630,7 +633,8 @@ void editorStringRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	uint8_t *okill = NULL;
 	if (ed->kill.str != NULL) {
 		okill = xmalloc(strlen((char *)ed->kill.str) + 1);
-		emil_strlcpy(okill, ed->kill.str, strlen((char *)ed->kill.str) + 1);
+		emil_strlcpy(okill, ed->kill.str,
+			     strlen((char *)ed->kill.str) + 1);
 	}
 
 	/* Do all the bookkeeping for killing the region, with a little extra
@@ -897,7 +901,7 @@ void editorKillRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 
 	/* Phase 1: editorCopyRegion writes linear undo text into ed->kill */
 	struct editorText saved = ed->kill;
-	ed->kill = (struct editorText){0};
+	ed->kill = (struct editorText){ 0 };
 
 	int topx, topy, botx, boty;
 	boty = buf->marky;
@@ -1079,7 +1083,7 @@ void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	int rh = ed->kill.rect_height;
 
 	struct editorText saved = ed->kill;
-	ed->kill = (struct editorText){0};
+	ed->kill = (struct editorText){ 0 };
 
 	int topx, topy, botx, boty;
 	topx = buf->cx;
@@ -1160,8 +1164,9 @@ void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	free(new->data);
 	new->datalen = 0;
 	if (rw > 0) {
-		new->datasize = (ed->kill.str ? strlen((char *)ed->kill.str) : 0) +
-				(rw * ((boty - topy) + 1)) + 1;
+		new->datasize =
+			(ed->kill.str ? strlen((char *)ed->kill.str) : 0) +
+			(rw * ((boty - topy) + 1)) + 1;
 	} else {
 		new->datasize = ed->kill.str ? strlen((char *)ed->kill.str) : 1;
 	}
@@ -1213,8 +1218,7 @@ void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 			new->data = xrealloc(new->data, new->datasize);
 		}
 		if (rw > 0) {
-			row->chars =
-				xrealloc(row->chars, row->size + 1 + rw);
+			row->chars = xrealloc(row->chars, row->size + 1 + rw);
 		}
 		memcpy(&row->chars[topx + rw], &row->chars[botx],
 		       row->size - botx);
@@ -1222,8 +1226,8 @@ void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 		row->size += rw;
 		row->chars[row->size] = 0;
 		if (rw > 0)
-			adjustAllPoints(buf, topx, cur_row, topx + rw,
-					cur_row, 0);
+			adjustAllPoints(buf, topx, cur_row, topx + rw, cur_row,
+					0);
 		emil_strlcat((char *)new->data, (char *)row->chars,
 			     new->datasize);
 		idx++;
@@ -1242,8 +1246,7 @@ void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 			new->data = xrealloc(new->data, new->datasize);
 		}
 		if (rw > 0) {
-			row->chars =
-				xrealloc(row->chars, row->size + 1 + rw);
+			row->chars = xrealloc(row->chars, row->size + 1 + rw);
 		}
 		memcpy(&row->chars[topx + rw], &row->chars[botx],
 		       row->size - botx);
@@ -1251,8 +1254,7 @@ void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 		row->size += rw;
 		row->chars[row->size] = 0;
 		if (rw > 0)
-			adjustAllPoints(buf, topx, boty, topx + rw, boty,
-					0);
+			adjustAllPoints(buf, topx, boty, topx + rw, boty, 0);
 		strncat((char *)new->data, (char *)row->chars, botx + rw);
 	}
 	new->datalen = strlen((char *)new->data);
