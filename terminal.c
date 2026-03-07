@@ -12,6 +12,7 @@
 #include <sys/termios.h>
 #endif
 #include <sys/ioctl.h>
+#include <sys/select.h>
 #include <unistd.h>
 #include <string.h>
 #include <signal.h>
@@ -229,6 +230,37 @@ void editorDeserializeUnicode(void) {
 	}
 }
 
+/*
+ * Drain the remainder of an unrecognized CSI (ESC [) sequence.
+ *
+ * CSI sequences follow the ECMA-48 grammar:
+ *   CSI  P..P  I..I  F
+ * where P (parameter bytes) are 0x30-0x3F, I (intermediate bytes) are
+ * 0x20-0x2F, and F (final byte) is 0x40-0x7E.  We read and discard
+ * bytes until we consume the final byte or the input dries up.
+ *
+ * last_read is the most recent byte already consumed by the caller;
+ * if it is itself a final byte there is nothing left to drain.
+ */
+static void drainCSI(uint8_t last_read) {
+	if (last_read >= 0x40 && last_read <= 0x7E)
+		return;
+
+	for (;;) {
+		fd_set fds;
+		struct timeval tv = { 0, 50000 }; /* 50 ms */
+		FD_ZERO(&fds);
+		FD_SET(STDIN_FILENO, &fds);
+		if (select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv) <= 0)
+			break;
+		uint8_t discard;
+		if (read(STDIN_FILENO, &discard, 1) != 1)
+			break;
+		if (discard >= 0x40 && discard <= 0x7E)
+			break;
+	}
+}
+
 /* Raw reading a keypress - terminal layer only handles raw byte reading and escape sequences */
 int editorReadKey(void) {
 	if (E.playback) {
@@ -370,20 +402,62 @@ int editorReadKey(void) {
 			}
 		}
 
-ESC_UNKNOWN:;
-		char seqR[32];
-		seqR[0] = 0;
-		char buf[8];
-		for (int i = 0; seq[i]; i++) {
-			if (seq[i] < ' ') {
-				snprintf(buf, sizeof(buf), "C-%c ",
-					 seq[i] + '`');
-			} else {
-				snprintf(buf, sizeof(buf), "%c ", seq[i]);
+ESC_UNKNOWN:
+		/*
+		 * Drain any remaining bytes that belong to this
+		 * escape sequence so they are not misinterpreted
+		 * as individual keypresses.
+		 *
+		 * CSI (ESC [): parameter/intermediate bytes may
+		 * still be in the input buffer; drain up to and
+		 * including the final byte (0x40-0x7E).
+		 *
+		 * SS3 (ESC O): exactly one follow-up byte which
+		 * was never read because seq[0]=='O' fell through
+		 * the Meta key handling above.
+		 */
+		if (seq[0] == '[') {
+			/* Find last byte we already consumed */
+			uint8_t last = 0;
+			for (int i = 4; i >= 1; i--) {
+				if (seq[i]) {
+					last = (uint8_t)seq[i];
+					break;
+				}
 			}
-			emil_strlcat(seqR, buf, sizeof(seqR));
+			if (last)
+				drainCSI(last);
+		} else if (seq[0] == 'O') {
+			/* SS3: consume the single expected byte */
+			fd_set fds;
+			struct timeval tv = { 0, 50000 };
+			FD_ZERO(&fds);
+			FD_SET(STDIN_FILENO, &fds);
+			if (select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv) >
+			    0) {
+				uint8_t discard;
+				if (read(STDIN_FILENO, &discard, 1) < 1) {
+					/* nothing to do */
+				}
+			}
 		}
-		editorSetStatusMessage(msg_unknown_meta, seqR);
+
+		{
+			char seqR[32];
+			seqR[0] = 0;
+			char buf[8];
+			for (int i = 0; seq[i]; i++) {
+				if (seq[i] < ' ') {
+					snprintf(buf, sizeof(buf), "C-%c ",
+						 seq[i] + '`');
+				} else {
+					snprintf(buf, sizeof(buf), "%c ",
+						 seq[i]);
+				}
+				emil_strlcat(seqR, buf, sizeof(seqR));
+			}
+			editorSetStatusMessage(msg_unknown_meta, seqR);
+		}
 		return 033;
 	} else if (utf8_is2Char(c)) {
 		/* 2-byte UTF-8 sequence */

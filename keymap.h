@@ -7,7 +7,7 @@
 #endif
 
 /* Prefix state for key sequences */
-enum PrefixState { PREFIX_NONE, PREFIX_CTRL_X, PREFIX_CTRL_X_R, PREFIX_META };
+enum PrefixState { PREFIX_NONE, PREFIX_CTRL_X, PREFIX_CTRL_X_R };
 
 enum editorKey {
 	BACKSPACE = 127,
