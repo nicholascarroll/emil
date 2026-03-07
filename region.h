@@ -8,6 +8,11 @@ int markInvalid(void);
 int markInvalidSilent(void);
 
 void editorSetMark(void);
+void editorSetMarkSilent(void);
+
+void editorDeactivateMark(void);
+
+void editorPopMark(void);
 
 void editorClearMark(void);
 

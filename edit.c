@@ -29,6 +29,8 @@ void editorInsertChar(struct editorBuffer *bufr, int c, int count) {
 		return;
 	}
 
+	bufr->mark_active = 0;
+
 	if (count <= 0)
 		count = 1;
 
@@ -42,6 +44,7 @@ void editorInsertChar(struct editorBuffer *bufr, int c, int count) {
 }
 
 void editorInsertUnicode(struct editorBuffer *bufr, int count) {
+	bufr->mark_active = 0;
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
 		editorUndoAppendUnicode(&E, bufr);
@@ -108,6 +111,8 @@ void editorInsertNewline(struct editorBuffer *bufr, int count) {
 		return;
 	}
 
+	bufr->mark_active = 0;
+
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
 		editorUndoAppendChar(bufr, '\n');
@@ -173,6 +178,8 @@ void editorUnindent(struct editorBuffer *bufr, int rept) {
 		return;
 	}
 
+	bufr->mark_active = 0;
+
 	/* Setup for indent mode */
 	int indWidth = 1;
 	char indCh = '\t';
@@ -233,6 +240,8 @@ void editorDelChar(struct editorBuffer *bufr, int count) {
 		return;
 	}
 
+	bufr->mark_active = 0;
+
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
 		if (bufr->cy == bufr->numrows)
@@ -261,6 +270,7 @@ int isParaBoundary(erow *row) {
 }
 
 void editorBackSpace(struct editorBuffer *bufr, int count) {
+	bufr->mark_active = 0;
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
 		if (!bufr->numrows)
@@ -536,6 +546,7 @@ void editorCapitalCaseWord(struct editorBuffer *bufr, int times) {
 /* Word deletion */
 
 void editorDeleteWord(struct editorBuffer *bufr, int count) {
+	bufr->mark_active = 0;
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
 		int origMarkx = bufr->markx;
@@ -555,6 +566,7 @@ void editorDeleteWord(struct editorBuffer *bufr, int count) {
 }
 
 void editorBackspaceWord(struct editorBuffer *bufr, int count) {
+	bufr->mark_active = 0;
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
 		int origMarkx = bufr->markx;
@@ -575,6 +587,7 @@ void editorBackspaceWord(struct editorBuffer *bufr, int count) {
 /* Character/word transposition */
 
 void editorTransposeWords(struct editorBuffer *bufr) {
+	bufr->mark_active = 0;
 	if (bufr->numrows == 0) {
 		editorSetStatusMessage(msg_buffer_empty);
 		return;
@@ -607,6 +620,7 @@ void editorTransposeWords(struct editorBuffer *bufr) {
 }
 
 void editorTransposeChars(struct editorBuffer *bufr) {
+	bufr->mark_active = 0;
 	if (bufr->numrows == 0) {
 		editorSetStatusMessage("Buffer is empty");
 		return;
@@ -640,6 +654,8 @@ void editorKillLine(int count) {
 		editorSetStatusMessage(msg_read_only);
 		return;
 	}
+
+	E.buf->mark_active = 0;
 
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
@@ -693,6 +709,7 @@ void editorKillLine(int count) {
 }
 
 void editorKillLineBackwards(void) {
+	E.buf->mark_active = 0;
 	if (E.buf->cx == 0) {
 		return;
 	}

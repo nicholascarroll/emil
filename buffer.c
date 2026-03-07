@@ -352,6 +352,9 @@ struct editorBuffer *newBuffer(void) {
 	ret->indent = 0;
 	ret->markx = -1;
 	ret->marky = -1;
+	ret->mark_active = 0;
+	ret->mark_ring_len = 0;
+	ret->mark_ring_idx = 0;
 	ret->cx = 0;
 	ret->cy = 0;
 	ret->numrows = 0;

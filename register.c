@@ -66,7 +66,7 @@ void editorJumpToRegister(struct editorConfig *ed) {
 		break;
 	case REGISTER_POINT:
 		if (ed->buf == ed->registers[reg].data.point.buf) {
-			editorSetMark();
+			editorSetMarkSilent();
 		} else {
 			ed->buf = ed->registers[reg].data.point.buf;
 			for (int i = 0; i < ed->nwindows; i++) {

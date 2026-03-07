@@ -32,9 +32,31 @@ void addToKillRing(const char *text, int is_rect, int rect_width,
 	E.kill.rect_height = rect_height;
 }
 
+/* Push the current mark position onto the mark ring (if mark is valid). */
+static void markRingPush(struct editorBuffer *buf) {
+	if (buf->markx < 0 || buf->marky < 0)
+		return;
+	buf->mark_ring[buf->mark_ring_idx].cx = buf->markx;
+	buf->mark_ring[buf->mark_ring_idx].cy = buf->marky;
+	buf->mark_ring_idx = (buf->mark_ring_idx + 1) % MARK_RING_SIZE;
+	if (buf->mark_ring_len < MARK_RING_SIZE)
+		buf->mark_ring_len++;
+}
+
 void editorSetMark(void) {
+	/* C-SPC C-SPC: if mark is already active at point, deactivate it.
+	 * This lets you drop a mark for later pop-back without starting
+	 * a visible selection. */
+	if (E.buf->mark_active && E.buf->markx == E.buf->cx &&
+	    E.buf->marky == E.buf->cy) {
+		E.buf->mark_active = 0;
+		editorSetStatusMessage("Mark deactivated");
+		return;
+	}
+	markRingPush(E.buf);
 	E.buf->markx = E.buf->cx;
 	E.buf->marky = E.buf->cy;
+	E.buf->mark_active = 1;
 	editorSetStatusMessage(msg_mark_set);
 	if (E.buf->marky >= E.buf->numrows) {
 		E.buf->marky = E.buf->numrows - 1;
@@ -42,14 +64,99 @@ void editorSetMark(void) {
 	}
 }
 
+/* Set mark at point, push old mark onto ring, but do NOT activate
+ * (no highlighting) and do NOT print a message.  Used before jumps
+ * like isearch, M-<, M->, goto-line, register-jump so the user
+ * can pop back with C-u C-SPC. */
+void editorSetMarkSilent(void) {
+	markRingPush(E.buf);
+	E.buf->markx = E.buf->cx;
+	E.buf->marky = E.buf->cy;
+	/* mark_active intentionally left unchanged (typically 0) */
+	if (E.buf->marky >= E.buf->numrows) {
+		E.buf->marky = E.buf->numrows - 1;
+		E.buf->markx = E.buf->row[E.buf->marky].size;
+	}
+}
+
 static void editorClearMarkQuiet(void) {
-	E.buf->markx = -1;
-	E.buf->marky = -1;
+	E.buf->mark_active = 0;
+}
+
+void editorDeactivateMark(void) {
+	E.buf->mark_active = 0;
 }
 
 void editorClearMark(void) {
 	editorClearMarkQuiet();
 	editorSetStatusMessage(msg_mark_cleared);
+}
+
+void editorPopMark(void) {
+	struct editorBuffer *buf = E.buf;
+
+	/*
+	 * Emacs set-mark-command with arg does two things:
+	 *   1. (goto-char (mark))  — move point to the current mark
+	 *   2. (pop-mark)          — rotate the ring into the mark
+	 *
+	 * pop-mark: append current mark to end of ring, then set mark
+	 * to the first (oldest) ring entry and remove it from the ring.
+	 */
+
+	/* Step 1: goto mark */
+	if (buf->markx < 0 || buf->marky < 0) {
+		editorSetStatusMessage("No mark set in this buffer");
+		return;
+	}
+
+	int old_cx = buf->cx;
+	int old_cy = buf->cy;
+
+	buf->cx = buf->markx;
+	buf->cy = buf->marky;
+
+	/* Clamp */
+	if (buf->cy >= buf->numrows)
+		buf->cy = buf->numrows > 0 ? buf->numrows - 1 : 0;
+	if (buf->cy < buf->numrows && buf->cx > buf->row[buf->cy].size)
+		buf->cx = buf->row[buf->cy].size;
+
+	/* Step 2: pop-mark — rotate ring into the mark.  */
+	if (buf->mark_ring_len > 0) {
+		/* Newest entry index */
+		int n = (buf->mark_ring_idx - 1 + MARK_RING_SIZE)
+			% MARK_RING_SIZE;
+
+		/* This becomes the new mark */
+		int new_cx = buf->mark_ring[n].cx;
+		int new_cy = buf->mark_ring[n].cy;
+
+		/* Shift all entries one position toward newest,
+		 * opening a slot at the oldest position for
+		 * the current mark. */
+		int oldest = (buf->mark_ring_idx - buf->mark_ring_len
+			      + MARK_RING_SIZE) % MARK_RING_SIZE;
+		for (int i = n; i != oldest;) {
+			int prev = (i - 1 + MARK_RING_SIZE) % MARK_RING_SIZE;
+			buf->mark_ring[i] = buf->mark_ring[prev];
+			i = prev;
+		}
+
+		/* Put current mark at the oldest (back) position */
+		buf->mark_ring[oldest].cx = buf->markx;
+		buf->mark_ring[oldest].cy = buf->marky;
+
+		/* mark_ring_idx and mark_ring_len unchanged */
+
+		buf->markx = new_cx;
+		buf->marky = new_cy;
+	}
+
+	buf->mark_active = 0;
+
+	if (buf->cx == old_cx && buf->cy == old_cy)
+		editorSetStatusMessage("Mark popped");
 }
 
 void editorToggleRectangleMode(void) {

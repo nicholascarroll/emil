@@ -65,8 +65,8 @@ static void computeRowHighlightBounds(struct editorBuffer *buf, int filerow,
 		return;
 	}
 
-	/* Region bounds */
-	if (!markInvalidSilent()) {
+	/* Region bounds — only highlight when mark is active */
+	if (buf->mark_active && !markInvalidSilent()) {
 		if (buf->rectangle_mode) {
 			int top = buf->cy < buf->marky ? buf->cy : buf->marky;
 			int bot = buf->cy > buf->marky ? buf->cy : buf->marky;

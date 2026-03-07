@@ -522,6 +522,7 @@ void editorProcessKeypress(int c) {
 		editorScrollLineDown(uarg);
 		break;
 	case BEG_OF_FILE:
+		editorSetMarkSilent();
 		E.buf->cy = 0;
 		E.buf->cx = 0;
 		break;
@@ -536,6 +537,7 @@ void editorProcessKeypress(int c) {
 			E.screenrows, win->rowoff);
 	} break;
 	case END_OF_FILE:
+		editorSetMarkSilent();
 		E.buf->cy = E.buf->numrows;
 		E.buf->cx = 0;
 		break;
@@ -548,12 +550,15 @@ void editorProcessKeypress(int c) {
 		editorEndOfLine(uarg);
 		break;
 	case CTRL('s'):
+		editorSetMarkSilent();
 		editorFind(E.buf);
 		break;
 	case REGEX_SEARCH_FORWARD:
+		editorSetMarkSilent();
 		editorRegexFind(E.buf);
 		break;
 	case REGEX_SEARCH_BACKWARD:
+		editorSetMarkSilent();
 		editorBackwardRegexFind(E.buf);
 		break;
 	case UNICODE_ERROR:
@@ -567,7 +572,7 @@ void editorProcessKeypress(int c) {
 			editorKillRectangle(&E, E.buf);
 		else
 			editorKillRegion(&E, E.buf);
-		editorClearMark();
+		editorDeactivateMark();
 		break;
 	case SAVE:
 		editorSave(E.buf);
@@ -580,15 +585,19 @@ void editorProcessKeypress(int c) {
 			editorCopyRectangle(&E, E.buf);
 		else
 			editorCopyRegion(&E, E.buf);
-		editorClearMark();
+		editorDeactivateMark();
 		break;
 	case CTRL('C'):
 		editorCopyRegion(&E, E.buf);
-		editorClearMark();
+		editorDeactivateMark();
 		editorCopyToClipboard(E.kill.str);
 		break;
 	case CTRL('@'):
-		editorSetMark();
+		if (uarg) {
+			editorPopMark();
+		} else {
+			editorSetMark();
+		}
 		break;
 	case CTRL('y'):
 		if (E.kill.is_rectangle)
@@ -604,7 +613,7 @@ void editorProcessKeypress(int c) {
 			editorBackspaceWord(E.buf, uarg ? uarg : 1);
 		} else {
 			editorKillRegion(&E, E.buf);
-			editorClearMark();
+			editorDeactivateMark();
 		}
 		break;
 	case CTRL('_'):
@@ -787,6 +796,7 @@ void editorProcessKeypress(int c) {
 		break;
 
 	case GOTO_LINE:
+		editorSetMarkSilent();
 		editorGotoLine();
 		break;
 
@@ -800,7 +810,7 @@ void editorProcessKeypress(int c) {
 		break;
 
 	case CTRL('g'):
-		editorClearMark();
+		editorDeactivateMark();
 		editorSetStatusMessage(msg_quit);
 		break;
 
@@ -821,6 +831,7 @@ void editorProcessKeypress(int c) {
 			E.buf->cy = E.buf->marky;
 			E.buf->markx = swapx;
 			E.buf->marky = swapy;
+			E.buf->mark_active = 1;
 		}
 		break;
 
@@ -849,12 +860,12 @@ void editorProcessKeypress(int c) {
 
 	case COPY_RECT:
 		editorCopyRectangle(&E, E.buf);
-		editorClearMark();
+		editorDeactivateMark();
 		break;
 
 	case KILL_RECT:
 		editorKillRectangle(&E, E.buf);
-		editorClearMark();
+		editorDeactivateMark();
 		break;
 
 	case YANK_RECT:

@@ -186,6 +186,8 @@ void editorDoUndo(struct editorBuffer *buf, int count) {
 		return;
 	}
 
+	buf->mark_active = 0;
+
 	int times = count ? count : 1;
 	for (int j = 0; j < times; j++) {
 		if (buf->undo == NULL) {
@@ -246,6 +248,8 @@ void editorDoRedo(struct editorBuffer *buf, int count) {
 		editorSetStatusMessage(msg_read_only);
 		return;
 	}
+
+	buf->mark_active = 0;
 
 	int times = count ? count : 1;
 	for (int j = 0; j < times; j++) {

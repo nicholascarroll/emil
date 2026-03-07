@@ -67,10 +67,21 @@ struct completion_result {
 	int prefix_len;
 };
 
+#define MARK_RING_SIZE 8
+
+struct markRingEntry {
+	int cx;
+	int cy;
+};
+
 struct editorBuffer {
 	int indent;
 	int cx, cy;
 	int markx, marky;
+	int mark_active;
+	struct markRingEntry mark_ring[MARK_RING_SIZE];
+	int mark_ring_len;   /* number of valid entries (0..MARK_RING_SIZE) */
+	int mark_ring_idx;   /* next slot to write (circular) */
 	int numrows;
 	int rowcap;
 	int end;
