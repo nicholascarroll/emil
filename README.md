@@ -195,8 +195,6 @@ when an OSC 52 enabled terminal client is used.
    - Visual line start/end (C-a / C-e)
    - M-{ / M-} paragraph up/down
    - M-a / M-e sentence start/end
-   - Jump to matching parenthesis (C-M-f / C-M-b)
-     also [,{,',"
    - C-M-k kill bracketed range
    - M-k kill paragraph
    - C-k kill visual line
