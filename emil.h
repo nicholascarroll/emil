@@ -191,7 +191,7 @@ struct editorConfig {
 	int screencols;
 	uint8_t unicode[4];
 	int nunicode;
-	char statusmsg[256];
+	char statusmsg[1024];
 	char prefix_display[32]; /* Display prefix commands like C-u */
 
 	/* Buffer management for minibuffer */

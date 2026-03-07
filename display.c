@@ -24,7 +24,7 @@
 
 extern struct editorConfig E;
 
-const int minibuffer_height = 1;
+int minibuffer_height = 1;
 const int statusbar_height = 1;
 
 /* Pre-computed highlight bounds for a single row.  Computed once per row
@@ -689,23 +689,54 @@ void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
 }
 
 void drawMinibuffer(struct abuf *ab) {
-	abAppend(ab, "\x1b[K", 3);
+	/* Determine the message to display */
+	const char *msg = E.statusmsg;
+	int msglen = strlen(msg);
+	int valid = msglen && time(NULL) - E.statusmsg_time < 5;
 
-	// Show prefix first if active
-	if (E.prefix_display[0]) {
-		abAppend(ab, E.prefix_display, strlen(E.prefix_display));
-	}
+	/* Prefix takes space on the first line */
+	int prefix_len = strlen(E.prefix_display);
 
-	// Then show message
-	int msglen = strlen(E.statusmsg);
-	if (msglen > E.screencols)
-		msglen = E.screencols;
-	if (msglen && time(NULL) - E.statusmsg_time < 5) {
-		if (E.buf->query && !E.buf->match) {
-			abAppend(ab, "\x1b[91m", 5);
+	/* Draw each minibuffer line */
+	for (int line = 0; line < minibuffer_height; line++) {
+		abAppend(ab, "\x1b[K", 3); /* clear line */
+
+		if (!valid) {
+			/* No message — just emit blank lines */
+			if (line < minibuffer_height - 1)
+				abAppend(ab, "\r\n", 2);
+			continue;
 		}
-		abAppend(ab, E.statusmsg, msglen);
-		abAppend(ab, "\x1b[0m", 4);
+
+		int offset;
+		if (line == 0) {
+			/* First line: prefix + start of message */
+			if (prefix_len > 0)
+				abAppend(ab, E.prefix_display, prefix_len);
+			offset = 0;
+		} else {
+			/* Continuation lines: message continues */
+			offset = (E.screencols - prefix_len) +
+				 (line - 1) * E.screencols;
+		}
+
+		int avail = (line == 0) ? E.screencols - prefix_len :
+					  E.screencols;
+		if (avail < 0)
+			avail = 0;
+
+		if (offset < msglen) {
+			int chunk = msglen - offset;
+			if (chunk > avail)
+				chunk = avail;
+			if (E.buf->query && !E.buf->match)
+				abAppend(ab, "\x1b[91m", 5);
+			abAppend(ab, msg + offset, chunk);
+			abAppend(ab, "\x1b[0m", 4);
+		}
+
+		if (line < minibuffer_height - 1)
+			abAppend(ab, "\r\n", 2);
 	}
 }
 
@@ -817,7 +848,21 @@ void cursorBottomLine(int curs) {
 	for (int i = 0; i < E.nwindows; i++) {
 		minibuf_row += E.windows[i]->height + statusbar_height;
 	}
-	minibuf_row++; /* minibuffer is after all windows/status bars */
+	minibuf_row++; /* minibuffer starts after all windows/status bars */
+
+	/* For multi-line minibuffer, figure out which line and column
+	 * the cursor falls on.  The first line has (screencols - prompt_width)
+	 * available characters; continuation lines have screencols each. */
+	if (minibuffer_height > 1 && curs > E.screencols) {
+		/* curs is 1-based column position.  First line holds screencols
+		 * characters.  Each subsequent line holds screencols more. */
+		int extra_lines = (curs - 1) / E.screencols;
+		if (extra_lines >= minibuffer_height)
+			extra_lines = minibuffer_height - 1;
+		minibuf_row += extra_lines;
+		curs = curs - extra_lines * E.screencols;
+	}
+
 	snprintf(cbuf, sizeof(cbuf), CSI "%d;%dH", minibuf_row, curs);
 	write(STDOUT_FILENO, cbuf, strlen(cbuf));
 }

@@ -45,6 +45,21 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 			editorSetStatusMessage((char *)prompt, content);
 		}
 		E.minibuf->completion_state.preserve_message = 0;
+
+		/* Grow minibuffer if prompt + content exceeds one line */
+		int total_len = strlen(E.statusmsg);
+		int needed = (total_len + E.screencols - 1) / E.screencols;
+		if (needed < 1)
+			needed = 1;
+		if (needed > 5)
+			needed = 5;
+		if (needed != minibuffer_height) {
+			minibuffer_height = needed;
+			/* Force window height recalculation */
+			for (int w = 0; w < E.nwindows; w++)
+				E.windows[w]->height = 0;
+		}
+
 		refreshScreen();
 
 		/* Position cursor on bottom line */
@@ -286,6 +301,13 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 	}
 
 done:
+	/* Restore minibuffer to single line */
+	if (minibuffer_height != 1) {
+		minibuffer_height = 1;
+		for (int w = 0; w < E.nwindows; w++)
+			E.windows[w]->height = 0;
+	}
+
 	if (result && strlen((char *)result) > 0) {
 		struct editorHistory *hist = NULL;
 		switch (t) {

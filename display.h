@@ -11,7 +11,7 @@ struct editorBuffer;
 struct editorConfig;
 
 /* Display constants */
-extern const int minibuffer_height;
+extern int minibuffer_height;
 extern const int statusbar_height;
 
 /* Display functions */
