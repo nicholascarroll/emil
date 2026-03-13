@@ -364,8 +364,8 @@ void editorQueryReplace(struct editorConfig *ed, struct editorBuffer *buf) {
 			NEXT_OCCUR(true);
 			break;
 		case CTRL('h'):
-		case BACKSPACE:
-		case DEL_KEY:
+		case KEY_BACKSPACE:
+		case KEY_DEL:
 		case 'n':
 			buf->cx++;
 			NEXT_OCCUR(true);

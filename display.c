@@ -155,8 +155,11 @@ void scrollViewport(struct editorWindow *win, struct editorBuffer *buf, int n) {
 		win->rowoff += n;
 		if (win->rowoff < 0)
 			win->rowoff = 0;
-		if (buf->numrows > 0 && win->rowoff >= buf->numrows)
-			win->rowoff = buf->numrows - 1;
+		int max_rowoff = buf->numrows - win->height + 2;
+		if (max_rowoff < 0)
+			max_rowoff = 0;
+		if (buf->numrows > 0 && win->rowoff > max_rowoff)
+			win->rowoff = max_rowoff;
 		win->skip_sublines = 0;
 		return;
 	}
@@ -166,8 +169,20 @@ void scrollViewport(struct editorWindow *win, struct editorBuffer *buf, int n) {
 
 	if (n > 0) {
 		/* Scroll down */
+		int last = buf->numrows - 1;
+		int last_end = getScreenLineForRow(buf, last, E.screencols) +
+			       countScreenLines(&buf->row[last], E.screencols);
+
 		for (int i = 0; i < n; i++) {
 			if (win->rowoff >= buf->numrows)
+				break;
+
+			/* Stop if the last buffer line is already visible
+			 * in the window (with a couple of blank lines). */
+			int top = getScreenLineForRow(buf, win->rowoff,
+						      E.screencols) +
+				  win->skip_sublines;
+			if (last_end <= top + win->height - 2)
 				break;
 
 			int row_lines = countScreenLines(&buf->row[win->rowoff],
@@ -199,6 +214,25 @@ void scrollViewport(struct editorWindow *win, struct editorBuffer *buf, int n) {
 			}
 		}
 	}
+}
+
+/* Update buf->end: is the last buffer line visible in the window? */
+static void updateEndFlag(struct editorWindow *win, struct editorBuffer *buf) {
+	if (buf->numrows == 0) {
+		buf->end = 1;
+		return;
+	}
+	if (!buf->word_wrap) {
+		buf->end = (win->rowoff + win->height > buf->numrows);
+		return;
+	}
+	buildScreenCache(buf, E.screencols);
+	int last = buf->numrows - 1;
+	int last_end = getScreenLineForRow(buf, last, E.screencols) +
+		       countScreenLines(&buf->row[last], E.screencols);
+	int top = getScreenLineForRow(buf, win->rowoff, E.screencols) +
+		  win->skip_sublines;
+	buf->end = (last_end <= top + win->height);
 }
 
 /* Return the absolute screen line for the top of the current viewport,
@@ -601,27 +635,36 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 
 void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
 	char buf[32];
-	/* Position cursor at the start of the status bar line */
 	snprintf(buf, sizeof(buf), CSI "%d;%dH", line, 1);
 	abAppend(ab, buf, strlen(buf));
 
 	struct editorBuffer *bufr = win->buf;
 
-	/* Start Reverse Video */
 	abAppend(ab, "\x1b[7m", 4);
 
-	/* Use pre-computed display name (set by computeDisplayNames) */
+	int total = E.screencols - 1;
+	char fill_char = win->focused ? ' ' : '-';
+
+	/* --- Prepare pieces --- */
+
 	const char *dname =
 		bufr->display_name ?
 			bufr->display_name :
 			(bufr->filename ? bufr->filename : "*scratch*");
+	const char *prefix = win->focused ? "   " : "-- ";
+	int prefix_len = strlen(prefix);
 
-	/* Build right-side indicator (fixed position, right-aligned).
-     * Format: " NNN:NNN XX% --" or " NNN:NNN Top --"
-     * This is always in the rightmost columns. */
-	char right[32];
+	char flags[8];
+	const char *mod_flag = bufr->external_mod ? "!" : "";
+	int flags_len = snprintf(flags, sizeof(flags), "%c%c%c%s",
+				 bufr->dirty ? '*' : '-',
+				 bufr->dirty ? '*' : '-',
+				 bufr->read_only ? '%' : ' ', mod_flag);
+
 	int ry = win->focused ? bufr->cy + 1 : win->cy + 1;
 	int rx = win->focused ? bufr->cx : win->cx;
+	char linecol[24];
+	int linecol_len = snprintf(linecol, sizeof(linecol), " %d:%d", ry, rx);
 
 	char pos_indicator[8];
 	if (bufr->numrows == 0)
@@ -635,39 +678,119 @@ void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
 	else
 		snprintf(pos_indicator, sizeof(pos_indicator), "%2d%%",
 			 (win->rowoff * 100) / bufr->numrows);
+	int pos_len = strlen(pos_indicator);
 
-	const char *wrap = bufr->word_wrap ?
-				   " (Wrap)" :
-				   (win->focused ? "       " : "-------");
-	int right_len;
-	if (win->focused) {
-		right_len = snprintf(right, sizeof(right), " %d:%d    %s   %s",
-				     ry, rx, pos_indicator, wrap);
-	} else {
-		right_len = snprintf(right, sizeof(right), " %d:%d -- %s --%s",
-				     ry, rx, pos_indicator, wrap);
+	const char *paren = NULL;
+	if (E.recording && bufr->word_wrap)
+		paren = "(Macro Wrap)";
+	else if (E.recording)
+		paren = "(Macro)";
+	else if (bufr->word_wrap)
+		paren = "(Wrap)";
+
+	/* --- Layout ---
+	 *
+	 * Left:   prefix + name + flags + linecol
+	 * Right:  parenthetical (if any, all-or-nothing)
+	 * Middle: position indicator (first to drop if tight)
+	 *
+	 * [prefix name flags linecol ... pos_indicator ... (paren)]
+	 */
+
+	/* The RHS has two independently reserved areas:
+	 *   1. Position indicator (Top/Bot/nn%/Emp/All) ~5 chars
+	 *   2. Parenthetical (Wrap/Macro/Macro Wrap)    ~15 chars
+	 *
+	 * Each reservation is dropped (freeing its space for the name)
+	 * if the basename + line:col won't fit with it.
+	 * Position indicator drops first, parenthetical drops second. */
+	int rhs_paren = 15;
+	int rhs_pos = 2 + pos_len; /* separator + indicator */
+
+	/* Extract basename for the fit check */
+	const char *bname = strrchr(dname, '/');
+	bname = bname ? bname + 1 : dname;
+	int bname_len = strlen(bname);
+
+	/* Left side fixed overhead (without name) */
+	int left_overhead = prefix_len + 1 + flags_len + linecol_len;
+
+	/* Try to afford both reservations, drop pos first, paren second */
+	int reserve_paren = (left_overhead + bname_len + rhs_paren <= total);
+	int reserve_pos = (left_overhead + bname_len +
+				   (reserve_paren ? rhs_paren : 0) + rhs_pos <=
+			   total);
+
+	int reserved =
+		(reserve_pos ? rhs_pos : 0) + (reserve_paren ? rhs_paren : 0);
+
+	/* Space available for the name */
+	int avail_for_name = total - left_overhead - reserved;
+	if (avail_for_name < 1)
+		avail_for_name = 1;
+
+	/* Left-truncate name to fit */
+	int dname_len = strlen(dname);
+	const char *show_name = dname;
+	char trunc_name[256];
+	if (dname_len > avail_for_name) {
+		int tail = avail_for_name - 3;
+		if (tail < 1)
+			tail = 1;
+		snprintf(trunc_name, sizeof(trunc_name), "...%s",
+			 dname + (dname_len - tail));
+		show_name = trunc_name;
 	}
 
-	/* Build left side: "-- name XX " or "   name XX " */
+	/* --- Build right side as fixed-width reserved blocks ---
+	 * The RHS is always exactly `reserved` chars wide.
+	 * Pos indicator is left-aligned in its block.
+	 * Parenthetical is right-aligned in its block. */
+	char right[64];
+	int right_len = 0;
+
+	if (reserve_pos) {
+		/* Pos block: separator + indicator, padded to rhs_pos */
+		const char *rsep = win->focused ? "  " : "--";
+		int wrote = snprintf(right + right_len,
+				     sizeof(right) - right_len, "%s%s", rsep,
+				     pos_indicator);
+		/* Pad remainder of block with fill */
+		while (wrote < rhs_pos &&
+		       right_len + wrote < (int)sizeof(right) - 1) {
+			right[right_len + wrote] = fill_char;
+			wrote++;
+		}
+		right_len += wrote;
+	}
+
+	if (reserve_paren) {
+		/* Paren block: padded to rhs_paren. Content right-aligned. */
+		if (paren) {
+			const char *rsep = win->focused ? "  " : "--";
+			int content_len = 2 + strlen(paren);
+			int pad = rhs_paren - content_len;
+			if (pad < 0)
+				pad = 0;
+			for (int i = 0; i < pad; i++)
+				right[right_len++] = fill_char;
+			right_len += snprintf(right + right_len,
+					      sizeof(right) - right_len, "%s%s",
+					      rsep, paren);
+		} else {
+			/* Empty: fill the whole block */
+			for (int i = 0; i < rhs_paren; i++)
+				right[right_len++] = fill_char;
+			right[right_len] = '\0';
+		}
+	}
+
+	/* --- Write left side: prefix + name + flags + linecol --- */
 	char left[1024];
-	int left_len;
-	const char *mod_flag = bufr->external_mod ? "!" : "";
-	if (win->focused) {
-		left_len = snprintf(left, sizeof(left), "   %s %c%c%c%s", dname,
-				    bufr->dirty ? '*' : '-',
-				    bufr->dirty ? '*' : '-',
-				    bufr->read_only ? '%' : ' ', mod_flag);
-	} else {
-		left_len = snprintf(left, sizeof(left), "-- %s %c%c%c%s", dname,
-				    bufr->dirty ? '*' : '-',
-				    bufr->dirty ? '*' : '-',
-				    bufr->read_only ? '%' : ' ', mod_flag);
-	}
+	int left_len = snprintf(left, sizeof(left), "%s%s %s%s", prefix,
+				show_name, flags, linecol);
 
-	/* Total visible = screencols - 1 (to avoid right-margin wrap).
-     * Layout: [left][fill][right]
-     * Cap left so there's room for at least the right side. */
-	int total = E.screencols - 1;
+	/* Safety cap */
 	if (left_len > total - right_len)
 		left_len = total - right_len;
 	if (left_len < 0)
@@ -675,16 +798,15 @@ void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
 
 	abAppend(ab, left, left_len);
 
-	/* Fill gap between left and right */
+	/* Fill gap */
 	int fill = total - left_len - right_len;
-	char fill_char = win->focused ? ' ' : '-';
 	while (fill-- > 0)
 		abAppend(ab, &fill_char, 1);
 
-	abAppend(ab, right, right_len);
+	/* Right side */
+	if (right_len > 0)
+		abAppend(ab, right, right_len);
 
-	/* CSI K fills the last column with reverse video without
-     * triggering auto-wrap on immediate-wrap terminals. */
 	abAppend(ab, "\x1b[K\x1b[m" CRLF, 8);
 }
 
@@ -802,6 +924,7 @@ void refreshScreen(void) {
 		if (win->focused)
 			scroll();
 		drawRows(win, &ab, win->height, E.screencols);
+		updateEndFlag(win, win->buf);
 		cumulative_height += win->height + statusbar_height;
 		drawStatusBar(win, &ab, cumulative_height);
 	}
@@ -838,7 +961,7 @@ void refreshScreen(void) {
 
 	IGNORE_RETURN(write(STDOUT_FILENO, ab.b, ab.len));
 
-//	usleep(100000); // 100ms delay for simulating slow network or screen
+	//	usleep(100000); // 100ms delay for simulating slow network or screen
 	abFree(&ab);
 }
 

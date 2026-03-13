@@ -15,6 +15,7 @@
 #include "prompt.h"
 #include "util.h"
 #include "undo.h"
+#include "unicode.h"
 #include "keymap.h"
 #include "unused.h"
 #include <limits.h>
@@ -145,74 +146,10 @@ char *editorRowsToString(struct editorBuffer *bufr, int *buflen) {
  * Returns 1 if valid, 0 if invalid. */
 
 static int checkUTF8Validity(struct editorBuffer *bufr) {
-	int row;
-	for (row = 0; row < bufr->numrows; row++) {
-		unsigned char *s = (unsigned char *)bufr->row[row].chars;
-		int i = 0;
-		while (i < bufr->row[row].size) {
-			unsigned char c = s[i];
-
-			if (c == 0x00) {
-				/* Null bytes not allowed */
-				return 0;
-			} else if (c <= 0x7F) {
-				/* ASCII byte */
-				i++;
-			} else if ((c & 0xE0) == 0xC0) {
-				/* 2-byte sequence */
-				if (i + 1 >= bufr->row[row].size ||
-				    (s[i + 1] & 0xC0) != 0x80) {
-					return 0;
-				}
-				unsigned int cp = ((c & 0x1F) << 6) |
-						  (s[i + 1] & 0x3F);
-				if (cp < 0x80) {
-					return 0; /* Overlong */
-				}
-				i += 2;
-			} else if ((c & 0xF0) == 0xE0) {
-				/* 3-byte sequence */
-				if (i + 2 >= bufr->row[row].size ||
-				    (s[i + 1] & 0xC0) != 0x80 ||
-				    (s[i + 2] & 0xC0) != 0x80) {
-					return 0;
-				}
-				unsigned int cp = ((c & 0x0F) << 12) |
-						  ((s[i + 1] & 0x3F) << 6) |
-						  (s[i + 2] & 0x3F);
-				if (cp < 0x800) {
-					return 0; /* Overlong */
-				}
-				if (cp >= 0xD800 && cp <= 0xDFFF) {
-					return 0; /* Surrogate half */
-				}
-				i += 3;
-			} else if ((c & 0xF8) == 0xF0) {
-				/* 4-byte sequence */
-				if (i + 3 >= bufr->row[row].size ||
-				    (s[i + 1] & 0xC0) != 0x80 ||
-				    (s[i + 2] & 0xC0) != 0x80 ||
-				    (s[i + 3] & 0xC0) != 0x80) {
-					return 0;
-				}
-				unsigned int cp = ((c & 0x07) << 18) |
-						  ((s[i + 1] & 0x3F) << 12) |
-						  ((s[i + 2] & 0x3F) << 6) |
-						  (s[i + 3] & 0x3F);
-				if (cp < 0x10000) {
-					return 0; /* Overlong */
-				}
-				if (cp > 0x10FFFF) {
-					return 0; /* Above Unicode max */
-				}
-				i += 4;
-			} else {
-				/* Invalid starting byte (0x80-0xBF or 0xF8+) */
-				return 0;
-			}
-		}
+	for (int row = 0; row < bufr->numrows; row++) {
+		if (!utf8_validate(bufr->row[row].chars, bufr->row[row].size))
+			return 0;
 	}
-
 	return 1;
 }
 

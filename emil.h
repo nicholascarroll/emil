@@ -230,7 +230,8 @@ struct editorConfig {
 	struct editorHistory shell_history;
 	struct editorHistory search_history;
 	struct editorHistory kill_history;
-	int kill_ring_pos; /* Current position in kill ring for M-y */
+	int kill_ring_pos;   /* Current position in kill ring for M-y */
+	int self_insert_key; /* Stashed key for CMD_SELF_INSERT */
 };
 
 /*** prototypes ***/

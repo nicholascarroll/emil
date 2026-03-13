@@ -833,7 +833,10 @@ static char *middleTruncate(const char *full, const char *other,
  *     differing directory walking up from the basename, drop shared
  *     dirs with "...", keep the differing one, left-truncate to fit. */
 void computeDisplayNames(void) {
-	int max_width = E.screencols - 30;
+	/* Reserve space for the status bar elements that surround the
+	 * name: prefix (3) + space (1) + flags (3) + separator (2) +
+	 * line:col (~6) = ~15 chars. */
+	int max_width = E.screencols - 15;
 	if (max_width < 4)
 		max_width = 4;
 

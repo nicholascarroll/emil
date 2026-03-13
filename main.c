@@ -284,43 +284,16 @@ int main(int argc, char *argv[]) {
 	for (;;) {
 		refreshScreen();
 
-		int c = editorReadKey();
-		if (c == MACRO_RECORD) {
-			if (E.recording) {
-				editorSetStatusMessage(
-					"Already defining keyboard macro");
-			} else {
-				editorSetStatusMessage(
-					"Defining keyboard macro...");
-				E.recording = 1;
-				E.macro.nkeys = 0;
-				E.macro.skeys = 0x10;
-				free(E.macro.keys);
-				E.macro.keys =
-					xmalloc(E.macro.skeys * sizeof(int));
-			}
-		} else if (c == MACRO_END) {
-			if (E.recording) {
-				editorSetStatusMessage(
-					"Keyboard macro defined");
-				E.recording = 0;
-			} else {
-				editorSetStatusMessage(
-					"Not defining keyboard macro");
-			}
-		} else if (c == MACRO_EXEC ||
-			   (E.micro == MACRO_EXEC && (c == 'e' || c == 'E'))) {
-			if (E.recording) {
-				editorSetStatusMessage(
-					"Keyboard macro defined");
-				E.recording = 0;
-			}
-			editorExecMacro(&E.macro);
-			E.micro = MACRO_EXEC;
-		} else {
-			editorRecordKey(c);
-			executeCommand(c);
-		}
+		int key = editorReadKey();
+		editorRecordKey(key);
+
+		/* Stash printable key for self-insert */
+		if (key >= ' ' && key < KEY_ARROW_LEFT)
+			E.self_insert_key = key;
+
+		int cmd = resolveBinding(key);
+		if (cmd != CMD_NONE)
+			editorProcessKeypress(cmd);
 	}
 
 	/* cleanup */

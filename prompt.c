@@ -169,20 +169,22 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 			}
 			break;
 
-		case ARROW_UP:
-		case META_P:
-		case ARROW_DOWN:
-		case META_N: {
+		case KEY_ARROW_UP:
+		case KEY_META('p'):
+		case KEY_ARROW_DOWN:
+		case KEY_META('n'): {
 			/* If completions are visible, cycle selection
 			 * instead of history. */
 			if (E.minibuf->completion_state.matches &&
 			    E.minibuf->completion_state.n_matches > 0) {
 				cycleCompletion(E.minibuf,
-						c == META_P ? 1 : -1);
-				cycleCompletion(E.minibuf,
-						c == META_N || c == ARROW_DOWN ?
-							1 :
-							-1);
+						c == KEY_META('p') ? 1 : -1);
+				cycleCompletion(
+					E.minibuf,
+					c == KEY_META('n') ||
+							c == KEY_ARROW_DOWN ?
+						1 :
+						-1);
 				break;
 			}
 
@@ -206,7 +208,7 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 			}
 
 			if (hist && hist->count > 0) {
-				if (c == META_P || c == ARROW_UP) {
+				if (c == KEY_META('p') || c == KEY_ARROW_UP) {
 					if (history_pos == -1) {
 						history_pos = hist->count - 1;
 					} else if (history_pos > 0) {
@@ -258,7 +260,14 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 					&E.minibuf->completion_state);
 			}
 
-			editorProcessKeypress(c);
+			/* Resolve key → command before dispatching */
+			if (c >= ' ' && c < KEY_ARROW_LEFT)
+				E.self_insert_key = c;
+			{
+				int cmd = resolveBinding(c);
+				if (cmd != CMD_NONE)
+					editorProcessKeypress(cmd);
+			}
 
 			/* Ensure single line */
 			if (E.minibuf->numrows > 1) {

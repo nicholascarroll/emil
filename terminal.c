@@ -261,11 +261,13 @@ static void drainCSI(uint8_t last_read) {
 	}
 }
 
-/* Raw reading a keypress - terminal layer only handles raw byte reading and escape sequences */
+/* Raw reading a keypress - terminal layer only handles raw byte
+ * reading, escape sequence decoding, and UTF-8 assembly.
+ * Returns key tokens only — no binding policy. */
 int editorReadKey(void) {
 	if (E.playback) {
 		int ret = E.macro.keys[E.playback++];
-		if (ret == UNICODE) {
+		if (ret == KEY_UNICODE) {
 			editorDeserializeUnicode();
 		}
 		return ret;
@@ -276,15 +278,13 @@ int editorReadKey(void) {
 		if (nread == -1 && errno != EAGAIN)
 			die("read");
 	}
-	if (c == CTRL('u')) {
-		return UNIVERSAL_ARGUMENT;
-	}
 	if (c == 033) {
 		char seq[5] = { 0, 0, 0, 0, 0 };
 		if (read(STDIN_FILENO, &seq[0], 1) != 1)
 			goto ESC_UNKNOWN;
 
 		if (seq[0] == '[') {
+			/* CSI sequence — physical key decoding */
 			if (read(STDIN_FILENO, &seq[1], 1) != 1)
 				goto ESC_UNKNOWN;
 			if (seq[1] >= '0' && seq[1] <= '9') {
@@ -293,19 +293,19 @@ int editorReadKey(void) {
 				if (seq[2] == '~') {
 					switch (seq[1]) {
 					case '1':
-						return HOME_KEY;
+						return KEY_HOME;
 					case '3':
-						return DEL_KEY;
+						return KEY_DEL;
 					case '4':
-						return END_KEY;
+						return KEY_END;
 					case '5':
-						return PAGE_UP;
+						return KEY_PAGE_UP;
 					case '6':
-						return PAGE_DOWN;
+						return KEY_PAGE_DOWN;
 					case '7':
-						return HOME_KEY;
+						return KEY_HOME;
 					case '8':
-						return END_KEY;
+						return KEY_END;
 					}
 				} else if (seq[2] == '4') {
 					if (read(STDIN_FILENO, &seq[3], 1) != 1)
@@ -318,102 +318,27 @@ int editorReadKey(void) {
 			} else {
 				switch (seq[1]) {
 				case 'A':
-					return ARROW_UP;
+					return KEY_ARROW_UP;
 				case 'B':
-					return ARROW_DOWN;
+					return KEY_ARROW_DOWN;
 				case 'C':
-					return ARROW_RIGHT;
+					return KEY_ARROW_RIGHT;
 				case 'D':
-					return ARROW_LEFT;
+					return KEY_ARROW_LEFT;
 				case 'F':
-					return END_KEY;
+					return KEY_END;
 				case 'H':
-					return HOME_KEY;
+					return KEY_HOME;
 				case 'Z':
-					return BACKTAB;
+					return KEY_BACKTAB;
 				}
 			}
 		} else if ('0' <= seq[0] && seq[0] <= '9') {
-			return ALT_0 + (seq[0] - '0');
-		} else if (seq[0] == '<') {
-			return BEG_OF_FILE;
-		} else if (seq[0] == '>') {
-			return END_OF_FILE;
-		} else if (seq[0] == '|') {
-			return PIPE_CMD;
-		} else if (seq[0] == '!') {
-			return SHELL_CMD;
-		} else if (seq[0] == '.') {
-			return CTAGS_JUMP;
-		} else if (seq[0] == ',') {
-			return CTAGS_BACK;
-		} else if (seq[0] == '`') {
-			return TOGGLE_HEADER_BODY;
-		} else if (seq[0] == '%') {
-			return QUERY_REPLACE;
-		} else if (seq[0] == '?') {
-			return CUSTOM_INFO_MESSAGE;
-		} else if (seq[0] == 127) {
-			return BACKSPACE_WORD;
-		} else if (seq[0] == CTRL('s')) {
-			return REGEX_SEARCH_FORWARD;
-		} else if (seq[0] == CTRL('r')) {
-			return REGEX_SEARCH_BACKWARD;
-		} else if (seq[0] == 'p') {
-			return META_P;
-		} else if (seq[0] == 'n') {
-			return META_N;
-		} else if (seq[0] == '{') {
-			return BACKWARD_PARA;
-		} else if (seq[0] == '}') {
-			return FORWARD_PARA;
-		} else if (seq[0] == 'a') {
-			return SENTENCE_BACKWARD;
-		} else if (seq[0] == 'e') {
-			return SENTENCE_FORWARD;
-		} else if (seq[0] == 'h') {
-			return MARK_PARA;
-		} else if (seq[0] == 'k') {
-			return KILL_PARA;
-		} else if (seq[0] == 'z') {
-			return ZAP_TO_CHAR;
+			/* Alt digit */
+			return KEY_ALT_0 + (seq[0] - '0');
 		} else {
-			/* Check for C-M- (control+meta) combinations first */
-			if (seq[0] == CTRL('f')) {
-				return FORWARD_SEXP;
-			} else if (seq[0] == CTRL('b')) {
-				return BACKWARD_SEXP;
-			} else if (seq[0] == CTRL('k')) {
-				return KILL_SEXP;
-			}
-			switch ((seq[0] & 0x1f) | 0x40) {
-			case 'B':
-				return BACKWARD_WORD;
-			case 'C':
-				return CAPCASE_WORD;
-			case 'D':
-				return DELETE_WORD;
-			case 'F':
-				return FORWARD_WORD;
-			case 'G':
-				return GOTO_LINE;
-			case 'H':
-				return BACKSPACE_WORD;
-			case 'L':
-				return DOWNCASE_WORD;
-			case 'T':
-				return TRANSPOSE_WORDS;
-			case 'U':
-				return UPCASE_WORD;
-			case 'V':
-				return PAGE_UP;
-			case 'W':
-				return COPY;
-			case 'X':
-				return EXEC_CMD;
-			case 'Y':
-				return YANK_POP;
-			}
+			/* Meta + character — return as KEY_META(ch) */
+			return KEY_META((uint8_t)seq[0]);
 		}
 
 ESC_UNKNOWN:
@@ -421,17 +346,8 @@ ESC_UNKNOWN:
 		 * Drain any remaining bytes that belong to this
 		 * escape sequence so they are not misinterpreted
 		 * as individual keypresses.
-		 *
-		 * CSI (ESC [): parameter/intermediate bytes may
-		 * still be in the input buffer; drain up to and
-		 * including the final byte (0x40-0x7E).
-		 *
-		 * SS3 (ESC O): exactly one follow-up byte which
-		 * was never read because seq[0]=='O' fell through
-		 * the Meta key handling above.
 		 */
 		if (seq[0] == '[') {
-			/* Find last byte we already consumed */
 			uint8_t last = 0;
 			for (int i = 4; i >= 1; i--) {
 				if (seq[i]) {
@@ -474,35 +390,35 @@ ESC_UNKNOWN:
 		}
 		return 033;
 	} else if (utf8_is2Char(c)) {
-		/* 2-byte UTF-8 sequence */
 		E.nunicode = 2;
-
 		E.unicode[0] = c;
 		if (read(STDIN_FILENO, &E.unicode[1], 1) != 1)
-			return UNICODE_ERROR;
-		return UNICODE;
+			return KEY_UNICODE_ERROR;
+		if (!utf8_validate(E.unicode, 2))
+			return KEY_UNICODE_ERROR;
+		return KEY_UNICODE;
 	} else if (utf8_is3Char(c)) {
-		/* 3-byte UTF-8 sequence */
 		E.nunicode = 3;
-
 		E.unicode[0] = c;
 		if (read(STDIN_FILENO, &E.unicode[1], 1) != 1)
-			return UNICODE_ERROR;
+			return KEY_UNICODE_ERROR;
 		if (read(STDIN_FILENO, &E.unicode[2], 1) != 1)
-			return UNICODE_ERROR;
-		return UNICODE;
+			return KEY_UNICODE_ERROR;
+		if (!utf8_validate(E.unicode, 3))
+			return KEY_UNICODE_ERROR;
+		return KEY_UNICODE;
 	} else if (utf8_is4Char(c)) {
-		/* 4-byte UTF-8 sequence */
 		E.nunicode = 4;
-
 		E.unicode[0] = c;
 		if (read(STDIN_FILENO, &E.unicode[1], 1) != 1)
-			return UNICODE_ERROR;
+			return KEY_UNICODE_ERROR;
 		if (read(STDIN_FILENO, &E.unicode[2], 1) != 1)
-			return UNICODE_ERROR;
+			return KEY_UNICODE_ERROR;
 		if (read(STDIN_FILENO, &E.unicode[3], 1) != 1)
-			return UNICODE_ERROR;
-		return UNICODE;
+			return KEY_UNICODE_ERROR;
+		if (!utf8_validate(E.unicode, 4))
+			return KEY_UNICODE_ERROR;
+		return KEY_UNICODE;
 	}
 	return c;
 }

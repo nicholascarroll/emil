@@ -124,7 +124,7 @@ void test_visual_move_down_within_row(void) {
 	b->cx = 5;
 	b->cy = 0;
 
-	editorMoveCursor(ARROW_DOWN, 1);
+	editorMoveCursor(KEY_ARROW_DOWN, 1);
 	/* Should move to sub-line 1, col 5 => byte 25 */
 	TEST_ASSERT_EQUAL_INT(0, b->cy); /* same logical row */
 	TEST_ASSERT_EQUAL_INT(25, b->cx);
@@ -142,7 +142,7 @@ void test_visual_move_up_within_row(void) {
 	b->cx = 25; /* sub-line 1, col 5 */
 	b->cy = 0;
 
-	editorMoveCursor(ARROW_UP, 1);
+	editorMoveCursor(KEY_ARROW_UP, 1);
 	/* Should move to sub-line 0, col 5 => byte 5 */
 	TEST_ASSERT_EQUAL_INT(0, b->cy);
 	TEST_ASSERT_EQUAL_INT(5, b->cx);
@@ -159,7 +159,7 @@ void test_visual_move_down_crosses_row(void) {
 	b->cx = 3;
 	b->cy = 0;
 
-	editorMoveCursor(ARROW_DOWN, 1);
+	editorMoveCursor(KEY_ARROW_DOWN, 1);
 	TEST_ASSERT_EQUAL_INT(1, b->cy);
 	TEST_ASSERT_EQUAL_INT(3, b->cx);
 	destroyBuffer(b);
@@ -178,7 +178,7 @@ void test_visual_move_up_crosses_row(void) {
 	b->cy = 1;
 	b->cx = 3; /* col 3 on row 1 */
 
-	editorMoveCursor(ARROW_UP, 1);
+	editorMoveCursor(KEY_ARROW_UP, 1);
 	/* Should go to row 0, last sub-line (1), col 3 => byte 23 */
 	TEST_ASSERT_EQUAL_INT(0, b->cy);
 	TEST_ASSERT_EQUAL_INT(23, b->cx);
@@ -193,7 +193,7 @@ void test_visual_move_down_at_buffer_end(void) {
 	b->cx = 3;
 	b->cy = 0;
 
-	editorMoveCursor(ARROW_DOWN, 1);
+	editorMoveCursor(KEY_ARROW_DOWN, 1);
 	/* Should move to virtual line past EOF */
 	TEST_ASSERT_EQUAL_INT(1, b->cy);
 	TEST_ASSERT_EQUAL_INT(0, b->cx);
@@ -208,7 +208,7 @@ void test_visual_move_up_at_buffer_start(void) {
 	b->cx = 3;
 	b->cy = 0;
 
-	editorMoveCursor(ARROW_UP, 1);
+	editorMoveCursor(KEY_ARROW_UP, 1);
 	/* Should stay put */
 	TEST_ASSERT_EQUAL_INT(0, b->cy);
 	TEST_ASSERT_EQUAL_INT(3, b->cx);

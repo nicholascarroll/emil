@@ -148,6 +148,15 @@ void editorPipeCmd(struct editorConfig *ed, struct editorBuffer *bufr,
 	uint8_t *pipeOutput = editorPipe(ed, bufr, useRegion);
 	if (pipeOutput != NULL) {
 		size_t outputLen = strlen((char *)pipeOutput);
+
+		/* Validate UTF-8 before inserting into a buffer */
+		if (!utf8_validate(pipeOutput, (int)outputLen)) {
+			editorSetStatusMessage(
+				"Shell output contains invalid UTF-8");
+			free(pipeOutput);
+			return;
+		}
+
 		if (outputLen < sizeof(ed->statusmsg) - 1) {
 			editorSetStatusMessage("%s", pipeOutput);
 		} else {

@@ -358,7 +358,7 @@ void editorMoveCursor(int key, int count) {
 				    &E.buf->row[E.buf->cy];
 
 		switch (key) {
-		case ARROW_LEFT:
+		case KEY_ARROW_LEFT:
 			if (E.buf->cx != 0) {
 				do
 					E.buf->cx--;
@@ -370,7 +370,7 @@ void editorMoveCursor(int key, int count) {
 			}
 			break;
 
-		case ARROW_RIGHT:
+		case KEY_ARROW_RIGHT:
 			if (row && E.buf->cx < row->size) {
 				E.buf->cx += utf8_nBytes(row->chars[E.buf->cx]);
 			} else if (row && E.buf->cx == row->size) {
@@ -378,7 +378,7 @@ void editorMoveCursor(int key, int count) {
 				E.buf->cx = 0;
 			}
 			break;
-		case ARROW_UP:
+		case KEY_ARROW_UP:
 			if (E.buf->word_wrap) {
 				editorMoveVisualRow(-1);
 			} else if (E.buf->cy > 0) {
@@ -390,7 +390,7 @@ void editorMoveCursor(int key, int count) {
 					E.buf->cx++;
 			}
 			break;
-		case ARROW_DOWN:
+		case KEY_ARROW_DOWN:
 			if (E.buf->word_wrap) {
 				editorMoveVisualRow(+1);
 			} else if (E.buf->cy < E.buf->numrows) {
@@ -928,12 +928,9 @@ void editorTransposeWords(struct editorBuffer *bufr) {
 		editorSetStatusMessage("Cannot transpose here");
 		return;
 	}
-	bufr->cx = startcx;
-	bufr->cy = startcy;
-	bufr->markx = endcx;
-	bufr->marky = endcy;
 
-	editorTransformRegion(&E, bufr, transformerTransposeWords);
+	editorTransformRange(&E, bufr, startcx, startcy, endcx, endcy,
+			     transformerTransposeWords);
 }
 
 void editorTransposeChars(struct editorBuffer *bufr) {
@@ -943,25 +940,36 @@ void editorTransposeChars(struct editorBuffer *bufr) {
 		return;
 	}
 
-	if (bufr->cx == 0 && bufr->cy == 0) {
-		editorSetStatusMessage(msg_beginning_of_buffer);
-		return;
-	} else if (bufr->cy >= bufr->numrows ||
-		   (bufr->cy == bufr->numrows - 1 &&
-		    bufr->cx == bufr->row[bufr->cy].size)) {
-		editorSetStatusMessage(msg_end_of_buffer);
+	erow *row = &bufr->row[bufr->cy];
+
+	/* If nothing after point, back up one character. */
+	if (bufr->cx >= row->size) {
+		if (bufr->cx == 0) {
+			/* Empty line */
+			editorSetStatusMessage("Cannot transpose here");
+			return;
+		}
+		bufr->cx--;
+		while (bufr->cx > 0 && utf8_isCont(row->chars[bufr->cx]))
+			bufr->cx--;
+	}
+
+	/* Need a character before and after point. */
+	if (bufr->cx == 0 || bufr->cx >= row->size) {
+		editorSetStatusMessage("Cannot transpose here");
 		return;
 	}
 
-	int startcx, startcy;
-	editorMoveCursor(ARROW_LEFT, 1);
-	startcx = bufr->cx;
-	startcy = bufr->cy;
-	editorMoveCursor(ARROW_RIGHT, 1);
-	editorMoveCursor(ARROW_RIGHT, 1);
-	bufr->markx = startcx;
-	bufr->marky = startcy;
-	editorTransformRegion(&E, bufr, transformerTransposeChars);
+	/* Find the start of the character before point. */
+	int startx = bufr->cx - 1;
+	while (startx > 0 && utf8_isCont(row->chars[startx]))
+		startx--;
+
+	/* Find the end of the character after point. */
+	int endx = bufr->cx + utf8_nBytes(row->chars[bufr->cx]);
+
+	editorTransformRange(&E, bufr, startx, bufr->cy, endx, bufr->cy,
+			     transformerTransposeChars);
 }
 
 /* Line operations */

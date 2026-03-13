@@ -13,9 +13,9 @@ You will receive an initial response within 14 days.
 
 ---
 
-## Hardening Options
+## Hardening
 
-see [HARDENING.md](./HARDENING.md)
+`emil` allows you to strip Shell Integration from the build: Use `-DEMIL_DISABLE_SHELL` to disable all external command execution.
 
 ## Project Roadmap
 

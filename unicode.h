@@ -16,4 +16,6 @@ int utf8_nBytes(uint8_t ch);
 
 int utf8_isCont(uint8_t ch);
 
+int utf8_validate(const uint8_t *buf, int len);
+
 int nextScreenX(uint8_t *str, int *idx, int screen_x);

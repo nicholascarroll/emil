@@ -190,6 +190,64 @@ int utf8_isCont(uint8_t ch) {
 	return (0x80 <= ch && ch <= 0xBF);
 }
 
+/*
+ * Validate a UTF-8 byte sequence.
+ *
+ * Returns 1 if buf[0..len-1] is valid UTF-8, 0 otherwise.
+ * Checks continuation bytes, rejects overlong encodings,
+ * surrogate halves (U+D800..U+DFFF), null bytes, and
+ * codepoints above U+10FFFF.
+ */
+int utf8_validate(const uint8_t *buf, int len) {
+	int i = 0;
+	while (i < len) {
+		uint8_t c = buf[i];
+
+		if (c == 0x00) {
+			return 0;
+		} else if (c <= 0x7F) {
+			i++;
+		} else if ((c & 0xE0) == 0xC0) {
+			if (c < 0xC2)
+				return 0; /* Overlong */
+			if (i + 1 >= len || (buf[i + 1] & 0xC0) != 0x80)
+				return 0;
+			i += 2;
+		} else if ((c & 0xF0) == 0xE0) {
+			if (i + 2 >= len || (buf[i + 1] & 0xC0) != 0x80 ||
+			    (buf[i + 2] & 0xC0) != 0x80)
+				return 0;
+			unsigned int cp = ((c & 0x0F) << 12) |
+					  ((buf[i + 1] & 0x3F) << 6) |
+					  (buf[i + 2] & 0x3F);
+			if (cp < 0x800)
+				return 0; /* Overlong */
+			if (cp >= 0xD800 && cp <= 0xDFFF)
+				return 0; /* Surrogate */
+			i += 3;
+		} else if ((c & 0xF8) == 0xF0) {
+			if (c > 0xF4)
+				return 0; /* Above U+10FFFF */
+			if (i + 3 >= len || (buf[i + 1] & 0xC0) != 0x80 ||
+			    (buf[i + 2] & 0xC0) != 0x80 ||
+			    (buf[i + 3] & 0xC0) != 0x80)
+				return 0;
+			unsigned int cp = ((c & 0x07) << 18) |
+					  ((buf[i + 1] & 0x3F) << 12) |
+					  ((buf[i + 2] & 0x3F) << 6) |
+					  (buf[i + 3] & 0x3F);
+			if (cp < 0x10000)
+				return 0; /* Overlong */
+			if (cp > 0x10FFFF)
+				return 0; /* Above Unicode max */
+			i += 4;
+		} else {
+			return 0; /* Invalid lead byte */
+		}
+	}
+	return 1;
+}
+
 int nextScreenX(uint8_t *str, int *idx, int screen_x) {
 	uint8_t ch = str[*idx];
 

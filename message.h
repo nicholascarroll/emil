@@ -82,6 +82,7 @@ static const char *const msg_not_recording = "未在录制";
 static const char *const msg_macro_recorded = "宏已录制（%d 键）";
 static const char *const msg_no_macro = "没有已录制的宏";
 static const char *const msg_macro_depth = "宏递归深度超限";
+static const char *const msg_macro_blocked = "录制/回放宏时不可用";
 
 static const char *const msg_shell_canceled = "已取消 Shell 命令。";
 static const char *const msg_shell_read_bytes = "已读取 %d 字节";
@@ -177,6 +178,7 @@ static const char *const msg_not_recording = "Not recording";
 static const char *const msg_macro_recorded = "Macro recorded (%d keys)";
 static const char *const msg_no_macro = "No macro recorded";
 static const char *const msg_macro_depth = "Macro recursion depth exceeded";
+static const char *const msg_macro_blocked = "Not available during macro";
 
 static const char *const msg_shell_canceled = "Canceled shell command.";
 static const char *const msg_shell_read_bytes = "Read %d bytes";

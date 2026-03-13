@@ -478,16 +478,28 @@ void editorYankPop(struct editorConfig *ed, struct editorBuffer *buf) {
 	}
 }
 
-void editorTransformRegion(struct editorConfig *ed, struct editorBuffer *buf,
-			   uint8_t *(*transformer)(uint8_t *)) {
+void editorTransformRange(struct editorConfig *ed, struct editorBuffer *buf,
+			  int startx, int starty, int endx, int endy,
+			  uint8_t *(*transformer)(uint8_t *)) {
 	if (buf->read_only) {
 		editorSetStatusMessage(msg_read_only);
 		return;
 	}
 
-	if (markInvalid())
-		return;
-	normalizeRegion(buf);
+	/* Normalize: put start before end */
+	if (starty > endy || (starty == endy && startx > endx)) {
+		int tx = startx, ty = starty;
+		startx = endx;
+		starty = endy;
+		endx = tx;
+		endy = ty;
+	}
+
+	/* Set up mark/cursor for the kill/yank machinery */
+	buf->cx = startx;
+	buf->cy = starty;
+	buf->markx = endx;
+	buf->marky = endy;
 
 	uint8_t *okill = NULL;
 	if (ed->kill.str != NULL) {
@@ -506,6 +518,21 @@ void editorTransformRegion(struct editorConfig *ed, struct editorBuffer *buf,
 
 	free(ed->kill.str);
 	ed->kill.str = okill;
+}
+
+void editorTransformRegion(struct editorConfig *ed, struct editorBuffer *buf,
+			   uint8_t *(*transformer)(uint8_t *)) {
+	if (buf->read_only) {
+		editorSetStatusMessage(msg_read_only);
+		return;
+	}
+
+	if (markInvalid())
+		return;
+	normalizeRegion(buf);
+
+	editorTransformRange(ed, buf, buf->cx, buf->cy, buf->markx, buf->marky,
+			     transformer);
 }
 
 void editorReplaceRegex(struct editorConfig *ed, struct editorBuffer *buf) {

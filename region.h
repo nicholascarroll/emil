@@ -31,6 +31,10 @@ void editorYank(struct editorConfig *ed, struct editorBuffer *buf, int count);
 
 void editorYankPop(struct editorConfig *ed, struct editorBuffer *buf);
 
+void editorTransformRange(struct editorConfig *ed, struct editorBuffer *buf,
+			  int startx, int starty, int endx, int endy,
+			  uint8_t *(*transformer)(uint8_t *));
+
 void editorTransformRegion(struct editorConfig *ed, struct editorBuffer *buf,
 			   uint8_t *(*transformer)(uint8_t *));
 
