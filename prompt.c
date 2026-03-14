@@ -169,6 +169,31 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 			}
 			break;
 
+		case CTRL('r'):
+			/* C-r C-r: populate empty search with last search */
+			if (t == PROMPT_SEARCH && E.minibuf->numrows > 0 &&
+			    E.minibuf->row[0].size == 0) {
+				char *last_search = NULL;
+				struct historyEntry *last_entry =
+					getLastHistory(&E.search_history);
+				if (last_entry)
+					last_search = last_entry->str;
+				if (last_search) {
+					while (E.minibuf->numrows > 0) {
+						editorDelRow(E.minibuf, 0);
+					}
+					editorInsertRow(E.minibuf, 0,
+							last_search,
+							strlen(last_search));
+					E.minibuf->cx = strlen(last_search);
+					E.minibuf->cy = 0;
+				} else {
+					editorSetStatusMessage(
+						"[No previous search]");
+				}
+			}
+			break;
+
 		case KEY_ARROW_UP:
 		case KEY_META('p'):
 		case KEY_ARROW_DOWN:

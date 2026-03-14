@@ -127,6 +127,8 @@ char *str_replace(char *orig, char *rep, char *with) {
 	return result;
 }
 
+static int initial_direction = 1;
+
 void editorFindCallback(struct editorBuffer *bufr, uint8_t *query, int key) {
 	static int last_match = -1;
 	static int direction = 1;
@@ -148,7 +150,7 @@ void editorFindCallback(struct editorBuffer *bufr, uint8_t *query, int key) {
 		direction = -1;
 	} else {
 		last_match = -1;
-		direction = 1;
+		direction = initial_direction;
 	}
 
 	if (!query || strlen((char *)query) == 0) {
@@ -156,8 +158,10 @@ void editorFindCallback(struct editorBuffer *bufr, uint8_t *query, int key) {
 	}
 
 	if (last_match == -1)
-		direction = 1;
+		direction = initial_direction;
 	int current = last_match;
+	if (current < 0)
+		current = (direction == -1) ? bufr->cy : -1;
 	if (current >= 0 && current < bufr->numrows) {
 		erow *row = &bufr->row[current];
 		uint8_t *match;
@@ -219,6 +223,7 @@ void editorFindCallback(struct editorBuffer *bufr, uint8_t *query, int key) {
 
 void editorFind(struct editorBuffer *bufr) {
 	regex_mode = 0; /* Start in normal mode */
+	initial_direction = 1;
 	int saved_cx = bufr->cx;
 	int saved_cy = bufr->cy;
 	//	int saved_rowoff = bufr->rowoff;
@@ -234,6 +239,26 @@ void editorFind(struct editorBuffer *bufr) {
 		bufr->cx = saved_cx;
 		bufr->cy = saved_cy;
 		//		bufr->rowoff = saved_rowoff;
+	}
+}
+
+void editorReverseFind(struct editorBuffer *bufr) {
+	regex_mode = 0;
+	initial_direction = -1;
+	int saved_cx = bufr->cx;
+	int saved_cy = bufr->cy;
+
+	uint8_t *query = editorPrompt(bufr,
+				      "Reverse search (C-g to cancel): %s",
+				      PROMPT_SEARCH, editorFindCallback);
+
+	free(bufr->query);
+	bufr->query = NULL;
+	if (query) {
+		free(query);
+	} else {
+		bufr->cx = saved_cx;
+		bufr->cy = saved_cy;
 	}
 }
 

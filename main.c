@@ -191,6 +191,7 @@ int main(int argc, char *argv[]) {
 	 */
 	char *stdin_data = NULL;
 	size_t stdin_len = 0;
+	int stdin_buf_used = 0;
 	if (!isatty(STDIN_FILENO)) {
 		stdin_data = readAllFromFd(STDIN_FILENO, &stdin_len);
 
@@ -229,6 +230,7 @@ int main(int argc, char *argv[]) {
 			stdinBuf->next = E.headbuf;
 			E.headbuf = stdinBuf;
 			E.buf = stdinBuf;
+			stdin_buf_used = 1;
 		}
 		free(stdin_data);
 		stdin_data = NULL;
@@ -242,6 +244,18 @@ int main(int argc, char *argv[]) {
 			i++;
 		}
 		for (; i < argc; i++) {
+			/* POSIX: "-" means read from stdin */
+			if (strcmp(argv[i], "-") == 0) {
+				if (stdin_buf_used) {
+					/* Already loaded stdin above */
+					continue;
+				}
+				/* stdin was a tty and not piped —
+				 * nothing to read */
+				editorSetStatusMessage("stdin: no piped input");
+				continue;
+			}
+
 			struct editorBuffer *newBuf = newBuffer();
 			if (editorOpen(newBuf, argv[i]) < 0) {
 				disableRawMode();

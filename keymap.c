@@ -504,6 +504,8 @@ int resolveBinding(int key) {
 		return CMD_PREV_LINE;
 	case CTRL('q'):
 		return CMD_QUOTED_INSERT;
+	case CTRL('r'):
+		return CMD_REVERSE_ISEARCH;
 	case CTRL('s'):
 		return CMD_ISEARCH;
 	case CTRL('t'):
@@ -950,6 +952,10 @@ static int dispatchSearch(int c) {
 	case CMD_ISEARCH:
 		editorSetMarkSilent();
 		editorFind(E.buf);
+		return 1;
+	case CMD_REVERSE_ISEARCH:
+		editorSetMarkSilent();
+		editorReverseFind(E.buf);
 		return 1;
 	case CMD_REGEX_SEARCH_FORWARD:
 		editorSetMarkSilent();
