@@ -543,6 +543,8 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 	int skip = win->skip_sublines; /* sub-lines to skip on first row */
 
 	for (y = 0; y < screenrows; y++) {
+		int filled =
+			0; /* set when word-wrap fill loop padded this line */
 		if (filerow >= buf->numrows) {
 			abAppend(ab, " ", 1);
 		} else {
@@ -607,6 +609,7 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 						fill_col++;
 					}
 					updateHighlight(ab, &fill_hl, 0);
+					filled = 1;
 
 					/* --- Advance to next screen line
 					 *     if more content remains --- */
@@ -626,7 +629,7 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 				skip = 0; /* Only skip on the first row */
 			}
 		}
-		if (!buf->word_wrap)
+		if (!filled)
 			abAppend(ab, "\x1b[K", 3);
 		if (y < screenrows - 1) {
 			abAppend(ab, "\r\n", 2);
