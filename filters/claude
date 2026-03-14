@@ -1,9 +1,9 @@
 #!/bin/sh
-# gpt: pipe text through ChatGPT with an instruction
-# Usage: echo "hello" | gpt "translate to Spanish"
+# claude: pipe text through Claude with an instruction
+# Usage: echo "hello" | claude "translate to Spanish"
 
-[ -z "$OPENAI_API_KEY" ] && {
-    echo "OPENAI_API_KEY not set" >&2
+[ -z "$ANTHROPIC_API_KEY" ] && {
+    echo "ANTHROPIC_API_KEY not set" >&2
     exit 1
 }
 
@@ -17,23 +17,24 @@ payload=$(jq -n \
   --arg instruction "$instruction" \
   --arg input "$input" \
   '{
-    "model": "gpt-5-mini",
+    "model": "claude-sonnet-4-20250514",
+    "max_tokens": 4096,
+    "system": ($system + "\nInstruction: " + $instruction),
     "messages": [
-      {"role": "system", "content": ($system + "\nInstruction: " + $instruction)},
       {"role": "user", "content": $input}
     ]
   }')
 
-response=$(curl -s https://api.openai.com/v1/chat/completions \
+response=$(curl -s https://api.anthropic.com/v1/messages \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -H "x-api-key: $ANTHROPIC_API_KEY" \
+  -H "anthropic-version: 2023-06-01" \
   -d "$payload")
 
-# Extract content or error
 error=$(echo "$response" | jq -r '.error.message // empty')
 if [ -n "$error" ]; then
     echo "Error: $error" >&2
     exit 1
 fi
 
-echo "$response" | jq -r '.choices[0].message.content'
+echo "$response" | jq -r '.content[0].text'
