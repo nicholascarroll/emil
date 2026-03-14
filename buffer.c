@@ -456,6 +456,7 @@ struct editorBuffer *newBuffer(void) {
 	ret->row = NULL;
 	ret->filename = NULL;
 	ret->display_name = NULL;
+	ret->min_name_len = 0;
 	ret->query = NULL;
 	ret->dirty = 0;
 	ret->special_buffer = 0;
@@ -736,9 +737,15 @@ static char *leftTruncate(const char *s, int max_width) {
 	int len = (int)strlen(s);
 	if (len <= max_width)
 		return xstrdup(s);
+	/* Never truncate into the basename */
+	const char *base = strrchr(s, '/');
+	base = base ? base + 1 : s;
+	int blen = strlen(base);
+	if (max_width <= blen + 3)
+		return xstrdup(base); /* basename alone if ... won't help */
 	int tail = max_width - 3;
-	if (tail < 1)
-		tail = 1;
+	if (tail < blen)
+		tail = blen;
 	char *r = xmalloc(tail + 4);
 	snprintf(r, tail + 4, "...%s", s + (len - tail));
 	return r;
@@ -822,36 +829,30 @@ static char *middleTruncate(const char *full, const char *other,
 	return leftTruncate(mid, max_width);
 }
 
-/* Compute display_name for every buffer's status bar display.
+/* Compute display_name and min_name_len for every buffer.
  *
- * Called on buffer open/close/rename and on terminal resize — NOT on
- * every screen refresh.  The algorithm:
+ * Called on buffer open/close/rename and on terminal resize.
  *
- *  1. If the full filename fits, use it as-is.
- *  2. If it doesn't fit, left-truncate ("...tory/file.c").
- *  3. If two buffers collide, middle-truncate: find the first
- *     differing directory walking up from the basename, drop shared
- *     dirs with "...", keep the differing one, left-truncate to fit. */
+ * display_name: the name shown in the status bar and switch-buffer.
+ * min_name_len: the fewest chars of display_name the status bar must
+ *               show to avoid colliding with another buffer's name. */
 void computeDisplayNames(void) {
-	/* Reserve space for the status bar elements that surround the
-	 * name: prefix (3) + space (1) + flags (3) + separator (2) +
-	 * line:col (~6) = ~15 chars. */
 	int max_width = E.screencols - 15;
 	if (max_width < 4)
 		max_width = 4;
 
-	/* Pass 1: use full name if it fits, otherwise left-truncate. */
+	/* Pass 1: full name or left-truncated. */
 	for (struct editorBuffer *b = E.headbuf; b != NULL; b = b->next) {
 		free(b->display_name);
 		const char *name = b->filename ? b->filename : "*scratch*";
 		b->display_name = leftTruncate(name, max_width);
 	}
 
-	/* Pass 2: detect collisions and middle-truncate. */
+	/* Pass 2: disambiguate collisions via middle-truncate. */
 	for (struct editorBuffer *a = E.headbuf; a != NULL; a = a->next) {
 		const char *a_full = a->filename ? a->filename : "*scratch*";
 		if (strcmp(a->display_name, a_full) == 0)
-			continue; /* Not truncated — can't collide */
+			continue;
 
 		for (struct editorBuffer *b = a->next; b != NULL; b = b->next) {
 			if (strcmp(a->display_name, b->display_name) != 0)
@@ -866,5 +867,34 @@ void computeDisplayNames(void) {
 			b->display_name =
 				middleTruncate(b_full, a_full, max_width);
 		}
+	}
+
+	/* Pass 3: compute min_name_len for each buffer.
+	 * Find the shortest right-end of display_name that doesn't
+	 * match any other buffer's right-end at the same length. */
+	for (struct editorBuffer *a = E.headbuf; a != NULL; a = a->next) {
+		int alen = strlen(a->display_name);
+		const char *bn = baseName(a->display_name);
+		a->min_name_len = strlen(bn); /* at least the basename */
+
+		for (struct editorBuffer *b = E.headbuf; b != NULL;
+		     b = b->next) {
+			if (b == a)
+				continue;
+			int blen = strlen(b->display_name);
+
+			/* Walk from basename length upward until they differ */
+			for (int n = a->min_name_len; n <= alen; n++) {
+				const char *a_tail = a->display_name + alen - n;
+				const char *b_tail = b->display_name + blen - n;
+				if (n > blen || strncmp(a_tail, b_tail, n) != 0)
+					break;
+				/* Still matches at length n, need n+1 */
+				if (n + 1 > a->min_name_len)
+					a->min_name_len = n + 1;
+			}
+		}
+		if (a->min_name_len > alen)
+			a->min_name_len = alen;
 	}
 }

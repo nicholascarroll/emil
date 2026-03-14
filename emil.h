@@ -106,6 +106,7 @@ struct editorBuffer {
 	erow *row;
 	char *filename;
 	char *display_name; /* Truncated name for status bar display */
+	int min_name_len;   /* Min chars to show without colliding */
 	uint8_t *query;
 	uint8_t match;
 	struct editorUndo *undo;
