@@ -427,8 +427,10 @@ void setScxScy(struct editorWindow *win) {
 		win->scy = win->height - 1;
 	if (win->scx < 0)
 		win->scx = 0;
-	if (win->scx >= E.screencols)
-		win->scx = E.screencols - 1;
+	if (win->scx >= E.screencols) {
+		win->scy++;
+		win->scx = 0;
+	}
 }
 
 void scroll(void) {
@@ -543,6 +545,8 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 	int skip = win->skip_sublines; /* sub-lines to skip on first row */
 
 	for (y = 0; y < screenrows; y++) {
+		int filled =
+			0; /* set when word-wrap fill loop padded this line */
 		if (filerow >= buf->numrows) {
 			abAppend(ab, " ", 1);
 		} else {
@@ -554,6 +558,18 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 				renderLineWithHighlighting(
 					row, ab, win->coloff,
 					win->coloff + screencols, &hl, -1);
+				/* Pad remainder of screen line so \x1b[K
+				 * is not needed (it would erase the last
+				 * column due to pending-wrap state). */
+				int rx = charsToDisplayColumn(row, row->size) -
+					 win->coloff;
+				if (rx < 0)
+					rx = 0;
+				while (rx < screencols) {
+					abAppend(ab, " ", 1);
+					rx++;
+				}
+				filled = 1;
 				filerow++;
 			} else {
 				/* Word-wrap mode: break lines at word
@@ -607,6 +623,7 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 						fill_col++;
 					}
 					updateHighlight(ab, &fill_hl, 0);
+					filled = 1;
 
 					/* --- Advance to next screen line
 					 *     if more content remains --- */
@@ -626,7 +643,8 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 				skip = 0; /* Only skip on the first row */
 			}
 		}
-		abAppend(ab, "\x1b[K", 3);
+		if (!filled)
+			abAppend(ab, "\x1b[K", 3);
 		if (y < screenrows - 1) {
 			abAppend(ab, "\r\n", 2);
 		}
@@ -641,11 +659,11 @@ void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
 	struct editorBuffer *bufr = win->buf;
 	abAppend(ab, "\x1b[7m", 4);
 
-	int total = E.screencols - 1;
+	int total = E.screencols;
 	int focused = win->focused;
 	char fc = focused ? ' ' : '-';
 	const char *sep = focused ? "  " : "--";
-	const char *prefix = focused ? "   " : "-- ";
+	const char *prefix = focused ? "" : "";
 	int prefix_len = strlen(prefix);
 
 	/* Prepare content */
@@ -724,6 +742,12 @@ void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
 		remain -= BLOCK;
 
 	int name_width = min_name + (remain > 0 ? remain : 0);
+	/* Clamp so the name never pushes Block 1 past total width. */
+	int max_name = total - prefix_len - 1 - flags_len;
+	if (max_name < 1)
+		max_name = 1;
+	if (name_width > max_name)
+		name_width = max_name;
 
 	/* Truncate display name to fit name_width.
 	 * Left-truncate with "...", keeping the basename end. */
@@ -795,7 +819,7 @@ void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
 	if (rhs_len > 0)
 		abAppend(ab, rhs, rhs_len);
 
-	abAppend(ab, "\x1b[K\x1b[m" CRLF, 8);
+	abAppend(ab, "\x1b[m" CRLF, 8);
 }
 void drawMinibuffer(struct abuf *ab) {
 	/* Determine the message to display */

@@ -118,16 +118,12 @@ void editorOpenShellDrawer(void) {
 }
 
 void enableRawMode(void) {
-	/* Saves the screen and switches to an alt screen */
-	if (write(STDOUT_FILENO, CSI "?1049h", 8) == -1)
+	/* Saves the screen and switches to an alt screen 
+	*  CSI "?7l" is disable auto-wrap
+	*/
+	if (write(STDOUT_FILENO, CSI "?1049h" CSI "?7l", 13) == -1)
 		die("enableRawMode write");
 
-	/*
-	 * I looked into it. It's possible, but not easy, to do it
-	 * without termios. Basically you'd have to hand-hack and send
-	 * off your own bits. Check out busybox vi and that rabbithole
-	 * for an implementation.
-	 */
 	if (tcgetattr(STDIN_FILENO, &E.orig_termios) == -1)
 		die("tcgetattr");
 	atexit(disableRawMode);
