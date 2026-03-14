@@ -321,6 +321,8 @@ void editorSave(struct editorBuffer *bufr) {
 			editorSetStatusMessage("Save aborted.");
 			return;
 		}
+		bufr->special_buffer = 0;
+		computeDisplayNames();
 	}
 
 	int len;
