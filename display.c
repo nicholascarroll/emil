@@ -626,7 +626,8 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 				skip = 0; /* Only skip on the first row */
 			}
 		}
-		abAppend(ab, "\x1b[K", 3);
+		if (!buf->word_wrap)
+			abAppend(ab, "\x1b[K", 3);
 		if (y < screenrows - 1) {
 			abAppend(ab, "\r\n", 2);
 		}
