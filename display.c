@@ -659,7 +659,7 @@ void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
 	int focused = win->focused;
 	char fc = focused ? ' ' : '-';
 	const char *sep = focused ? "  " : "--";
-	const char *prefix = focused ? "   " : "-- ";
+	const char *prefix = focused ? "" : ""; 
 	int prefix_len = strlen(prefix);
 
 	/* Prepare content */
