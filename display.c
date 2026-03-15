@@ -851,6 +851,8 @@ void drawMinibuffer(struct abuf *ab) {
 
 		int avail = (line == 0) ? E.screencols - prefix_len :
 					  E.screencols;
+		if (line == minibuffer_height - 1)
+			avail--;
 		if (avail < 0)
 			avail = 0;
 
@@ -995,6 +997,9 @@ void cursorBottomLine(int curs) {
 		minibuf_row += extra_lines;
 		curs = curs - extra_lines * E.screencols;
 	}
+
+	if (curs > E.screencols - 1)
+		curs = E.screencols - 1;
 
 	snprintf(cbuf, sizeof(cbuf), CSI "%d;%dH", minibuf_row, curs);
 	IGNORE_RETURN(write(STDOUT_FILENO, cbuf, strlen(cbuf)));
