@@ -728,6 +728,12 @@ void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
 		remain -= BLOCK;
 
 	int name_width = min_name + (remain > 0 ? remain : 0);
+	/* Clamp so the name never pushes Block 1 past total width. */
+	int max_name = total - prefix_len - 1 - flags_len;
+	if (max_name < 1)
+		max_name = 1;
+	if (name_width > max_name)
+		name_width = max_name;
 
 	/* Truncate display name to fit name_width.
 	 * Left-truncate with "...", keeping the basename end. */
