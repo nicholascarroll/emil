@@ -556,6 +556,16 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 				renderLineWithHighlighting(
 					row, ab, win->coloff,
 					win->coloff + screencols, &hl, -1);
+				/* Pad remainder of screen line so \x1b[K
+				 * is not needed (it would erase the last
+				 * column due to pending-wrap state). */
+				int rx = charsToDisplayColumn(row, row->size) - win->coloff;
+				if (rx < 0) rx = 0;
+				while (rx < screencols) {
+					abAppend(ab, " ", 1);
+					rx++;
+				}
+				filled = 1;
 				filerow++;
 			} else {
 				/* Word-wrap mode: break lines at word
@@ -645,7 +655,7 @@ void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
 	struct editorBuffer *bufr = win->buf;
 	abAppend(ab, "\x1b[7m", 4);
 
-	int total = E.screencols - 1;
+	int total = E.screencols;
 	int focused = win->focused;
 	char fc = focused ? ' ' : '-';
 	const char *sep = focused ? "  " : "--";
@@ -805,7 +815,7 @@ void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
 	if (rhs_len > 0)
 		abAppend(ab, rhs, rhs_len);
 
-	abAppend(ab, "\x1b[K\x1b[m" CRLF, 8);
+	abAppend(ab, "\x1b[m" CRLF, 8);
 }
 void drawMinibuffer(struct abuf *ab) {
 	/* Determine the message to display */
