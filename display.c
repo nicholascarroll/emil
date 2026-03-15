@@ -875,6 +875,7 @@ void refreshScreen(void) {
 
 	struct abuf ab = ABUF_INIT;
 	abAppend(&ab, "\x1b[?25l", 6); // Hide cursor
+	abAppend(&ab, "\x1b[?7l", 5);  // Disable auto-wrap
 	abAppend(&ab, "\x1b[H", 3);    // Move cursor to top-left corner
 
 	/* Mandatory bounds clamp for all windows (§7.2) */
@@ -964,6 +965,7 @@ void refreshScreen(void) {
 		 focusedWin->scx + 1);
 	abAppend(&ab, buf, strlen(buf));
 
+	abAppend(&ab, "\x1b[?7h", 5);  // Re-enable auto-wrap
 	abAppend(&ab, "\x1b[?25h", 6); // Show cursor
 
 	IGNORE_RETURN(write(STDOUT_FILENO, ab.b, ab.len));
