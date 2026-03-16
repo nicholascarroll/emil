@@ -839,7 +839,7 @@ void editorStringRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	if (extra > 0) {
 		row->chars = xrealloc(row->chars, row->size + 1 + extra);
 	}
-	memcpy(&row->chars[topx + slen], &row->chars[botx], row->size - botx);
+	memmove(&row->chars[topx + slen], &row->chars[botx], row->size - botx);
 	memcpy(&row->chars[topx], string, slen);
 	row->size += extra;
 	row->chars[row->size] = 0;
@@ -869,8 +869,8 @@ void editorStringRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 			row->chars =
 				xrealloc(row->chars, row->size + 1 + extra);
 		}
-		memcpy(&row->chars[topx + slen], &row->chars[botx],
-		       row->size - botx);
+		memmove(&row->chars[topx + slen], &row->chars[botx],
+			row->size - botx);
 		memcpy(&row->chars[topx], string, slen);
 		row->size += extra;
 		row->chars[row->size] = 0;
@@ -896,8 +896,8 @@ void editorStringRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 			row->chars =
 				xrealloc(row->chars, row->size + 1 + extra);
 		}
-		memcpy(&row->chars[topx + slen], &row->chars[botx],
-		       row->size - botx);
+		memmove(&row->chars[topx + slen], &row->chars[botx],
+			row->size - botx);
 		memcpy(&row->chars[topx], string, slen);
 		row->size += extra;
 		row->chars[row->size] = 0;
@@ -1270,7 +1270,7 @@ void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	if (rw > 0) {
 		row->chars = xrealloc(row->chars, row->size + 1 + rw);
 	}
-	memcpy(&row->chars[topx + rw], &row->chars[botx], row->size - botx);
+	memmove(&row->chars[topx + rw], &row->chars[botx], row->size - botx);
 	memcpy(&row->chars[topx], string, rw);
 	row->size += rw;
 	row->chars[row->size] = 0;
@@ -1300,8 +1300,8 @@ void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 		if (rw > 0) {
 			row->chars = xrealloc(row->chars, row->size + 1 + rw);
 		}
-		memcpy(&row->chars[topx + rw], &row->chars[botx],
-		       row->size - botx);
+		memmove(&row->chars[topx + rw], &row->chars[botx],
+			row->size - botx);
 		memcpy(&row->chars[topx], string, rw);
 		row->size += rw;
 		row->chars[row->size] = 0;
@@ -1328,8 +1328,8 @@ void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 		if (rw > 0) {
 			row->chars = xrealloc(row->chars, row->size + 1 + rw);
 		}
-		memcpy(&row->chars[topx + rw], &row->chars[botx],
-		       row->size - botx);
+		memmove(&row->chars[topx + rw], &row->chars[botx],
+			row->size - botx);
 		memcpy(&row->chars[topx], string, rw);
 		row->size += rw;
 		row->chars[row->size] = 0;
