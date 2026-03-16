@@ -427,7 +427,7 @@ void setScxScy(struct editorWindow *win) {
 		win->scy = win->height - 1;
 	if (win->scx < 0)
 		win->scx = 0;
-	if (win->scx >= E.screencols) {
+	if (buf->word_wrap && win->scx >= E.screencols) {
 		win->scy++;
 		win->scx = 0;
 	}
