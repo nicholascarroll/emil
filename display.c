@@ -634,6 +634,11 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 
 					if (!more)
 						break;
+					/* Window full — stop rendering this
+					 * row to avoid overflowing into the
+					 * status bar / next window area. */
+					if (y >= screenrows - 1)
+						break;
 					line_start_col = break_col;
 					line_start_byte = break_byte;
 					sub_line_idx++;
@@ -819,7 +824,7 @@ void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
 	if (rhs_len > 0)
 		abAppend(ab, rhs, rhs_len);
 
-	abAppend(ab, "\x1b[m" CRLF, 8);
+	abAppend(ab, "\x1b[m" CRLF, 5);
 }
 void drawMinibuffer(struct abuf *ab) {
 	/* Determine the message to display */
