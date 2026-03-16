@@ -25,11 +25,26 @@ void addToKillRing(const char *text, int is_rect, int rect_width,
 			   rect_height);
 	E.kill_ring_pos = -1;
 
+	/* text may point to E.kill.str, so copy before freeing. */
+	uint8_t *copy = (uint8_t *)xstrdup(text);
 	clearEditorText(&E.kill);
-	E.kill.str = (uint8_t *)xstrdup(text);
+	E.kill.str = copy;
 	E.kill.is_rectangle = is_rect;
 	E.kill.rect_width = rect_width;
 	E.kill.rect_height = rect_height;
+}
+
+/* Save and restore the kill text around operations that temporarily
+ * overwrite ed->kill (transforms, rectangle ops). */
+static uint8_t *saveKill(struct editorConfig *ed) {
+	if (ed->kill.str == NULL)
+		return NULL;
+	return (uint8_t *)xstrdup((char *)ed->kill.str);
+}
+
+static void restoreKill(struct editorConfig *ed, uint8_t *saved) {
+	free(ed->kill.str);
+	ed->kill.str = saved;
 }
 
 /* Push the current mark position onto the mark ring (if mark is valid). */
@@ -216,6 +231,45 @@ static void normalizeRegion(struct editorBuffer *buf) {
 	}
 }
 
+/* Bounded append to undo data: append at most 'ncopy' bytes from 'src'
+ * to the undo record, respecting both the source length and the
+ * destination capacity.  Always NUL-terminates. */
+static void undoAppendBounded(struct editorUndo *u, const uint8_t *src,
+			      int src_len, int ncopy) {
+	if (ncopy > src_len)
+		ncopy = src_len;
+	int dlen = strlen((char *)u->data);
+	int avail = u->datasize - dlen - 1;
+	if (ncopy > avail)
+		ncopy = avail;
+	if (ncopy > 0) {
+		memcpy(&u->data[dlen], src, ncopy);
+		u->data[dlen + ncopy] = 0;
+	}
+}
+
+/* Normalise rectangle columns so topx <= botx.  Also sets up
+ * buf->cx, buf->cy, buf->markx, buf->marky for the rectangle. */
+static void normalizeRectCols(struct editorBuffer *buf, int *topx, int *topy,
+			      int *botx, int *boty) {
+	*boty = buf->marky;
+	*topy = buf->cy;
+	if (buf->cx > buf->markx) {
+		*topx = buf->markx;
+		*botx = buf->cx;
+	} else {
+		*botx = buf->markx;
+		*topx = buf->cx;
+	}
+	buf->cx = *topx;
+	buf->cy = *topy;
+	buf->marky = *boty;
+	if (*botx > buf->row[*boty].size)
+		buf->markx = buf->row[*boty].size;
+	else
+		buf->markx = *botx;
+}
+
 void editorDeleteRange(struct editorBuffer *buf, int startx, int starty,
 		       int endx, int endy, int add_to_kill_ring) {
 	/* Normalise: ensure start comes before end */
@@ -288,6 +342,10 @@ void editorDeleteRange(struct editorBuffer *buf, int startx, int starty,
 
 	free(collected);
 
+	/* Adjust tracked points BEFORE the mutation while row structure
+	 * is still intact — matches the contract used by bulkDelete. */
+	adjustAllPoints(buf, startx, starty, endx, endy, 1);
+
 	/* Splice rows — same logic as the old editorKillRegion */
 	struct erow *row = &buf->row[starty];
 	if (starty == endy) {
@@ -311,9 +369,6 @@ void editorDeleteRange(struct editorBuffer *buf, int startx, int starty,
 
 	buf->dirty = 1;
 	editorUpdateBuffer(buf);
-
-	/* Adjust tracked points for the deleted region */
-	adjustAllPoints(buf, new->startx, new->starty, new->endx, new->endy, 1);
 
 	/* Set cursor to start of deleted range */
 	buf->cx = startx;
@@ -345,15 +400,17 @@ void editorCopyRegion(struct editorConfig *ed, struct editorBuffer *buf) {
 	ed->kill.str = xmalloc(regionSize);
 
 	int killpos = 0;
-	while (!(buf->cy == buf->marky && buf->cx == buf->markx)) {
-		uint8_t c = buf->row[buf->cy].chars[buf->cx];
-		if (buf->cx >= buf->row[buf->cy].size) {
-			buf->cy++;
-			buf->cx = 0;
+	/* Use local variables for iteration — never touch buf->cx/cy */
+	int lx = buf->cx;
+	int ly = buf->cy;
+	while (!(ly == buf->marky && lx == buf->markx)) {
+		if (lx >= buf->row[ly].size) {
+			ly++;
+			lx = 0;
 			ed->kill.str[killpos++] = '\n';
 		} else {
-			ed->kill.str[killpos++] = c;
-			buf->cx++;
+			ed->kill.str[killpos++] = buf->row[ly].chars[lx];
+			lx++;
 		}
 
 		if (killpos >= regionSize - 2) {
@@ -402,29 +459,32 @@ void editorYank(struct editorConfig *ed, struct editorBuffer *buf, int count) {
 		emil_strlcpy(new->data, ed->kill.str, new->datasize);
 		new->append = 0;
 
-		/* Insert using raw primitives — this undo record
-		 * is built manually above. */
-		for (int i = 0; ed->kill.str[i] != 0; i++) {
+		/* Compute end position from the kill text */
+		int ex = buf->cx;
+		int ey = buf->cy;
+		for (int i = 0; i < killLen; i++) {
 			if (ed->kill.str[i] == '\n') {
-				editorInsertNewlineRaw(buf);
+				ey++;
+				ex = 0;
 			} else {
-				editorInsertChar(buf, ed->kill.str[i], 1);
+				ex++;
 			}
 		}
-
-		new->endx = buf->cx;
-		new->endy = buf->cy;
+		new->endx = ex;
+		new->endy = ey;
 		pushUndo(buf, new);
 
-		/* Adjust tracked points for this insertion */
-		adjustAllPoints(buf, new->startx, new->starty, new->endx,
-				new->endy, 0);
+		/* bulkInsert handles the row manipulation and calls
+		 * adjustAllPoints internally. */
+		bulkInsert(buf, buf->cx, buf->cy, ed->kill.str, killLen);
 
-		// For line yanks with multiple repetitions, position cursor
-		// at the beginning of the next line for the next yank
+		buf->cx = ex;
+		buf->cy = ey;
+
+		/* For line yanks with multiple repetitions, position cursor
+		 * at the beginning of the next line for the next yank */
 		if (isLineYank && j < count - 1) {
 			buf->cx = 0;
-			// Already on next line due to the newline
 		}
 	}
 
@@ -501,12 +561,7 @@ void editorTransformRange(struct editorConfig *ed, struct editorBuffer *buf,
 	buf->markx = endx;
 	buf->marky = endy;
 
-	uint8_t *okill = NULL;
-	if (ed->kill.str != NULL) {
-		okill = xmalloc(strlen((char *)ed->kill.str) + 1);
-		emil_strlcpy(okill, ed->kill.str,
-			     strlen((char *)ed->kill.str) + 1);
-	}
+	uint8_t *okill = saveKill(ed);
 	editorKillRegion(ed, buf);
 
 	uint8_t *input = ed->kill.str;
@@ -516,8 +571,7 @@ void editorTransformRange(struct editorConfig *ed, struct editorBuffer *buf,
 	editorYank(ed, buf, 1);
 	buf->undo->paired = 1;
 
-	free(ed->kill.str);
-	ed->kill.str = okill;
+	restoreKill(ed, okill);
 }
 
 void editorTransformRegion(struct editorConfig *ed, struct editorBuffer *buf,
@@ -562,12 +616,7 @@ void editorReplaceRegex(struct editorConfig *ed, struct editorBuffer *buf) {
 	}
 	int replen = strlen((char *)repl);
 
-	uint8_t *okill = NULL;
-	if (ed->kill.str != NULL) {
-		okill = xmalloc(strlen((char *)ed->kill.str) + 1);
-		emil_strlcpy(okill, ed->kill.str,
-			     strlen((char *)ed->kill.str) + 1);
-	}
+	uint8_t *okill = saveKill(ed);
 	editorCopyRegion(ed, buf);
 
 	/* This is a transformation, so create a delete undo. However, we're not
@@ -703,7 +752,7 @@ void editorReplaceRegex(struct editorConfig *ed, struct editorBuffer *buf) {
 	free(regex);
 	free(repl);
 
-	ed->kill.str = okill;
+	restoreKill(ed, okill);
 
 	editorSetStatusMessage("Replaced %d instances", madeReplacements);
 }
@@ -719,45 +768,16 @@ void editorStringRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 		return;
 	}
 
-	uint8_t *okill = NULL;
-	if (ed->kill.str != NULL) {
-		okill = xmalloc(strlen((char *)ed->kill.str) + 1);
-		emil_strlcpy(okill, ed->kill.str,
-			     strlen((char *)ed->kill.str) + 1);
-	}
+	uint8_t *okill = saveKill(ed);
 
-	/* Do all the bookkeeping for killing the region, with a little extra
-	 * for rectangles :) */
-
-	/* Normalize the region (putting cx, cy before markx,marky) because this
-	 * is a useful assumption to have. */
 	normalizeRegion(buf);
 
-	/* All the various dimensions we need for rectangles */
 	int slen = strlen((char *)string);
 	int topx, topy, botx, boty;
-	boty = buf->marky;
-	topy = buf->cy;
-	/* If we don't do this, we end up creating undos that go out of the
-	 * buffer. */
-	if (buf->cx > buf->markx) {
-		topx = buf->markx;
-		botx = buf->cx;
-	} else {
-		botx = buf->markx;
-		topx = buf->cx;
-	}
+	normalizeRectCols(buf, &topx, &topy, &botx, &boty);
 	int rwidth = botx - topx;
 	int extra = slen - rwidth; /* new bytes per line */
 
-	buf->cx = topx;
-	buf->cy = topy;
-	buf->marky = boty;
-	if (botx > buf->row[boty].size) {
-		buf->markx = buf->row[boty].size;
-	} else {
-		buf->markx = botx;
-	}
 	editorCopyRegion(ed, buf);
 	clearRedos(buf);
 
@@ -884,14 +904,14 @@ void editorStringRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 		adjustAllPoints(buf, topx, boty, botx, boty, 1);
 		if (slen > 0)
 			adjustAllPoints(buf, topx, boty, topx + slen, boty, 0);
-		strncat((char *)new->data, (char *)row->chars, botx + extra);
+		undoAppendBounded(new, row->chars, row->size, botx + extra);
 	}
 	new->datalen = strlen((char *)new->data);
 
 	buf->dirty = 1;
 	editorUpdateBuffer(buf);
 	editorClearMarkQuiet();
-	ed->kill.str = okill;
+	restoreKill(ed, okill);
 }
 
 void editorCopyRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
@@ -900,26 +920,9 @@ void editorCopyRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	normalizeRegion(buf);
 
 	int topx, topy, botx, boty;
-	boty = buf->marky;
-	topy = buf->cy;
-	if (buf->cx > buf->markx) {
-		topx = buf->markx;
-		botx = buf->cx;
-	} else {
-		botx = buf->markx;
-		topx = buf->cx;
-	}
+	normalizeRectCols(buf, &topx, &topy, &botx, &boty);
 	int rw = botx - topx;
 	int rh = (boty - topy) + 1;
-
-	buf->cx = topx;
-	buf->cy = topy;
-	buf->marky = boty;
-	if (botx > buf->row[boty].size) {
-		buf->markx = buf->row[boty].size;
-	} else {
-		buf->markx = botx;
-	}
 
 	clearEditorText(&ed->kill);
 	ed->kill.str = xcalloc((rw * rh) + 1, 1);
@@ -993,26 +996,10 @@ void editorKillRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	ed->kill = (struct editorText){ 0 };
 
 	int topx, topy, botx, boty;
-	boty = buf->marky;
-	topy = buf->cy;
-	if (buf->cx > buf->markx) {
-		topx = buf->markx;
-		botx = buf->cx;
-	} else {
-		botx = buf->markx;
-		topx = buf->cx;
-	}
+	normalizeRectCols(buf, &topx, &topy, &botx, &boty);
 	int rw = botx - topx;
 	int rh = (boty - topy) + 1;
 
-	buf->cx = topx;
-	buf->cy = topy;
-	buf->marky = boty;
-	if (botx > buf->row[boty].size) {
-		buf->markx = buf->row[boty].size;
-	} else {
-		buf->markx = botx;
-	}
 	editorCopyRegion(ed, buf);
 	clearRedos(buf);
 
@@ -1036,15 +1023,19 @@ void editorKillRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	new->delete = 1;
 	pushUndo(buf, new);
 
-	/* This is technically a transformation, so we need paired undos. */
+	/* This is technically a transformation, so we need paired undos.
+	 * Use a safe upper bound for initial size — the linear region
+	 * text length is always sufficient since the residual content
+	 * after rectangle column removal is smaller. */
 	new = newUndo();
 	new->startx = topx;
 	new->starty = topy;
 	new->endx = botx - rw;
 	new->endy = boty;
 	free(new->data);
-	new->datalen = strlen((char *)ed->kill.str) - (rw * rh);
-	new->datasize = 1 + new->datalen;
+	int kill_len = strlen((char *)ed->kill.str);
+	new->datalen = 0;
+	new->datasize = kill_len + 1;
 	new->data = xmalloc(new->datasize);
 	new->data[0] = 0;
 	new->append = 0;
@@ -1145,7 +1136,7 @@ void editorKillRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 			adjustAllPoints(buf, topx, cur_row, botx, cur_row, 1);
 		}
 
-		strncat((char *)new->data, (char *)row->chars, topx);
+		undoAppendBounded(new, row->chars, row->size, topx);
 	}
 	new->datalen = strlen((char *)new->data);
 
@@ -1241,7 +1232,7 @@ void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	new->data[new->datalen] = 0;
 	new->append = 0;
 	new->delete = 1;
-	new->paired = extralines;
+	new->paired = extralines ? 1 : 0;
 	pushUndo(buf, new);
 
 	/* Transformation (insert) undo */
@@ -1344,7 +1335,7 @@ void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 		row->chars[row->size] = 0;
 		if (rw > 0)
 			adjustAllPoints(buf, topx, boty, topx + rw, boty, 0);
-		strncat((char *)new->data, (char *)row->chars, botx + rw);
+		undoAppendBounded(new, row->chars, row->size, botx + rw);
 	}
 	new->datalen = strlen((char *)new->data);
 

@@ -15,6 +15,8 @@ struct editorUndo *newUndo(void);
 void pushUndo(struct editorBuffer *buf, struct editorUndo *new);
 void clearRedos(struct editorBuffer *buf);
 void clearUndosAndRedos(struct editorBuffer *buf);
+void bulkInsert(struct editorBuffer *buf, int startx, int starty,
+		const uint8_t *data, int datalen);
 #ifdef EMIL_DEBUG_UNDO
 void debugUnpair(struct editorConfig *ed, struct editorBuffer *buf);
 #endif

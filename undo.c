@@ -16,9 +16,9 @@
 /* Bulk-insert text from 'data' (length 'datalen') into 'buf' starting
  * at buffer position (startx, starty).  Uses direct memmove/memcpy and
  * editorInsertRow — no character-at-a-time primitives.  Does NOT record
- * undo. */
-static void bulkInsert(struct editorBuffer *buf, int startx, int starty,
-		       const uint8_t *data, int datalen) {
+ * undo.  Calls adjustAllPoints internally. */
+void bulkInsert(struct editorBuffer *buf, int startx, int starty,
+		const uint8_t *data, int datalen) {
 	if (datalen <= 0)
 		return;
 
