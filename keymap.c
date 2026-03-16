@@ -64,7 +64,6 @@ void setupCommands(struct editorConfig *ed) {
 		{ "visual-line-mode", editorToggleVisualLineModeWrapper },
 		{ "version", editorVersionWrapper },
 		{ "view-register", editorViewRegister },
-		{ "whitespace-cleanup", editorWhitespaceCleanup },
 #ifdef EMIL_DEBUG_UNDO
 		{ "debug-unpair", debugUnpair },
 #endif

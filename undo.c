@@ -325,7 +325,7 @@ void pushUndo(struct editorBuffer *buf, struct editorUndo *new) {
 			/* If the oldest entry is paired, free both */
 			freeUndos(cur->prev);
 			cur->prev = NULL;
-			cur->paired = 0;  /* pair was split by pruning */
+			cur->paired = 0; /* pair was split by pruning */
 		}
 		buf->undo_count = UNDO_LIMIT;
 		buf->undo_pruned = 1;

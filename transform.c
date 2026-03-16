@@ -112,33 +112,3 @@ uint8_t *transformerTransposeWords(uint8_t *input) {
 void editorCapitalizeRegion(struct editorConfig *ed, struct editorBuffer *buf) {
 	editorTransformRegion(ed, buf, transformerCapitalCase);
 }
-
-void editorWhitespaceCleanup(struct editorConfig *UNUSED(ed),
-			     struct editorBuffer *buf) {
-	unsigned int trailing = 0;
-	for (int i = 0; i < buf->numrows; i++) {
-		erow *row = &buf->row[i];
-		for (int j = row->size - 1; j >= 0; j--) {
-			if (row->chars[j] == ' ' || row->chars[j] == '\t') {
-				row->size--;
-				trailing++;
-			} else {
-				break;
-			}
-		}
-		row->cached_width = -1;
-	}
-	invalidateScreenCache(buf);
-
-	if (buf->cx > buf->row[buf->cy].size) {
-		buf->cx = buf->row[buf->cy].size;
-	}
-
-	if (trailing > 0) {
-		clearUndosAndRedos(buf);
-		editorSetStatusMessage("%d trailing characters removed",
-				       trailing);
-	} else {
-		editorSetStatusMessage("No change.");
-	}
-}
