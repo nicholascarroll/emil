@@ -184,10 +184,7 @@ Notes:
 
 2. **Version 0.1.1 Feature complete** [DONE] ✅
 
-3. **Version 0.2.0 Stable Preview**  [WIP]⚠️🚧🔨👷    
-   - Most known bugs fixed
-   - First GitHub release (prerelease tag)  
-   - Announced on forums (HN, Reddit, etc.)  
+3. **Version 0.2.1 First Prerelease**  [DONE]
 
 4. **Rendering optimizations**
    Reduce bytes over wire with an optional render acceleration layer 

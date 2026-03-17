@@ -197,7 +197,7 @@ int editorOpen(struct editorBuffer *bufr, char *filename) {
 	if (fileContainsNullBytes(fp)) {
 		fclose(fp);
 		editorSetStatusMessage(
-			"File failed UTF-8 validation (contains null bytes)");
+			msg_invalid_utf8); // * TODO this message maybe imprecise
 		free(bufr->filename);
 		bufr->filename = NULL;
 		return -1;
@@ -234,7 +234,7 @@ int editorOpen(struct editorBuffer *bufr, char *filename) {
 		bufr->numrows = 0;
 		free(bufr->filename);
 		bufr->filename = NULL;
-		editorSetStatusMessage(msg_file_bad_utf8);
+		editorSetStatusMessage(msg_invalid_utf8);
 		return -1;
 	}
 
@@ -268,8 +268,7 @@ int editorOpen(struct editorBuffer *bufr, char *filename) {
 		}
 	}
 
-	editorSetStatusMessage("%d lines, %d columns", bufr->numrows,
-			       max_width);
+	editorSetStatusMessage(msg_lines_columns, bufr->numrows, max_width);
 	return 0;
 }
 
@@ -318,7 +317,7 @@ void editorSave(struct editorBuffer *bufr) {
 		bufr->filename = (char *)editorPrompt(
 			bufr, (uint8_t *)"Save as: %s", PROMPT_FILES, NULL);
 		if (bufr->filename == NULL) {
-			editorSetStatusMessage("Save aborted.");
+			editorSetStatusMessage(msg_save_aborted);
 			return;
 		}
 		bufr->special_buffer = 0;
@@ -335,7 +334,7 @@ void editorSave(struct editorBuffer *bufr) {
 	int fd = mkstemp(tmpname);
 	if (fd == -1) {
 		free(buf);
-		editorSetStatusMessage("Save failed: %s", strerror(errno));
+		editorSetStatusMessage(msg_save_failed, strerror(errno));
 		return;
 	}
 
@@ -355,7 +354,7 @@ void editorSave(struct editorBuffer *bufr) {
 			close(fd);
 			unlink(tmpname);
 			free(buf);
-			editorSetStatusMessage("Save failed: %s",
+			editorSetStatusMessage(msg_save_failed,
 					       strerror(errno));
 			return;
 		} else if (n == 0) {
@@ -363,8 +362,7 @@ void editorSave(struct editorBuffer *bufr) {
 			close(fd);
 			unlink(tmpname);
 			free(buf);
-			editorSetStatusMessage(
-				"Save failed: wrote 0 bytes unexpectedly");
+			editorSetStatusMessage(msg_save_failed);
 			return;
 		}
 		total += n;
@@ -374,7 +372,7 @@ void editorSave(struct editorBuffer *bufr) {
 		close(fd);
 		unlink(tmpname);
 		free(buf);
-		editorSetStatusMessage("Save failed: %s", strerror(errno));
+		editorSetStatusMessage(msg_save_failed, strerror(errno));
 		return;
 	}
 
@@ -383,7 +381,7 @@ void editorSave(struct editorBuffer *bufr) {
 	if (rename(tmpname, bufr->filename) == -1) {
 		unlink(tmpname);
 		free(buf);
-		editorSetStatusMessage("Save failed: %s", strerror(errno));
+		editorSetStatusMessage(msg_save_failed, strerror(errno));
 		return;
 	}
 
@@ -411,7 +409,7 @@ void editorSaveAs(struct editorBuffer *bufr) {
 	char *new_filename = (char *)editorPrompt(
 		bufr, (uint8_t *)"Save as: %s", PROMPT_FILES, NULL);
 	if (new_filename == NULL) {
-		editorSetStatusMessage("Save aborted.");
+		editorSetStatusMessage(msg_save_aborted);
 		return;
 	}
 	free(bufr->filename);
@@ -448,7 +446,7 @@ struct editorBuffer *editorSwitchToFile(const char *filename) {
 
 void findFile(void) {
 	uint8_t *prompt =
-		editorPrompt(E.buf, "Find File: %s", PROMPT_FILES, NULL);
+		editorPrompt(E.buf, msg_find_file, PROMPT_FILES, NULL);
 
 	if (prompt == NULL) {
 		editorSetStatusMessage(msg_canceled);
@@ -456,7 +454,7 @@ void findFile(void) {
 	}
 	// I think this probably never gets called anymore
 	if (prompt[strlen(prompt) - 1] == '/') {
-		editorSetStatusMessage("Directory editing not supported.");
+		editorSetStatusMessage(msg_dir_not_supported);
 		free(prompt);
 		return;
 	}
@@ -479,9 +477,9 @@ void editorInsertFile(struct editorConfig *UNUSED(ed),
 	FILE *fp = fopen((char *)filename, "r");
 	if (!fp) {
 		if (errno == ENOENT) {
-			editorSetStatusMessage("File not found: %s", filename);
+			editorSetStatusMessage(msg_file_not_found, filename);
 		} else {
-			editorSetStatusMessage("Error opening file: %s",
+			editorSetStatusMessage(msg_error_opening,
 					       strerror(errno));
 		}
 		free(filename);
@@ -492,7 +490,7 @@ void editorInsertFile(struct editorConfig *UNUSED(ed),
 	if (fileContainsNullBytes(fp)) {
 		fclose(fp);
 		editorSetStatusMessage(
-			"File failed UTF-8 validation (contains null bytes)");
+			msg_invalid_utf8); // * TODO needa  null bytes msg
 		free(filename);
 		return;
 	}
@@ -519,7 +517,7 @@ void editorInsertFile(struct editorConfig *UNUSED(ed),
 	/* Validate UTF-8 before inserting */
 	if (!checkUTF8Validity(tmpbuf)) {
 		destroyBuffer(tmpbuf);
-		editorSetStatusMessage(msg_file_bad_utf8);
+		editorSetStatusMessage(msg_invalid_utf8);
 		free(filename);
 		return;
 	}
@@ -542,8 +540,7 @@ void editorInsertFile(struct editorConfig *UNUSED(ed),
 		buf->cx = buf->row[buf->cy].size;
 	}
 
-	editorSetStatusMessage("Inserted %d lines from %s", lines_inserted,
-			       filename);
+	editorSetStatusMessage(msg_inserted_lines, lines_inserted, filename);
 	free(filename);
 
 	buf->dirty++;
@@ -701,8 +698,7 @@ void editorChangeDirectory(struct editorConfig *ed, struct editorBuffer *buf) {
 	/* Grab the old cwd before changing */
 	char old_cwd[PATH_MAX];
 	if (getcwd(old_cwd, sizeof(old_cwd)) == NULL) {
-		editorSetStatusMessage(
-			"cd: cannot determine current directory");
+		editorSetStatusMessage(msg_indeterminate_cd);
 		free(dir);
 		return;
 	}
@@ -718,7 +714,7 @@ void editorChangeDirectory(struct editorConfig *ed, struct editorBuffer *buf) {
 	if (getcwd(new_cwd, sizeof(new_cwd)) == NULL) {
 		/* chdir succeeded but getcwd failed — unlikely but
 		 * leave filenames as-is */
-		editorSetStatusMessage("Changed directory");
+		editorSetStatusMessage(msg_changed_dir);
 		free(dir);
 		return;
 	}
@@ -738,6 +734,6 @@ void editorChangeDirectory(struct editorConfig *ed, struct editorBuffer *buf) {
 		computeDisplayNames();
 	}
 
-	editorSetStatusMessage("Current directory: %s", new_cwd);
+	editorSetStatusMessage(msg_current_dir, new_cwd);
 	free(dir);
 }

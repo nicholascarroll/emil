@@ -67,8 +67,7 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 
 	/* Check if subprocess exited with error */
 	if (sub_ret != 0) {
-		editorSetStatusMessage("Shell command exited with status %d",
-				       sub_ret);
+		editorSetStatusMessage(msg_shell_exit_status, sub_ret);
 		/* Continue anyway to show any output/errors */
 	}
 
@@ -88,7 +87,7 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 
 	/* Only show byte count if subprocess succeeded */
 	if (sub_ret == 0) {
-		editorSetStatusMessage("Read %d bytes", i);
+		editorSetStatusMessage(msg_shell_read_bytes, i);
 	}
 
 	/* Cleanup & return */
@@ -103,7 +102,7 @@ uint8_t *editorPipe(struct editorConfig *ed, struct editorBuffer *bf,
 	cmd = editorPrompt(bf, (uint8_t *)"Shell: %s", PROMPT_BASIC, NULL);
 
 	if (cmd == NULL) {
-		editorSetStatusMessage("Canceled shell command.");
+		editorSetStatusMessage(msg_shell_canceled);
 	} else if (useRegion) {
 		if (E.uarg) {
 			E.uarg = 0;
@@ -116,7 +115,7 @@ uint8_t *editorPipe(struct editorConfig *ed, struct editorBuffer *bf,
 		} else {
 			// 1. Extract the selected region
 			if (markInvalid()) {
-				editorSetStatusMessage("Mark invalid.");
+				editorSetStatusMessage(msg_mark_invalid);
 				free(cmd);
 				free(buf);
 				return NULL;
@@ -208,12 +207,12 @@ void editorPipeCmd(struct editorConfig *ed, struct editorBuffer *bufr,
 void editorDiffBufferWithFile(struct editorConfig *ed,
 			      struct editorBuffer *bufr) {
 	if (bufr->filename == NULL) {
-		editorSetStatusMessage("Buffer has no file");
+		editorSetStatusMessage(msg_buffer_without_file);
 		return;
 	}
 
 	if (!bufr->dirty) {
-		editorSetStatusMessage("Buffer matches file");
+		editorSetStatusMessage(msg_diff_buffer_matches_file);
 		return;
 	}
 
@@ -221,7 +220,7 @@ void editorDiffBufferWithFile(struct editorConfig *ed,
 	char tmpname[] = "/tmp/emil-diff-XXXXXX";
 	int fd = mkstemp(tmpname);
 	if (fd == -1) {
-		editorSetStatusMessage("Diff failed: cannot create temp file");
+		editorSetStatusMessage(msg_diff_cannot_create_temp);
 		return;
 	}
 
@@ -236,7 +235,7 @@ void editorDiffBufferWithFile(struct editorConfig *ed,
 			close(fd);
 			unlink(tmpname);
 			free(bufstr);
-			editorSetStatusMessage("Diff failed: write error");
+			editorSetStatusMessage(msg_diff_cannot_write);
 			return;
 		}
 		total += n;
@@ -255,7 +254,7 @@ void editorDiffBufferWithFile(struct editorConfig *ed,
 				  &subprocess);
 	if (result) {
 		unlink(tmpname);
-		editorSetStatusMessage("Diff failed: cannot create subprocess");
+		editorSetStatusMessage(msg_diff_cannot_subprocess);
 		return;
 	}
 
@@ -284,13 +283,13 @@ void editorDiffBufferWithFile(struct editorConfig *ed,
 	/* diff returns 0 = identical, 1 = differences, 2 = error */
 	if (sub_ret == 0) {
 		free(output);
-		editorSetStatusMessage("No differences");
+		editorSetStatusMessage(msg_diff_no_differences);
 		return;
 	}
 
 	if (sub_ret >= 2 || i == 0) {
 		free(output);
-		editorSetStatusMessage("Diff failed (exit status %d)", sub_ret);
+		editorSetStatusMessage(msg_diff_failed, sub_ret);
 		return;
 	}
 

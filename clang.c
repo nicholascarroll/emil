@@ -153,7 +153,7 @@ static int ctagsLookup(const char *sym, char *out_file, size_t filesz,
 void editorCtagsJump(void) {
 	char *sym = wordAtPoint(E.buf);
 	if (!sym) {
-		editorSetStatusMessage("No symbol at point");
+		editorSetStatusMessage(msg_no_symbol_at_point);
 		return;
 	}
 
@@ -162,7 +162,7 @@ void editorCtagsJump(void) {
 	int tagline;
 	if (ctagsLookup(sym, tagfile, sizeof(tagfile), &tagline, tagpat,
 			sizeof(tagpat)) < 0) {
-		editorSetStatusMessage("Tag not found: %s", sym);
+		editorSetStatusMessage(msg_tag_not_found, sym);
 		free(sym);
 		return;
 	}
@@ -188,13 +188,13 @@ void editorCtagsJump(void) {
 		}
 		recenter(E.windows[windowFocusedIdx()]);
 	}
-	editorSetStatusMessage("Tag: %s", sym);
+	editorSetStatusMessage(msg_tag, sym);
 	free(sym);
 }
 
 void editorCtagsBack(void) {
 	if (jsp == 0) {
-		editorSetStatusMessage("Tag stack empty");
+		editorSetStatusMessage(msg_tag_stack_empty);
 		return;
 	}
 	jsp--;
@@ -213,7 +213,7 @@ void editorToggleHeaderBody(void) {
 
 	char *ext = strrchr(E.buf->filename, '.');
 	if (!ext) {
-		editorSetStatusMessage("No file extension");
+		editorSetStatusMessage(msg_no_file_extension);
 		return;
 	}
 
@@ -239,7 +239,7 @@ void editorToggleHeaderBody(void) {
 	}
 
 	if (!target_ext) {
-		editorSetStatusMessage("No header/body mapping for %s", ext);
+		editorSetStatusMessage(msg_no_ext_mapping, ext);
 		return;
 	}
 
@@ -250,7 +250,7 @@ void editorToggleHeaderBody(void) {
 	snprintf(other + base_len, sizeof(other) - base_len, "%s", target_ext);
 
 	if (access(other, F_OK) != 0) {
-		editorSetStatusMessage("No counterpart file: %s", other);
+		editorSetStatusMessage(msg_no_ext_file, other);
 		return;
 	}
 

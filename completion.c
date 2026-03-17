@@ -310,8 +310,7 @@ static void showCompletionsBuffer(char **matches, int n_matches,
 
 	/* Add header */
 	char header[100];
-	snprintf(header, sizeof(header),
-		 "Possible completions (%d):", n_matches);
+	snprintf(header, sizeof(header), msg_possible_completions, n_matches);
 	editorInsertRow(comp_buf, 0, header, strlen(header));
 	editorInsertRow(comp_buf, 1, "", 0);
 
@@ -587,8 +586,7 @@ void handleMinibufferCompletion(struct editorBuffer *minibuf,
 				showCompletionsBuffer(result.matches,
 						      result.n_matches, type);
 			} else {
-				editorSetStatusMessage(
-					"[Complete, but not unique]");
+				editorSetStatusMessage(msg_complete_not_unique);
 				minibuf->completion_state.preserve_message = 1;
 			}
 		}

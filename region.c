@@ -66,7 +66,7 @@ void editorSetMark(void) {
 	if (E.buf->mark_active && E.buf->markx == E.buf->cx &&
 	    E.buf->marky == E.buf->cy) {
 		E.buf->mark_active = 0;
-		editorSetStatusMessage("Mark deactivated");
+		editorSetStatusMessage(msg_mark_cleared);
 		return;
 	}
 	markRingPush(E.buf);
@@ -122,7 +122,7 @@ void editorPopMark(void) {
 
 	/* Step 1: goto mark */
 	if (buf->markx < 0 || buf->marky < 0) {
-		editorSetStatusMessage("No mark set in this buffer");
+		editorSetStatusMessage(msg_no_mark_set);
 		return;
 	}
 
@@ -173,7 +173,7 @@ void editorPopMark(void) {
 	buf->mark_active = 0;
 
 	if (buf->cx == old_cx && buf->cy == old_cy)
-		editorSetStatusMessage("Mark popped");
+		editorSetStatusMessage(msg_mark_popped);
 }
 
 void editorToggleRectangleMode(void) {
@@ -498,7 +498,7 @@ void editorYank(struct editorConfig *ed, struct editorBuffer *buf, int count) {
 
 void editorYankPop(struct editorConfig *ed, struct editorBuffer *buf) {
 	if (ed->kill_history.count == 0) {
-		editorSetStatusMessage("Kill ring is empty");
+		editorSetStatusMessage(msg_kill_ring_empty);
 		return;
 	}
 
@@ -624,7 +624,7 @@ void editorReplaceRegex(struct editorConfig *ed, struct editorBuffer *buf) {
 		char error_msg[256];
 		regerror(regcomp_result, &pattern, error_msg,
 			 sizeof(error_msg));
-		editorSetStatusMessage("Regex error: %s", error_msg);
+		editorSetStatusMessage(msg_regex_error, error_msg);
 		free(regex);
 		free(repl);
 		return;
@@ -755,7 +755,7 @@ void editorReplaceRegex(struct editorConfig *ed, struct editorBuffer *buf) {
 
 	restoreKill(ed, okill);
 
-	editorSetStatusMessage("Replaced %d instances", madeReplacements);
+	editorSetStatusMessage(msg_replaced_n, madeReplacements);
 }
 
 void editorStringRectangle(struct editorConfig *ed, struct editorBuffer *buf) {

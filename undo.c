@@ -191,7 +191,7 @@ void editorDoUndo(struct editorBuffer *buf, int count) {
 	int times = count ? count : 1;
 	for (int j = 0; j < times; j++) {
 		if (buf->undo == NULL) {
-			editorSetStatusMessage("No further undo information.");
+			editorSetStatusMessage(msg_no_undo);
 			if (!buf->undo_pruned && !buf->internal_mod) {
 				buf->dirty = 0;
 			}
@@ -223,7 +223,7 @@ void editorDoUndo(struct editorBuffer *buf, int count) {
 		buf->undo = buf->undo->prev;
 		buf->redo->prev = orig;
 		buf->undo_count--;
-		editorSetStatusMessage("Undo");
+		editorSetStatusMessage(msg_undo);
 
 		if (paired) {
 			editorDoUndo(buf, 1);
@@ -243,7 +243,7 @@ void debugUnpair(struct editorConfig *UNUSED(ed), struct editorBuffer *buf) {
 		i->paired = 0;
 		redos++;
 	}
-	editorSetStatusMessage("Unpaired %d undos, %d redos.", undos, redos);
+	editorSetStatusMessage(msg_unpaired_undo_redo, undos, redos);
 }
 #endif
 
@@ -258,8 +258,7 @@ void editorDoRedo(struct editorBuffer *buf, int count) {
 	int times = count ? count : 1;
 	for (int j = 0; j < times; j++) {
 		if (buf->redo == NULL) {
-			editorSetStatusMessage("No further redo information.");
-			return;
+			editorSetStatusMessage(msg_no_redo);
 		}
 
 		if (buf->redo->delete) {

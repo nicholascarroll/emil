@@ -96,7 +96,7 @@ void runCommand(char *cmd, struct editorConfig *ed, struct editorBuffer *buf) {
 	if (found) {
 		found->cmd(ed, buf);
 	} else {
-		editorSetStatusMessage("No command found");
+		editorSetStatusMessage(msg_no_command);
 	}
 }
 
@@ -330,9 +330,8 @@ int resolveBinding(int key) {
 				if (nextkey == 't') {
 					return CMD_VISUAL_LINE_MODE;
 				} else {
-					editorSetStatusMessage(
-						"Unknown command C-x x %c",
-						nextkey);
+					editorSetStatusMessage(msg_unknown_cx_x,
+							       nextkey);
 					return CMD_NONE;
 				}
 			}
@@ -355,8 +354,7 @@ int resolveBinding(int key) {
 				editorSetStatusMessage(msg_unknown_cx,
 						       key + '`');
 			} else {
-				editorSetStatusMessage("Unknown command C-x %c",
-						       key);
+				editorSetStatusMessage(msg_unknown_cx, key);
 			}
 			return CMD_NONE;
 		}
@@ -649,7 +647,7 @@ static int dispatchEdit(int c, int uarg) {
 		editorDelChar(E.buf, uarg);
 		return 1;
 	case CMD_UNICODE_ERROR:
-		editorSetStatusMessage("Bad UTF-8 sequence");
+		editorSetStatusMessage(msg_invalid_utf8);
 		return 1;
 	case CMD_UNICODE:
 		editorInsertUnicode(E.buf, uarg);
@@ -675,7 +673,7 @@ static int dispatchEdit(int c, int uarg) {
 			}
 			editorInsertChar(E.buf, key, count);
 		} else {
-			editorSetStatusMessage("Bad UTF-8 sequence");
+			editorSetStatusMessage(msg_invalid_utf8);
 		}
 	}
 		return 1;
@@ -984,18 +982,18 @@ static int dispatchMacro(int c, int uarg) {
 				free(E.macro.keys);
 			}
 			E.macro.keys = xmalloc(E.macro.skeys * sizeof(int));
-			editorSetStatusMessage("Recording macro...");
+			editorSetStatusMessage(msg_recording);
 		} else {
-			editorSetStatusMessage("Already recording");
+			editorSetStatusMessage(msg_already_recording);
 		}
 		return 1;
 	case CMD_MACRO_END:
 		if (E.recording) {
 			E.recording = 0;
-			editorSetStatusMessage("Macro recorded (%d keys)",
+			editorSetStatusMessage(msg_macro_recorded,
 					       E.macro.nkeys);
 		} else {
-			editorSetStatusMessage("Not recording");
+			editorSetStatusMessage(msg_not_recording);
 		}
 		return 1;
 	case CMD_MACRO_EXEC:
@@ -1004,7 +1002,7 @@ static int dispatchMacro(int c, int uarg) {
 				editorExecMacro(&E.macro);
 			}
 		} else {
-			editorSetStatusMessage("No macro recorded");
+			editorSetStatusMessage(msg_no_macro);
 		}
 		return 1;
 	default:
@@ -1192,7 +1190,7 @@ done:
 void editorExecMacro(struct editorMacro *macro) {
 	const int MAX_MACRO_DEPTH = 100;
 	if (E.macro_depth >= MAX_MACRO_DEPTH) {
-		editorSetStatusMessage("Macro recursion depth exceeded");
+		editorSetStatusMessage(msg_macro_depth);
 		return;
 	}
 

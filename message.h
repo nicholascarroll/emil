@@ -23,10 +23,14 @@ static const char *const msg_buffer_empty = "缓冲区为空";
 static const char *const msg_beginning_of_buffer = "缓冲区开头";
 static const char *const msg_end_of_buffer = "缓冲区末尾";
 static const char *const msg_new_file = "（新文件）";
+static const char *const msg_find_file = "查找文件: %s";
 
 static const char *const msg_mark_set = "标记已设置。";
 static const char *const msg_mark_cleared = "标记已清除";
 static const char *const msg_mark_invalid = "标记无效。";
+static const char *const msg_mark_popped = "已弹出标记";
+static const char *const msg_no_mark_set = "此缓冲区未设置标记。";
+
 static const char *const msg_rectangle_on = "矩形模式已开启";
 static const char *const msg_rectangle_off = "矩形模式已关闭";
 
@@ -35,21 +39,29 @@ static const char *const msg_no_more_kill_entries =
 	"剪切环中没有更多条目可粘贴！";
 static const char *const msg_not_after_yank = "上一个命令不是粘贴";
 
-static const char *const msg_no_undo = "没有更多撤销信息。";
-static const char *const msg_no_redo = "没有更多重做信息。";
+static const char *const msg_undo = "撤销操作";
+static const char *const msg_redo = "重做操作";
+static const char *const msg_no_undo = "没有更多可撤销的操作";
+static const char *const msg_no_redo = "没有更多可重做的操作";
+static const char *const msg_unpaired_undo_redo =
+	"未匹配的 %d 次撤销, %d 次重做。";
 
 static const char *const msg_wrote_bytes = "已写入 %d 字节到 %s";
 static const char *const msg_cant_open = "无法打开文件：%s";
 static const char *const msg_save_aborted = "保存已中止。";
 static const char *const msg_save_failed = "保存失败：%s";
 static const char *const msg_file_not_found = "文件未找到：%s";
-static const char *const msg_file_bad_utf8 = "文件 UTF-8 验证失败";
+static const char *const msg_invalid_utf8 = "UTF-8 验证失败";
+
 static const char *const msg_file_locked = "[文件被 PID %d 锁定]";
 static const char *const msg_file_changed_on_disk = "[文件已被外部修改]";
 static const char *const msg_lines_columns = "%d 行，%d 列";
 static const char *const msg_dir_not_supported = "不支持编辑目录。";
 static const char *const msg_inserted_lines = "从 %s 插入了 %d 行";
 static const char *const msg_error_opening = "打开文件出错：%s";
+static const char *const msg_changed_dir = "已更改目录";
+static const char *const msg_current_dir = "当前目录: %s";
+static const char *const msg_indeterminate_cd = "cd: 无法确定当前目录";
 
 static const char *const msg_canceled_replace = "已取消字符串替换。";
 static const char *const msg_canceled_query_replace = "已取消交互式替换。";
@@ -61,6 +73,8 @@ static const char *const msg_no_match_bracket = "[无匹配]";
 static const char *const msg_backward_regex_todo = "反向正则搜索尚未实现";
 
 static const char *const msg_nothing_to_complete = "此处无可补全内容。";
+static const char *const msg_possible_completions = "可能的补全 (%d):";
+static const char *const msg_complete_not_unique = "[已补全，但有多个匹配项]";
 
 static const char *const msg_indent_tabs = "缩进已设为制表符";
 static const char *const msg_indent_spaces = "缩进已设为 %i 个空格";
@@ -87,7 +101,6 @@ static const char *const msg_macro_blocked = "录制/回放宏时不可用";
 static const char *const msg_shell_canceled = "已取消 Shell 命令。";
 static const char *const msg_shell_read_bytes = "已读取 %d 字节";
 static const char *const msg_shell_exit_status = "Shell 命令退出状态为 %d";
-static const char *const msg_pipe_unavailable = "此平台不支持管道命令";
 static const char *const msg_shell_disabled = "Shell 集成已禁用";
 
 static const char *const msg_register_empty = "寄存器 %s 为空。";
@@ -105,6 +118,25 @@ static const char *const msg_unsaved_quit =
 static const char *const msg_buffer_modified_kill =
 	"缓冲区 %.20s 已修改；仍要关闭吗？（y 或 n）";
 
+static const char *const msg_no_piped_input = "标准输入: 无管道输入";
+static const char *const msg_no_symbol_at_point = "当前光标处无符号";
+static const char *const msg_tag_not_found = "未找到标签: %s";
+static const char *const msg_tag = "标签: %s";
+static const char *const msg_tag_stack_empty = "标签栈为空";
+static const char *const msg_no_file_extension = "无文件扩展名";
+static const char *const msg_no_ext_mapping = "没有 %s 的头文件/主体映射";
+static const char *const msg_no_ext_file = "没有对应的文件: %s";
+static const char *const msg_buffer_without_file = "缓冲区未关联文件";
+static const char *const msg_diff_buffer_matches_file = "缓冲区内容与文件一致";
+static const char *const msg_diff_cannot_create_temp =
+	"Diff 失败: 无法创建临时文件";
+static const char *const msg_diff_cannot_write = "Diff 失败: 写入错误";
+static const char *const msg_diff_cannot_subprocess =
+	"Diff 失败: 无法创建子进程";
+static const char *const msg_diff_no_differences = "无差异";
+static const char *const msg_diff_failed = "Diff 失败 (退出状态 %d)";
+static const char *const msg_unknown_cx_x = "未知命令 C-x x %c";
+
 #else
 
 /* ENGLISH (default) */
@@ -117,10 +149,14 @@ static const char *const msg_buffer_empty = "Buffer is empty";
 static const char *const msg_beginning_of_buffer = "Beginning of buffer";
 static const char *const msg_end_of_buffer = "End of buffer";
 static const char *const msg_new_file = "(New file)";
+static const char *const msg_find_file = "Find File: %s";
 
 static const char *const msg_mark_set = "Mark set.";
-static const char *const msg_mark_cleared = "Mark Cleared";
+static const char *const msg_mark_cleared = "Mark deactivated";
 static const char *const msg_mark_invalid = "Mark invalid.";
+static const char *const msg_mark_popped = "Mark popped.";
+static const char *const msg_no_mark_set = "No mark set in this buffer.";
+
 static const char *const msg_rectangle_on = "Rectangle mode ON";
 static const char *const msg_rectangle_off = "Rectangle mode OFF";
 
@@ -129,15 +165,19 @@ static const char *const msg_no_more_kill_entries =
 	"No more kill ring entries to yank!";
 static const char *const msg_not_after_yank = "Previous command was not a yank";
 
+static const char *const msg_undo = "Undo.";
+static const char *const msg_redo = "Redo.";
 static const char *const msg_no_undo = "No further undo information.";
 static const char *const msg_no_redo = "No further redo information.";
+static const char *const msg_unpaired_undo_redo =
+	"Unpaired %d undos, %d redos.";
 
 static const char *const msg_wrote_bytes = "Wrote %d bytes to %s";
 static const char *const msg_cant_open = "Can't open file: %s";
 static const char *const msg_save_aborted = "Save aborted.";
 static const char *const msg_save_failed = "Save failed: %s";
 static const char *const msg_file_not_found = "File not found: %s";
-static const char *const msg_file_bad_utf8 = "File failed UTF-8 validation";
+static const char *const msg_invalid_utf8 = "Failed UTF-8 validation";
 static const char *const msg_file_locked = "[FILE LOCKED BY PID %d]";
 static const char *const msg_file_changed_on_disk = "[FILE CHANGED ON DISK]";
 static const char *const msg_lines_columns = "%d lines, %d columns";
@@ -145,6 +185,10 @@ static const char *const msg_dir_not_supported =
 	"Directory editing not supported.";
 static const char *const msg_inserted_lines = "Inserted %d lines from %s";
 static const char *const msg_error_opening = "Error opening file: %s";
+static const char *const msg_changed_dir = "Changed directory";
+static const char *const msg_current_dir = "Current directory: %s";
+static const char *const msg_indeterminate_cd =
+	"cd: cannot determine current directory";
 
 static const char *const msg_canceled_replace = "Canceled replace-string.";
 static const char *const msg_canceled_query_replace = "Canceled query-replace.";
@@ -157,6 +201,9 @@ static const char *const msg_backward_regex_todo =
 	"Backward regex search not yet implemented";
 
 static const char *const msg_nothing_to_complete = "Nothing to complete here.";
+static const char *const msg_possible_completions =
+	"Possible completions (%d):";
+static const char *const msg_complete_not_unique = "[complete, but not unique]";
 
 static const char *const msg_indent_tabs = "Indentation set to tabs";
 static const char *const msg_indent_spaces = "Indentation set to %i spaces";
@@ -184,8 +231,6 @@ static const char *const msg_shell_canceled = "Canceled shell command.";
 static const char *const msg_shell_read_bytes = "Read %d bytes";
 static const char *const msg_shell_exit_status =
 	"Shell command exited with status %d";
-static const char *const msg_pipe_unavailable =
-	"Pipe command not available on this platform";
 static const char *const msg_shell_disabled = "Shell integration disabled";
 
 static const char *const msg_register_empty = "Register %s is empty.";
@@ -203,6 +248,25 @@ static const char *const msg_unsaved_quit =
 	"There are unsaved changes. Really quit? (y or n)";
 static const char *const msg_buffer_modified_kill =
 	"Buffer %.20s modified; kill anyway? (y or n)";
+
+static const char *const msg_no_piped_input = "stdin: no piped input";
+static const char *const msg_no_symbol_at_point = "No symbol at point";
+static const char *const msg_tag_not_found = "Tag not found: %s";
+static const char *const msg_tag = "Tag: %s";
+static const char *const msg_tag_stack_empty = "Tag stack empty";
+static const char *const msg_no_file_extension = "No file extension";
+static const char *const msg_no_ext_mapping = "No header/body mapping for %s";
+static const char *const msg_no_ext_file = "No counterpart file: %s";
+static const char *const msg_buffer_without_file = "Buffer has no file";
+static const char *const msg_diff_buffer_matches_file = "Buffer matches file";
+static const char *const msg_diff_cannot_create_temp =
+	"Diff failed: cannot create temp file";
+static const char *const msg_diff_cannot_write = "Diff failed: write error";
+static const char *const msg_diff_cannot_subprocess =
+	"Diff failed: cannot create subprocess";
+static const char *const msg_diff_no_differences = "No differences";
+static const char *const msg_diff_failed = "Diff failed (exit status %d)";
+static const char *const msg_unknown_cx_x = "Unknown command C-x x %c";
 
 #endif
 

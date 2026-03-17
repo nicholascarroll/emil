@@ -544,8 +544,7 @@ void editorSwitchToNamedBuffer(struct editorConfig *ed,
 		editorPrompt(current, (uint8_t *)prompt, PROMPT_BASIC, NULL);
 
 	if (buffer_name == NULL) {
-		editorSetStatusMessage("Buffer switch canceled");
-		return;
+		editorSetStatusMessage(msg_buffer_switch_canceled);
 	}
 
 	struct editorBuffer *targetBuffer = NULL;
@@ -554,7 +553,7 @@ void editorSwitchToNamedBuffer(struct editorConfig *ed,
 		/* User pressed Enter without typing — use default */
 		targetBuffer = defaultBuffer;
 		if (!targetBuffer) {
-			editorSetStatusMessage("No buffer to switch to");
+			editorSetStatusMessage(msg_no_buffer_switch);
 			free(buffer_name);
 			return;
 		}
@@ -601,7 +600,7 @@ void editorSwitchToNamedBuffer(struct editorConfig *ed,
 		}
 
 		if (!targetBuffer) {
-			editorSetStatusMessage("No buffer named '%s'",
+			editorSetStatusMessage(msg_no_buffer_named,
 					       buffer_name);
 			free(buffer_name);
 			return;
@@ -615,7 +614,7 @@ void editorSwitchToNamedBuffer(struct editorConfig *ed,
 		ed->buf->display_name ?
 			ed->buf->display_name :
 			(ed->buf->filename ? ed->buf->filename : "*scratch*");
-	editorSetStatusMessage("Switched to buffer %s", switchedName);
+	editorSetStatusMessage(msg_switched_to, switchedName);
 
 	for (int i = 0; i < ed->nwindows; i++) {
 		if (ed->windows[i]->focused) {

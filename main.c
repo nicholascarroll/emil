@@ -223,8 +223,8 @@ int main(int argc, char *argv[]) {
 				/* Binary data — bail out cleanly */
 				free(stdin_data);
 				disableRawMode();
-				fprintf(stderr,
-					"stdin: data failed UTF-8 validation\n");
+				fprintf(stderr, "stdin: %s\n",
+					msg_invalid_utf8);
 				exit(1);
 			}
 			stdinBuf->next = E.headbuf;
@@ -252,16 +252,16 @@ int main(int argc, char *argv[]) {
 				}
 				/* stdin was a tty and not piped —
 				 * nothing to read */
-				editorSetStatusMessage("stdin: no piped input");
+				editorSetStatusMessage(msg_no_piped_input);
 				continue;
 			}
 
 			struct editorBuffer *newBuf = newBuffer();
 			if (editorOpen(newBuf, argv[i]) < 0) {
 				disableRawMode();
-				fprintf(stderr,
-					"%s: file failed UTF-8 validation\n",
-					argv[i]);
+
+				fprintf(stderr, "%s: %s\n", argv[i],
+					msg_invalid_utf8);
 				exit(1);
 			}
 
@@ -291,7 +291,7 @@ int main(int argc, char *argv[]) {
 	computeDisplayNames();
 
 #ifdef EMIL_DISABLE_SHELL
-	editorSetStatusMessage("Shell integration disabled");
+	editorSetStatusMessage(msg_shell_disabled);
 #endif /* EMIL_DISABLE_SHELL */
 	setupHandlers();
 

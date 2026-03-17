@@ -4,25 +4,24 @@
 .Sh NAME
 .Nm emil
 .Nd text editor
-
 .Sh SYNOPSIS
 .Nm
 .Op Ar options
 .Op Ar file
-
 .Sh DESCRIPTION
 .Nm
-is a small text editor for UTF-8 encoded files. 
-It is designed to operate on VT100-compatible terminals and implements 
-a subset of the operational conventions found in the 
-.Em Emacs 
+is a small, portable text editor for UTF-8 encoded files.
+It is designed to operate on VT100-compatible terminals and implements
+a subset of the operational conventions found in the
+.Em Emacs
 editor.
 .Pp
-Text is managed in discrete 
-.Sy buffers , 
-which may be displayed in one or more 
+This man page is the primary documentation for
+.Nm .
+Text is managed in discrete
+.Sy buffers ,
+which may be displayed in one or more
 .Sy windows .
-
 .Sh OPTIONS
 .Bl -tag -width Ds
 .It +N
@@ -30,7 +29,45 @@ Position the cursor at line number N when opening the file.
 .It --version
 Display version information.
 .El
-
+.Sh CONCEPTS
+.Nm
+follows Emacs-style paradigms. Understanding these concepts is essential for effective use.
+.Ss Buffers and Windows
+A
+.Sy buffer
+is the in-memory content of a file or text that has not been saved to any file.
+A
+.Sy window
+is a viewport onto a buffer.
+Multiple windows can display the same or different buffers simultaneously.
+.Ss The Mark Ring
+The
+.Sy mark
+defines one end of a selected region (the other end is the cursor).
+.Nm
+maintains a ring of recent mark positions.
+Setting the mark pushes the current position onto the ring.
+.Ss The Kill Ring
+Deleted or copied text is stored in the
+.Sy kill ring
+(clipboard history).
+Yanking retrieves text from the kill ring.
+Successive yanks can cycle through previous kills.
+.Ss Universal Argument
+The
+.Cm C-u
+command precedes a numeric argument.
+By default,
+.Cm C-u
+sets the argument to 4.
+Repeating
+.Cm C-u
+multiplies the argument by 4 (e.g.,
+.Cm C-u C-u
+= 16).
+Typing digits after
+.Cm C-u
+sets the argument to that number.
 .Sh COMMANDS
 Commands largely follow Emacs conventions.
 .Cm C-
@@ -39,7 +76,6 @@ denotes the Control key,
 denotes the Meta (Alt) key.
 .Cm S-
 denotes the Shift key.
-
 .Ss Basic Commands
 .Bl -tag -width Ds
 .It Cm C-x C-c
@@ -48,18 +84,26 @@ Quit the editor.
 Open a file and load it into a buffer.
 .It Cm C-x C-s
 Save the current buffer to its associated file.
+.It Cm C-x C-w
+Save the current buffer under a new filename (Save As).
+.It Cm C-x C-q
+Toggle read-only status of the current buffer.
 .It Cm C-x k
 Kill (close) the current buffer.
 .It Cm C-x b
 Switch current window to another buffer.
+.It Cm C-z
+Suspend the editor; resume with
+.Cm fg .
 .It Cm C-x C-z
-Suspend the editor to the background and return control to the shell.
+Suspend the editor while preserving the editor screen (Shell Drawer).
 .It Cm C-s
-Interactive search in the current buffer.
+Interactive search forward in the current buffer.
+.It Cm C-r
+Interactive search backward in the current buffer.
 .It Cm C-g
-Cancel the current operation.
+Cancel the current operation or deactivate region.
 .El
-
 .Ss Cursor Movement
 .Bl -tag -width Ds
 .It Cm C-n
@@ -67,13 +111,25 @@ Move cursor to next line.
 .It Cm C-p
 Move cursor to previous line.
 .It Cm C-f
-Move cursor forward.
+Move cursor forward character.
 .It Cm C-b
-Move cursor backward.
+Move cursor backward character.
 .It Cm M-f
-Move cursor forward by word.
+Move cursor forward word.
 .It Cm M-b
-Move cursor backward by word.
+Move cursor backward word.
+.It Cm C-M-f
+Move cursor forward sexp (expression).
+.It Cm C-M-b
+Move cursor backward sexp (expression).
+.It Cm M-a
+Move cursor backward sentence.
+.It Cm M-e
+Move cursor forward sentence.
+.It Cm M-{
+Move cursor backward paragraph.
+.It Cm M-}
+Move cursor forward paragraph.
 .It Cm M-<
 Move cursor to start of buffer.
 .It Cm M->
@@ -82,6 +138,10 @@ Move cursor to end of buffer.
 Move cursor to beginning of line.
 .It Cm C-e
 Move cursor to end of line.
+.It Cm M-v
+Page up.
+.It Cm C-v
+Page down.
 .It Cm M-p
 Scroll up one line.
 .It Cm M-n
@@ -90,8 +150,13 @@ Scroll down one line.
 Scroll up one line.
 .It Cm C-DOWN
 Scroll down one line.
+.It Cm C-l
+Centre the screen on the cursor's current line.
+.It Cm M-g
+Go to specific line number.
+.It Cm C-x =
+Show cursor position (line, column, byte offset).
 .El
-
 .Ss Editing
 .Bl -tag -width Ds
 .It Cm C-_
@@ -99,45 +164,76 @@ Undo.
 .It Cm C-x C-_
 Redo.
 .It Cm C-w
-Kill (cut) region.
+Kill (cut) region or rectangle.
 .It Cm M-w
-Copy region.
+Copy region or rectangle to kill ring.
+.It Cm C-c
+Copy region to system clipboard (OSC 52) and kill ring.
 .It Cm C-y
-Yank (paste).
+Yank (paste) from kill ring.
+.It Cm M-y
+Yank pop: Cycle through previous kills after yanking.
 .It Cm C-k
-Delete to end of line.
+Kill to end of line.
 .It Cm C-u C-a
-Delete to beginning of line.
+Kill to beginning of line.
+.It Cm M-d
+Kill word forward.
+.It Cm M-DEL
+Kill word backward.
+.It Cm M-z
+Zap to char: Kill up to and including a given character.
+.It Cm C-t
+Transpose characters.
+.It Cm M-t
+Transpose words.
+.It Cm C-x C-t
+Transpose sentences.
 .It Cm C-u
 Universal Prefix: Followed by a number it repeats the succeeding command.
 .It Cm C-j
-Insert newline and indent by inserting the same leading whitespace of the previous line.
+Insert newline and indent (match previous line).
 .It Cm C-o
 Insert newline without moving the cursor.
 .It Cm C-q
-Insert next character verbatim.
+Insert next character verbatim (quoted insert).
+.It Cm C-x C-l
+Convert region to lowercase.
+.It Cm C-x C-u
+Convert region to uppercase.
+.It Cm M-c
+Capitalize word.
+.It Cm M-u
+Upcase word.
+.It Cm M-l
+Downcase word.
+.It Cm C-h
+Delete previous character (Backspace).
+.It Cm DEL
+Delete character under cursor.
 .El
-
 .Ss Selection and Regions
-A 
-.Sy region 
-is defined as the text between the 
-.Sy mark 
-and the 
-.Sy cursor . 
-Once a mark is set, moving the cursor changes the extent of the 
+A
+.Sy region
+is defined as the text between the
+.Sy mark
+and the
+.Sy cursor .
+Once a mark is set, moving the cursor changes the extent of the
 active region.
-
 .Bl -tag -width Ds
 .It Cm C-SPC
 Set mark: Establish the mark at the cursor.
+.It Cm C-u C-SPC
+Pop mark: Jump to previous mark position (Mark Ring).
+.It Cm C-x C-x
+Swap cursor and mark positions.
 .It Cm C-g
 Abort: Deactivate the current region and clear the mark.
 .It Cm C-x h
-Mark whole buffer: Set the cursor at the beginning and the mark 
+Mark whole buffer: Set the cursor at the beginning and the mark
 at the end of the buffer.
 .El
-
 .Ss Window Management
 The display can be partitioned into multiple tiled windows.
 .Bl -tag -width Ds
@@ -150,79 +246,157 @@ Delete other windows: Expand the current window to fill the screen.
 .It Cm C-x 2
 Split window: Divide the current window horizontally.
 .It Cm C-x x t
-Toggle display mode from truncate-lines mode (the default) to line wrap.
+Toggle word wrap (visual-line-mode).
 .El
-
 .Ss Registers
-Registers provide session-persistent storage of cursor position, text fragments, numbers, or keyboard macros. Each register is identified by a single character.
-
+Registers provide session-persistent storage of cursor position and text fragments. Each register is identified by a single character.
 .Bl -tag -width Ds
 .It Cm C-x r SPACE x
-Store the current cursor position in a register named 
+Store the current cursor position in a register named
 .Ar x .
-
 .It Cm C-x r j x
 Jump to the cursor position stored in register
 .Ar x .
-
-.It Cm C-x r a
-Store a keyboard macro in a register.
-
-.It Cm C-x r n
-Store a number.
-
-.It Cm C-x r s
-Store a region in a register.
-
-.It Cm C-x r +
-Increment a number in a register, or append a region to a string.
-
-.It Cm C-x r r
-Copy a rectangle to a register.
-
-.It Cm C-x r y
-Yank a region or rectangle from a register.
-
-.It Cm C-x r k
-Kill a region or rectangle into a register.
-
-.It Cm C-x r v
-View contents of a register.
+.It Cm C-x r s x
+Store the active region in register
+.Ar x .
+.It Cm C-x r y x
+Yank contents of register
+.Ar x .
+.It Cm C-x r k x
+Kill region into register
+.Ar x .
+.It Cm C-x r v x
+View contents of register
+.Ar x .
 .El
-
-
 .Ss Rectangles
 Rectangles operate on column-aligned regions spanning multiple lines.
-
+Rectangle mark mode must be toggled on before using rectangle commands.
 .Bl -tag -width Ds
-.It Cm C-x r t
+.It Cm C-x SPACE
+Toggle rectangle mode.
+.It Cm C-x r t or C-t
 Replace rectangle with string.
-.It Cm C-x r k
+.It Cm C-x r k or C-w
 Kill rectangle.
-.It Cm C-x r y
+.It Cm C-x r y or C-y
 Yank rectangle.
+.It Cm C-x r o
+Open rectangle (insert whitespace).
 .El
-
+.Ss Macros
+Keyboard macros record a sequence of keystrokes for later playback.
+Macros cannot be viewed, edited, exported nor saved. 
+The commands Find File, Save File and shell commands cannot be executed by Macros.
+.Bl -tag -width Ds
+.It Cm C-x (
+Start recording macro.
+.It Cm C-x )
+Stop recording macro.
+.It Cm C-x e
+Execute last macro.
+.It Cm C-u C-x e
+Execute last macro N times.
+.El
+.Ss Search and Replace
+.Bl -tag -width Ds
+.It Cm C-M-s
+Incremental regex search forward.
+.It Cm C-M-r
+Incremental regex search backward.
+.It Cm M-%
+Query replace (string).
+.It Cm C-M-%
+Query replace regex.
+.It Cm M-x query-replace
+Replace string interactively.
+.It Cm M-x replace-string
+Replace all occurrences (non-interactive).
+.It Cm M-x replace-regexp
+Replace using regular expressions.
+.El
 .Ss Shell Integration
 When enabled at compile time:
-
 .Bl -tag -width Ds
 .It Cm M-|
 Filter the selected region through a shell command.
 .It Cm C-u M-|
-Filter the selected region through a shell command and replace the region with the output. 
-.It Cm M-x diff-buffer-with-file RET
-Show unsaved changes. 
+Filter the selected region and replace with output.
+.It Cm M-!
+Run a shell command (output to buffer).
+.It Cm M-x diff-buffer-with-file
+Show unsaved changes compared to file on disk.
+.It Cm M-x cd
+Change working directory (editor only).
 .El
-
-.Ss Named Commands
-
+.Ss System Integration
 .Bl -tag -width Ds
-.It Cm M-x
-Enter a command by name.
+.It Cm C-c
+Copy region to system clipboard (OSC 52).
+.It Cm M-.
+Jump to symbol definition (Ctags).
+.It Cm M-,
+Jump back from symbol definition.
+.It Cm M-x version
+Display editor version.
 .El
-
-
+.Ss Named Commands
+The following commands are available via
+.Cm M-x :
+.Bl -tag -width Ds
+.It Cm capitalize-region
+Capitalize each word in the region.
+.It Cm insert-file
+Insert contents of another file at cursor.
+.It Cm cd
+Change working directory.
+.It Cm diff-buffer-with-file
+Show unsaved changes.
+.It Cm isearch-forward-regexp
+Incremental regex search forward.
+.It Cm query-replace
+Interactive search-and-replace.
+.It Cm replace-regexp
+Replace using regular expressions.
+.It Cm replace-string
+Replace literal strings.
+.It Cm revert
+Revert buffer from file on disk.
+.It Cm visual-line-mode
+Toggle line wrapping.
+.It Cm version
+Show version info.
+.It Cm view-register
+Display contents of a register.
+.El
+.Sh DEVIATIONS FROM EMACS
+.Nm
+aims for Emacs compatibility but differs in specific areas for shell integration and usability:
+.Bl -tag -width Ds
+.It Cm C-h
+In Emacs, this is the Help prefix. In
+.Nm ,
+it is bound to Backspace (Readline compatibility).
+.It Cm C-c
+In Emacs, this is the user defined keybinding prefix. In
+.Nm ,
+it copies to the system clipboard (OSC 52) as well as the kill ring.
+.It Cm C-u C-a
+In Emacs, this runs
+.Cm beginning-of-line
+with argument. In
+.Nm ,
+it kills to the beginning of the line (Readline compatibility).
+.It Cm C-x C-z
+In Emacs, this suspends and clears the screen. In
+.Nm ,
+it suspends while preserving the editor screen (Shell Drawer).
+.It Cm C-_
+In Emacs, this is both undo and redo, creating an undo history tree by reversal of traversal direction. In
+.Nm ,
+it is only undo.
+.El
 .Sh FILES AND ENCODING
 .Nm
 expects all input and files to be encoded as
@@ -231,8 +405,7 @@ Files are loaded in their entirety into memory.
 .Pp
 .Nm
 adheres to the Unix convention where lines are delimited by a single linefeed (LF) character and files terminate with a linefeed.
-The presence of null bytes (0x00) or malformed UTF-8 sequences may result in undefined behavior or error conditions.
-
+Validation at file load and inserting text in the buffer disallow  null bytes (0x00) or malformed UTF-8 sequences.
 .Ss File Persistence
 When saving,
 .Nm
@@ -240,21 +413,18 @@ writes the complete buffer to the associated file.
 The editor attempts an atomic write operation to prevent data corruption.
 If an atomic write is not possible, the user is prompted to overwrite the file directly.
 No automatic backup or "auto-save" files are generated.
-
 .Sh UNDO HISTORY
 .Nm
-maintains a linear undo history of up to 1000 editing actions per buffer.
-
+maintains a linear undo history of up to 100 editing actions per buffer.
 .Sh SEE ALSO
 .Xr emacs 1
-
 .Sh BUGS
 Please report defects to the project repository at:
 .Lk https://github.com/nicholascarroll/emil
 .Sh AUTHOR
-The 
-.Nm 
-editor was developed by Nicholas Carroll. 
+The
+.Nm
+editor was developed by Nicholas Carroll.
 It is a derivative of
 .Em emsys
 by japanoise.

@@ -61,7 +61,7 @@ void editorInsertUnicode(struct editorBuffer *bufr, int count) {
 void editorIndentTabs(struct editorConfig *UNUSED(ed),
 		      struct editorBuffer *buf) {
 	buf->indent = 0;
-	editorSetStatusMessage("Indentation set to tabs");
+	editorSetStatusMessage(msg_indent_tabs);
 }
 
 void editorIndentSpaces(struct editorConfig *UNUSED(ed),
@@ -79,7 +79,7 @@ cancel:
 		return;
 	}
 	buf->indent = indent;
-	editorSetStatusMessage("Indentation set to %i spaces", indent);
+	editorSetStatusMessage(msg_indent_spaces, indent);
 }
 
 void editorInsertNewlineRaw(struct editorBuffer *bufr) {
@@ -767,7 +767,7 @@ void editorBackwardSexp(int count) {
 
 		/* Step back once then skip whitespace and newlines */
 		if (!stepBackward(buf, &cx, &cy)) {
-			editorSetStatusMessage("Beginning of buffer");
+			editorSetStatusMessage(msg_beginning_of_buffer);
 			return;
 		}
 		while (1) {
@@ -775,7 +775,7 @@ void editorBackwardSexp(int count) {
 			if (ch != ' ' && ch != '\t' && ch != '\n')
 				break;
 			if (!stepBackward(buf, &cx, &cy)) {
-				editorSetStatusMessage("Beginning of buffer");
+				editorSetStatusMessage(msg_beginning_of_buffer);
 				return;
 			}
 		}
@@ -925,7 +925,7 @@ void editorTransposeWords(struct editorBuffer *bufr) {
 	bufferEndOfForwardWord(bufr, &endcx, &endcy);
 	if ((startcx == bufr->cx && bufr->cy == startcy) ||
 	    (endcx == bufr->cx && bufr->cy == endcy)) {
-		editorSetStatusMessage("Cannot transpose here");
+		editorSetStatusMessage(msg_cannot_transpose);
 		return;
 	}
 
@@ -946,7 +946,7 @@ void editorTransposeChars(struct editorBuffer *bufr) {
 	if (bufr->cx >= row->size) {
 		if (bufr->cx == 0) {
 			/* Empty line */
-			editorSetStatusMessage("Cannot transpose here");
+			editorSetStatusMessage(msg_cannot_transpose);
 			return;
 		}
 		bufr->cx--;
@@ -956,7 +956,7 @@ void editorTransposeChars(struct editorBuffer *bufr) {
 
 	/* Need a character before and after point. */
 	if (bufr->cx == 0 || bufr->cx >= row->size) {
-		editorSetStatusMessage("Cannot transpose here");
+		editorSetStatusMessage(msg_cannot_transpose);
 		return;
 	}
 
@@ -1436,7 +1436,7 @@ void editorMarkParagraph(void) {
 	buf->cx = startx;
 	buf->cy = starty;
 
-	editorSetStatusMessage("Mark set");
+	editorSetStatusMessage(msg_mark_set);
 }
 
 /* Transpose sentences (C-x C-t) — swap sentence before point with

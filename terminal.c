@@ -118,10 +118,8 @@ void editorOpenShellDrawer(void) {
 }
 
 void enableRawMode(void) {
-	/* Saves the screen and switches to an alt screen 
-	*  CSI "?7l" is disable auto-wrap
-	*/
-	if (write(STDOUT_FILENO, CSI "?1049h" CSI "?7l", 13) == -1)
+	/* Saves the screen and switches to an alt screen */
+	if (write(STDOUT_FILENO, CSI "?1049h", 8) == -1)
 		die("enableRawMode write");
 
 	if (tcgetattr(STDIN_FILENO, &E.orig_termios) == -1)
