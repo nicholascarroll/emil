@@ -616,6 +616,20 @@ void editorReplaceRegex(struct editorConfig *ed, struct editorBuffer *buf) {
 	}
 	int replen = strlen((char *)repl);
 
+	/* Compile the regex */
+	regex_t pattern;
+	regmatch_t matches[1];
+	int regcomp_result = regcomp(&pattern, (char *)regex, REG_EXTENDED);
+	if (regcomp_result != 0) {
+		char error_msg[256];
+		regerror(regcomp_result, &pattern, error_msg,
+			 sizeof(error_msg));
+		editorSetStatusMessage("Regex error: %s", error_msg);
+		free(regex);
+		free(repl);
+		return;
+	}
+
 	uint8_t *okill = saveKill(ed);
 	editorCopyRegion(ed, buf);
 
@@ -654,20 +668,6 @@ void editorReplaceRegex(struct editorConfig *ed, struct editorBuffer *buf) {
 	new->paired = 1;
 	pushUndo(buf, new);
 
-	/* Regex boilerplate & setup */
-	regex_t pattern;
-	regmatch_t matches[1];
-	int regcomp_result = regcomp(&pattern, (char *)regex, REG_EXTENDED);
-	if (regcomp_result != 0) {
-		char error_msg[256];
-		regerror(regcomp_result, &pattern, error_msg,
-			 sizeof(error_msg));
-		editorSetStatusMessage("Regex error: %s", error_msg);
-		free(regex);
-		free(repl);
-		return;
-	}
-
 	for (int i = buf->cy; i <= buf->marky; i++) {
 		struct erow *row = &buf->row[i];
 		int regexec_result =
@@ -680,16 +680,16 @@ void editorReplaceRegex(struct editorConfig *ed, struct editorBuffer *buf) {
 			emil_strlcat((char *)new->data, "\n", new->datasize);
 		if (match_idx < 0) {
 			if (buf->cy == buf->marky) {
-				strncat((char *)new->data,
-					(char *)&row->chars[buf->cx],
-					buf->markx - buf->cx);
+				emil_strlcat((char *)new->data,
+					     (char *)&row->chars[buf->cx],
+					     new->datasize);
 			} else if (i == buf->cy) {
 				emil_strlcat((char *)new->data,
 					     (char *)&row->chars[buf->cx],
 					     new->datasize);
 			} else if (i == buf->marky) {
-				strncat((char *)new->data, (char *)row->chars,
-					buf->markx);
+				emil_strlcat((char *)new->data,
+					     (char *)row->chars, new->datasize);
 			} else {
 				emil_strlcat((char *)new->data,
 					     (char *)row->chars, new->datasize);
@@ -702,8 +702,8 @@ void editorReplaceRegex(struct editorConfig *ed, struct editorBuffer *buf) {
 			continue;
 		} else if (i == buf->marky &&
 			   match_idx + match_length > buf->markx) {
-			strncat((char *)new->data, (char *)row->chars,
-				buf->markx);
+			emil_strlcat((char *)new->data, (char *)row->chars,
+				     new->datasize);
 			continue;
 		}
 		madeReplacements++;
@@ -724,16 +724,17 @@ void editorReplaceRegex(struct editorConfig *ed, struct editorBuffer *buf) {
 		row->chars[row->size] = 0;
 		if (buf->cy == buf->marky) {
 			buf->markx += extra;
-			strncat((char *)new->data, (char *)&row->chars[buf->cx],
-				buf->markx - buf->cx);
+			emil_strlcat((char *)new->data,
+				     (char *)&row->chars[buf->cx],
+				     new->datasize);
 		} else if (i == buf->cy) {
 			emil_strlcat((char *)new->data,
 				     (char *)&row->chars[buf->cx],
 				     new->datasize);
 		} else if (i == buf->marky) {
 			buf->markx += extra;
-			strncat((char *)new->data, (char *)row->chars,
-				buf->markx);
+			emil_strlcat((char *)new->data, (char *)row->chars,
+				     new->datasize);
 		} else {
 			emil_strlcat((char *)new->data, (char *)row->chars,
 				     new->datasize);
@@ -1173,17 +1174,19 @@ void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	char *string = xcalloc(rw + 1, 1);
 
 	buf->marky = boty;
-	if (botx > buf->row[boty].size) {
-		buf->markx = buf->row[boty].size;
-	} else {
-		buf->markx = botx;
-	}
 
 	int extralines = 0;
 	while (boty >= buf->numrows) {
 		editorInsertRow(buf, buf->numrows, "", 0);
 		extralines++;
 	}
+
+	if (botx > buf->row[boty].size) {
+		buf->markx = buf->row[boty].size;
+	} else {
+		buf->markx = botx;
+	}
+
 	if (extralines) {
 		struct editorUndo *new = newUndo();
 		new->starty = buf->numrows - extralines - 1;
