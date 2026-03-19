@@ -68,18 +68,18 @@ emil file.txt
 
 ### Essential Commands
 
-| Action                 | Command         |
-| ---------------------- | --------------- |
-| Open file              | `Ctrl-x Ctrl-f` |
-| Save file              | `Ctrl-x Ctrl-s` |
-| Quit emil              | `Ctrl-x Ctrl-c` |
-| Mark (to select text)  | `Ctrl-SPACE`    |
-| Cut                    | `Ctrl-w`        |
+| Action                 | Command             |
+| ---------------------- | ------------------- |
+| Open file              | `Ctrl-x Ctrl-f`     |
+| Save file              | `Ctrl-x Ctrl-s`     |
+| Quit emil              | `Ctrl-x Ctrl-c`     |
+| Mark (to select text)  | `Ctrl-SPACE`        |
+| Cut                    | `Ctrl-w`            |
 | Copy                   | `Alt-w` or `Ctrl-c` |
-| Paste                  | `Ctrl-y`        |
-| Undo                   | `Ctrl-_`        |
-| Search                 | `Ctrl-s`        |
-| Cancel                 | `Ctrl-g`        |
+| Paste                  | `Ctrl-y`            |
+| Undo                   | `Ctrl-_`            |
+| Search                 | `Ctrl-s`            |
+| Cancel                 | `Ctrl-g`            |
 
 For the complete command reference, see the man page:
 
@@ -131,21 +131,21 @@ Shell integration can be disabled at build time with the compiler flag `-DEMIL_D
 
 Below are common "recipes" using standard Unix utilities. 
 
-| Task | Command | Keys To Use |
-| :--- | :--- | :--- |
-| **Fill region** | `fmt` | `Ctrl-u Alt-\|` |
-| **Sort lines** | `sort` | `Ctrl-u Alt-\|` |
-| **Align Columns** | `column -t` | `Ctrl-u Alt-\|` |
-| **Align Text Table** | `column -t -s '\|'` -o '\|' | `Ctrl-u Alt-\|` |
-| **Number Lines** | `cat -n` | `Ctrl-u Alt-\|` |
-| **Word Count** | `wc` | `Alt-\|` |
-| **Solve Math** | `bc` | `Alt-\|` or `Ctrl-u Alt-\|` |
-| **Format JSON** | `jq .` | `Alt-\|` or `Ctrl-u Alt-\|` |
-| **Find Typos** | `aspell list` | `Alt-\|` |
-| **Format C Code** | `make format` | `Ctrl-u Alt-\|` |
-| **Lint Shell Script** | `shellcheck` | `Ctrl-u Alt-\|` |
-| **Trim Trailing Whitespace** | `sed 's/[[:space:]]\+$//'` | `Ctrl-u Alt-\|` |
-| **Remove Duplicate Lines** | `awk '!seen[$0]++'` | `Ctrl-u Alt-\|` |
+| Task                   | Command               | Keys To Use                 |
+| ---------------------- | --------------------- | --------------------------- | 
+| **Fill region**        | `fmt`                 | `Ctrl-u Alt-\|`             |
+| **Sort lines**         | `sort`                | `Ctrl-u Alt-\|`             |
+| **Align columns**      | `column -t`           | `Ctrl-u Alt-\|`             |
+| **Align text table**   | `column -t -s '\|'` -o '\|' | `Ctrl-u Alt-\|`       |
+| **Number lines**       | `cat -n`              | `Ctrl-u Alt-\|`             |
+| **Word count**         | `wc`                  | `Alt-\|`                    |
+| **Solve math**         | `bc`                  | `Alt-\|` or `Ctrl-u Alt-\|` |
+| **Format JSON**        | `jq .`                | `Alt-\|` or `Ctrl-u Alt-\|` |
+| **Find typos**         | `aspell list`         | `Alt-\|`                    |
+| **Format C code**      | `make format`         | `Ctrl-u Alt-\|`             |
+| **Lint shell script**  | `shellcheck`          | `Ctrl-u Alt-\|`             |
+| **Trim whitespace**    | `sed 's/[[:space:]]\+$//'` | `Ctrl-u Alt-\|`        |
+| **De-duplicate lines** | `awk '!seen[$0]++'`   | `Ctrl-u Alt-\|`             |
 
 More complex commands can be converted into shell scripts. For example: to add a dictionary lookup, create a file named `edict` in your `$PATH`:
 
@@ -184,7 +184,7 @@ Notes:
 
 2. **Version 0.1.1 Feature complete** [DONE] ✅
 
-3. **Version 0.2.1 First Prerelease**  [DONE]
+3. **Version 0.2.1 First Prerelease**  [DONE] ✅
 
 4. **Rendering optimizations**
    Reduce bytes over wire with an optional render acceleration layer 

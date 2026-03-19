@@ -18,10 +18,6 @@ editor.
 .Pp
 This man page is the primary documentation for
 .Nm .
-Text is managed in discrete
-.Sy buffers ,
-which may be displayed in one or more
-.Sy windows .
 .Sh OPTIONS
 .Bl -tag -width Ds
 .It +N
@@ -45,14 +41,12 @@ The
 .Sy mark
 defines one end of a selected region (the other end is the cursor).
 .Nm
-maintains a ring of recent mark positions.
-Setting the mark pushes the current position onto the ring.
+maintains a ring of recent mark positions. Setting the mark pushes the current position onto the ring. These positions can then be returned to later.
 .Ss The Kill Ring
 Deleted or copied text is stored in the
 .Sy kill ring
 (clipboard history).
-Yanking retrieves text from the kill ring.
-Successive yanks can cycle through previous kills.
+Yanking retrieves text from the kill ring and inserts it in the buffer ('paste'). Successive yanks can cycle through previous kills.
 .Ss Universal Argument
 The
 .Cm C-u
@@ -146,10 +140,6 @@ Page down.
 Scroll up one line.
 .It Cm M-n
 Scroll down one line.
-.It Cm C-UP
-Scroll up one line.
-.It Cm C-DOWN
-Scroll down one line.
 .It Cm C-l
 Centre the screen on the cursor's current line.
 .It Cm M-g
@@ -233,6 +223,8 @@ Abort: Deactivate the current region and clear the mark.
 .It Cm C-x h
 Mark whole buffer: Set the cursor at the beginning and the mark
 at the end of the buffer.
+.It Cm M-h
+Mark the current paragraph.
 .El
 .Ss Window Management
 The display can be partitioned into multiple tiled windows.
