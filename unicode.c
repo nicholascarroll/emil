@@ -7,7 +7,7 @@
 #include "emil.h"
 
 /* The UCS format used by wcwidth.c. NOT a general purpose function. */
-static int utf8ToUCS(uint8_t *str, int idx) {
+static int utf8ToUCS(const uint8_t *str, int idx) {
 	int ret = 0;
 	uint8_t ch = str[idx];
 	if (utf8_is2Char(ch)) {
@@ -134,7 +134,7 @@ int unicodeTest(void) {
 	return retval;
 }
 
-int stringWidth(uint8_t *str) {
+int stringWidth(const uint8_t *str) {
 	int idx = 0;
 	int width = 0;
 
@@ -146,7 +146,7 @@ int stringWidth(uint8_t *str) {
 	return width;
 }
 
-int charInStringWidth(uint8_t *str, int idx) {
+int charInStringWidth(const uint8_t *str, int idx) {
 	if (str[idx] < 0x20) {
 		return 2;
 	} else if (str[idx] < 0x7f) {

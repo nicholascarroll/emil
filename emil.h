@@ -237,7 +237,7 @@ struct editorConfig {
 
 /*** prototypes ***/
 
-uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
+uint8_t *editorPrompt(struct editorBuffer *bufr, const uint8_t *prompt,
 		      enum promptType t,
 		      void (*callback)(struct editorBuffer *, uint8_t *, int));
 void editorUpdateBuffer(struct editorBuffer *buf);

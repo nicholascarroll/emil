@@ -259,6 +259,7 @@ void editorDoRedo(struct editorBuffer *buf, int count) {
 	for (int j = 0; j < times; j++) {
 		if (buf->redo == NULL) {
 			editorSetStatusMessage(msg_no_redo);
+			return;
 		}
 
 		if (buf->redo->delete) {

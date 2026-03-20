@@ -26,12 +26,11 @@ static char **snapshot_buffer(struct editorBuffer *buf, int *nrows) {
 	return snap;
 }
 
-static void assert_buffer_matches(struct editorBuffer *buf,
-				   char **snap, int nrows,
-				   const char *label) {
+static void assert_buffer_matches(struct editorBuffer *buf, char **snap,
+				  int nrows, const char *label) {
 	if (buf->numrows != nrows) {
-		printf("  FAIL (%s): row count %d vs expected %d\n",
-		       label, buf->numrows, nrows);
+		printf("  FAIL (%s): row count %d vs expected %d\n", label,
+		       buf->numrows, nrows);
 		_current_test_failed = 1;
 		return;
 	}
@@ -69,7 +68,8 @@ void test_kill_rect_single_row_undo(void) {
 	char **snap = snapshot_buffer(buf, &snap_n);
 
 	/* Select columns 1-3 on row 0: kill "BCD" */
-	buf->cx = 1; buf->cy = 0;
+	buf->cx = 1;
+	buf->cy = 0;
 	set_mark(buf, 4, 0);
 	editorKillRectangle(&E, buf);
 
@@ -92,7 +92,8 @@ void test_kill_rect_multi_row_undo(void) {
 	char **snap = snapshot_buffer(buf, &snap_n);
 
 	/* Rectangle: columns 1-3, rows 0-2 */
-	buf->cx = 1; buf->cy = 0;
+	buf->cx = 1;
+	buf->cy = 0;
 	set_mark(buf, 4, 2);
 	editorKillRectangle(&E, buf);
 
@@ -111,7 +112,8 @@ void test_kill_rect_multi_row_redo(void) {
 	const char *lines[] = { "ABCDE", "FGHIJ", "KLMNO" };
 	struct editorBuffer *buf = make_test_buffer_lines(lines, 3);
 
-	buf->cx = 1; buf->cy = 0;
+	buf->cx = 1;
+	buf->cy = 0;
 	set_mark(buf, 4, 2);
 	editorKillRectangle(&E, buf);
 
@@ -137,7 +139,8 @@ void test_kill_rect_short_rows_undo(void) {
 	char **snap = snapshot_buffer(buf, &snap_n);
 
 	/* Rectangle: columns 2-6, rows 0-2 */
-	buf->cx = 2; buf->cy = 0;
+	buf->cx = 2;
+	buf->cy = 0;
 	set_mark(buf, 6, 2);
 	editorKillRectangle(&E, buf);
 
@@ -156,7 +159,8 @@ void test_kill_rect_swapped_columns_undo(void) {
 	int snap_n;
 	char **snap = snapshot_buffer(buf, &snap_n);
 
-	buf->cx = 4; buf->cy = 0;
+	buf->cx = 4;
+	buf->cy = 0;
 	set_mark(buf, 1, 1);
 	editorKillRectangle(&E, buf);
 
@@ -178,7 +182,8 @@ void test_copy_rect_preserves_buffer(void) {
 	int snap_n;
 	char **snap = snapshot_buffer(buf, &snap_n);
 
-	buf->cx = 1; buf->cy = 0;
+	buf->cx = 1;
+	buf->cy = 0;
 	set_mark(buf, 4, 2);
 	editorCopyRectangle(&E, buf);
 
@@ -212,7 +217,8 @@ void test_yank_rect_basic_undo(void) {
 	E.kill.rect_width = 2;
 	E.kill.rect_height = 3;
 
-	buf->cx = 1; buf->cy = 0;
+	buf->cx = 1;
+	buf->cy = 0;
 	editorYankRectangle(&E, buf);
 
 	/* Should have inserted XX into each row at column 1 */
@@ -237,7 +243,8 @@ void test_yank_rect_redo(void) {
 	E.kill.rect_width = 2;
 	E.kill.rect_height = 3;
 
-	buf->cx = 1; buf->cy = 0;
+	buf->cx = 1;
+	buf->cy = 0;
 	editorYankRectangle(&E, buf);
 
 	int yank_n;
@@ -253,15 +260,12 @@ void test_yank_rect_redo(void) {
 
 void test_yank_rect_extra_lines_undo(void) {
 	/* Yanking a 4-row rectangle into a 2-row buffer requires
-	 * adding extra lines.  Tests the 3-undo-record sequence.
-	 *
-	 * NOTE: this exercises a known pre-existing limitation —
-	 * the undo for extra-line yank doesn't fully restore the
-	 * original buffer because editorCopyRegion captures empty
-	 * data for the delete undo record.  We test that undo at
-	 * least runs without crashing and reduces the row count. */
+	 * adding extra lines.  Tests the 3-undo-record sequence. */
 	const char *lines[] = { "AA", "BB" };
 	struct editorBuffer *buf = make_test_buffer_lines(lines, 2);
+
+	int snap_n;
+	char **snap = snapshot_buffer(buf, &snap_n);
 
 	clearEditorText(&E.kill);
 	E.kill.str = (uint8_t *)strdup("XXYYZZWW");
@@ -269,7 +273,8 @@ void test_yank_rect_extra_lines_undo(void) {
 	E.kill.rect_width = 2;
 	E.kill.rect_height = 4;
 
-	buf->cx = 0; buf->cy = 0;
+	buf->cx = 0;
+	buf->cy = 0;
 	editorYankRectangle(&E, buf);
 
 	/* Should have 4 rows now */
@@ -277,21 +282,22 @@ void test_yank_rect_extra_lines_undo(void) {
 
 	editorDoUndo(buf, 1);
 
-	/* Undo should not crash and should reduce row count */
-	TEST_ASSERT_TRUE(buf->numrows <= 2);
+	/* Undo should fully restore original buffer */
+	assert_buffer_matches(buf, snap, snap_n, "yank_rect_extra_lines_undo");
 
+	free_snapshot(snap, snap_n);
 	destroyBuffer(buf);
 }
 
 void test_yank_rect_into_short_rows_undo(void) {
 	/* Rows shorter than the insertion column — tests space padding.
-	 *
-	 * NOTE: known pre-existing limitation — the space padding
-	 * added to reach the insertion column is not tracked in undo,
-	 * so undo leaves the padding in place.  We verify undo runs
-	 * without crashing and removes the inserted rectangle data. */
+	 * Undo must remove both the inserted rectangle data AND the
+	 * space padding added to reach the insertion column. */
 	const char *lines[] = { "A", "B", "C" };
 	struct editorBuffer *buf = make_test_buffer_lines(lines, 3);
+
+	int snap_n;
+	char **snap = snapshot_buffer(buf, &snap_n);
 
 	clearEditorText(&E.kill);
 	E.kill.str = (uint8_t *)strdup("XXYYZZ");
@@ -300,14 +306,16 @@ void test_yank_rect_into_short_rows_undo(void) {
 	E.kill.rect_height = 3;
 
 	/* Insert at column 5 — well past end of each 1-char row */
-	buf->cx = 5; buf->cy = 0;
+	buf->cx = 5;
+	buf->cy = 0;
 	editorYankRectangle(&E, buf);
 
 	editorDoUndo(buf, 1);
 
-	/* Undo should not crash; rows should exist */
-	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
+	/* Undo should fully restore original buffer */
+	assert_buffer_matches(buf, snap, snap_n, "yank_rect_short_rows_undo");
 
+	free_snapshot(snap, snap_n);
 	destroyBuffer(buf);
 }
 
@@ -359,7 +367,8 @@ void test_kill_region_undo(void) {
 	int snap_n;
 	char **snap = snapshot_buffer(buf, &snap_n);
 
-	buf->cx = 2; buf->cy = 0;
+	buf->cx = 2;
+	buf->cy = 0;
 	set_mark(buf, 3, 1);
 	editorKillRegion(&E, buf);
 
@@ -382,12 +391,14 @@ void test_kill_then_yank_rect_round_trip(void) {
 	char **snap = snapshot_buffer(buf, &snap_n);
 
 	/* Kill columns 1-4 */
-	buf->cx = 1; buf->cy = 0;
+	buf->cx = 1;
+	buf->cy = 0;
 	set_mark(buf, 4, 2);
 	editorKillRectangle(&E, buf);
 
 	/* Now yank it back at the same position */
-	buf->cx = 1; buf->cy = 0;
+	buf->cx = 1;
+	buf->cy = 0;
 	editorYankRectangle(&E, buf);
 
 	/* Should be back to original content */
@@ -409,7 +420,8 @@ void test_multiple_rect_ops_undo_all(void) {
 	char **snap = snapshot_buffer(buf, &snap_n);
 
 	/* First: kill rectangle cols 0-2 */
-	buf->cx = 0; buf->cy = 0;
+	buf->cx = 0;
+	buf->cy = 0;
 	set_mark(buf, 2, 2);
 	buf->mark_active = 1;
 	editorKillRectangle(&E, buf);
@@ -420,7 +432,8 @@ void test_multiple_rect_ops_undo_all(void) {
 	E.kill.is_rectangle = 1;
 	E.kill.rect_width = 2;
 	E.kill.rect_height = 3;
-	buf->cx = 0; buf->cy = 0;
+	buf->cx = 0;
+	buf->cy = 0;
 	editorYankRectangle(&E, buf);
 
 	/* Undo yank */
@@ -445,7 +458,8 @@ void test_kill_rect_zero_width(void) {
 	int snap_n;
 	char **snap = snapshot_buffer(buf, &snap_n);
 
-	buf->cx = 2; buf->cy = 0;
+	buf->cx = 2;
+	buf->cy = 0;
 	set_mark(buf, 2, 0);
 	/* markInvalid will catch this (same point), so buffer stays intact */
 	editorKillRectangle(&E, buf);
@@ -460,8 +474,11 @@ void test_kill_rect_zero_width(void) {
  * Runner
  * ---------------------------------------------------------------- */
 
-void setUp(void) { initTestEditor(); }
-void tearDown(void) {}
+void setUp(void) {
+	initTestEditor();
+}
+void tearDown(void) {
+}
 
 int main(void) {
 	TEST_BEGIN();

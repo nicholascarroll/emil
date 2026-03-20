@@ -1173,174 +1173,169 @@ void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf) {
 	boty = topy + rh - 1;
 	char *string = xcalloc(rw + 1, 1);
 
-	buf->marky = boty;
+	/* Snapshot original row content BEFORE any mutation so that
+	 * the delete undo record captures the true pre-edit state.
+	 * This fixes: #16 (extra-line undo) and #17 (space-padding
+	 * undo) — both were caused by capturing undo data after the
+	 * buffer had been partially modified. */
+	int orig_numrows = buf->numrows;
+	int snap_count = (boty < orig_numrows) ? rh : orig_numrows - topy;
+	int *snap_sizes = xmalloc(snap_count * sizeof(int));
+	uint8_t **snap_chars = xmalloc(snap_count * sizeof(uint8_t *));
+	for (int i = 0; i < snap_count; i++) {
+		struct erow *r = &buf->row[topy + i];
+		snap_sizes[i] = r->size;
+		snap_chars[i] = xmalloc(r->size + 1);
+		memcpy(snap_chars[i], r->chars, r->size + 1);
+	}
 
+	/* Add extra rows if the rectangle extends past the buffer */
 	int extralines = 0;
 	while (boty >= buf->numrows) {
 		editorInsertRow(buf, buf->numrows, "", 0);
 		extralines++;
 	}
 
-	if (botx > buf->row[boty].size) {
-		buf->markx = buf->row[boty].size;
-	} else {
-		buf->markx = botx;
-	}
-
-	if (extralines) {
-		struct editorUndo *new = newUndo();
-		new->starty = buf->numrows - extralines - 1;
-		new->startx = buf->row[new->starty].size;
-		new->endx = 0;
-		new->endy = buf->numrows - 1;
-		if (extralines >= new->datasize) {
-			new->datasize = extralines + 1;
-			new->data = xrealloc(new->data, new->datasize);
-		}
-		memset(new->data, '\n', extralines);
-		new->data[extralines] = 0;
-		new->datalen = strlen((char *)new->data);
-		new->append = 0;
-		new->delete = 0;
-		pushUndo(buf, new);
-
-		/* Adjust for the new rows added at the end of the buffer */
-		adjustAllPoints(buf, new->startx, new->starty, new->endx,
-				new->endy, 0);
-	}
-
-	editorCopyRegion(ed, buf);
 	clearRedos(buf);
 
-	struct editorUndo *new = newUndo();
-	new->startx = buf->cx;
-	new->starty = buf->cy;
-	new->endx = buf->markx;
-	new->endy = buf->marky;
-	free(new->data);
-	if (ed->kill.str == NULL) {
-		new->datalen = 0;
-	} else {
-		new->datalen = strlen((char *)ed->kill.str);
-	}
-	new->datasize = new->datalen + 1;
-	new->data = xmalloc(new->datasize);
-	if (ed->kill.str == NULL) {
-		new->data[0] = 0;
-	} else {
-		for (int i = 0; i < new->datalen; i++) {
-			new->data[i] = ed->kill.str[i];
+	/* Undo record 1 (bottom of stack): extra-lines insert.
+	 * Records the newlines appended to extend the buffer. */
+	if (extralines) {
+		struct editorUndo *u = newUndo();
+		u->starty = orig_numrows - 1;
+		u->startx = buf->row[u->starty].size;
+		u->endx = 0;
+		u->endy = buf->numrows - 1;
+		if (extralines >= u->datasize) {
+			u->datasize = extralines + 1;
+			u->data = xrealloc(u->data, u->datasize);
 		}
-	}
-	new->data[new->datalen] = 0;
-	new->append = 0;
-	new->delete = 1;
-	new->paired = extralines ? 1 : 0;
-	pushUndo(buf, new);
+		memset(u->data, '\n', extralines);
+		u->data[extralines] = 0;
+		u->datalen = extralines;
+		u->append = 0;
+		u->delete = 0;
+		pushUndo(buf, u);
 
-	/* Transformation (insert) undo */
-	new = newUndo();
-	new->startx = topx;
-	new->starty = topy;
-	new->endx = botx + rw;
-	new->endy = boty;
-	free(new->data);
-	new->datalen = 0;
-	if (rw > 0) {
-		new->datasize =
-			(ed->kill.str ? strlen((char *)ed->kill.str) : 0) +
-			(rw * ((boty - topy) + 1)) + 1;
+		adjustAllPoints(buf, u->startx, u->starty, u->endx, u->endy, 0);
+	}
+
+	/* Undo record 2: delete — stores the original row content so
+	 * that undoing re-inserts the pre-edit text.  Built from the
+	 * snapshot taken before any mutation. */
+	int del_datasize = 32;
+	for (int i = 0; i < snap_count; i++)
+		del_datasize += snap_sizes[i] + 1;
+	uint8_t *del_data = xmalloc(del_datasize);
+	int del_pos = 0;
+	for (int i = 0; i < snap_count; i++) {
+		if (i > 0)
+			del_data[del_pos++] = '\n';
+		memcpy(&del_data[del_pos], snap_chars[i], snap_sizes[i]);
+		del_pos += snap_sizes[i];
+	}
+	/* For extra lines that didn't exist, add empty lines */
+	for (int i = snap_count; i < rh; i++)
+		del_data[del_pos++] = '\n';
+	del_data[del_pos] = 0;
+
+	struct editorUndo *del_undo = newUndo();
+	del_undo->startx = 0;
+	del_undo->starty = topy;
+	/* End position: end of the last original row, or end of last
+	 * extra line */
+	if (snap_count > 0) {
+		del_undo->endx = snap_sizes[snap_count - 1];
+		del_undo->endy = topy + snap_count - 1;
 	} else {
-		new->datasize = ed->kill.str ? strlen((char *)ed->kill.str) : 1;
+		del_undo->endx = 0;
+		del_undo->endy = topy;
 	}
-	new->data = xmalloc(new->datasize);
-	new->data[0] = 0;
-	new->append = 0;
-	new->paired = 1;
-	pushUndo(buf, new);
+	if (extralines) {
+		del_undo->endx = 0;
+		del_undo->endy = boty;
+	}
+	free(del_undo->data);
+	del_undo->data = del_data;
+	del_undo->datalen = del_pos;
+	del_undo->datasize = del_datasize;
+	del_undo->append = 0;
+	del_undo->delete = 1;
+	del_undo->paired = extralines ? 1 : 0;
+	pushUndo(buf, del_undo);
 
-	/* First, topy */
-	int idx = 0;
-	struct erow *row = &buf->row[topy];
-	strncpy(string, (char *)&saved.str[idx * rw], rw);
-	if (row->size < botx) {
-		row->chars = xrealloc(row->chars, botx + 1);
-		memset(&row->chars[row->size], ' ', botx - row->size);
-		row->size = botx;
-		new->datasize += row->size + 1;
-		new->data = xrealloc(new->data, new->datasize);
-	}
-	if (rw > 0) {
-		row->chars = xrealloc(row->chars, row->size + 1 + rw);
-	}
-	memmove(&row->chars[topx + rw], &row->chars[botx], row->size - botx);
-	memcpy(&row->chars[topx], string, rw);
-	row->size += rw;
-	row->chars[row->size] = 0;
-	if (rw > 0)
-		adjustAllPoints(buf, topx, topy, topx + rw, topy, 0);
-	if (boty == topy) {
-		emil_strlcat((char *)new->data, string, new->datasize);
-	} else {
-		emil_strlcat((char *)new->data, (char *)&row->chars[topx],
-			     new->datasize);
-	}
-	idx++;
+	/* Undo record 3 (top of stack): insert — will be filled with
+	 * the post-mutation row content during the per-row loop. */
+	struct editorUndo *ins_undo = newUndo();
+	ins_undo->startx = 0;
+	ins_undo->starty = topy;
+	ins_undo->endx = 0; /* updated after loop */
+	ins_undo->endy = boty;
+	free(ins_undo->data);
+	ins_undo->datalen = 0;
+	ins_undo->datasize = del_datasize + (rw * rh) + 1;
+	ins_undo->data = xmalloc(ins_undo->datasize);
+	ins_undo->data[0] = 0;
+	ins_undo->append = 0;
+	ins_undo->paired = 1;
+	pushUndo(buf, ins_undo);
 
-	while ((topy + idx) < boty) {
+	/* Free snapshot */
+	for (int i = 0; i < snap_count; i++)
+		free(snap_chars[i]);
+	free(snap_chars);
+	free(snap_sizes);
+
+	/* Per-row rectangle insertion */
+	for (int idx = 0; idx < rh; idx++) {
 		int cur_row = topy + idx;
-		emil_strlcat((char *)new->data, "\n", new->datasize);
-		/* Next, middle lines */
-		row = &buf->row[cur_row];
+		struct erow *row = &buf->row[cur_row];
+
+		if (idx > 0)
+			emil_strlcat((char *)ins_undo->data, "\n",
+				     ins_undo->datasize);
+
 		strncpy(string, (char *)&saved.str[idx * rw], rw);
+
+		/* Pad row with spaces if shorter than insertion column */
 		if (row->size < botx) {
 			row->chars = xrealloc(row->chars, botx + 1);
 			memset(&row->chars[row->size], ' ', botx - row->size);
 			row->size = botx;
-			new->datasize += row->size + 1;
-			new->data = xrealloc(new->data, new->datasize);
+			ins_undo->datasize += row->size + 1;
+			ins_undo->data =
+				xrealloc(ins_undo->data, ins_undo->datasize);
 		}
-		if (rw > 0) {
+
+		/* Make room and insert rectangle slice */
+		if (rw > 0)
 			row->chars = xrealloc(row->chars, row->size + 1 + rw);
-		}
 		memmove(&row->chars[topx + rw], &row->chars[botx],
 			row->size - botx);
 		memcpy(&row->chars[topx], string, rw);
 		row->size += rw;
 		row->chars[row->size] = 0;
+		row->cached_width = -1;
+
 		if (rw > 0)
 			adjustAllPoints(buf, topx, cur_row, topx + rw, cur_row,
 					0);
-		emil_strlcat((char *)new->data, (char *)row->chars,
-			     new->datasize);
-		idx++;
-	}
 
-	/* Finally, end line */
-	if (topy != boty) {
-		emil_strlcat((char *)new->data, "\n", new->datasize);
-		strncpy(string, (char *)&saved.str[idx * rw], rw);
-		row = &buf->row[boty];
-		if (row->size < botx) {
-			row->chars = xrealloc(row->chars, botx + 1);
-			memset(&row->chars[row->size], ' ', botx - row->size);
-			row->size = botx;
-			new->datasize += row->size + 1;
-			new->data = xrealloc(new->data, new->datasize);
+		/* Append post-mutation row content to insert undo.
+		 * For the last row, use bounded append for the
+		 * partial-row undo convention. */
+		if (idx == rh - 1 && topy != boty) {
+			undoAppendBounded(ins_undo, row->chars, row->size,
+					  row->size);
+		} else {
+			emil_strlcat((char *)ins_undo->data, (char *)row->chars,
+				     ins_undo->datasize);
 		}
-		if (rw > 0) {
-			row->chars = xrealloc(row->chars, row->size + 1 + rw);
-		}
-		memmove(&row->chars[topx + rw], &row->chars[botx],
-			row->size - botx);
-		memcpy(&row->chars[topx], string, rw);
-		row->size += rw;
-		row->chars[row->size] = 0;
-		if (rw > 0)
-			adjustAllPoints(buf, topx, boty, topx + rw, boty, 0);
-		undoAppendBounded(new, row->chars, row->size, botx + rw);
 	}
-	new->datalen = strlen((char *)new->data);
+	ins_undo->datalen = strlen((char *)ins_undo->data);
+	ins_undo->endx = buf->row[boty].size;
+
+	free(string);
 
 	buf->dirty = 1;
 	editorUpdateBuffer(buf);

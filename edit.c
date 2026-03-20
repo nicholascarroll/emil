@@ -1157,29 +1157,23 @@ void editorQuit(void) {
 }
 
 void editorGotoLine(void) {
-	uint8_t *nls;
-	int nl;
+	uint8_t *nls = editorPrompt(E.buf, "Goto line: %s", PROMPT_BASIC, NULL);
+	if (!nls)
+		return;
 
-	for (;;) {
-		nls = editorPrompt(E.buf, "Goto line: %s", PROMPT_BASIC, NULL);
-		if (!nls) {
-			return;
-		}
+	int nl = atoi((char *)nls);
+	free(nls);
 
-		nl = atoi((char *)nls);
-		free(nls);
+	if (nl == 0)
+		return;
 
-		if (nl) {
-			E.buf->cx = 0;
-			if (nl < 0) {
-				E.buf->cy = 0;
-			} else if (nl > E.buf->numrows) {
-				E.buf->cy = E.buf->numrows;
-			} else {
-				E.buf->cy = nl - 1;
-			}
-			return;
-		}
+	E.buf->cx = 0;
+	if (nl < 0) {
+		E.buf->cy = 0;
+	} else if (nl > E.buf->numrows) {
+		E.buf->cy = E.buf->numrows;
+	} else {
+		E.buf->cy = nl - 1;
 	}
 }
 

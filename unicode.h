@@ -2,9 +2,9 @@
 
 int unicodeTest(void);
 
-int stringWidth(uint8_t *str);
+int stringWidth(const uint8_t *str);
 
-int charInStringWidth(uint8_t *str, int idx);
+int charInStringWidth(const uint8_t *str, int idx);
 
 int utf8_is2Char(uint8_t ch);
 

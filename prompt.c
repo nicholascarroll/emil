@@ -19,7 +19,7 @@
 
 extern struct editorConfig E;
 
-uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
+uint8_t *editorPrompt(struct editorBuffer *bufr, const uint8_t *prompt,
 		      enum promptType t,
 		      void (*callback)(struct editorBuffer *, uint8_t *, int)) {
 	uint8_t *result = NULL;
@@ -192,6 +192,12 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, uint8_t *prompt,
 						"[No previous search]");
 				}
 			}
+			break;
+
+		case KEY_META('g'):
+			/* Swallow M-g so that the Emacs M-g M-g chord for
+			 * goto-line doesn't recursively open a nested
+			 * prompt.  The first M-g already opened this one. */
 			break;
 
 		case KEY_ARROW_UP:
