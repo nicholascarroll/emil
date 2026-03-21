@@ -439,61 +439,82 @@ void editorYank(struct editorConfig *ed, struct editorBuffer *buf, int count) {
 		return;
 	}
 
-	if (count <= 0)
-		count = 1;
-
-	// Check if this is a line yank (ends with newline)
-	int killLen = strlen((char *)ed->kill.str);
-	int isLineYank = (killLen > 0 && ed->kill.str[killLen - 1] == '\n');
-
-	for (int j = 0; j < count; j++) {
-		clearRedos(buf);
-
-		struct editorUndo *new = newUndo();
-		new->startx = buf->cx;
-		new->starty = buf->cy;
-		free(new->data);
-		new->datalen = killLen;
-		new->datasize = new->datalen + 1;
-		new->data = xmalloc(new->datasize);
-		emil_strlcpy(new->data, ed->kill.str, new->datasize);
-		new->append = 0;
-
-		/* Compute end position from the kill text */
-		int ex = buf->cx;
-		int ey = buf->cy;
-		for (int i = 0; i < killLen; i++) {
-			if (ed->kill.str[i] == '\n') {
-				ey++;
-				ex = 0;
-			} else {
-				ex++;
-			}
+	/* Numeric argument selects which kill ring entry to yank.
+	 * 0 or 1 = most recent, 2 = second most recent, etc.
+	 * Matches GNU Emacs C-y behavior. */
+	if (count > 1) {
+		int idx = ed->kill_history.count - count;
+		if (idx < 0)
+			idx = 0;
+		struct historyEntry *entry =
+			getHistoryAt(&ed->kill_history, idx);
+		if (!entry) {
+			editorSetStatusMessage(msg_kill_ring_empty);
+			return;
 		}
-		new->endx = ex;
-		new->endy = ey;
-		pushUndo(buf, new);
+		clearEditorText(&ed->kill);
+		ed->kill.str = (uint8_t *)xstrdup(entry->str);
+		ed->kill.is_rectangle = entry->is_rectangle;
+		ed->kill.rect_width = entry->rect_width;
+		ed->kill.rect_height = entry->rect_height;
 
-		/* bulkInsert handles the row manipulation and calls
-		 * adjustAllPoints internally. */
-		bulkInsert(buf, buf->cx, buf->cy, ed->kill.str, killLen);
-
-		buf->cx = ex;
-		buf->cy = ey;
-
-		/* For line yanks with multiple repetitions, position cursor
-		 * at the beginning of the next line for the next yank */
-		if (isLineYank && j < count - 1) {
-			buf->cx = 0;
+		/* If the selected entry is a rectangle, delegate */
+		if (entry->is_rectangle) {
+			ed->kill_ring_pos = idx;
+			editorYankRectangle(ed, buf);
+			return;
 		}
 	}
+
+	int killLen = strlen((char *)ed->kill.str);
+
+	clearRedos(buf);
+
+	struct editorUndo *new = newUndo();
+	new->startx = buf->cx;
+	new->starty = buf->cy;
+	free(new->data);
+	new->datalen = killLen;
+	new->datasize = new->datalen + 1;
+	new->data = xmalloc(new->datasize);
+	emil_strlcpy(new->data, ed->kill.str, new->datasize);
+	new->append = 0;
+
+	/* Compute end position from the kill text */
+	int ex = buf->cx;
+	int ey = buf->cy;
+	for (int i = 0; i < killLen; i++) {
+		if (ed->kill.str[i] == '\n') {
+			ey++;
+			ex = 0;
+		} else {
+			ex++;
+		}
+	}
+	new->endx = ex;
+	new->endy = ey;
+	pushUndo(buf, new);
+
+	/* bulkInsert handles the row manipulation and calls
+	 * adjustAllPoints internally. */
+	bulkInsert(buf, buf->cx, buf->cy, ed->kill.str, killLen);
+
+	buf->cx = ex;
+	buf->cy = ey;
 
 	buf->dirty = 1;
 	editorUpdateBuffer(buf);
 
-	/* Set kill ring position to most recent */
-	ed->kill_ring_pos =
-		ed->kill_history.count > 0 ? ed->kill_history.count - 1 : 0;
+	/* Set kill ring position so M-y continues from here */
+	if (count > 1) {
+		ed->kill_ring_pos = ed->kill_history.count - count;
+		if (ed->kill_ring_pos < 0)
+			ed->kill_ring_pos = 0;
+	} else {
+		ed->kill_ring_pos = ed->kill_history.count > 0 ?
+					    ed->kill_history.count - 1 :
+					    0;
+	}
 }
 
 void editorYankPop(struct editorConfig *ed, struct editorBuffer *buf) {

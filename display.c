@@ -623,22 +623,21 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 						fill_col++;
 					}
 					updateHighlight(ab, &fill_hl, 0);
-					filled = 1;
 
-					/* --- Advance to next screen line
-					 *     if more content remains --- */
-					if (more && y < screenrows - 1) {
-						abAppend(ab, "\r\n", 2);
-						y++;
-					}
+					filled = 1;
 
 					if (!more)
 						break;
-					/* Window full — stop rendering this
-					 * row to avoid overflowing into the
-					 * status bar / next window area. */
-					if (y >= screenrows - 1)
+
+					/* Advance to next screen line if
+					 * room remains; otherwise the
+					 * window is full. */
+					if (y < screenrows - 1) {
+						abAppend(ab, "\r\n", 2);
+						y++;
+					} else {
 						break;
+					}
 					line_start_col = break_col;
 					line_start_byte = break_byte;
 					sub_line_idx++;

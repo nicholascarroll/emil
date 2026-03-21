@@ -547,3 +547,25 @@ void editorUndoDelChar(struct editorBuffer *buf, erow *row) {
 		adjustAllPoints(buf, buf->cx, buf->cy, buf->cx + n, buf->cy, 1);
 	}
 }
+
+void editorUndoSelfInsert(struct editorBuffer *buf, uint8_t c, int count) {
+	if (count == 1) {
+		editorUndoAppendChar(buf, c);
+		return;
+	}
+	clearRedos(buf);
+	struct editorUndo *new = newUndo();
+	new->startx = buf->cx;
+	new->starty = buf->cy;
+	new->endx = buf->cx + count;
+	new->endy = buf->cy;
+	new->append = 0;
+	if (count + 1 > new->datasize) {
+		new->datasize = count + 1;
+		new->data = xrealloc(new->data, new->datasize);
+	}
+	memset(new->data, c, count);
+	new->data[count] = 0;
+	new->datalen = count;
+	pushUndo(buf, new);
+}

@@ -32,4 +32,7 @@ int sublineBounds(erow *row, int screencols, int target_subline,
 		  int *start_byte, int *end_byte);
 int displayColumnToByteOffset(erow *row, int screencols, int target_subline,
 			      int target_col);
+
+void editorClampPositions(struct editorBuffer *buf);
+
 #endif

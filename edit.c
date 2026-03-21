@@ -306,8 +306,18 @@ void editorBackSpace(struct editorBuffer *bufr, int count) {
  * active.  direction: -1 = up, +1 = down. */
 static void editorMoveVisualRow(int direction) {
 	struct editorBuffer *buf = E.buf;
-	if (buf->cy >= buf->numrows)
+
+	if (buf->cy >= buf->numrows) {
+		if (direction > 0 || buf->numrows == 0)
+			return;
+		/* Moving up from virtual EOF line */
+		buf->cy = buf->numrows - 1;
+		erow *prev = &buf->row[buf->cy];
+		int last_sub = countScreenLines(prev, E.screencols) - 1;
+		buf->cx = displayColumnToByteOffset(prev, E.screencols,
+						    last_sub, 0);
 		return;
+	}
 
 	erow *row = &buf->row[buf->cy];
 	int display_col = charsToDisplayColumn(row, buf->cx);
@@ -868,37 +878,47 @@ void editorCapitalCaseWord(struct editorBuffer *bufr, int times) {
 /* Word deletion */
 
 void editorDeleteWord(struct editorBuffer *bufr, int count) {
-	if (bufr->read_only) {
-		editorSetStatusMessage(msg_read_only);
-		return;
-	}
-	bufr->mark_active = 0;
+	int startx = bufr->cx;
+	int starty = bufr->cy;
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
 		int endx = bufr->cx;
 		int endy = bufr->cy;
 		bufferEndOfForwardWord(bufr, &endx, &endy);
 		if (endx == bufr->cx && endy == bufr->cy)
-			return;
-		editorDeleteRange(bufr, bufr->cx, bufr->cy, endx, endy, 1);
+			break;
+		bufr->cx = endx;
+		bufr->cy = endy;
 	}
+	if (bufr->cx == startx && bufr->cy == starty)
+		return;
+	int endx = bufr->cx;
+	int endy = bufr->cy;
+	bufr->cx = startx;
+	bufr->cy = starty;
+	editorDeleteRange(bufr, bufr->cx, bufr->cy, endx, endy, 1);
 }
 
 void editorBackspaceWord(struct editorBuffer *bufr, int count) {
-	if (bufr->read_only) {
-		editorSetStatusMessage(msg_read_only);
-		return;
-	}
-	bufr->mark_active = 0;
+	int startx = bufr->cx;
+	int starty = bufr->cy;
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
 		int endx = bufr->cx;
 		int endy = bufr->cy;
 		bufferEndOfBackwardWord(bufr, &endx, &endy);
 		if (endx == bufr->cx && endy == bufr->cy)
-			return;
-		editorDeleteRange(bufr, bufr->cx, bufr->cy, endx, endy, 1);
+			break;
+		bufr->cx = endx;
+		bufr->cy = endy;
 	}
+	if (bufr->cx == startx && bufr->cy == starty)
+		return;
+	int endx = bufr->cx;
+	int endy = bufr->cy;
+	bufr->cx = startx;
+	bufr->cy = starty;
+	editorDeleteRange(bufr, bufr->cx, bufr->cy, endx, endy, 1);
 }
 
 /* Character/word transposition */

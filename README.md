@@ -113,13 +113,13 @@ Readline supports two ways to kill to the beginning of the line: `Ctrl-x BACKSPA
 Shell integration is a compile-time option (enabled by default). It enables shell commands to be used on the buffer:
 
 - **`Alt-|`** 
-  Takes the current region, feeds it to the shell command you type, and **displays the output** in a `*Shell Output*` buffer (or the echo area if the output is small).  
+  Takes the current region, feeds it to the shell command you type, and **displays the output** in a `*Shell Output*` buffer.  
 
 - **`Ctrl-u Alt-|`**    
   Takes the current region, feeds it to the shell command, and **replaces the region** with the output of the command.  
 
 - **`Alt-!`**   
-  Enter a shell command in the minibuffer and the output displays in *Shell Output* (or echo area). 
+  Enter a shell command in the minibuffer and the output displays in *Shell Output*.
 
 - **`Alt-x diff-buffer-with-file`**    
   Shows unsaved changes.

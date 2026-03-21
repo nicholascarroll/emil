@@ -33,6 +33,7 @@
 #include "region.h"
 #include "prompt.h"
 #include "clang.h"
+#include "adjust.h"
 
 extern struct editorConfig E;
 
@@ -668,17 +669,16 @@ static int dispatchEdit(int c, int uarg) {
 			editorInsertUnicode(E.buf, count);
 		} else if (key != KEY_UNICODE_ERROR && key < KEY_ARROW_LEFT) {
 			int count = uarg ? uarg : 1;
-			for (int i = 0; i < count; i++) {
-				editorUndoAppendChar(E.buf, key);
-			}
+			editorUndoSelfInsert(E.buf, key, count);
 			editorInsertChar(E.buf, key, count);
+			if (count > 1)
+				adjustAllPoints(E.buf, E.buf->cx - count,
+						E.buf->cy, E.buf->cx, E.buf->cy,
+						0);
 		} else {
 			editorSetStatusMessage(msg_invalid_utf8);
 		}
 	}
-		return 1;
-	case CMD_DELETE_WORD:
-		editorDeleteWord(E.buf, uarg);
 		return 1;
 	case CMD_BACKSPACE_WORD:
 		editorBackspaceWord(E.buf, uarg);
@@ -1162,27 +1162,21 @@ void editorProcessKeypress(int c) {
 		goto done;
 
 	/* Self-insert */
-	if (c == CMD_TAB) {
-		if (E.buf == E.minibuf) {
+	if (c == CMD_TAB || c == CMD_SELF_INSERT) {
+		if (c == CMD_TAB && E.buf == E.minibuf)
 			goto done;
-		}
+		int ch = (c == CMD_TAB) ? '\t' : E.self_insert_key;
 		int count = uarg ? uarg : 1;
-		for (int i = 0; i < count; i++) {
-			editorUndoAppendChar(E.buf, '\t');
-		}
-		editorInsertChar(E.buf, '\t', count);
-	} else if (c == CMD_SELF_INSERT) {
-		/* The actual character is stored in E.self_insert_key */
-		int count = uarg ? uarg : 1;
-		int ch = E.self_insert_key;
-		for (int i = 0; i < count; i++) {
-			editorUndoAppendChar(E.buf, ch);
-		}
+		editorUndoSelfInsert(E.buf, ch, count);
 		editorInsertChar(E.buf, ch, count);
+		if (count > 1)
+			adjustAllPoints(E.buf, E.buf->cx - count, E.buf->cy,
+					E.buf->cx, E.buf->cy, 0);
 	}
 
 done:
 	E.uarg = 0;
+	editorClampPositions(E.buf);
 }
 
 /*** init ***/

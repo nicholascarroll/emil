@@ -90,7 +90,7 @@ hal:
 	$(MAKE) format
 	$(MAKE) clean
 	for f in *.c; do clang-tidy $$f -- -I. ; done
-	$(MAKE) CFLAGS="$(CFLAGS) -D_POSIX_C_SOURCE=200112L -Werror" $(PROGNAME)
+	$(MAKE) CFLAGS="$(CFLAGS) -D_POSIX_C_SOURCE=200112L -D_FORTIFY_SOURCE=2 -Werror" $(PROGNAME)
 	$(MAKE) test
 
 # Development targets

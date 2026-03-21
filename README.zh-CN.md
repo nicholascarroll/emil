@@ -121,13 +121,13 @@ Readline 支持两种删除至行首的方式：`Ctrl-x BACKSPACE`（*emacs* 支
 Shell 集成为编译时选项（默认启用），允许在缓冲区上使用 shell 命令：
 
 - **`Alt-|`**  
-  将当前选区馈送至输入的 shell 命令，**输出**显示于 `*Shell Output*` 缓冲区（输出较小时显示于回显区）。
+  将当前选区馈送至输入的 shell 命令，**输出**显示于 `*Shell Output*` 缓冲区。
 
 - **`Ctrl-u Alt-|`**    
   将当前选区馈送至 shell 命令，并用命令**输出**替换原选区。
 
 - **`Alt-!`**   
-  在 minibuffer 中输入 shell 命令，输出显示于 `*Shell Output*`（或回显区）。
+  在 minibuffer 中输入 shell 命令，输出显示于 `*Shell Output*`。
 
 - **`Alt-x diff-buffer-with-file`**    
   显示未保存的更改。

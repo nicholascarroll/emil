@@ -897,3 +897,31 @@ void computeDisplayNames(void) {
 			a->min_name_len = alen;
 	}
 }
+
+/* Clamp cursor and mark to valid buffer positions.
+ * Called after every command to prevent out-of-bounds
+ * row access in rendering or subsequent commands. */
+void editorClampPositions(struct editorBuffer *buf) {
+	if (buf->numrows == 0) {
+		buf->cy = 0;
+		buf->cx = 0;
+		buf->markx = -1;
+		buf->marky = -1;
+		buf->mark_active = 0;
+		return;
+	}
+	/* cy == numrows is allowed (virtual EOF line) but nothing beyond */
+	if (buf->cy > buf->numrows)
+		buf->cy = buf->numrows;
+	if (buf->cy < buf->numrows && buf->cx > buf->row[buf->cy].size)
+		buf->cx = buf->row[buf->cy].size;
+	if (buf->cy == buf->numrows)
+		buf->cx = 0;
+	/* Clamp mark */
+	if (buf->marky >= buf->numrows) {
+		buf->marky = buf->numrows - 1;
+		buf->markx = buf->row[buf->marky].size;
+	}
+	if (buf->marky >= 0 && buf->markx > buf->row[buf->marky].size)
+		buf->markx = buf->row[buf->marky].size;
+}

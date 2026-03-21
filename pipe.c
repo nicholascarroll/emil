@@ -156,49 +156,49 @@ void editorPipeCmd(struct editorConfig *ed, struct editorBuffer *bufr,
 			return;
 		}
 
-		if (outputLen < sizeof(ed->statusmsg) - 1) {
-			editorSetStatusMessage("%s", pipeOutput);
-		} else {
-			struct editorBuffer *newBuf = newBuffer();
-			newBuf->filename = xstrdup("*Shell Output*");
-			newBuf->special_buffer = 1;
+		struct editorBuffer *newBuf = newBuffer();
+		newBuf->filename = xstrdup("*Shell Output*");
+		newBuf->special_buffer = 1;
 
-			// Use a temporary buffer to build each row
-			size_t rowStart = 0;
-			size_t rowLen = 0;
-			for (size_t i = 0; i < outputLen; i++) {
-				if (pipeOutput[i] == '\n' ||
-				    i == outputLen - 1) {
-					// Found a newline or end of output, insert the row
+		// Use a temporary buffer to build each row
+		size_t rowStart = 0;
+		size_t rowLen = 0;
+
+		for (size_t i = 0; i < outputLen; i++) {
+			if (pipeOutput[i] == '\n') {
+				editorInsertRow(newBuf, newBuf->numrows,
+						(char *)&pipeOutput[rowStart],
+						rowLen);
+				rowStart = i + 1;
+				rowLen = 0;
+			} else {
+				rowLen++;
+				if (i == outputLen - 1) {
 					editorInsertRow(
 						newBuf, newBuf->numrows,
 						(char *)&pipeOutput[rowStart],
 						rowLen);
-					rowStart =
-						i + 1; // Start of the next row
-					rowLen = 0;    // Reset row length
-				} else {
-					rowLen++;
 				}
 			}
-
-			// Link the new buffer and update focus
-			if (ed->headbuf == NULL) {
-				ed->headbuf = newBuf;
-			} else {
-				struct editorBuffer *temp = ed->headbuf;
-				while (temp->next != NULL) {
-					temp = temp->next;
-				}
-				temp->next = newBuf;
-			}
-			ed->buf = newBuf;
-
-			// Update the focused window
-			int idx = windowFocusedIdx();
-			ed->windows[idx]->buf = ed->buf;
-			refreshScreen();
 		}
+
+		// Link the new buffer and update focus
+		if (ed->headbuf == NULL) {
+			ed->headbuf = newBuf;
+		} else {
+			struct editorBuffer *temp = ed->headbuf;
+			while (temp->next != NULL) {
+				temp = temp->next;
+			}
+			temp->next = newBuf;
+		}
+		ed->buf = newBuf;
+
+		// Update the focused window
+		int idx = windowFocusedIdx();
+		ed->windows[idx]->buf = ed->buf;
+		refreshScreen();
+
 		free(pipeOutput);
 	}
 }
