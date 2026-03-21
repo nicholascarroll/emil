@@ -33,6 +33,7 @@
 #include "region.h"
 #include "prompt.h"
 #include "clang.h"
+#include "adjust.h"
 
 extern struct editorConfig E;
 
@@ -668,10 +669,29 @@ static int dispatchEdit(int c, int uarg) {
 			editorInsertUnicode(E.buf, count);
 		} else if (key != KEY_UNICODE_ERROR && key < KEY_ARROW_LEFT) {
 			int count = uarg ? uarg : 1;
-			for (int i = 0; i < count; i++) {
+			if (count == 1) {
 				editorUndoAppendChar(E.buf, key);
+			} else {
+				clearRedos(E.buf);
+				struct editorUndo *new = newUndo();
+				new->startx = E.buf->cx;
+				new->starty = E.buf->cy;
+				new->endx = E.buf->cx + count;
+				new->endy = E.buf->cy;
+				free(new->data);
+				new->datasize = count + 1;
+				new->data = xmalloc(new->datasize);
+				memset(new->data, (uint8_t)key, count);
+				new->data[count] = 0;
+				new->datalen = count;
+				new->append = 0;
+				pushUndo(E.buf, new);
 			}
 			editorInsertChar(E.buf, key, count);
+			if (count > 1)
+				adjustAllPoints(E.buf, E.buf->cx - count,
+						E.buf->cy, E.buf->cx, E.buf->cy,
+						0);
 		} else {
 			editorSetStatusMessage(msg_invalid_utf8);
 		}
@@ -1167,18 +1187,54 @@ void editorProcessKeypress(int c) {
 			goto done;
 		}
 		int count = uarg ? uarg : 1;
-		for (int i = 0; i < count; i++) {
+		if (count == 1) {
 			editorUndoAppendChar(E.buf, '\t');
+		} else {
+			clearRedos(E.buf);
+			struct editorUndo *new = newUndo();
+			new->startx = E.buf->cx;
+			new->starty = E.buf->cy;
+			new->endx = E.buf->cx + count;
+			new->endy = E.buf->cy;
+			free(new->data);
+			new->datasize = count + 1;
+			new->data = xmalloc(new->datasize);
+			memset(new->data, '\t', count);
+			new->data[count] = 0;
+			new->datalen = count;
+			new->append = 0;
+			pushUndo(E.buf, new);
 		}
 		editorInsertChar(E.buf, '\t', count);
+		if (count > 1)
+			adjustAllPoints(E.buf, E.buf->cx - count, E.buf->cy,
+					E.buf->cx, E.buf->cy, 0);
 	} else if (c == CMD_SELF_INSERT) {
 		/* The actual character is stored in E.self_insert_key */
 		int count = uarg ? uarg : 1;
 		int ch = E.self_insert_key;
-		for (int i = 0; i < count; i++) {
+		if (count == 1) {
 			editorUndoAppendChar(E.buf, ch);
+		} else {
+			clearRedos(E.buf);
+			struct editorUndo *new = newUndo();
+			new->startx = E.buf->cx;
+			new->starty = E.buf->cy;
+			new->endx = E.buf->cx + count;
+			new->endy = E.buf->cy;
+			free(new->data);
+			new->datasize = count + 1;
+			new->data = xmalloc(new->datasize);
+			memset(new->data, (uint8_t)ch, count);
+			new->data[count] = 0;
+			new->datalen = count;
+			new->append = 0;
+			pushUndo(E.buf, new);
 		}
 		editorInsertChar(E.buf, ch, count);
+		if (count > 1)
+			adjustAllPoints(E.buf, E.buf->cx - count, E.buf->cy,
+					E.buf->cx, E.buf->cy, 0);
 	}
 
 done:
