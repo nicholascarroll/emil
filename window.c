@@ -1,11 +1,11 @@
 #include "window.h"
+#include "display.h"
 #include "emil.h"
 #include "message.h"
 #include "util.h"
 #include <stdlib.h>
-#include "display.h"
 
-extern struct editorConfig E;
+extern struct config E;
 
 int windowFocusedIdx(void) {
 	for (int i = 0; i < E.nwindows; i++) {
@@ -16,7 +16,7 @@ int windowFocusedIdx(void) {
 	return 0;
 }
 
-int findBufferWindow(struct editorBuffer *buf) {
+int findBufferWindow(struct buffer *buf) {
 	for (int i = 0; i < E.nwindows; i++) {
 		if (E.windows[i]->buf == buf) {
 			return i;
@@ -25,8 +25,7 @@ int findBufferWindow(struct editorBuffer *buf) {
 	return -1;
 }
 
-void synchronizeBufferCursor(struct editorBuffer *buf,
-			     struct editorWindow *win) {
+void synchronizeBufferCursor(struct buffer *buf, struct window *win) {
 	// Ensure the cursor is within the buffer's bounds
 	if (win->cy >= buf->numrows) {
 		win->cy = buf->numrows > 0 ? buf->numrows - 1 : 0;
@@ -40,15 +39,15 @@ void synchronizeBufferCursor(struct editorBuffer *buf,
 	buf->cy = win->cy;
 }
 
-void editorSwitchWindow(void) {
+void switchWindow(void) {
 	if (E.nwindows == 1) {
-		editorSetStatusMessage(msg_no_other_windows);
+		setStatusMessage(msg_no_other_windows);
 		return;
 	}
 
 	int currentIdx = windowFocusedIdx();
-	struct editorWindow *currentWindow = E.windows[currentIdx];
-	struct editorBuffer *currentBuffer = currentWindow->buf;
+	struct window *currentWindow = E.windows[currentIdx];
+	struct buffer *currentBuffer = currentWindow->buf;
 
 	// Store the current buffer's cursor position in the current window
 	currentWindow->cx = currentBuffer->cx;
@@ -57,7 +56,7 @@ void editorSwitchWindow(void) {
 	// Switch to the next window
 	currentWindow->focused = 0;
 	int nextIdx = (currentIdx + 1) % E.nwindows;
-	struct editorWindow *nextWindow = E.windows[nextIdx];
+	struct window *nextWindow = E.windows[nextIdx];
 	nextWindow->focused = 1;
 
 	// Update the focused buffer
@@ -71,10 +70,10 @@ void editorSwitchWindow(void) {
 	synchronizeBufferCursor(E.buf, nextWindow);
 }
 
-void editorCreateWindow(void) {
-	E.windows = xrealloc(E.windows,
-			     sizeof(struct editorWindow *) * (++E.nwindows));
-	E.windows[E.nwindows - 1] = xcalloc(1, sizeof(struct editorWindow));
+void createWindow(void) {
+	E.windows =
+		xrealloc(E.windows, sizeof(struct window *) * (++E.nwindows));
+	E.windows[E.nwindows - 1] = xcalloc(1, sizeof(struct window));
 	E.windows[E.nwindows - 1]->focused = 0;
 	E.windows[E.nwindows - 1]->buf = E.buf;
 	E.windows[E.nwindows - 1]->cx = E.buf->cx;
@@ -88,9 +87,9 @@ void editorCreateWindow(void) {
 	}
 }
 
-void editorDestroyWindow(int window_idx) {
+void destroyWindow(int window_idx) {
 	if (E.nwindows == 1) {
-		editorSetStatusMessage(msg_cant_kill_last_window);
+		setStatusMessage(msg_cant_kill_last_window);
 		return;
 	}
 
@@ -98,12 +97,12 @@ void editorDestroyWindow(int window_idx) {
 
 	/* switch focus before destroying current window */
 	if (window_idx == focused_idx) {
-		editorSwitchWindow();
+		switchWindow();
 	}
 
 	free(E.windows[window_idx]);
-	struct editorWindow **windows =
-		xmalloc(sizeof(struct editorWindow *) * (--E.nwindows));
+	struct window **windows =
+		xmalloc(sizeof(struct window *) * (--E.nwindows));
 	int j = 0;
 	for (int i = 0; i < E.nwindows + 1; i++) {
 		if (i != window_idx) {
@@ -120,13 +119,13 @@ void editorDestroyWindow(int window_idx) {
 	}
 }
 
-void editorDestroyOtherWindows(void) {
+void destroyOtherWindows(void) {
 	if (E.nwindows == 1) {
-		editorSetStatusMessage(msg_no_windows_delete);
+		setStatusMessage(msg_no_windows_delete);
 		return;
 	}
 	int idx = windowFocusedIdx();
-	struct editorWindow **windows = xmalloc(sizeof(struct editorWindow *));
+	struct window **windows = xmalloc(sizeof(struct window *));
 	for (int i = 0; i < E.nwindows; i++) {
 		if (i != idx) {
 			free(E.windows[i]);
@@ -139,5 +138,45 @@ void editorDestroyOtherWindows(void) {
 	free(E.windows);
 	E.windows = windows;
 
-	editorResizeScreen(0);
+	resizeScreen(0);
+}
+
+void showPopupBuffer(struct buffer *buf) {
+	int win_idx = findBufferWindow(buf);
+	if (win_idx >= 0)
+		return; /* already visible */
+
+	int new_idx = E.nwindows;
+	createWindow();
+	E.windows[new_idx]->buf = buf;
+	E.windows[new_idx]->focused = 0;
+
+	/* Keep focus on the original window */
+	for (int i = 0; i < E.nwindows; i++)
+		E.windows[i]->focused = (i == 0);
+
+	/* Size the popup: content height + padding */
+	extern int minibuffer_height;
+	extern const int statusbar_height;
+	int popup_height = buf->numrows + 2;
+	int total_height = E.screenrows - minibuffer_height -
+			   (statusbar_height * E.nwindows);
+	int non_popup = E.nwindows - 1;
+	int min_others = non_popup * 3;
+	int max_popup = total_height - min_others;
+	if (popup_height > max_popup)
+		popup_height = max_popup;
+	if (popup_height < 3)
+		popup_height = 3;
+
+	int remaining = total_height - popup_height;
+	int per_win = remaining / non_popup;
+
+	win_idx = findBufferWindow(buf);
+	for (int i = 0; i < E.nwindows; i++) {
+		if (i == win_idx)
+			E.windows[i]->height = popup_height;
+		else
+			E.windows[i]->height = per_win;
+	}
 }

@@ -1,5 +1,5 @@
-#ifndef TERMINAL_H
-#define TERMINAL_H
+#ifndef EMIL_TERMINAL_H
+#define EMIL_TERMINAL_H
 
 #include <stdint.h>
 
@@ -8,10 +8,10 @@ void disableRawMode(void);
 void enableRawMode(void);
 int getCursorPosition(int *rows, int *cols);
 int getWindowSize(int *rows, int *cols);
-int editorReadKey(void);
-void editorDeserializeUnicode(void);
-void editorCopyToClipboard(const uint8_t *text);
+int readKey(void);
+void deserializeUnicode(void);
+void copyToClipboard(const uint8_t *text);
 void disableRawModeKeepScreen(void);
-void editorOpenShellDrawer(void);
+void openShellDrawer(void);
 
-#endif /* TERMINAL_H */
+#endif /* EMIL_TERMINAL_H */

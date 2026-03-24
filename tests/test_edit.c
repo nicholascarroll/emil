@@ -8,44 +8,44 @@
 /* ---- Character insertion ---- */
 
 void test_insert_char_beginning(void) {
-	struct editorBuffer *buf = make_test_buffer("BCD");
+	struct buffer *buf = make_test_buffer("BCD");
 	buf->cx = 0;
-	editorInsertChar(buf, 'A', 1);
+	insertChar(buf, 'A', 1);
 	TEST_ASSERT_EQUAL_STRING("ABCD", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_INT(1, buf->cx);
 	destroyBuffer(buf);
 }
 
 void test_insert_char_middle(void) {
-	struct editorBuffer *buf = make_test_buffer("ACD");
+	struct buffer *buf = make_test_buffer("ACD");
 	buf->cx = 1;
-	editorInsertChar(buf, 'B', 1);
+	insertChar(buf, 'B', 1);
 	TEST_ASSERT_EQUAL_STRING("ABCD", row_str(buf, 0));
 	destroyBuffer(buf);
 }
 
 void test_insert_char_end(void) {
-	struct editorBuffer *buf = make_test_buffer("ABC");
+	struct buffer *buf = make_test_buffer("ABC");
 	buf->cx = 3;
-	editorInsertChar(buf, 'D', 1);
+	insertChar(buf, 'D', 1);
 	TEST_ASSERT_EQUAL_STRING("ABCD", row_str(buf, 0));
 	destroyBuffer(buf);
 }
 
 void test_insert_char_with_count(void) {
-	struct editorBuffer *buf = make_test_buffer("AE");
+	struct buffer *buf = make_test_buffer("AE");
 	buf->cx = 1;
-	editorInsertChar(buf, 'B', 3);
+	insertChar(buf, 'B', 3);
 	TEST_ASSERT_EQUAL_STRING("ABBBE", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_INT(4, buf->cx);
 	destroyBuffer(buf);
 }
 
 void test_insert_char_readonly(void) {
-	struct editorBuffer *buf = make_test_buffer("Hello");
+	struct buffer *buf = make_test_buffer("Hello");
 	buf->read_only = 1;
 	buf->cx = 0;
-	editorInsertChar(buf, 'X', 1);
+	insertChar(buf, 'X', 1);
 	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
 	destroyBuffer(buf);
 }
@@ -53,9 +53,10 @@ void test_insert_char_readonly(void) {
 /* ---- Newlines ---- */
 
 void test_insert_newline_splits(void) {
-	struct editorBuffer *buf = make_test_buffer("HelloWorld");
+	struct buffer *buf = make_test_buffer("HelloWorld");
 	buf->cx = 5;
-	editorInsertNewline(buf, 1);
+	E.buf = buf;
+	insertNewline(1);
 	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_STRING("World", row_str(buf, 1));
@@ -65,9 +66,10 @@ void test_insert_newline_splits(void) {
 }
 
 void test_insert_newline_at_beginning(void) {
-	struct editorBuffer *buf = make_test_buffer("Hello");
+	struct buffer *buf = make_test_buffer("Hello");
 	buf->cx = 0;
-	editorInsertNewline(buf, 1);
+	E.buf = buf;
+	insertNewline(1);
 	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 1));
@@ -75,9 +77,10 @@ void test_insert_newline_at_beginning(void) {
 }
 
 void test_insert_newline_at_end(void) {
-	struct editorBuffer *buf = make_test_buffer("Hello");
+	struct buffer *buf = make_test_buffer("Hello");
 	buf->cx = 5;
-	editorInsertNewline(buf, 1);
+	E.buf = buf;
+	insertNewline(1);
 	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_STRING("", row_str(buf, 1));
@@ -85,9 +88,10 @@ void test_insert_newline_at_end(void) {
 }
 
 void test_insert_newline_and_indent(void) {
-	struct editorBuffer *buf = make_test_buffer("    Hello");
+	struct buffer *buf = make_test_buffer("    Hello");
 	buf->cx = 9;
-	editorInsertNewlineAndIndent(buf, 1);
+	E.buf = buf;
+	insertNewlineAndIndent(1);
 	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("    Hello", row_str(buf, 0));
 	TEST_ASSERT(buf->row[1].size >= 4);
@@ -97,9 +101,10 @@ void test_insert_newline_and_indent(void) {
 }
 
 void test_open_line(void) {
-	struct editorBuffer *buf = make_test_buffer("Hello");
+	struct buffer *buf = make_test_buffer("Hello");
 	buf->cx = 5;
-	editorOpenLine(buf, 1);
+	E.buf = buf;
+	openLine(1);
 	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 	TEST_ASSERT_EQUAL_INT(0, buf->cy);
 	TEST_ASSERT_EQUAL_INT(5, buf->cx);
@@ -109,28 +114,31 @@ void test_open_line(void) {
 /* ---- Deletion ---- */
 
 void test_del_char_middle(void) {
-	struct editorBuffer *buf = make_test_buffer("ABCD");
+	struct buffer *buf = make_test_buffer("ABCD");
 	buf->cx = 1;
-	editorDelChar(buf, 1);
+	E.buf = buf;
+	delChar(1);
 	TEST_ASSERT_EQUAL_STRING("ACD", row_str(buf, 0));
 	destroyBuffer(buf);
 }
 
 void test_del_char_joins_lines(void) {
 	const char *lines[] = { "Hello", "World" };
-	struct editorBuffer *buf = make_test_buffer_lines(lines, 2);
+	struct buffer *buf = make_test_buffer_lines(lines, 2);
 	buf->cx = 5;
 	buf->cy = 0;
-	editorDelChar(buf, 1);
+	E.buf = buf;
+	delChar(1);
 	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("HelloWorld", row_str(buf, 0));
 	destroyBuffer(buf);
 }
 
 void test_backspace_middle(void) {
-	struct editorBuffer *buf = make_test_buffer("ABCD");
+	struct buffer *buf = make_test_buffer("ABCD");
 	buf->cx = 2;
-	editorBackSpace(buf, 1);
+	E.buf = buf;
+	backSpace(1);
 	TEST_ASSERT_EQUAL_STRING("ACD", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_INT(1, buf->cx);
 	destroyBuffer(buf);
@@ -138,10 +146,11 @@ void test_backspace_middle(void) {
 
 void test_backspace_joins_lines(void) {
 	const char *lines[] = { "Hello", "World" };
-	struct editorBuffer *buf = make_test_buffer_lines(lines, 2);
+	struct buffer *buf = make_test_buffer_lines(lines, 2);
 	buf->cx = 0;
 	buf->cy = 1;
-	editorBackSpace(buf, 1);
+	E.buf = buf;
+	backSpace(1);
 	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("HelloWorld", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_INT(5, buf->cx);
@@ -152,28 +161,31 @@ void test_backspace_joins_lines(void) {
 /* ---- Indentation ---- */
 
 void test_indent_tab(void) {
-	struct editorBuffer *buf = make_test_buffer("Hello");
+	struct buffer *buf = make_test_buffer("Hello");
 	buf->cx = 0;
 	buf->indent = 0;
-	editorIndent(buf, 1);
+	E.buf = buf;
+	editorIndent(1);
 	TEST_ASSERT_EQUAL_STRING("\tHello", row_str(buf, 0));
 	destroyBuffer(buf);
 }
 
 void test_indent_spaces(void) {
-	struct editorBuffer *buf = make_test_buffer("Hello");
+	struct buffer *buf = make_test_buffer("Hello");
 	buf->cx = 0;
 	buf->indent = 4;
-	editorIndent(buf, 1);
+	E.buf = buf;
+	editorIndent(1);
 	TEST_ASSERT_EQUAL_STRING("    Hello", row_str(buf, 0));
 	destroyBuffer(buf);
 }
 
 void test_unindent(void) {
-	struct editorBuffer *buf = make_test_buffer("\tHello");
+	struct buffer *buf = make_test_buffer("\tHello");
 	buf->cx = 1;
 	buf->indent = 0;
-	editorUnindent(buf, 1);
+	E.buf = buf;
+	unindent(1);
 	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
 	destroyBuffer(buf);
 }
@@ -182,11 +194,12 @@ void test_unindent(void) {
 
 void test_forward_para_boundary(void) {
 	const char *lines[] = { "Hello world.", "", "Second para." };
-	struct editorBuffer *buf = make_test_buffer_lines(lines, 3);
+	struct buffer *buf = make_test_buffer_lines(lines, 3);
 	buf->cx = 0;
 	buf->cy = 0;
 	int cx = 0, cy = 0;
-	bufferForwardParagraphBoundary(buf, &cx, &cy);
+	E.buf = buf;
+	forwardParaBoundary(&cx, &cy);
 	TEST_ASSERT_EQUAL_INT(1, cy);
 	TEST_ASSERT_EQUAL_INT(0, cx);
 	destroyBuffer(buf);
@@ -194,11 +207,12 @@ void test_forward_para_boundary(void) {
 
 void test_backward_para_boundary(void) {
 	const char *lines[] = { "Hello world.", "", "Second para." };
-	struct editorBuffer *buf = make_test_buffer_lines(lines, 3);
+	struct buffer *buf = make_test_buffer_lines(lines, 3);
 	buf->cx = 0;
 	buf->cy = 2;
 	int cx = 0, cy = 2;
-	bufferBackwardParagraphBoundary(buf, &cx, &cy);
+	E.buf = buf;
+	backwardParaBoundary(&cx, &cy);
 	TEST_ASSERT_EQUAL_INT(1, cy);
 	TEST_ASSERT_EQUAL_INT(0, cx);
 	destroyBuffer(buf);
@@ -206,22 +220,24 @@ void test_backward_para_boundary(void) {
 
 void test_forward_para_to_end(void) {
 	const char *lines[] = { "One line only" };
-	struct editorBuffer *buf = make_test_buffer_lines(lines, 1);
+	struct buffer *buf = make_test_buffer_lines(lines, 1);
 	buf->cx = 0;
 	buf->cy = 0;
 	int cx = 0, cy = 0;
-	bufferForwardParagraphBoundary(buf, &cx, &cy);
+	E.buf = buf;
+	forwardParaBoundary(&cx, &cy);
 	TEST_ASSERT_EQUAL_INT(1, cy); /* numrows */
 	destroyBuffer(buf);
 }
 
 void test_backward_para_to_start(void) {
 	const char *lines[] = { "One line only" };
-	struct editorBuffer *buf = make_test_buffer_lines(lines, 1);
+	struct buffer *buf = make_test_buffer_lines(lines, 1);
 	buf->cx = 5;
 	buf->cy = 0;
 	int cx = 5, cy = 0;
-	bufferBackwardParagraphBoundary(buf, &cx, &cy);
+	E.buf = buf;
+	backwardParaBoundary(&cx, &cy);
 	TEST_ASSERT_EQUAL_INT(0, cy);
 	TEST_ASSERT_EQUAL_INT(0, cx);
 	destroyBuffer(buf);
@@ -230,13 +246,13 @@ void test_backward_para_to_start(void) {
 /* ---- Sentence movement ---- */
 
 void test_forward_sentence_simple(void) {
-	struct editorBuffer *buf =
+	struct buffer *buf =
 		make_test_buffer("Hello world. Goodbye world.");
 	buf->cx = 0;
 	buf->cy = 0;
 	E.buf = buf;
 	int cx = 0, cy = 0;
-	bufferForwardSentenceEnd(buf, &cx, &cy);
+	forwardSentenceEnd(&cx, &cy);
 	/* Should land after "Hello world. " (pos 13) */
 	TEST_ASSERT_EQUAL_INT(13, cx);
 	TEST_ASSERT_EQUAL_INT(0, cy);
@@ -245,11 +261,12 @@ void test_forward_sentence_simple(void) {
 
 void test_forward_sentence_end_of_line(void) {
 	const char *lines[] = { "Hello world.", "Next sentence." };
-	struct editorBuffer *buf = make_test_buffer_lines(lines, 2);
+	struct buffer *buf = make_test_buffer_lines(lines, 2);
 	buf->cx = 0;
 	buf->cy = 0;
+	E.buf = buf;
 	int cx = 0, cy = 0;
-	bufferForwardSentenceEnd(buf, &cx, &cy);
+	forwardSentenceEnd(&cx, &cy);
 	/* Sentence ends at ".", followed by end-of-line, land at start
 	 * of next line */
 	TEST_ASSERT_EQUAL_INT(0, cx);
@@ -258,13 +275,13 @@ void test_forward_sentence_end_of_line(void) {
 }
 
 void test_backward_sentence_simple(void) {
-	struct editorBuffer *buf =
+	struct buffer *buf =
 		make_test_buffer("Hello world. Goodbye world.");
 	buf->cx = 27; /* end of line */
 	buf->cy = 0;
 	E.buf = buf;
 	int cx = 27, cy = 0;
-	bufferBackwardSentenceStart(buf, &cx, &cy);
+	backwardSentenceStart(&cx, &cy);
 	/* Should land at start of "Goodbye" (pos 13) */
 	TEST_ASSERT_EQUAL_INT(13, cx);
 	TEST_ASSERT_EQUAL_INT(0, cy);
@@ -272,24 +289,25 @@ void test_backward_sentence_simple(void) {
 }
 
 void test_backward_sentence_to_beginning(void) {
-	struct editorBuffer *buf = make_test_buffer("Hello world.");
+	struct buffer *buf = make_test_buffer("Hello world.");
 	buf->cx = 5;
 	buf->cy = 0;
 	E.buf = buf;
 	int cx = 5, cy = 0;
-	bufferBackwardSentenceStart(buf, &cx, &cy);
+	backwardSentenceStart(&cx, &cy);
 	TEST_ASSERT_EQUAL_INT(0, cx);
 	TEST_ASSERT_EQUAL_INT(0, cy);
 	destroyBuffer(buf);
 }
 
 void test_forward_sentence_with_closing_punct(void) {
-	struct editorBuffer *buf =
+	struct buffer *buf =
 		make_test_buffer("He said \"hello.\" Then left.");
 	buf->cx = 0;
 	buf->cy = 0;
+	E.buf = buf;
 	int cx = 0, cy = 0;
-	bufferForwardSentenceEnd(buf, &cx, &cy);
+	forwardSentenceEnd(&cx, &cy);
 	/* Should skip past the closing quote: "hello.\" " — land at 'T' */
 	TEST_ASSERT_EQUAL_INT(17, cx);
 	TEST_ASSERT_EQUAL_INT(0, cy);
@@ -298,11 +316,12 @@ void test_forward_sentence_with_closing_punct(void) {
 
 void test_forward_sentence_para_boundary(void) {
 	const char *lines[] = { "First sentence", "", "Second sentence" };
-	struct editorBuffer *buf = make_test_buffer_lines(lines, 3);
+	struct buffer *buf = make_test_buffer_lines(lines, 3);
 	buf->cx = 0;
 	buf->cy = 0;
+	E.buf = buf;
 	int cx = 0, cy = 0;
-	bufferForwardSentenceEnd(buf, &cx, &cy);
+	forwardSentenceEnd(&cx, &cy);
 	/* Paragraph boundary should end the sentence, landing on
 	 * the first non-blank line after the blank */
 	TEST_ASSERT_EQUAL_INT(0, cx);
@@ -313,31 +332,31 @@ void test_forward_sentence_para_boundary(void) {
 /* ---- Kill sexp ---- */
 
 void test_kill_sexp_parens(void) {
-	struct editorBuffer *buf = make_test_buffer("(hello) world");
+	struct buffer *buf = make_test_buffer("(hello) world");
 	buf->cx = 0;
 	buf->cy = 0;
 	E.buf = buf;
-	editorKillSexp(1);
+	killSexp(1);
 	TEST_ASSERT_EQUAL_STRING(" world", row_str(buf, 0));
 	destroyBuffer(buf);
 }
 
 void test_kill_sexp_word(void) {
-	struct editorBuffer *buf = make_test_buffer("hello world");
+	struct buffer *buf = make_test_buffer("hello world");
 	buf->cx = 0;
 	buf->cy = 0;
 	E.buf = buf;
-	editorKillSexp(1);
+	killSexp(1);
 	TEST_ASSERT_EQUAL_STRING(" world", row_str(buf, 0));
 	destroyBuffer(buf);
 }
 
 void test_kill_sexp_readonly(void) {
-	struct editorBuffer *buf = make_test_buffer("(hello) world");
+	struct buffer *buf = make_test_buffer("(hello) world");
 	buf->read_only = 1;
 	buf->cx = 0;
 	E.buf = buf;
-	editorKillSexp(1);
+	killSexp(1);
 	TEST_ASSERT_EQUAL_STRING("(hello) world", row_str(buf, 0));
 	destroyBuffer(buf);
 }
@@ -347,11 +366,11 @@ void test_kill_sexp_readonly(void) {
 void test_kill_paragraph(void) {
 	const char *lines[] = { "Hello world.", "More text.", "",
 				"Next para." };
-	struct editorBuffer *buf = make_test_buffer_lines(lines, 4);
+	struct buffer *buf = make_test_buffer_lines(lines, 4);
 	buf->cx = 0;
 	buf->cy = 0;
 	E.buf = buf;
-	editorKillParagraph(1);
+	killParagraph(1);
 	/* Should kill up to the blank line */
 	TEST_ASSERT_EQUAL_INT(0, buf->cx);
 	TEST_ASSERT_EQUAL_INT(0, buf->cy);
@@ -362,10 +381,10 @@ void test_kill_paragraph(void) {
 
 void test_kill_paragraph_readonly(void) {
 	const char *lines[] = { "Hello.", "", "World." };
-	struct editorBuffer *buf = make_test_buffer_lines(lines, 3);
+	struct buffer *buf = make_test_buffer_lines(lines, 3);
 	buf->read_only = 1;
 	E.buf = buf;
-	editorKillParagraph(1);
+	killParagraph(1);
 	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
 	destroyBuffer(buf);
 }
@@ -374,11 +393,11 @@ void test_kill_paragraph_readonly(void) {
 
 void test_mark_paragraph(void) {
 	const char *lines[] = { "First.", "", "Hello.", "World.", "", "Last." };
-	struct editorBuffer *buf = make_test_buffer_lines(lines, 6);
+	struct buffer *buf = make_test_buffer_lines(lines, 6);
 	buf->cx = 3;
 	buf->cy = 2;
 	E.buf = buf;
-	editorMarkParagraph();
+	markParagraph();
 	/* Point should be at paragraph start (blank line before) */
 	TEST_ASSERT_EQUAL_INT(1, buf->cy);
 	TEST_ASSERT_EQUAL_INT(0, buf->cx);
@@ -390,30 +409,30 @@ void test_mark_paragraph(void) {
 }
 
 /* ---- Zap to char ---- */
-/* Note: editorZapToChar reads a key interactively, so we can't easily
- * unit test it without mocking editorReadKey. We test the boundary
+/* Note: zapToChar reads a key interactively, so we can't easily
+ * unit test it without mocking readKey. We test the boundary
  * cases that don't require key input through the delete range. */
 
 /* ---- Paragraph movement via refactored functions ---- */
 
 void test_editor_forward_para(void) {
 	const char *lines[] = { "A", "B", "", "C", "D" };
-	struct editorBuffer *buf = make_test_buffer_lines(lines, 5);
+	struct buffer *buf = make_test_buffer_lines(lines, 5);
 	buf->cx = 0;
 	buf->cy = 0;
 	E.buf = buf;
-	editorForwardPara(1);
+	forwardPara(1);
 	TEST_ASSERT_EQUAL_INT(2, E.buf->cy);
 	destroyBuffer(buf);
 }
 
 void test_editor_back_para(void) {
 	const char *lines[] = { "A", "B", "", "C", "D" };
-	struct editorBuffer *buf = make_test_buffer_lines(lines, 5);
+	struct buffer *buf = make_test_buffer_lines(lines, 5);
 	buf->cx = 0;
 	buf->cy = 4;
 	E.buf = buf;
-	editorBackPara(1);
+	backPara(1);
 	TEST_ASSERT_EQUAL_INT(2, E.buf->cy);
 	destroyBuffer(buf);
 }

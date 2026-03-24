@@ -1,5 +1,5 @@
-#ifndef ABUF_H
-#define ABUF_H
+#ifndef EMIL_ABUF_H
+#define EMIL_ABUF_H
 
 /* Append buffer for efficient screen updates */
 struct abuf {
@@ -13,4 +13,4 @@ struct abuf {
 void abAppend(struct abuf *ab, const char *s, int len);
 void abFree(struct abuf *ab);
 
-#endif /* ABUF_H */
+#endif /* EMIL_ABUF_H */

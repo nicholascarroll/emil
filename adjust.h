@@ -21,7 +21,7 @@ int adjustPoint(int *px, int *py, int startx, int starty, int endx, int endy,
  *   - the mark (markx/marky) if set
  *   - all REGISTER_POINT entries referencing this buffer
  */
-void adjustAllPoints(struct editorBuffer *buf, int startx, int starty, int endx,
+void adjustAllPoints(struct buffer *buf, int startx, int starty, int endx,
 		     int endy, int is_delete);
 
 #endif

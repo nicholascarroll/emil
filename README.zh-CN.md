@@ -114,7 +114,6 @@ set bind-tty-special-chars off
 
 在 `emil` 与 Readline 中，`Ctrl-h` 删除前一字符；而在 `emacs` 中它是帮助前缀键。
 
-Readline 支持两种删除至行首的方式：`Ctrl-x BACKSPACE`（*emacs* 支持）及更符合人体工学的 `Ctrl-u`，但后者与 *emacs* 通用参数冲突。`emil` 通过将 `Ctrl-u Ctrl-a` 绑定为删除至行首解决此冲突。
 
 ### Shell 集成
 

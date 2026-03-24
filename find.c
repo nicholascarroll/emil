@@ -1,26 +1,26 @@
 #include "find.h"
-#include "emil.h"
-#include "message.h"
-#include <string.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <stdbool.h>
-#include <regex.h>
-#include <stdint.h>
+#include "buffer.h"
 #include "display.h"
+#include "emil.h"
+#include "history.h"
 #include "keymap.h"
+#include "message.h"
+#include "prompt.h"
+#include "region.h"
 #include "terminal.h"
 #include "transform.h"
 #include "undo.h"
 #include "unicode.h"
-#include "region.h"
-#include "prompt.h"
 #include "unused.h"
 #include "util.h"
-#include "history.h"
-#include "buffer.h"
+#include <regex.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-extern struct editorConfig E;
+extern struct config E;
 static int regex_mode = 0;
 
 /* Helper function to search for regex match in a string */
@@ -129,7 +129,7 @@ char *str_replace(char *orig, char *rep, char *with) {
 
 static int initial_direction = 1;
 
-void editorFindCallback(struct editorBuffer *bufr, uint8_t *query, int key) {
+void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 	static int last_match = -1;
 	static int direction = 1;
 
@@ -221,63 +221,66 @@ void editorFindCallback(struct editorBuffer *bufr, uint8_t *query, int key) {
 	}
 }
 
-void editorFind(struct editorBuffer *bufr) {
+void editorFind(void) {
+	setMarkSilent();
 	regex_mode = 0; /* Start in normal mode */
 	initial_direction = 1;
-	int saved_cx = bufr->cx;
-	int saved_cy = bufr->cy;
-	//	int saved_rowoff = bufr->rowoff;
+	int saved_cx = E.buf->cx;
+	int saved_cy = E.buf->cy;
+	//	int saved_rowoff = E.buf->rowoff;
 
-	uint8_t *query = editorPrompt(bufr, "Search (C-g to cancel): %s",
-				      PROMPT_SEARCH, editorFindCallback);
+	uint8_t *query = editorPrompt(E.buf, "Search (C-g to cancel): %s",
+				      PROMPT_SEARCH, findCallback);
 
-	free(bufr->query);
-	bufr->query = NULL;
+	free(E.buf->query);
+	E.buf->query = NULL;
 	if (query) {
 		free(query);
 	} else {
-		bufr->cx = saved_cx;
-		bufr->cy = saved_cy;
-		//		bufr->rowoff = saved_rowoff;
+		E.buf->cx = saved_cx;
+		E.buf->cy = saved_cy;
+		//		E.buf->rowoff = saved_rowoff;
 	}
 }
 
-void editorReverseFind(struct editorBuffer *bufr) {
+void reverseFind(void) {
+	setMarkSilent();
 	regex_mode = 0;
 	initial_direction = -1;
-	int saved_cx = bufr->cx;
-	int saved_cy = bufr->cy;
+	int saved_cx = E.buf->cx;
+	int saved_cy = E.buf->cy;
 
-	uint8_t *query = editorPrompt(bufr,
+	uint8_t *query = editorPrompt(E.buf,
 				      "Reverse search (C-g to cancel): %s",
-				      PROMPT_SEARCH, editorFindCallback);
+				      PROMPT_SEARCH, findCallback);
 
-	free(bufr->query);
-	bufr->query = NULL;
+	free(E.buf->query);
+	E.buf->query = NULL;
 	if (query) {
 		free(query);
 	} else {
-		bufr->cx = saved_cx;
-		bufr->cy = saved_cy;
+		E.buf->cx = saved_cx;
+		E.buf->cy = saved_cy;
 	}
 }
 
-void editorRegexFind(struct editorBuffer *bufr) {
+void regexFind(void) {
+	setMarkSilent();
 	regex_mode = 1; /* Start in regex mode */
-	int saved_cx = bufr->cx;
-	int saved_cy = bufr->cy;
+	int saved_cx = E.buf->cx;
+	int saved_cy = E.buf->cy;
 
-	uint8_t *query = editorPrompt(bufr, "Regex search (C-g to cancel): %s",
-				      PROMPT_SEARCH, editorFindCallback);
+	uint8_t *query = editorPrompt(E.buf, "Regex search (C-g to cancel): %s",
+				      PROMPT_SEARCH, findCallback);
 
-	free(bufr->query);
-	bufr->query = NULL;
+	free(E.buf->query);
+	E.buf->query = NULL;
 	regex_mode = 0; /* Reset after search */
 	if (query) {
 		free(query);
 	} else {
-		bufr->cx = saved_cx;
-		bufr->cy = saved_cy;
+		E.buf->cx = saved_cx;
+		E.buf->cy = saved_cy;
 	}
 }
 
@@ -285,74 +288,74 @@ uint8_t *transformerReplaceString(uint8_t *input) {
 	return str_replace(input, orig, repl);
 }
 
-void editorReplaceString(struct editorConfig *ed, struct editorBuffer *buf) {
+void replaceString(void) {
 	orig = NULL;
 	repl = NULL;
-	orig = editorPrompt(buf, "Replace: %s", PROMPT_BASIC, NULL);
+	orig = editorPrompt(E.buf, "Replace: %s", PROMPT_BASIC, NULL);
 	if (orig == NULL) {
-		editorSetStatusMessage(msg_canceled_replace);
+		setStatusMessage(msg_canceled_replace);
 		return;
 	}
 
 	uint8_t *prompt = xmalloc(strlen(orig) + 20);
 	snprintf(prompt, strlen(orig) + 20, "Replace %s with: %%s", orig);
-	repl = editorPrompt(buf, prompt, PROMPT_BASIC, NULL);
+	repl = editorPrompt(E.buf, prompt, PROMPT_BASIC, NULL);
 	free(prompt);
 	prompt = NULL;
 	if (repl == NULL) {
 		free(orig);
-		editorSetStatusMessage(msg_canceled_replace);
+		setStatusMessage(msg_canceled_replace);
 		return;
 	}
 
-	editorTransformRegion(ed, buf, transformerReplaceString);
+	transformRegion(transformerReplaceString);
 
 	free(orig);
 	free(repl);
 }
 
-static int nextOccur(struct editorBuffer *buf, uint8_t *needle, int ocheck) {
-	int ox = buf->cx;
-	int oy = buf->cy;
+static int nextOccur(uint8_t *needle, int ocheck) {
+	int ox = E.buf->cx;
+	int oy = E.buf->cy;
 	if (!ocheck) {
 		ox = -69;
 	}
-	while (buf->cy < buf->numrows) {
-		erow *row = &buf->row[buf->cy];
-		uint8_t *match =
-			strstr((char *)&(row->chars[buf->cx]), (char *)needle);
+	while (E.buf->cy < E.buf->numrows) {
+		erow *row = &E.buf->row[E.buf->cy];
+		uint8_t *match = strstr((char *)&(row->chars[E.buf->cx]),
+					(char *)needle);
 		if (match) {
-			if (!(buf->cx == ox && buf->cy == oy)) {
-				buf->cx = match - row->chars;
-				buf->marky = buf->cy;
-				buf->markx = buf->cx + strlen(needle);
-				/* buf->rowoff = buf->numrows; */
+			if (!(E.buf->cx == ox && E.buf->cy == oy)) {
+				E.buf->cx = match - row->chars;
+				E.buf->marky = E.buf->cy;
+				E.buf->markx = E.buf->cx + strlen(needle);
+				/* E.buf->rowoff = E.buf->numrows; */
 				return 1;
 			}
-			buf->cx++;
+			E.buf->cx++;
 		}
-		buf->cx = 0;
-		buf->cy++;
+		E.buf->cx = 0;
+		E.buf->cy++;
 	}
 	return 0;
 }
 
-void editorQueryReplace(struct editorConfig *ed, struct editorBuffer *buf) {
+void queryReplace(void) {
 	orig = NULL;
 	repl = NULL;
-	orig = editorPrompt(buf, "Query replace: %s", PROMPT_BASIC, NULL);
+	orig = editorPrompt(E.buf, "Query replace: %s", PROMPT_BASIC, NULL);
 	if (orig == NULL) {
-		editorSetStatusMessage(msg_canceled_query_replace);
+		setStatusMessage(msg_canceled_query_replace);
 		return;
 	}
 
 	uint8_t *prompt = xmalloc(strlen(orig) + 25);
 	snprintf(prompt, strlen(orig) + 25, "Query replace %s with: %%s", orig);
-	repl = editorPrompt(buf, prompt, PROMPT_BASIC, NULL);
+	repl = editorPrompt(E.buf, prompt, PROMPT_BASIC, NULL);
 	free(prompt);
 	if (repl == NULL) {
 		free(orig);
-		editorSetStatusMessage(msg_canceled_query_replace);
+		setStatusMessage(msg_canceled_query_replace);
 		return;
 	}
 
@@ -360,39 +363,38 @@ void editorQueryReplace(struct editorConfig *ed, struct editorBuffer *buf) {
 	snprintf(prompt, strlen(orig) + strlen(repl) + 32,
 		 "Query replacing %s with %s:", orig, repl);
 	int bufwidth = stringWidth(prompt);
-	int savedMx = buf->markx;
-	int savedMy = buf->marky;
-	struct editorUndo *first = buf->undo;
+	int savedMx = E.buf->markx;
+	int savedMy = E.buf->marky;
+	struct undo *first = E.buf->undo;
 	uint8_t *newStr = NULL;
-	buf->query = orig;
+	E.buf->query = orig;
 	int currentIdx = windowFocusedIdx();
-	struct editorWindow *currentWindow = ed->windows[currentIdx];
+	struct window *currentWindow = E.windows[currentIdx];
 
-#define NEXT_OCCUR(ocheck)                 \
-	if (!nextOccur(buf, orig, ocheck)) \
+#define NEXT_OCCUR(ocheck)            \
+	if (!nextOccur(orig, ocheck)) \
 	goto QR_CLEANUP
 
 	NEXT_OCCUR(false);
 
 	for (;;) {
-		editorSetStatusMessage(prompt);
+		setStatusMessage(prompt);
 		refreshScreen();
 		cursorBottomLine(bufwidth + 2);
 
-		int c = editorReadKey();
-		editorRecordKey(c);
+		int c = readKey();
+		recordKey(c);
 		switch (c) {
 		case ' ':
 		case 'y':
-			editorTransformRegion(ed, buf,
-					      transformerReplaceString);
+			transformRegion(transformerReplaceString);
 			NEXT_OCCUR(true);
 			break;
 		case CTRL('h'):
 		case KEY_BACKSPACE:
 		case KEY_DEL:
 		case 'n':
-			buf->cx++;
+			E.buf->cx++;
 			NEXT_OCCUR(true);
 			break;
 		case '\r':
@@ -402,44 +404,42 @@ void editorQueryReplace(struct editorConfig *ed, struct editorBuffer *buf) {
 			goto QR_CLEANUP;
 			break;
 		case '.':
-			editorTransformRegion(ed, buf,
-					      transformerReplaceString);
+			transformRegion(transformerReplaceString);
 			goto QR_CLEANUP;
 			break;
 		case '!':
 		case 'Y':
-			buf->marky = buf->numrows - 1;
-			buf->markx = buf->row[buf->marky].size;
-			editorTransformRegion(ed, buf,
-					      transformerReplaceString);
+			E.buf->marky = E.buf->numrows - 1;
+			E.buf->markx = E.buf->row[E.buf->marky].size;
+			transformRegion(transformerReplaceString);
 			goto QR_CLEANUP;
 			break;
 		case 'u':
-			editorDoUndo(buf, 1);
-			buf->markx = buf->cx;
-			buf->marky = buf->cy;
-			buf->cx -= strlen(orig);
+			doUndo(E.buf, 1);
+			E.buf->markx = E.buf->cx;
+			E.buf->marky = E.buf->cy;
+			E.buf->cx -= strlen(orig);
 			break;
 		case 'U':
-			while (buf->undo != first)
-				editorDoUndo(buf, 1);
-			buf->markx = buf->cx;
-			buf->marky = buf->cy;
-			buf->cx -= strlen(orig);
+			while (E.buf->undo != first)
+				doUndo(E.buf, 1);
+			E.buf->markx = E.buf->cx;
+			E.buf->marky = E.buf->cy;
+			E.buf->cx -= strlen(orig);
 			break;
 		case CTRL('r'):
 			prompt = xmalloc(strlen(orig) + 25);
 			snprintf(prompt, strlen(orig) + 25,
 				 "Replace this %s with: %%s", orig);
-			newStr = editorPrompt(buf, prompt, PROMPT_BASIC, NULL);
+			newStr =
+				editorPrompt(E.buf, prompt, PROMPT_BASIC, NULL);
 			free(prompt);
 			if (newStr == NULL) {
 				goto RESET_PROMPT;
 			}
 			uint8_t *tmp = repl;
 			repl = newStr;
-			editorTransformRegion(ed, buf,
-					      transformerReplaceString);
+			transformRegion(transformerReplaceString);
 			free(newStr);
 			repl = tmp;
 			NEXT_OCCUR(true);
@@ -450,15 +450,15 @@ void editorQueryReplace(struct editorConfig *ed, struct editorBuffer *buf) {
 			prompt = xmalloc(strlen(orig) + 25);
 			snprintf(prompt, strlen(orig) + 25,
 				 "Query replace %s with: %%s", orig);
-			newStr = editorPrompt(buf, prompt, PROMPT_BASIC, NULL);
+			newStr =
+				editorPrompt(E.buf, prompt, PROMPT_BASIC, NULL);
 			free(prompt);
 			if (newStr == NULL) {
 				goto RESET_PROMPT;
 			}
 			free(repl);
 			repl = newStr;
-			editorTransformRegion(ed, buf,
-					      transformerReplaceString);
+			transformRegion(transformerReplaceString);
 			NEXT_OCCUR(true);
 RESET_PROMPT:
 			prompt = xmalloc(strlen(orig) + strlen(repl) + 32);
@@ -473,10 +473,10 @@ RESET_PROMPT:
 	}
 
 QR_CLEANUP:
-	editorSetStatusMessage("");
-	buf->query = NULL;
-	buf->markx = savedMx;
-	buf->marky = savedMy;
+	setStatusMessage("");
+	E.buf->query = NULL;
+	E.buf->markx = savedMx;
+	E.buf->marky = savedMy;
 	free(orig);
 	free(repl);
 	if (prompt != NULL) {
@@ -485,22 +485,27 @@ QR_CLEANUP:
 }
 
 /* Wrapper for command table */
-void editorRegexFindWrapper(struct editorConfig *UNUSED(ed),
-			    struct editorBuffer *buf) {
-	editorRegexFind(buf);
+void regexFindWrapper(void) {
+	regexFind();
 }
 
-/* Backward regex find - not yet implemented */
-void editorBackwardRegexFind(struct editorBuffer *bufr) {
-	(void)bufr;	/* Unused parameter */
+void backwardRegexFind(void) {
 	regex_mode = 1; /* Start in regex mode */
+	initial_direction = -1;
+	int saved_cx = E.buf->cx;
+	int saved_cy = E.buf->cy;
 
-	editorSetStatusMessage(msg_backward_regex_todo);
+	uint8_t *query =
+		editorPrompt(E.buf, "Reverse regex search (C-g to cancel): %s",
+			     PROMPT_SEARCH, findCallback);
+
+	free(E.buf->query);
+	E.buf->query = NULL;
 	regex_mode = 0; /* Reset after search */
-}
-
-/* Wrapper for backward regex find */
-void editorBackwardRegexFindWrapper(struct editorConfig *UNUSED(ed),
-				    struct editorBuffer *buf) {
-	editorBackwardRegexFind(buf);
+	if (query) {
+		free(query);
+	} else {
+		E.buf->cx = saved_cx;
+		E.buf->cy = saved_cy;
+	}
 }

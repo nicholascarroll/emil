@@ -1,6 +1,27 @@
+#include "keymap.h"
+#include "adjust.h"
+#include "buffer.h"
+#include "clang.h"
+#include "completion.h"
+#include "display.h"
+#include "edit.h"
+#include "emil.h"
+#include "fileio.h"
+#include "find.h"
+#include "message.h"
+#include "pipe.h"
+#include "prompt.h"
+#include "region.h"
+#include "register.h"
+#include "terminal.h"
+#include "transform.h"
+#include "undo.h"
+#include "unicode.h"
+#include "unused.h"
 #include "util.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -11,74 +32,49 @@
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
-#include <limits.h>
-#include "emil.h"
-#include "message.h"
-#include "util.h"
-#include "fileio.h"
-#include "find.h"
-#include "pipe.h"
-#include "region.h"
-#include "register.h"
-#include "buffer.h"
-#include "completion.h"
-#include "transform.h"
-#include "undo.h"
-#include "unicode.h"
-#include "unused.h"
-#include "terminal.h"
-#include "display.h"
-#include "keymap.h"
-#include "edit.h"
-#include "region.h"
-#include "prompt.h"
-#include "clang.h"
-#include "adjust.h"
 
-extern struct editorConfig E;
+extern struct config E;
 
 /* Helper functions for state machine */
 void showPrefix(const char *prefix) {
-	editorSetStatusMessage("%s", prefix);
+	setStatusMessage("%s", prefix);
 }
 
 // Forward declarations for command functions
 
 static int compare_commands(const void *a, const void *b) {
-	return strcmp(((struct editorCommand *)a)->key,
-		      ((struct editorCommand *)b)->key);
+	return strcmp(((struct command *)a)->key, ((struct command *)b)->key);
 }
 
-void setupCommands(struct editorConfig *ed) {
-	static struct editorCommand commands[] = {
-		{ "capitalize-region", editorCapitalizeRegion },
-		//		{ "indent-spaces", editorIndentSpaces },
-		//		{ "indent-tabs", editorIndentTabs },
-		{ "insert-file", editorInsertFile },
-		{ "cd", editorChangeDirectory },
-		{ "diff-buffer-with-file", editorDiffBufferWithFile },
-		{ "isearch-forward-regexp", editorRegexFindWrapper },
-		{ "query-replace", editorQueryReplace },
-		{ "replace-regexp", editorReplaceRegex },
-		{ "replace-string", editorReplaceString },
-		{ "revert", editorRevert },
-		{ "visual-line-mode", editorToggleVisualLineModeWrapper },
-		{ "version", editorVersionWrapper },
-		{ "view-register", editorViewRegister },
+void setupCommands(void) {
+	static struct command commands[] = {
+		{ "capitalize-region", capitalizeRegion },
+		//		{ "indent-spaces", indentSpaces },
+		//		{ "indent-tabs", indentTabs },
+		{ "insert-file", insertFile },
+		{ "cd", changeDirectory },
+		{ "diff-buffer-with-file", diffBufferWithFile },
+		{ "isearch-forward-regexp", regexFindWrapper },
+		{ "query-replace", queryReplace },
+		{ "replace-regexp", replaceRegex },
+		{ "replace-string", replaceString },
+		{ "revert", revert },
+		{ "visual-line-mode", toggleVisualLineMode },
+		{ "version", editorVersion },
+		{ "view-register", viewRegister },
 #ifdef EMIL_DEBUG_UNDO
 		{ "debug-unpair", debugUnpair },
 #endif
 	};
 
-	ed->cmd = commands;
-	ed->cmd_count = sizeof(commands) / sizeof(commands[0]);
+	E.cmd = commands;
+	E.cmd_count = sizeof(commands) / sizeof(commands[0]);
 
 	// Sort the commands array
-	qsort(ed->cmd, ed->cmd_count, sizeof(struct editorCommand),
-	      compare_commands);
+	qsort(E.cmd, E.cmd_count, sizeof(struct command), compare_commands);
 }
 
-void runCommand(char *cmd, struct editorConfig *ed, struct editorBuffer *buf) {
+void runCommand(char *cmd) {
 	for (int i = 0; cmd[i]; i++) {
 		uint8_t c = cmd[i];
 		if ('A' <= c && c <= 'Z') {
@@ -89,21 +85,21 @@ void runCommand(char *cmd, struct editorConfig *ed, struct editorBuffer *buf) {
 		cmd[i] = c;
 	}
 
-	struct editorCommand key = { cmd, NULL };
-	struct editorCommand *found = bsearch(&key, ed->cmd, ed->cmd_count,
-					      sizeof(struct editorCommand),
-					      compare_commands);
+	struct command key = { cmd, NULL };
+	struct command *found = bsearch(&key, E.cmd, E.cmd_count,
+					sizeof(struct command),
+					compare_commands);
 
 	if (found) {
-		found->cmd(ed, buf);
+		found->cmd();
 	} else {
-		editorSetStatusMessage(msg_no_command);
+		setStatusMessage(msg_no_command);
 	}
 }
 
 /*** editor operations ***/
 
-void editorRecordKey(int c) {
+void recordKey(int c) {
 	if (E.recording) {
 		E.macro.keys[E.macro.nkeys++] = c;
 		if (E.macro.nkeys >= E.macro.skeys) {
@@ -141,7 +137,7 @@ void editorRecordKey(int c) {
 /*
  * Resolve a Meta key combination into a command token.
  * The character is the raw byte after ESC (already extracted
- * by editorReadKey and encoded as KEY_META(ch)).
+ * by readKey and encoded as KEY_META(ch)).
  */
 static int resolveMetaBinding(int ch) {
 	/* Lowercase letters and their uppercase equivalents */
@@ -256,7 +252,7 @@ int resolveBinding(int key) {
 
 	if (key == CTRL('g') && prefix != PREFIX_NONE) {
 		prefix = PREFIX_NONE;
-		editorSetStatusMessage("");
+		setStatusMessage("");
 		return CMD_NONE;
 	}
 
@@ -327,12 +323,12 @@ int resolveBinding(int key) {
 		case 'x':
 			/* C-x x sub-prefix — read another key */
 			{
-				int nextkey = editorReadKey();
+				int nextkey = readKey();
 				if (nextkey == 't') {
 					return CMD_VISUAL_LINE_MODE;
 				} else {
-					editorSetStatusMessage(msg_unknown_cx_x,
-							       nextkey);
+					setStatusMessage(msg_unknown_cx_x,
+							 nextkey);
 					return CMD_NONE;
 				}
 			}
@@ -347,15 +343,14 @@ int resolveBinding(int key) {
 			return CMD_NEXT_BUFFER;
 		case ' ':
 			if (!E.buf->mark_active)
-				editorSetMark();
-			editorToggleRectangleMode();
+				setMark();
+			toggleRectangleMode();
 			return CMD_NONE;
 		default:
 			if (key < ' ') {
-				editorSetStatusMessage(msg_unknown_cx,
-						       key + '`');
+				setStatusMessage(msg_unknown_cx, key + '`');
 			} else {
-				editorSetStatusMessage(msg_unknown_cx, key);
+				setStatusMessage(msg_unknown_cx, key);
 			}
 			return CMD_NONE;
 		}
@@ -367,18 +362,18 @@ int resolveBinding(int key) {
 
 		switch (key) {
 		case '\x1b': {
-			int nextkey = editorReadKey();
+			int nextkey = readKey();
 			if (IS_META_KEY(nextkey)) {
 				int mch = META_CHAR(nextkey);
 				if (mch == 'W' || mch == 'w')
 					return CMD_COPY_RECT;
 			}
-			/* Raw ESC handling for editorReadKey returning
+			/* Raw ESC handling for readKey returning
 			 * key tokens directly */
 			if (nextkey == 'W' || nextkey == 'w')
 				return CMD_COPY_RECT;
-			editorSetStatusMessage("Unknown command C-x r ESC %c",
-					       nextkey);
+			setStatusMessage("Unknown command C-x r ESC %c",
+					 nextkey);
 			return CMD_NONE;
 		}
 		case 'j':
@@ -415,12 +410,11 @@ int resolveBinding(int key) {
 			return CMD_YANK_RECT;
 		default:
 			if (key < ' ') {
-				editorSetStatusMessage(
-					"Unknown command C-x r C-%c",
-					key + '`');
+				setStatusMessage("Unknown command C-x r C-%c",
+						 key + '`');
 			} else {
-				editorSetStatusMessage(
-					"Unknown command C-x r %c", key);
+				setStatusMessage("Unknown command C-x r %c",
+						 key);
 			}
 			return CMD_NONE;
 		}
@@ -440,7 +434,7 @@ int resolveBinding(int key) {
 
 	/* Alt digits */
 	if (key >= KEY_ALT_0 && key <= KEY_ALT_9)
-		return key; /* Passed through, handled by editorProcessKeypress */
+		return key; /* Passed through, handled by processKeypress */
 
 	/* Physical key tokens → commands */
 	switch (key) {
@@ -540,7 +534,7 @@ int resolveBinding(int key) {
 			} else {
 				E.uarg = E.uarg * 10 + (key - '0');
 			}
-			editorSetStatusMessage("C-u %d", E.uarg);
+			setStatusMessage("C-u %d", E.uarg);
 			return CMD_NONE;
 		}
 		return CMD_SELF_INSERT;
@@ -557,78 +551,77 @@ int resolveBinding(int key) {
  */
 
 /* Movement */
-static int dispatchMove(int c, int uarg, struct editorWindow *win) {
+static int dispatchMove(int c, int uarg, struct window *win) {
 	switch (c) {
 	case CMD_BACKWARD_CHAR:
-		editorMoveCursor(KEY_ARROW_LEFT, uarg);
+		moveCursor(KEY_ARROW_LEFT, uarg);
 		return 1;
 	case CMD_FORWARD_CHAR:
-		editorMoveCursor(KEY_ARROW_RIGHT, uarg);
+		moveCursor(KEY_ARROW_RIGHT, uarg);
 		return 1;
 	case CMD_PREV_LINE:
-		editorMoveCursor(KEY_ARROW_UP, uarg);
+		moveCursor(KEY_ARROW_UP, uarg);
 		return 1;
 	case CMD_NEXT_LINE:
-		editorMoveCursor(KEY_ARROW_DOWN, uarg);
+		moveCursor(KEY_ARROW_DOWN, uarg);
 		return 1;
 	case CMD_PAGE_UP:
-		editorPageUp(uarg);
+		pageUp(uarg);
 		return 1;
 	case CMD_PAGE_DOWN:
-		editorPageDown(uarg);
+		pageDown(uarg);
 		return 1;
 	case CMD_SCROLL_UP:
-		editorScrollLineUp(uarg);
+		scrollLineUp(uarg);
 		return 1;
 	case CMD_SCROLL_DOWN:
-		editorScrollLineDown(uarg);
+		scrollLineDown(uarg);
 		return 1;
 	case CMD_BEG_OF_FILE:
-		editorSetMarkSilent();
+		setMarkSilent();
 		E.buf->cy = 0;
 		E.buf->cx = 0;
 		return 1;
 	case CMD_END_OF_FILE:
-		editorSetMarkSilent();
+		setMarkSilent();
 		E.buf->cy = E.buf->numrows;
 		E.buf->cx = 0;
 		return 1;
 	case CMD_HOME:
-		editorBeginningOfLine(uarg);
+		beginningOfLine();
 		return 1;
 	case CMD_END:
-		editorEndOfLine(uarg);
+		endOfLine(uarg);
 		return 1;
 	case CMD_FORWARD_WORD:
-		editorForwardWord(uarg);
+		forwardWord(uarg);
 		return 1;
 	case CMD_BACKWARD_WORD:
-		editorBackWord(uarg);
+		backWord(uarg);
 		return 1;
 	case CMD_FORWARD_PARA:
-		editorForwardPara(uarg);
+		forwardPara(uarg);
 		return 1;
 	case CMD_BACKWARD_PARA:
-		editorBackPara(uarg);
+		backPara(uarg);
 		return 1;
 	case CMD_FORWARD_SEXP:
-		editorForwardSexp(uarg);
+		forwardSexp(uarg);
 		return 1;
 	case CMD_BACKWARD_SEXP:
-		editorBackwardSexp(uarg);
+		backwardSexp(uarg);
 		return 1;
 	case CMD_SENTENCE_FORWARD:
-		editorForwardSentence(uarg);
+		forwardSentence(uarg);
 		return 1;
 	case CMD_SENTENCE_BACKWARD:
-		editorBackwardSentence(uarg);
+		backwardSentence(uarg);
 		return 1;
 	case CMD_RECENTER:
 		recenter(win);
 		return 1;
 	case CMD_GOTO_LINE:
-		editorSetMarkSilent();
-		editorGotoLine();
+		gotoLine();
 		return 1;
 	default:
 		return 0;
@@ -639,88 +632,88 @@ static int dispatchMove(int c, int uarg, struct editorWindow *win) {
 static int dispatchEdit(int c, int uarg) {
 	switch (c) {
 	case CMD_NEWLINE:
-		editorInsertNewline(E.buf, uarg);
+		insertNewline(uarg);
 		return 1;
 	case CMD_BACKSPACE:
-		editorBackSpace(E.buf, uarg);
+		backSpace(uarg);
 		return 1;
 	case CMD_DELETE:
-		editorDelChar(E.buf, uarg);
+		delChar(uarg);
 		return 1;
 	case CMD_UNICODE_ERROR:
-		editorSetStatusMessage(msg_invalid_utf8);
+		setStatusMessage(msg_invalid_utf8);
 		return 1;
 	case CMD_UNICODE:
-		editorInsertUnicode(E.buf, uarg);
+		insertUnicode(uarg);
 		return 1;
 	case CMD_KILL_LINE:
-		editorKillLine(uarg);
+		killLine(uarg);
 		return 1;
 	case CMD_NEWLINE_INDENT:
-		editorInsertNewlineAndIndent(E.buf, uarg ? uarg : 1);
+		insertNewlineAndIndent(uarg);
 		return 1;
 	case CMD_OPEN_LINE:
-		editorOpenLine(E.buf, uarg ? uarg : 1);
+		openLine(uarg);
 		return 1;
 	case CMD_QUOTED_INSERT: {
-		int key = editorReadKey();
+		int key = readKey();
 		if (key == KEY_UNICODE) {
 			int count = uarg ? uarg : 1;
-			editorInsertUnicode(E.buf, count);
+			insertUnicode(count);
 		} else if (key != KEY_UNICODE_ERROR && key < KEY_ARROW_LEFT) {
 			int count = uarg ? uarg : 1;
-			editorUndoSelfInsert(E.buf, key, count);
-			editorInsertChar(E.buf, key, count);
+			undoSelfInsert(key, count);
+			insertChar(E.buf, key, count);
 			if (count > 1)
 				adjustAllPoints(E.buf, E.buf->cx - count,
 						E.buf->cy, E.buf->cx, E.buf->cy,
 						0);
 		} else {
-			editorSetStatusMessage(msg_invalid_utf8);
+			setStatusMessage(msg_invalid_utf8);
 		}
 	}
 		return 1;
 	case CMD_BACKSPACE_WORD:
-		editorBackspaceWord(E.buf, uarg);
+		backspaceWord(uarg);
 		return 1;
 	case CMD_DELETE_WORD:
-		editorDeleteWord(E.buf, uarg);
+		deleteWord(uarg);
 		return 1;
 	case CMD_UPCASE_WORD:
-		editorUpcaseWord(E.buf, uarg ? uarg : 1);
+		upcaseWord(uarg);
 		return 1;
 	case CMD_DOWNCASE_WORD:
-		editorDowncaseWord(E.buf, uarg ? uarg : 1);
+		downcaseWord(uarg);
 		return 1;
 	case CMD_CAPCASE_WORD:
-		editorCapitalCaseWord(E.buf, uarg ? uarg : 1);
+		capitalCaseWord(uarg);
 		return 1;
 	case CMD_TRANSPOSE_WORDS:
-		editorTransposeWords(E.buf);
+		transposeWords();
 		return 1;
 	case CMD_TRANSPOSE_CHARS:
 		if (E.buf->rectangle_mode && !markInvalidSilent())
-			editorStringRectangle(&E, E.buf);
+			stringRectangle();
 		else
-			editorTransposeChars(E.buf);
+			transposeChars();
 		return 1;
 	case CMD_TRANSPOSE_SENTENCES:
-		editorTransposeSentences(E.buf);
+		transposeSentences();
 		return 1;
 	case CMD_ZAP_TO_CHAR:
-		editorZapToChar(E.buf);
+		zapToChar();
 		return 1;
 	case CMD_KILL_SEXP:
-		editorKillSexp(uarg);
+		killSexp(uarg);
 		return 1;
 	case CMD_KILL_PARA:
-		editorKillParagraph(uarg);
+		killParagraph(uarg);
 		return 1;
 	case CMD_MARK_PARA:
-		editorMarkParagraph();
+		markParagraph();
 		return 1;
 	case CMD_UNINDENT:
-		editorUnindent(E.buf, uarg);
+		unindent(uarg);
 		return 1;
 	default:
 		return 0;
@@ -732,35 +725,34 @@ static int dispatchWindow(int c) {
 	switch (c) {
 	case CMD_OTHER_WINDOW:
 		if (E.buf == E.minibuf) {
-			editorSetStatusMessage(
+			setStatusMessage(
 				"Command attempted to use minibuffer while in minibuffer");
 		} else {
-			editorSwitchWindow();
+			switchWindow();
 		}
 		return 1;
 	case CMD_CREATE_WINDOW:
 		if (E.buf == E.minibuf) {
-			editorSetStatusMessage(
+			setStatusMessage(
 				"Command attempted to use minibuffer while in minibuffer");
 		} else {
-			editorCreateWindow();
+			createWindow();
 		}
 		return 1;
 	case CMD_DESTROY_WINDOW:
 		if (E.buf == E.minibuf) {
-			editorSetStatusMessage(
+			setStatusMessage(
 				"Command attempted to use minibuffer while in minibuffer");
 		} else {
-			editorDestroyWindow(windowFocusedIdx());
+			destroyWindow(windowFocusedIdx());
 		}
 		return 1;
 	case CMD_DESTROY_OTHER_WINDOWS:
 		if (E.buf == E.minibuf) {
-			editorSetStatusMessage(
+			setStatusMessage(
 				"Command attempted to use minibuffer while in minibuffer");
 		} else {
-			editorDestroyOtherWindows();
-			refreshScreen();
+			destroyOtherWindows();
 		}
 		return 1;
 	default:
@@ -768,67 +760,48 @@ static int dispatchWindow(int c) {
 	}
 }
 
-/* Returns true if a macro is being recorded or played back. */
-static int macroActive(void) {
-	return E.recording || E.playback;
-}
-
 /* Buffers and files */
 static int dispatchBuffer(int c, int uarg) {
 	switch (c) {
 	case CMD_QUIT:
-		editorQuit();
+		quit();
 		return 1;
 	case CMD_SAVE:
-		if (macroActive()) {
-			editorSetStatusMessage(msg_macro_blocked);
-			return 1;
-		}
-		editorSave(E.buf);
+		save();
 		return 1;
 	case CMD_SAVE_AS:
-		if (macroActive()) {
-			editorSetStatusMessage(msg_macro_blocked);
-			return 1;
-		}
-		editorSaveAs(E.buf);
+		saveAs();
 		return 1;
 	case CMD_SWITCH_BUFFER:
-		editorSwitchToNamedBuffer(&E, E.buf);
+		switchToNamedBuffer();
 		return 1;
 	case CMD_NEXT_BUFFER:
-		editorNextBuffer();
+		nextBuffer();
 		return 1;
 	case CMD_PREV_BUFFER:
-		editorPreviousBuffer();
+		previousBuffer();
 		return 1;
 	case CMD_MARK_BUFFER:
-		editorMarkBuffer();
+		markBuffer();
 		return 1;
 	case CMD_KILL_BUFFER:
-		editorKillBuffer();
+		killBuffer();
 		return 1;
 	case CMD_INSERT_FILE:
-		editorInsertFile(&E, E.buf);
+		insertFile();
 		return 1;
 	case CMD_FIND_FILE:
-		if (macroActive()) {
-			editorSetStatusMessage(msg_macro_blocked);
-			return 1;
-		}
 		findFile();
 		return 1;
 	case CMD_TOGGLE_READ_ONLY:
 		E.buf->read_only = !E.buf->read_only;
-		editorSetStatusMessage(E.buf->read_only ?
-					       msg_read_only :
-					       "Buffer set to writable");
+		setStatusMessage(E.buf->read_only ? msg_read_only :
+						    "Buffer set to writable");
 		return 1;
 	case CMD_REDO:
-		editorDoRedo(E.buf, uarg);
+		doRedo(E.buf, uarg);
 		if (E.buf->redo != NULL) {
-			editorSetStatusMessage(
-				"Press C-_ or C-/ to redo again");
+			setStatusMessage("Press C-_ or C-/ to redo again");
 			E.micro = CMD_REDO;
 		}
 		return 1;
@@ -842,9 +815,9 @@ static int dispatchRegion(int c, int uarg) {
 	switch (c) {
 	case CMD_SET_MARK:
 		if (uarg) {
-			editorPopMark();
+			popMark();
 		} else {
-			editorSetMark();
+			setMark();
 		}
 		return 1;
 	case CMD_SWAP_MARK:
@@ -861,85 +834,85 @@ static int dispatchRegion(int c, int uarg) {
 		return 1;
 	case CMD_CUT:
 		if (E.buf->rectangle_mode)
-			editorKillRectangle(&E, E.buf);
+			killRectangle();
 		else
-			editorKillRegion(&E, E.buf);
-		editorDeactivateMark();
+			killRegion();
+		deactivateMark();
 		return 1;
 	case CMD_COPY:
 		if (E.buf->rectangle_mode)
-			editorCopyRectangle(&E, E.buf);
+			copyRectangle();
 		else
-			editorCopyRegion(&E, E.buf);
-		editorDeactivateMark();
+			copyRegion();
+		deactivateMark();
 		return 1;
 	case CMD_COPY_CLIPBOARD:
 		if (!E.buf->rectangle_mode) {
-			editorCopyRegion(&E, E.buf);
-			editorDeactivateMark();
-			editorCopyToClipboard(E.kill.str);
+			copyRegion();
+			deactivateMark();
+			copyToClipboard(E.kill.str);
 		} else {
-			editorSetStatusMessage(
+			setStatusMessage(
 				"Copying rectangle to OSC 52 not supported!");
 		}
 		return 1;
 	case CMD_YANK:
 		if (E.kill.is_rectangle)
-			editorYankRectangle(&E, E.buf);
+			yankRectangle();
 		else
-			editorYank(&E, E.buf, uarg ? uarg : 1);
+			yank(uarg);
 		return 1;
 	case CMD_YANK_POP:
-		editorYankPop(&E, E.buf);
+		yankPop();
 		return 1;
 	case CMD_KILL_REGION:
 		if (!E.buf->rectangle_mode) {
-			editorKillRegion(&E, E.buf);
+			killRegion();
 		} else {
-			editorKillRectangle(&E, E.buf);
+			killRectangle();
 		}
-		editorDeactivateMark();
+		deactivateMark();
 		return 1;
 	case CMD_UPCASE_REGION:
-		editorTransformRegion(&E, E.buf, transformerUpcase);
+		transformRegion(transformerUpcase);
 		return 1;
 	case CMD_DOWNCASE_REGION:
-		editorTransformRegion(&E, E.buf, transformerDowncase);
+		transformRegion(transformerDowncase);
 		return 1;
 	case CMD_JUMP_REGISTER:
-		editorJumpToRegister(&E);
+		jumpToRegister();
 		return 1;
 	case CMD_POINT_REGISTER:
-		editorPointToRegister(&E);
+		pointToRegister();
 		return 1;
 	case CMD_REGION_REGISTER:
-		editorRegionToRegister(&E, E.buf);
+		regionToRegister();
 		return 1;
 	case CMD_INC_REGISTER:
-		editorIncrementRegister(&E, E.buf);
+		incrementRegister();
 		return 1;
 	case CMD_INSERT_REGISTER:
-		editorInsertRegister(&E, E.buf);
+		insertRegister();
 		return 1;
 	case CMD_VIEW_REGISTER:
-		editorViewRegister(&E, E.buf);
+		viewRegister();
 		return 1;
 	case CMD_STRING_RECT:
-		editorStringRectangle(&E, E.buf);
+		stringRectangle();
 		return 1;
 	case CMD_COPY_RECT:
-		editorCopyRectangle(&E, E.buf);
-		editorDeactivateMark();
+		copyRectangle();
+		deactivateMark();
 		return 1;
 	case CMD_KILL_RECT:
-		editorKillRectangle(&E, E.buf);
-		editorDeactivateMark();
+		killRectangle();
+		deactivateMark();
 		return 1;
 	case CMD_YANK_RECT:
-		editorYankRectangle(&E, E.buf);
+		yankRectangle();
 		return 1;
 	case CMD_RECT_REGISTER:
-		editorRectToRegister(&E, E.buf);
+		rectToRegister();
 		return 1;
 	default:
 		return 0;
@@ -950,23 +923,19 @@ static int dispatchRegion(int c, int uarg) {
 static int dispatchSearch(int c) {
 	switch (c) {
 	case CMD_ISEARCH:
-		editorSetMarkSilent();
-		editorFind(E.buf);
+		editorFind();
 		return 1;
 	case CMD_REVERSE_ISEARCH:
-		editorSetMarkSilent();
-		editorReverseFind(E.buf);
+		reverseFind();
 		return 1;
 	case CMD_REGEX_SEARCH_FORWARD:
-		editorSetMarkSilent();
-		editorRegexFind(E.buf);
+		regexFind();
 		return 1;
 	case CMD_REGEX_SEARCH_BACKWARD:
-		editorSetMarkSilent();
-		editorBackwardRegexFind(E.buf);
+		backwardRegexFind();
 		return 1;
 	case CMD_QUERY_REPLACE:
-		editorQueryReplace(&E, E.buf);
+		queryReplace();
 		return 1;
 	default:
 		return 0;
@@ -985,27 +954,26 @@ static int dispatchMacro(int c, int uarg) {
 				free(E.macro.keys);
 			}
 			E.macro.keys = xmalloc(E.macro.skeys * sizeof(int));
-			editorSetStatusMessage(msg_recording);
+			setStatusMessage(msg_recording);
 		} else {
-			editorSetStatusMessage(msg_already_recording);
+			setStatusMessage(msg_already_recording);
 		}
 		return 1;
 	case CMD_MACRO_END:
 		if (E.recording) {
 			E.recording = 0;
-			editorSetStatusMessage(msg_macro_recorded,
-					       E.macro.nkeys);
+			setStatusMessage(msg_macro_recorded, E.macro.nkeys);
 		} else {
-			editorSetStatusMessage(msg_not_recording);
+			setStatusMessage(msg_not_recording);
 		}
 		return 1;
 	case CMD_MACRO_EXEC:
 		if (E.macro.nkeys > 0) {
 			for (int i = 0; i < (uarg ? uarg : 1); i++) {
-				editorExecMacro(&E.macro);
+				execMacro(&E.macro);
 			}
 		} else {
-			editorSetStatusMessage(msg_no_macro);
+			setStatusMessage(msg_no_macro);
 		}
 		return 1;
 	default:
@@ -1017,59 +985,60 @@ static int dispatchMacro(int c, int uarg) {
 static int dispatchMisc(int c, int uarg) {
 	switch (c) {
 	case CMD_UNDO:
-		editorDoUndo(E.buf, uarg);
+		doUndo(E.buf, uarg);
 		return 1;
 	case CMD_SUSPEND:
 		raise(SIGTSTP);
 		return 1;
 	case CMD_SHELL_DRAWER:
-		editorOpenShellDrawer();
+		openShellDrawer();
 		return 1;
 	case CMD_CTAGS_JUMP:
-		editorCtagsJump();
+		ctagsJump();
 		return 1;
 	case CMD_CTAGS_BACK:
-		editorCtagsBack();
+		ctagsBack();
 		return 1;
 	case CMD_TOGGLE_HEADER_BODY:
-		editorToggleHeaderBody();
+		toggleHeaderBody();
 		return 1;
 	case CMD_VISUAL_LINE_MODE:
-		editorToggleVisualLineMode();
+		toggleVisualLineMode();
 		return 1;
 	case CMD_WHAT_CURSOR:
-		editorWhatCursor();
+		whatCursor();
 		return 1;
 	case CMD_EXEC_CMD: {
-		if (macroActive()) {
-			editorSetStatusMessage(msg_macro_blocked);
+		if (E.recording || E.playback) {
+			setStatusMessage(msg_macro_blocked);
 			return 1;
 		}
 		uint8_t *cmd =
 			editorPrompt(E.buf, "cmd: %s", PROMPT_COMMAND, NULL);
 		if (cmd != NULL) {
-			runCommand(cmd, &E, E.buf);
+			runCommand(cmd);
 			free(cmd);
 		}
 	}
 		return 1;
 	case CMD_CUSTOM_INFO: {
 		int winIdx = windowFocusedIdx();
-		struct editorWindow *w = E.windows[winIdx];
-		struct editorBuffer *buf = w->buf;
+		struct window *w = E.windows[winIdx];
+		struct buffer *buf = w->buf;
 
-		editorSetStatusMessage(
-			"(buf->cx%d,cy%d) (win->scx%d,scy%d) win->height=%d screenrows=%d, rowoff=%d",
+		setStatusMessage(
+			"(buf->cx%d,cy%d) (win->scx%d,scy%d) win->height=%d "
+			"screenrows=%d, rowoff=%d",
 			buf->cx, buf->cy, w->scx, w->scy, w->height,
 			E.screenrows, w->rowoff);
 	}
 		return 1;
 	case CMD_KILL_LINE_BACKWARDS:
-		editorKillLineBackwards();
+		killLineBackwards();
 		return 1;
 	case CMD_CANCEL:
-		editorDeactivateMark();
-		editorSetStatusMessage(msg_quit);
+		deactivateMark();
+		setStatusMessage(msg_quit);
 		return 1;
 	case CMD_UNIVERSAL_ARG:
 		/* Handled before dispatch chain */
@@ -1079,7 +1048,7 @@ static int dispatchMisc(int c, int uarg) {
 	}
 }
 
-void editorProcessKeypress(int c) {
+void processKeypress(int c) {
 	/* Record is handled by the caller (main loop) at the key level.
 	 * Commands arriving here are already resolved. */
 
@@ -1088,11 +1057,11 @@ void editorProcessKeypress(int c) {
 	}
 
 	int windowIdx = windowFocusedIdx();
-	struct editorWindow *win = E.windows[windowIdx];
+	struct window *win = E.windows[windowIdx];
 
 	if (E.micro) {
 		if (E.micro == CMD_REDO && (c == CMD_UNDO)) {
-			editorDoRedo(E.buf, 1);
+			doRedo(E.buf, 1);
 			return;
 		} else {
 			E.micro = 0;
@@ -1107,7 +1076,7 @@ void editorProcessKeypress(int c) {
 		}
 		E.uarg *= 10;
 		E.uarg += c - KEY_ALT_0;
-		editorSetStatusMessage("uarg: %i", E.uarg);
+		setStatusMessage("uarg: %i", E.uarg);
 		return;
 	}
 
@@ -1118,28 +1087,18 @@ void editorProcessKeypress(int c) {
 		} else {
 			E.uarg *= 4;
 		}
-		editorSetStatusMessage("C-u %d", E.uarg);
+		setStatusMessage("C-u %d", E.uarg);
 		return;
 	}
 
 	/* Handle pipe/shell before general dispatch */
 	if (c == CMD_PIPE_CMD) {
-		if (macroActive()) {
-			editorSetStatusMessage(msg_macro_blocked);
-			E.uarg = 0;
-			return;
-		}
-		editorPipeCmd(&E, E.buf, 1);
+		pipeCmd(1);
 		E.uarg = 0;
 		return;
 	}
 	if (c == CMD_SHELL_CMD) {
-		if (macroActive()) {
-			editorSetStatusMessage(msg_macro_blocked);
-			E.uarg = 0;
-			return;
-		}
-		editorPipeCmd(&E, E.buf, 0);
+		pipeCmd(0);
 		E.uarg = 0;
 		return;
 	}
@@ -1170,8 +1129,8 @@ void editorProcessKeypress(int c) {
 			goto done;
 		int ch = (c == CMD_TAB) ? '\t' : E.self_insert_key;
 		int count = uarg ? uarg : 1;
-		editorUndoSelfInsert(E.buf, ch, count);
-		editorInsertChar(E.buf, ch, count);
+		undoSelfInsert(ch, count);
+		insertChar(E.buf, ch, count);
 		if (count > 1)
 			adjustAllPoints(E.buf, E.buf->cx - count, E.buf->cy,
 					E.buf->cx, E.buf->cy, 0);
@@ -1179,27 +1138,27 @@ void editorProcessKeypress(int c) {
 
 done:
 	E.uarg = 0;
-	editorClampPositions(E.buf);
+	clampPositions(E.buf);
 }
 
 /*** init ***/
 
-void editorExecMacro(struct editorMacro *macro) {
+void execMacro(struct macro *macro) {
 	const int MAX_MACRO_DEPTH = 100;
 	if (E.macro_depth >= MAX_MACRO_DEPTH) {
-		editorSetStatusMessage(msg_macro_depth);
+		setStatusMessage(msg_macro_depth);
 		return;
 	}
 
 	E.macro_depth++;
 
-	struct editorMacro tmp;
+	struct macro tmp;
 	tmp.keys = NULL;
 	if (macro != &E.macro) {
 		/* HACK: Annoyance here with readkey needs us to futz
 		 * around with E.macro */
-		memcpy(&tmp, &E.macro, sizeof(struct editorMacro));
-		memcpy(&E.macro, macro, sizeof(struct editorMacro));
+		memcpy(&tmp, &E.macro, sizeof(struct macro));
+		memcpy(&E.macro, macro, sizeof(struct macro));
 	}
 	E.playback = 0;
 	while (E.playback < E.macro.nkeys) {
@@ -1207,17 +1166,17 @@ void editorExecMacro(struct editorMacro *macro) {
 		 * readkey sees playback != 0 */
 		int key = E.macro.keys[E.playback++];
 		if (key == KEY_UNICODE) {
-			editorDeserializeUnicode();
+			deserializeUnicode();
 		}
 		if (key >= ' ' && key < KEY_ARROW_LEFT)
 			E.self_insert_key = key;
 		int cmd = resolveBinding(key);
 		if (cmd != CMD_NONE)
-			editorProcessKeypress(cmd);
+			processKeypress(cmd);
 	}
 	E.playback = 0;
 	if (tmp.keys != NULL) {
-		memcpy(&E.macro, &tmp, sizeof(struct editorMacro));
+		memcpy(&E.macro, &tmp, sizeof(struct macro));
 	}
 
 	E.macro_depth--;

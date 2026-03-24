@@ -121,13 +121,13 @@ void test_getline_multiple_reallocs(void) {
 /* ---- File round-trip ---- */
 
 void test_rows_to_string(void) {
-	struct editorBuffer *buf = make_test_buffer(NULL);
-	editorInsertRow(buf, 0, "Hello", 5);
-	editorInsertRow(buf, 1, "World", 5);
-	editorInsertRow(buf, 2, "", 0);
+	struct buffer *buf = make_test_buffer(NULL);
+	insertRow(buf, 0, "Hello", 5);
+	insertRow(buf, 1, "World", 5);
+	insertRow(buf, 2, "", 0);
 
 	int buflen = 0;
-	char *str = editorRowsToString(buf, &buflen);
+	char *str = rowsToString(buf, &buflen);
 	TEST_ASSERT_EQUAL_INT(13, buflen);
 	TEST_ASSERT(memcmp(str, "Hello\nWorld\n\n", 13) == 0);
 
@@ -142,7 +142,7 @@ void test_open_temp_file(void) {
 	write(fd, "Line one\nLine two\nLine three\n", 29);
 	close(fd);
 
-	struct editorBuffer *buf = make_test_buffer(NULL);
+	struct buffer *buf = make_test_buffer(NULL);
 	int rc = editorOpen(buf, tmpname);
 	TEST_ASSERT_EQUAL_INT(0, rc);
 	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
@@ -160,7 +160,7 @@ void test_open_empty_file(void) {
 	TEST_ASSERT(fd >= 0);
 	close(fd);
 
-	struct editorBuffer *buf = make_test_buffer(NULL);
+	struct buffer *buf = make_test_buffer(NULL);
 	int rc = editorOpen(buf, tmpname);
 	TEST_ASSERT_EQUAL_INT(0, rc);
 	TEST_ASSERT_EQUAL_INT(0, buf->numrows);
@@ -178,7 +178,7 @@ void test_utf8_valid_file(void) {
 	write(fd, "Hello \xC2\xA2 \xE2\x82\xAC\n", 13);
 	close(fd);
 
-	struct editorBuffer *buf = make_test_buffer(NULL);
+	struct buffer *buf = make_test_buffer(NULL);
 	int rc = editorOpen(buf, tmpname);
 	TEST_ASSERT_EQUAL_INT(0, rc);
 	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
@@ -194,7 +194,7 @@ void test_utf8_invalid_continuation(void) {
 	write(fd, "Bad \xC2\x41\n", 7);
 	close(fd);
 
-	struct editorBuffer *buf = make_test_buffer(NULL);
+	struct buffer *buf = make_test_buffer(NULL);
 	int rc = editorOpen(buf, tmpname);
 	TEST_ASSERT_EQUAL_INT(-1, rc);
 
@@ -209,7 +209,7 @@ void test_utf8_overlong_rejected(void) {
 	write(fd, "\xC0\xAF\n", 3);
 	close(fd);
 
-	struct editorBuffer *buf = make_test_buffer(NULL);
+	struct buffer *buf = make_test_buffer(NULL);
 	int rc = editorOpen(buf, tmpname);
 	TEST_ASSERT_EQUAL_INT(-1, rc);
 
@@ -225,7 +225,7 @@ void test_utf8_null_byte_rejected(void) {
 	write(fd, data, 6);
 	close(fd);
 
-	struct editorBuffer *buf = make_test_buffer(NULL);
+	struct buffer *buf = make_test_buffer(NULL);
 	int rc = editorOpen(buf, tmpname);
 	TEST_ASSERT_EQUAL_INT(-1, rc);
 
@@ -240,7 +240,7 @@ void test_utf8_truncated_multibyte(void) {
 	write(fd, "A\xE2\x82\n", 4);
 	close(fd);
 
-	struct editorBuffer *buf = make_test_buffer(NULL);
+	struct buffer *buf = make_test_buffer(NULL);
 	int rc = editorOpen(buf, tmpname);
 	TEST_ASSERT_EQUAL_INT(-1, rc);
 

@@ -7,7 +7,7 @@
 /* ---- Row operations ---- */
 
 void test_new_destroy_buffer(void) {
-	struct editorBuffer *buf = newBuffer();
+	struct buffer *buf = newBuffer();
 	TEST_ASSERT_NOT_NULL(buf);
 	TEST_ASSERT_EQUAL_INT(0, buf->numrows);
 	TEST_ASSERT_NULL(buf->filename);
@@ -15,9 +15,9 @@ void test_new_destroy_buffer(void) {
 }
 
 void test_insert_row_beginning(void) {
-	struct editorBuffer *buf = make_test_buffer(NULL);
-	editorInsertRow(buf, 0, "second", 6);
-	editorInsertRow(buf, 0, "first", 5);
+	struct buffer *buf = make_test_buffer(NULL);
+	insertRow(buf, 0, "second", 6);
+	insertRow(buf, 0, "first", 5);
 	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("first", (char *)buf->row[0].chars);
 	TEST_ASSERT_EQUAL_STRING("second", (char *)buf->row[1].chars);
@@ -25,60 +25,60 @@ void test_insert_row_beginning(void) {
 }
 
 void test_insert_row_middle(void) {
-	struct editorBuffer *buf = make_test_buffer(NULL);
-	editorInsertRow(buf, 0, "first", 5);
-	editorInsertRow(buf, 1, "third", 5);
-	editorInsertRow(buf, 1, "second", 6);
+	struct buffer *buf = make_test_buffer(NULL);
+	insertRow(buf, 0, "first", 5);
+	insertRow(buf, 1, "third", 5);
+	insertRow(buf, 1, "second", 6);
 	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("second", (char *)buf->row[1].chars);
 	destroyBuffer(buf);
 }
 
 void test_insert_row_end(void) {
-	struct editorBuffer *buf = make_test_buffer(NULL);
-	editorInsertRow(buf, 0, "first", 5);
-	editorInsertRow(buf, 1, "second", 6);
-	editorInsertRow(buf, 2, "third", 5);
+	struct buffer *buf = make_test_buffer(NULL);
+	insertRow(buf, 0, "first", 5);
+	insertRow(buf, 1, "second", 6);
+	insertRow(buf, 2, "third", 5);
 	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("third", (char *)buf->row[2].chars);
 	destroyBuffer(buf);
 }
 
 void test_del_row_beginning(void) {
-	struct editorBuffer *buf = make_test_buffer(NULL);
-	editorInsertRow(buf, 0, "first", 5);
-	editorInsertRow(buf, 1, "second", 6);
-	editorInsertRow(buf, 2, "third", 5);
-	editorDelRow(buf, 0);
+	struct buffer *buf = make_test_buffer(NULL);
+	insertRow(buf, 0, "first", 5);
+	insertRow(buf, 1, "second", 6);
+	insertRow(buf, 2, "third", 5);
+	delRow(buf, 0);
 	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("second", (char *)buf->row[0].chars);
 	destroyBuffer(buf);
 }
 
 void test_del_row_middle(void) {
-	struct editorBuffer *buf = make_test_buffer(NULL);
-	editorInsertRow(buf, 0, "first", 5);
-	editorInsertRow(buf, 1, "second", 6);
-	editorInsertRow(buf, 2, "third", 5);
-	editorDelRow(buf, 1);
+	struct buffer *buf = make_test_buffer(NULL);
+	insertRow(buf, 0, "first", 5);
+	insertRow(buf, 1, "second", 6);
+	insertRow(buf, 2, "third", 5);
+	delRow(buf, 1);
 	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("third", (char *)buf->row[1].chars);
 	destroyBuffer(buf);
 }
 
 void test_del_row_end(void) {
-	struct editorBuffer *buf = make_test_buffer(NULL);
-	editorInsertRow(buf, 0, "first", 5);
-	editorInsertRow(buf, 1, "second", 6);
-	editorInsertRow(buf, 2, "third", 5);
-	editorDelRow(buf, 2);
+	struct buffer *buf = make_test_buffer(NULL);
+	insertRow(buf, 0, "first", 5);
+	insertRow(buf, 1, "second", 6);
+	insertRow(buf, 2, "third", 5);
+	delRow(buf, 2);
 	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("second", (char *)buf->row[1].chars);
 	destroyBuffer(buf);
 }
 
 void test_row_insert_char(void) {
-	struct editorBuffer *buf = make_test_buffer("AC");
+	struct buffer *buf = make_test_buffer("AC");
 	rowInsertChar(buf, &buf->row[0], 1, 'B');
 	TEST_ASSERT_EQUAL_INT(3, buf->row[0].size);
 	TEST_ASSERT_EQUAL_STRING("ABC", (char *)buf->row[0].chars);
@@ -86,7 +86,7 @@ void test_row_insert_char(void) {
 }
 
 void test_row_del_char(void) {
-	struct editorBuffer *buf = make_test_buffer("ABC");
+	struct buffer *buf = make_test_buffer("ABC");
 	rowDelChar(buf, &buf->row[0], 1);
 	TEST_ASSERT_EQUAL_INT(2, buf->row[0].size);
 	TEST_ASSERT_EQUAL_STRING("AC", (char *)buf->row[0].chars);
@@ -94,7 +94,7 @@ void test_row_del_char(void) {
 }
 
 void test_row_append_string(void) {
-	struct editorBuffer *buf = make_test_buffer("Hello");
+	struct buffer *buf = make_test_buffer("Hello");
 	rowAppendString(buf, &buf->row[0], " World", 6);
 	TEST_ASSERT_EQUAL_INT(11, buf->row[0].size);
 	TEST_ASSERT_EQUAL_STRING("Hello World", (char *)buf->row[0].chars);
@@ -102,9 +102,9 @@ void test_row_append_string(void) {
 }
 
 void test_row_capacity_growth(void) {
-	struct editorBuffer *buf = make_test_buffer(NULL);
+	struct buffer *buf = make_test_buffer(NULL);
 	for (int i = 0; i < 20; i++)
-		editorInsertRow(buf, i, "row", 3);
+		insertRow(buf, i, "row", 3);
 	TEST_ASSERT_EQUAL_INT(20, buf->numrows);
 	TEST_ASSERT(buf->rowcap >= 20);
 	destroyBuffer(buf);
@@ -113,7 +113,7 @@ void test_row_capacity_growth(void) {
 /* ---- Coordinate mapping ---- */
 
 void test_chars_to_display_ascii(void) {
-	struct editorBuffer *buf = make_test_buffer("Hello");
+	struct buffer *buf = make_test_buffer("Hello");
 	TEST_ASSERT_EQUAL_INT(0, charsToDisplayColumn(&buf->row[0], 0));
 	TEST_ASSERT_EQUAL_INT(3, charsToDisplayColumn(&buf->row[0], 3));
 	TEST_ASSERT_EQUAL_INT(5, charsToDisplayColumn(&buf->row[0], 5));
@@ -121,7 +121,7 @@ void test_chars_to_display_ascii(void) {
 }
 
 void test_chars_to_display_tab(void) {
-	struct editorBuffer *buf = make_test_buffer("\tA");
+	struct buffer *buf = make_test_buffer("\tA");
 	TEST_ASSERT_EQUAL_INT(0, charsToDisplayColumn(&buf->row[0], 0));
 	TEST_ASSERT_EQUAL_INT(8, charsToDisplayColumn(&buf->row[0], 1));
 	TEST_ASSERT_EQUAL_INT(9, charsToDisplayColumn(&buf->row[0], 2));
@@ -129,7 +129,7 @@ void test_chars_to_display_tab(void) {
 }
 
 void test_chars_to_display_control(void) {
-	struct editorBuffer *buf = make_test_buffer("\x01" "A");
+	struct buffer *buf = make_test_buffer("\x01" "A");
 	TEST_ASSERT_EQUAL_INT(2, charsToDisplayColumn(&buf->row[0], 1));
 	TEST_ASSERT_EQUAL_INT(3, charsToDisplayColumn(&buf->row[0], 2));
 	destroyBuffer(buf);
@@ -137,7 +137,7 @@ void test_chars_to_display_control(void) {
 
 void test_chars_to_display_multibyte(void) {
 	/* "A¢B" — ¢ is 2 bytes, 1 column */
-	struct editorBuffer *buf = make_test_buffer("A\xC2\xA2" "B");
+	struct buffer *buf = make_test_buffer("A\xC2\xA2" "B");
 	TEST_ASSERT_EQUAL_INT(1, charsToDisplayColumn(&buf->row[0], 1));
 	TEST_ASSERT_EQUAL_INT(2, charsToDisplayColumn(&buf->row[0], 3));
 	TEST_ASSERT_EQUAL_INT(3, charsToDisplayColumn(&buf->row[0], 4));
@@ -145,7 +145,7 @@ void test_chars_to_display_multibyte(void) {
 }
 
 void test_calculate_line_width(void) {
-	struct editorBuffer *buf = make_test_buffer("ABCDE");
+	struct buffer *buf = make_test_buffer("ABCDE");
 	TEST_ASSERT_EQUAL_INT(5, calculateLineWidth(&buf->row[0]));
 	destroyBuffer(buf);
 
@@ -158,7 +158,7 @@ void test_calculate_line_width(void) {
 
 void test_build_screen_cache_no_wrap(void) {
 	const char *lines[] = { "line 0", "line 1", "line 2" };
-	struct editorBuffer *buf = make_test_buffer_lines(lines, 3);
+	struct buffer *buf = make_test_buffer_lines(lines, 3);
 	buf->word_wrap = 0;
 	buildScreenCache(buf, 80);
 	TEST_ASSERT_EQUAL_INT(1, buf->screen_line_cache_valid);
@@ -169,26 +169,26 @@ void test_build_screen_cache_no_wrap(void) {
 }
 
 void test_count_screen_lines_short(void) {
-	struct editorBuffer *buf = make_test_buffer("short");
+	struct buffer *buf = make_test_buffer("short");
 	TEST_ASSERT_EQUAL_INT(1, countScreenLines(&buf->row[0], 80));
 	destroyBuffer(buf);
 }
 
 void test_count_screen_lines_exact(void) {
-	struct editorBuffer *buf = make_test_buffer("1234567890");
+	struct buffer *buf = make_test_buffer("1234567890");
 	TEST_ASSERT_EQUAL_INT(1, countScreenLines(&buf->row[0], 10));
 	destroyBuffer(buf);
 }
 
 void test_count_screen_lines_long(void) {
-	struct editorBuffer *buf = make_test_buffer("abcdefghijklmnopqrstuvwxy");
+	struct buffer *buf = make_test_buffer("abcdefghijklmnopqrstuvwxy");
 	int lines = countScreenLines(&buf->row[0], 10);
 	TEST_ASSERT(lines >= 2);
 	destroyBuffer(buf);
 }
 
 void test_invalidate_screen_cache(void) {
-	struct editorBuffer *buf = make_test_buffer("hello");
+	struct buffer *buf = make_test_buffer("hello");
 	buf->word_wrap = 0;
 	buildScreenCache(buf, 80);
 	TEST_ASSERT_EQUAL_INT(1, buf->screen_line_cache_valid);
@@ -198,7 +198,7 @@ void test_invalidate_screen_cache(void) {
 }
 
 void test_word_wrap_break(void) {
-	struct editorBuffer *buf = make_test_buffer("hello world");
+	struct buffer *buf = make_test_buffer("hello world");
 	int break_col, break_byte;
 	int more = wordWrapBreak(&buf->row[0], 7, 0, 0,
 				 &break_col, &break_byte);
@@ -209,7 +209,7 @@ void test_word_wrap_break(void) {
 }
 
 void test_cursor_screen_line(void) {
-	struct editorBuffer *buf = make_test_buffer("hello world foo");
+	struct buffer *buf = make_test_buffer("hello world foo");
 	int out_line, out_col;
 	cursorScreenLine(&buf->row[0], 0, 10, &out_line, &out_col);
 	TEST_ASSERT_EQUAL_INT(0, out_line);

@@ -4,9 +4,9 @@
 #include <stdio.h>
 #include <time.h>
 
-extern struct editorConfig E;
+extern struct config E;
 
-void editorSetStatusMessage(const char *fmt, ...) {
+void setStatusMessage(const char *fmt, ...) {
 	va_list ap;
 	va_start(ap, fmt);
 	vsnprintf(E.statusmsg, sizeof(E.statusmsg), fmt, ap);

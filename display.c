@@ -1,28 +1,28 @@
 #include "display.h"
 #include "abuf.h"
+#include "buffer.h"
 #include "emil.h"
 #include "fileio.h"
 #include "message.h"
+#include "region.h"
 #include "terminal.h"
 #include "unicode.h"
 #include "unused.h"
-#include "region.h"
-#include "buffer.h"
 #include "util.h"
 #include "window.h"
 #include <errno.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-#include <limits.h>
 #ifdef __sun
 #include <termios.h>
 #endif
 
-extern struct editorConfig E;
+extern struct config E;
 
 int minibuffer_height = 1;
 const int statusbar_height = 1;
@@ -39,7 +39,7 @@ struct rowHighlight {
 	int match_end;	  /* search match end column, or -1 */
 };
 
-static void computeRowHighlightBounds(struct editorBuffer *buf, int filerow,
+static void computeRowHighlightBounds(struct buffer *buf, int filerow,
 				      struct rowHighlight *hl) {
 	hl->region_start = -1;
 	hl->region_end = -1;
@@ -147,7 +147,7 @@ static void updateHighlight(struct abuf *ab, int *current, int desired) {
  *
  * This is a pure viewport operation — it does NOT touch the cursor.
  * Callers are responsible for adjusting the cursor afterwards. */
-void scrollViewport(struct editorWindow *win, struct editorBuffer *buf, int n) {
+void scrollViewport(struct window *win, struct buffer *buf, int n) {
 	if (n == 0)
 		return;
 
@@ -217,7 +217,7 @@ void scrollViewport(struct editorWindow *win, struct editorBuffer *buf, int n) {
 }
 
 /* Update buf->end: is the last buffer line visible in the window? */
-static void updateEndFlag(struct editorWindow *win, struct editorBuffer *buf) {
+static void updateEndFlag(struct window *win, struct buffer *buf) {
 	if (buf->numrows == 0) {
 		buf->end = 1;
 		return;
@@ -237,8 +237,7 @@ static void updateEndFlag(struct editorWindow *win, struct editorBuffer *buf) {
 
 /* Return the absolute screen line for the top of the current viewport,
  * accounting for skip_sublines. */
-static int viewportTopScreenLine(struct editorWindow *win,
-				 struct editorBuffer *buf) {
+static int viewportTopScreenLine(struct window *win, struct buffer *buf) {
 	return getScreenLineForRow(buf, win->rowoff, E.screencols) +
 	       win->skip_sublines;
 }
@@ -246,7 +245,7 @@ static int viewportTopScreenLine(struct editorWindow *win,
 /* Ensure the cursor is within the visible viewport.  If it has fallen
  * outside, drag it to the nearest visible row.  Pure cursor fixup —
  * does not touch the viewport. */
-void clampCursorToViewport(struct editorWindow *win, struct editorBuffer *buf) {
+void clampCursorToViewport(struct window *win, struct buffer *buf) {
 	if (!buf->word_wrap) {
 		if (buf->cy < win->rowoff)
 			buf->cy = win->rowoff;
@@ -369,8 +368,8 @@ static void renderLineWithHighlighting(erow *row, struct abuf *ab,
 }
 
 /* Display functions */
-void setScxScy(struct editorWindow *win) {
-	struct editorBuffer *buf = win->buf;
+void setScxScy(struct window *win) {
+	struct buffer *buf = win->buf;
 	erow *row = (buf->cy >= buf->numrows) ? NULL : &buf->row[buf->cy];
 
 	win->scy = 0;
@@ -434,8 +433,8 @@ void setScxScy(struct editorWindow *win) {
 }
 
 void scroll(void) {
-	struct editorWindow *win = E.windows[windowFocusedIdx()];
-	struct editorBuffer *buf = win->buf;
+	struct window *win = E.windows[windowFocusedIdx()];
+	struct buffer *buf = win->buf;
 
 	if (buf->cy + 1 > buf->numrows) {
 		buf->cy = buf->numrows;
@@ -537,9 +536,9 @@ void scroll(void) {
 	setScxScy(win);
 }
 
-void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
+void drawRows(struct window *win, struct abuf *ab, int screenrows,
 	      int screencols) {
-	struct editorBuffer *buf = win->buf;
+	struct buffer *buf = win->buf;
 	int y;
 	int filerow = win->rowoff;
 	int skip = win->skip_sublines; /* sub-lines to skip on first row */
@@ -655,12 +654,12 @@ void drawRows(struct editorWindow *win, struct abuf *ab, int screenrows,
 	}
 }
 
-void drawStatusBar(struct editorWindow *win, struct abuf *ab, int line) {
+void drawStatusBar(struct window *win, struct abuf *ab, int line) {
 	char buf[32];
 	snprintf(buf, sizeof(buf), CSI "%d;%dH", line, 1);
 	abAppend(ab, buf, strlen(buf));
 
-	struct editorBuffer *bufr = win->buf;
+	struct buffer *bufr = win->buf;
 	abAppend(ab, "\x1b[7m", 4);
 
 	int total = E.screencols;
@@ -879,7 +878,7 @@ void drawMinibuffer(struct abuf *ab) {
 
 void refreshScreen(void) {
 	/* Check for external modification of the focused buffer's file */
-	editorCheckFileModified(E.buf);
+	checkFileModified();
 
 	struct abuf ab = ABUF_INIT;
 	abAppend(&ab, "\x1b[?7l", 5);  // Disable auto-wrap
@@ -888,8 +887,8 @@ void refreshScreen(void) {
 
 	/* Mandatory bounds clamp for all windows (§7.2) */
 	for (int i = 0; i < E.nwindows; i++) {
-		struct editorWindow *w = E.windows[i];
-		struct editorBuffer *b = w->buf;
+		struct window *w = E.windows[i];
+		struct buffer *b = w->buf;
 		if (b->numrows == 0) {
 			w->rowoff = 0;
 			w->skip_sublines = 0;
@@ -901,7 +900,7 @@ void refreshScreen(void) {
 
 	/* Build screen line cache for each visible buffer (§4.2) */
 	for (int i = 0; i < E.nwindows; i++) {
-		struct editorBuffer *b = E.windows[i]->buf;
+		struct buffer *b = E.windows[i]->buf;
 		if (!b->screen_line_cache_valid) {
 			buildScreenCache(b, E.screencols);
 		}
@@ -927,7 +926,7 @@ void refreshScreen(void) {
 		int remaining_height = total_height % E.nwindows;
 
 		for (int i = 0; i < E.nwindows; i++) {
-			struct editorWindow *win = E.windows[i];
+			struct window *win = E.windows[i];
 			win->height = window_height;
 			if (i == E.nwindows - 1)
 				win->height += remaining_height;
@@ -935,7 +934,7 @@ void refreshScreen(void) {
 	}
 
 	for (int i = 0; i < E.nwindows; i++) {
-		struct editorWindow *win = E.windows[i];
+		struct window *win = E.windows[i];
 
 		if (win->focused)
 			scroll();
@@ -951,7 +950,7 @@ void refreshScreen(void) {
 	abAppend(&ab, "\x1b[J", 3);
 
 	// Position the cursor for the focused window
-	struct editorWindow *focusedWin = E.windows[focusedIdx];
+	struct window *focusedWin = E.windows[focusedIdx];
 	char buf[32];
 
 	int cursor_y = focusedWin->scy + 1; // 1-based index
@@ -961,7 +960,7 @@ void refreshScreen(void) {
 
 	// Ensure cursor doesn't go beyond the window's bottom
 	if (cursor_y > cumulative_height) {
-		struct editorBuffer *buf = focusedWin->buf;
+		struct buffer *buf = focusedWin->buf;
 		if (buf->cy >= buf->numrows) {
 			cursor_y = cumulative_height;
 		} else {
@@ -1007,11 +1006,11 @@ void cursorBottomLine(int curs) {
 	IGNORE_RETURN(write(STDOUT_FILENO, cbuf, strlen(cbuf)));
 }
 
-void editorResizeScreen(int UNUSED(sig)) {
+void resizeScreen(int UNUSED(sig)) {
 	if (getWindowSize(&E.screenrows, &E.screencols) == -1)
 		die("getWindowSize");
 	/* Screen width changed — all cached widths are stale for word-wrap */
-	for (struct editorBuffer *b = E.headbuf; b != NULL; b = b->next) {
+	for (struct buffer *b = E.headbuf; b != NULL; b = b->next) {
 		for (int i = 0; i < b->numrows; i++) {
 			b->row[i].cached_width = -1;
 		}
@@ -1025,7 +1024,7 @@ void editorResizeScreen(int UNUSED(sig)) {
 	refreshScreen();
 }
 
-void editorWhatCursor(void) {
+void whatCursor(void) {
 	int rx = 0;
 	int line_len = 0;
 	if (E.buf->cy < E.buf->numrows) {
@@ -1051,13 +1050,13 @@ void editorWhatCursor(void) {
 	}
 
 	int screen_y = E.buf->cy - E.windows[0]->rowoff + 1;
-	editorSetStatusMessage(
+	setStatusMessage(
 		"Line,col (buffer:%d,%d screen:%d,%d) Char='%s' LineLen=%d Window=%dx%d",
 		E.buf->cy + 1, E.buf->cx, screen_y, rx, ch, line_len,
 		E.screencols, E.screenrows);
 }
 
-void recenter(struct editorWindow *win) {
+void recenter(struct window *win) {
 	win->rowoff = win->buf->cy - (win->height / 2);
 	if (win->rowoff < 0) {
 		win->rowoff = 0;
@@ -1065,25 +1064,13 @@ void recenter(struct editorWindow *win) {
 	win->skip_sublines = 0;
 }
 
-void editorToggleVisualLineMode(void) {
+void toggleVisualLineMode(void) {
 	E.buf->word_wrap = !E.buf->word_wrap;
 	invalidateScreenCache(E.buf);
-	editorSetStatusMessage(E.buf->word_wrap ? "Visual line mode enabled" :
-						  "Visual line mode disabled");
+	setStatusMessage(E.buf->word_wrap ? "Visual line mode enabled" :
+					    "Visual line mode disabled");
 }
 
 void editorVersion(void) {
-	editorSetStatusMessage("emil %s" EMIL_VERSION);
-}
-
-/* Wrapper for command table */
-void editorVersionWrapper(struct editorConfig *UNUSED(ed),
-			  struct editorBuffer *UNUSED(buf)) {
-	editorVersion();
-}
-
-/* Wrapper for command table */
-void editorToggleVisualLineModeWrapper(struct editorConfig *UNUSED(ed),
-				       struct editorBuffer *UNUSED(buf)) {
-	editorToggleVisualLineMode();
+	setStatusMessage("emil %s" EMIL_VERSION);
 }

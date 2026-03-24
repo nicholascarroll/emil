@@ -1,17 +1,18 @@
+#include "transform.h"
+#include "buffer.h"
+#include "display.h"
+#include "emil.h"
+#include "message.h"
+#include "region.h"
+#include "undo.h"
+#include "unicode.h"
+#include "unused.h"
+#include "util.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include "transform.h"
-#include "unicode.h"
-#include "emil.h"
-#include "message.h"
-#include "buffer.h"
-#include "undo.h"
-#include "display.h"
-#include "unused.h"
-#include "region.h"
-#include "util.h"
 
+extern struct config E;
 #define MKOUTPUT(in, l, o)          \
 	int l = strlen((char *)in); \
 	uint8_t *o = xmalloc(l + 1)
@@ -214,6 +215,6 @@ uint8_t *transformerTransposeWords(uint8_t *input) {
 	return output;
 }
 
-void editorCapitalizeRegion(struct editorConfig *ed, struct editorBuffer *buf) {
-	editorTransformRegion(ed, buf, transformerCapitalCase);
+void capitalizeRegion(void) {
+	transformRegion(transformerCapitalCase);
 }

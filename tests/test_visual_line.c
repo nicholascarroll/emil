@@ -110,21 +110,21 @@ void test_subline_bounds_nonexistent(void) {
 	TEST_ASSERT_FALSE(ok);
 }
 
-/* ---- editorMoveVisualRow (via editorMoveCursor) integration ---- */
+/* ---- moveVisualRow (via moveCursor) integration ---- */
 
 void test_visual_move_down_within_row(void) {
 	/* 40 'a' chars on 20-col screen. Cursor at byte 5, sub-line 0. */
 	char buf[41];
 	memset(buf, 'a', 40);
 	buf[40] = '\0';
-	struct editorBuffer *b = make_test_buffer(buf);
+	struct buffer *b = make_test_buffer(buf);
 	E.screencols = 20;
 	E.windows[0]->height = 24;
 	b->word_wrap = 1;
 	b->cx = 5;
 	b->cy = 0;
 
-	editorMoveCursor(KEY_ARROW_DOWN, 1);
+	moveCursor(KEY_ARROW_DOWN, 1);
 	/* Should move to sub-line 1, col 5 => byte 25 */
 	TEST_ASSERT_EQUAL_INT(0, b->cy); /* same logical row */
 	TEST_ASSERT_EQUAL_INT(25, b->cx);
@@ -135,14 +135,14 @@ void test_visual_move_up_within_row(void) {
 	char buf[41];
 	memset(buf, 'a', 40);
 	buf[40] = '\0';
-	struct editorBuffer *b = make_test_buffer(buf);
+	struct buffer *b = make_test_buffer(buf);
 	E.screencols = 20;
 	E.windows[0]->height = 24;
 	b->word_wrap = 1;
 	b->cx = 25; /* sub-line 1, col 5 */
 	b->cy = 0;
 
-	editorMoveCursor(KEY_ARROW_UP, 1);
+	moveCursor(KEY_ARROW_UP, 1);
 	/* Should move to sub-line 0, col 5 => byte 5 */
 	TEST_ASSERT_EQUAL_INT(0, b->cy);
 	TEST_ASSERT_EQUAL_INT(5, b->cx);
@@ -152,14 +152,14 @@ void test_visual_move_up_within_row(void) {
 void test_visual_move_down_crosses_row(void) {
 	/* Two rows: row 0 is short, row 1 has content */
 	const char *lines[] = { "Hello", "World" };
-	struct editorBuffer *b = make_test_buffer_lines(lines, 2);
+	struct buffer *b = make_test_buffer_lines(lines, 2);
 	E.screencols = 80;
 	E.windows[0]->height = 24;
 	b->word_wrap = 1;
 	b->cx = 3;
 	b->cy = 0;
 
-	editorMoveCursor(KEY_ARROW_DOWN, 1);
+	moveCursor(KEY_ARROW_DOWN, 1);
 	TEST_ASSERT_EQUAL_INT(1, b->cy);
 	TEST_ASSERT_EQUAL_INT(3, b->cx);
 	destroyBuffer(b);
@@ -171,14 +171,14 @@ void test_visual_move_up_crosses_row(void) {
 	memset(buf, 'a', 40);
 	buf[40] = '\0';
 	const char *lines[] = { buf, "Hello" };
-	struct editorBuffer *b = make_test_buffer_lines(lines, 2);
+	struct buffer *b = make_test_buffer_lines(lines, 2);
 	E.screencols = 20;
 	E.windows[0]->height = 24;
 	b->word_wrap = 1;
 	b->cy = 1;
 	b->cx = 3; /* col 3 on row 1 */
 
-	editorMoveCursor(KEY_ARROW_UP, 1);
+	moveCursor(KEY_ARROW_UP, 1);
 	/* Should go to row 0, last sub-line (1), col 3 => byte 23 */
 	TEST_ASSERT_EQUAL_INT(0, b->cy);
 	TEST_ASSERT_EQUAL_INT(23, b->cx);
@@ -186,14 +186,14 @@ void test_visual_move_up_crosses_row(void) {
 }
 
 void test_visual_move_down_at_buffer_end(void) {
-	struct editorBuffer *b = make_test_buffer("Hello");
+	struct buffer *b = make_test_buffer("Hello");
 	E.screencols = 80;
 	E.windows[0]->height = 24;
 	b->word_wrap = 1;
 	b->cx = 3;
 	b->cy = 0;
 
-	editorMoveCursor(KEY_ARROW_DOWN, 1);
+	moveCursor(KEY_ARROW_DOWN, 1);
 	/* Should move to virtual line past EOF */
 	TEST_ASSERT_EQUAL_INT(1, b->cy);
 	TEST_ASSERT_EQUAL_INT(0, b->cx);
@@ -201,14 +201,14 @@ void test_visual_move_down_at_buffer_end(void) {
 }
 
 void test_visual_move_up_at_buffer_start(void) {
-	struct editorBuffer *b = make_test_buffer("Hello");
+	struct buffer *b = make_test_buffer("Hello");
 	E.screencols = 80;
 	E.windows[0]->height = 24;
 	b->word_wrap = 1;
 	b->cx = 3;
 	b->cy = 0;
 
-	editorMoveCursor(KEY_ARROW_UP, 1);
+	moveCursor(KEY_ARROW_UP, 1);
 	/* Should stay put */
 	TEST_ASSERT_EQUAL_INT(0, b->cy);
 	TEST_ASSERT_EQUAL_INT(3, b->cx);
@@ -221,14 +221,14 @@ void test_beginning_of_visual_line(void) {
 	char buf[41];
 	memset(buf, 'a', 40);
 	buf[40] = '\0';
-	struct editorBuffer *b = make_test_buffer(buf);
+	struct buffer *b = make_test_buffer(buf);
 	E.screencols = 20;
 	E.windows[0]->height = 24;
 	b->word_wrap = 1;
 	b->cx = 25; /* sub-line 1, col 5 */
 	b->cy = 0;
 
-	editorBeginningOfLine(0);
+	beginningOfLine();
 	/* Should go to start of sub-line 1 = byte 20 */
 	TEST_ASSERT_EQUAL_INT(0, b->cy);
 	TEST_ASSERT_EQUAL_INT(20, b->cx);
@@ -239,14 +239,14 @@ void test_beginning_of_visual_line_first_subline(void) {
 	char buf[41];
 	memset(buf, 'a', 40);
 	buf[40] = '\0';
-	struct editorBuffer *b = make_test_buffer(buf);
+	struct buffer *b = make_test_buffer(buf);
 	E.screencols = 20;
 	E.windows[0]->height = 24;
 	b->word_wrap = 1;
 	b->cx = 5; /* sub-line 0 */
 	b->cy = 0;
 
-	editorBeginningOfLine(0);
+	beginningOfLine();
 	TEST_ASSERT_EQUAL_INT(0, b->cx); /* byte 0 */
 	destroyBuffer(b);
 }
@@ -255,14 +255,14 @@ void test_end_of_visual_line(void) {
 	char buf[41];
 	memset(buf, 'a', 40);
 	buf[40] = '\0';
-	struct editorBuffer *b = make_test_buffer(buf);
+	struct buffer *b = make_test_buffer(buf);
 	E.screencols = 20;
 	E.windows[0]->height = 24;
 	b->word_wrap = 1;
 	b->cx = 5; /* sub-line 0, col 5 */
 	b->cy = 0;
 
-	editorEndOfLine(0);
+	endOfLine(0);
 	/* Should go to last char of sub-line 0 = byte 19 (last 'a'
 	 * before the sub-line break at byte 20) */
 	TEST_ASSERT_EQUAL_INT(0, b->cy);
@@ -274,14 +274,14 @@ void test_end_of_visual_line_last_subline(void) {
 	char buf[41];
 	memset(buf, 'a', 40);
 	buf[40] = '\0';
-	struct editorBuffer *b = make_test_buffer(buf);
+	struct buffer *b = make_test_buffer(buf);
 	E.screencols = 20;
 	E.windows[0]->height = 24;
 	b->word_wrap = 1;
 	b->cx = 25; /* sub-line 1 */
 	b->cy = 0;
 
-	editorEndOfLine(0);
+	endOfLine(0);
 	/* Should go to end of sub-line 1 = byte 40 = row->size */
 	TEST_ASSERT_EQUAL_INT(0, b->cy);
 	TEST_ASSERT_EQUAL_INT(40, b->cx);
@@ -291,23 +291,23 @@ void test_end_of_visual_line_last_subline(void) {
 /* ---- C-a / C-e without wrap (regression) ---- */
 
 void test_beginning_of_line_no_wrap(void) {
-	struct editorBuffer *b = make_test_buffer("Hello, world!");
+	struct buffer *b = make_test_buffer("Hello, world!");
 	E.screencols = 80;
 	b->word_wrap = 0;
 	b->cx = 7;
 
-	editorBeginningOfLine(0);
+	beginningOfLine();
 	TEST_ASSERT_EQUAL_INT(0, b->cx);
 	destroyBuffer(b);
 }
 
 void test_end_of_line_no_wrap(void) {
-	struct editorBuffer *b = make_test_buffer("Hello, world!");
+	struct buffer *b = make_test_buffer("Hello, world!");
 	E.screencols = 80;
 	b->word_wrap = 0;
 	b->cx = 0;
 
-	editorEndOfLine(0);
+	endOfLine(0);
 	TEST_ASSERT_EQUAL_INT(13, b->cx);
 	destroyBuffer(b);
 }
@@ -318,14 +318,14 @@ void test_kill_visual_line_mid_subline(void) {
 	char buf[41];
 	memset(buf, 'a', 40);
 	buf[40] = '\0';
-	struct editorBuffer *b = make_test_buffer(buf);
+	struct buffer *b = make_test_buffer(buf);
 	E.screencols = 20;
 	E.windows[0]->height = 24;
 	b->word_wrap = 1;
 	b->cx = 5; /* sub-line 0, col 5 */
 	b->cy = 0;
 
-	editorKillLine(0);
+	killLine(0);
 	/* Should kill bytes 5..19 (15 chars from sub-line 0)
 	 * Remaining: 5 'a' + 20 'a' from sub-line 1 = 25 'a' */
 	TEST_ASSERT_EQUAL_INT(25, b->row[0].size);
@@ -334,12 +334,12 @@ void test_kill_visual_line_mid_subline(void) {
 }
 
 void test_kill_line_no_wrap(void) {
-	struct editorBuffer *b = make_test_buffer("Hello, world!");
+	struct buffer *b = make_test_buffer("Hello, world!");
 	E.screencols = 80;
 	b->word_wrap = 0;
 	b->cx = 5;
 
-	editorKillLine(0);
+	killLine(0);
 	/* Should kill from byte 5 to end of line */
 	TEST_ASSERT_EQUAL_STRING("Hello", row_str(b, 0));
 	destroyBuffer(b);

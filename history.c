@@ -4,20 +4,20 @@
 #include "history.h"
 #include "util.h"
 
-extern struct editorConfig E;
+extern struct config E;
 
-void initHistory(struct editorHistory *hist) {
+void initHistory(struct history *hist) {
 	hist->head = NULL;
 	hist->tail = NULL;
 	hist->count = 0;
 }
 
-void addHistory(struct editorHistory *hist, const char *str) {
+void addHistory(struct history *hist, const char *str) {
 	addHistoryWithRect(hist, str, 0, 0, 0);
 }
 
-void addHistoryWithRect(struct editorHistory *hist, const char *str,
-			int is_rectangle, int rect_width, int rect_height) {
+void addHistoryWithRect(struct history *hist, const char *str, int is_rectangle,
+			int rect_width, int rect_height) {
 	if (!str || strlen(str) == 0) {
 		return;
 	}
@@ -61,7 +61,7 @@ void addHistoryWithRect(struct editorHistory *hist, const char *str,
 	}
 }
 
-struct historyEntry *getHistoryAt(struct editorHistory *hist, int index) {
+struct historyEntry *getHistoryAt(struct history *hist, int index) {
 	if (index < 0 || index >= hist->count) {
 		return NULL;
 	}
@@ -74,7 +74,7 @@ struct historyEntry *getHistoryAt(struct editorHistory *hist, int index) {
 	return entry;
 }
 
-void freeHistory(struct editorHistory *hist) {
+void freeHistory(struct history *hist) {
 	struct historyEntry *entry = hist->head;
 	while (entry) {
 		struct historyEntry *next = entry->next;
@@ -85,6 +85,6 @@ void freeHistory(struct editorHistory *hist) {
 	initHistory(hist);
 }
 
-struct historyEntry *getLastHistory(struct editorHistory *hist) {
+struct historyEntry *getLastHistory(struct history *hist) {
 	return hist->tail;
 }

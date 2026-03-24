@@ -1,5 +1,5 @@
-#include "util.h"
 #include "message.h"
+#include "util.h"
 
 #ifndef EMIL_DISABLE_SHELL
 
@@ -17,19 +17,19 @@
 #define _POSIX_C_SOURCE 200112L
 #endif
 
-#include "emil.h"
-#include "region.h"
-#include "pipe.h"
-#include "subprocess.h"
-#include "display.h"
-#include "prompt.h"
 #include "buffer.h"
+#include "display.h"
+#include "emil.h"
+#include "fileio.h"
+#include "pipe.h"
+#include "prompt.h"
+#include "region.h"
+#include "subprocess.h"
 #include "unicode.h"
 #include "util.h"
-#include "fileio.h"
 #include <errno.h>
 
-extern struct editorConfig E;
+extern struct config E;
 
 static uint8_t *cmd;
 static char *buf;
@@ -43,7 +43,7 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 				       subprocess_option_inherit_environment,
 				       &subprocess);
 	if (result) {
-		editorSetStatusMessage(
+		setStatusMessage(
 			"Shell command failed: unable to create subprocess");
 		return NULL;
 	}
@@ -60,14 +60,14 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 	/* Join process */
 	int sub_ret;
 	if (subprocess_join(&subprocess, &sub_ret) != 0) {
-		editorSetStatusMessage(
+		setStatusMessage(
 			"Shell command failed: error waiting for subprocess");
 		return NULL;
 	}
 
 	/* Check if subprocess exited with error */
 	if (sub_ret != 0) {
-		editorSetStatusMessage(msg_shell_exit_status, sub_ret);
+		setStatusMessage(msg_shell_exit_status, sub_ret);
 		/* Continue anyway to show any output/errors */
 	}
 
@@ -87,7 +87,7 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 
 	/* Only show byte count if subprocess succeeded */
 	if (sub_ret == 0) {
-		editorSetStatusMessage(msg_shell_read_bytes, i);
+		setStatusMessage(msg_shell_read_bytes, i);
 	}
 
 	/* Cleanup & return */
@@ -95,38 +95,35 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 	return (uint8_t *)buf;
 }
 
-uint8_t *editorPipe(struct editorConfig *ed, struct editorBuffer *bf,
-		    int useRegion) {
+uint8_t *editorPipe(int useRegion) {
 	buf = xcalloc(1, BUFSIZ + 1);
 	cmd = NULL;
-	cmd = editorPrompt(bf, (uint8_t *)"Shell: %s", PROMPT_BASIC, NULL);
+	cmd = editorPrompt(E.buf, (uint8_t *)"Shell: %s", PROMPT_BASIC, NULL);
 
 	if (cmd == NULL) {
-		editorSetStatusMessage(msg_shell_canceled);
+		setStatusMessage(msg_shell_canceled);
 	} else if (useRegion) {
 		if (E.uarg) {
 			E.uarg = 0;
-			editorTransformRegion(ed, bf, transformerPipeCmd);
+			transformRegion(transformerPipeCmd);
 			// unmark region
-			bf->markx = -1;
-			bf->marky = -1;
+			E.buf->markx = -1;
+			E.buf->marky = -1;
 			free(cmd);
 			return NULL;
 		} else {
 			// 1. Extract the selected region
 			if (markInvalid()) {
-				editorSetStatusMessage(msg_mark_invalid);
+				setStatusMessage(msg_mark_invalid);
 				free(cmd);
 				free(buf);
 				return NULL;
 			}
 
-			editorCopyRegion(
-				ed,
-				bf); // ed->kill.str now holds the selected text
+			copyRegion(); // E.kill.str now holds the selected text
 
 			// 2. Pass the extracted text to transformerPipeCmd
-			uint8_t *result = transformerPipeCmd(ed->kill.str);
+			uint8_t *result = transformerPipeCmd(E.kill.str);
 
 			free(cmd);
 			return result;
@@ -142,21 +139,24 @@ uint8_t *editorPipe(struct editorConfig *ed, struct editorBuffer *bf,
 	return NULL;
 }
 
-void editorPipeCmd(struct editorConfig *ed, struct editorBuffer *bufr,
-		   int useRegion) {
-	uint8_t *pipeOutput = editorPipe(ed, bufr, useRegion);
+void pipeCmd(int useRegion) {
+	/* Not allowed during macro record/playback */
+	if (E.recording || E.playback) {
+		setStatusMessage(msg_macro_blocked);
+		return;
+	}
+	uint8_t *pipeOutput = editorPipe(useRegion);
 	if (pipeOutput != NULL) {
 		size_t outputLen = strlen((char *)pipeOutput);
 
 		/* Validate UTF-8 before inserting into a buffer */
 		if (!utf8_validate(pipeOutput, (int)outputLen)) {
-			editorSetStatusMessage(
-				"Shell output contains invalid UTF-8");
+			setStatusMessage("Shell output contains invalid UTF-8");
 			free(pipeOutput);
 			return;
 		}
 
-		struct editorBuffer *newBuf = newBuffer();
+		struct buffer *newBuf = newBuffer();
 		newBuf->filename = xstrdup("*Shell Output*");
 		newBuf->special_buffer = 1;
 
@@ -166,37 +166,36 @@ void editorPipeCmd(struct editorConfig *ed, struct editorBuffer *bufr,
 
 		for (size_t i = 0; i < outputLen; i++) {
 			if (pipeOutput[i] == '\n') {
-				editorInsertRow(newBuf, newBuf->numrows,
-						(char *)&pipeOutput[rowStart],
-						rowLen);
+				insertRow(newBuf, newBuf->numrows,
+					  (char *)&pipeOutput[rowStart],
+					  rowLen);
 				rowStart = i + 1;
 				rowLen = 0;
 			} else {
 				rowLen++;
 				if (i == outputLen - 1) {
-					editorInsertRow(
-						newBuf, newBuf->numrows,
-						(char *)&pipeOutput[rowStart],
-						rowLen);
+					insertRow(newBuf, newBuf->numrows,
+						  (char *)&pipeOutput[rowStart],
+						  rowLen);
 				}
 			}
 		}
 
 		// Link the new buffer and update focus
-		if (ed->headbuf == NULL) {
-			ed->headbuf = newBuf;
+		if (E.headbuf == NULL) {
+			E.headbuf = newBuf;
 		} else {
-			struct editorBuffer *temp = ed->headbuf;
+			struct buffer *temp = E.headbuf;
 			while (temp->next != NULL) {
 				temp = temp->next;
 			}
 			temp->next = newBuf;
 		}
-		ed->buf = newBuf;
+		E.buf = newBuf;
 
 		// Update the focused window
 		int idx = windowFocusedIdx();
-		ed->windows[idx]->buf = ed->buf;
+		E.windows[idx]->buf = E.buf;
 		refreshScreen();
 
 		free(pipeOutput);
@@ -204,15 +203,15 @@ void editorPipeCmd(struct editorConfig *ed, struct editorBuffer *bufr,
 }
 
 /////
-void editorDiffBufferWithFile(struct editorConfig *ed,
-			      struct editorBuffer *bufr) {
+void diffBufferWithFile(void) {
+	struct buffer *bufr = E.buf;
 	if (bufr->filename == NULL) {
-		editorSetStatusMessage(msg_buffer_without_file);
+		setStatusMessage(msg_buffer_without_file);
 		return;
 	}
 
 	if (!bufr->dirty) {
-		editorSetStatusMessage(msg_diff_buffer_matches_file);
+		setStatusMessage(msg_diff_buffer_matches_file);
 		return;
 	}
 
@@ -220,12 +219,12 @@ void editorDiffBufferWithFile(struct editorConfig *ed,
 	char tmpname[] = "/tmp/emil-diff-XXXXXX";
 	int fd = mkstemp(tmpname);
 	if (fd == -1) {
-		editorSetStatusMessage(msg_diff_cannot_create_temp);
+		setStatusMessage(msg_diff_cannot_create_temp);
 		return;
 	}
 
 	int buflen;
-	char *bufstr = editorRowsToString(bufr, &buflen);
+	char *bufstr = rowsToString(bufr, &buflen);
 	ssize_t total = 0;
 	while (total < buflen) {
 		ssize_t n = write(fd, bufstr + total, buflen - total);
@@ -235,7 +234,7 @@ void editorDiffBufferWithFile(struct editorConfig *ed,
 			close(fd);
 			unlink(tmpname);
 			free(bufstr);
-			editorSetStatusMessage(msg_diff_cannot_write);
+			setStatusMessage(msg_diff_cannot_write);
 			return;
 		}
 		total += n;
@@ -254,7 +253,7 @@ void editorDiffBufferWithFile(struct editorConfig *ed,
 				  &subprocess);
 	if (result) {
 		unlink(tmpname);
-		editorSetStatusMessage(msg_diff_cannot_subprocess);
+		setStatusMessage(msg_diff_cannot_subprocess);
 		return;
 	}
 
@@ -283,18 +282,18 @@ void editorDiffBufferWithFile(struct editorConfig *ed,
 	/* diff returns 0 = identical, 1 = differences, 2 = error */
 	if (sub_ret == 0) {
 		free(output);
-		editorSetStatusMessage(msg_diff_no_differences);
+		setStatusMessage(msg_diff_no_differences);
 		return;
 	}
 
 	if (sub_ret >= 2 || i == 0) {
 		free(output);
-		editorSetStatusMessage(msg_diff_failed, sub_ret);
+		setStatusMessage(msg_diff_failed, sub_ret);
 		return;
 	}
 
 	/* Create a *Diff* buffer with the output */
-	struct editorBuffer *diffBuf = newBuffer();
+	struct buffer *diffBuf = newBuffer();
 	diffBuf->filename = xstrdup("*Diff*");
 	diffBuf->special_buffer = 1;
 	diffBuf->read_only = 1;
@@ -304,8 +303,8 @@ void editorDiffBufferWithFile(struct editorConfig *ed,
 	size_t outputLen = (size_t)i;
 	for (size_t j = 0; j < outputLen; j++) {
 		if (output[j] == '\n' || j == outputLen - 1) {
-			editorInsertRow(diffBuf, diffBuf->numrows,
-					&output[rowStart], rowLen);
+			insertRow(diffBuf, diffBuf->numrows, &output[rowStart],
+				  rowLen);
 			rowStart = j + 1;
 			rowLen = 0;
 		} else {
@@ -314,19 +313,19 @@ void editorDiffBufferWithFile(struct editorConfig *ed,
 	}
 
 	/* Link the new buffer into the buffer list */
-	if (ed->headbuf == NULL) {
-		ed->headbuf = diffBuf;
+	if (E.headbuf == NULL) {
+		E.headbuf = diffBuf;
 	} else {
-		struct editorBuffer *temp = ed->headbuf;
+		struct buffer *temp = E.headbuf;
 		while (temp->next != NULL) {
 			temp = temp->next;
 		}
 		temp->next = diffBuf;
 	}
-	ed->buf = diffBuf;
+	E.buf = diffBuf;
 
 	int idx = windowFocusedIdx();
-	ed->windows[idx]->buf = ed->buf;
+	E.windows[idx]->buf = E.buf;
 	refreshScreen();
 
 	free(output);
@@ -334,20 +333,16 @@ void editorDiffBufferWithFile(struct editorConfig *ed,
 
 #else /* EMIL_DISABLE_SHELL */
 
-#include "emil.h"
 #include "display.h"
+#include "emil.h"
 
-void editorPipeCmd(struct editorConfig *ed, struct editorBuffer *bufr) {
-	(void)ed;   /* unused parameter */
-	(void)bufr; /* unused parameter */
-	editorSetStatusMessage(msg_shell_disabled);
+void pipeCmd(int useRegion) {
+	(void)useRegion; /* unused parameter */
+	setStatusMessage(msg_shell_disabled);
 }
 
-void editorDiffBufferWithFile(struct editorConfig *ed,
-			      struct editorBuffer *bufr) {
-	(void)ed;
-	(void)bufr;
-	editorSetStatusMessage(msg_shell_disabled);
+void diffBufferWithFile(void) {
+	setStatusMessage(msg_shell_disabled);
 }
 
 #endif /* EMIL_DISABLE_SHELL */

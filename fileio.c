@@ -1,27 +1,28 @@
-#include "emil.h"
-#include "message.h"
 #include "fileio.h"
 #include "buffer.h"
+#include "display.h"
+#include "emil.h"
+#include "keymap.h"
+#include "message.h"
+#include "prompt.h"
+#include "undo.h"
+#include "unicode.h"
+#include "unused.h"
+#include "util.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <glob.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <time.h>
-#include <sys/stat.h>
 #include <sys/select.h>
-#include "display.h"
-#include "prompt.h"
-#include "util.h"
-#include "undo.h"
-#include "unicode.h"
-#include "keymap.h"
-#include "unused.h"
-#include <limits.h>
+#include <sys/stat.h>
+#include <time.h>
+#include <unistd.h>
 
 /* Access global editor state */
-extern struct editorConfig E;
+extern struct config E;
 
 /* External functions we need */
 extern void die(const char *s);
@@ -33,7 +34,7 @@ extern void die(const char *s);
  * status message with the blocking PID), or -2 on error.
  * On success, bufr->lock_fd is set and must be released later. */
 
-int editorLockFile(struct editorBuffer *bufr, const char *filename) {
+int lockFile(struct buffer *bufr, const char *filename) {
 	/* Try O_RDWR first (needed for F_WRLCK per POSIX).
 	 * Fall back to O_RDONLY + F_RDLCK if the file isn't writable. */
 	int fd = open(filename, O_RDWR);
@@ -77,10 +78,9 @@ int editorLockFile(struct editorBuffer *bufr, const char *filename) {
 
 		if (fcntl(fd, F_GETLK, &query) == 0 &&
 		    query.l_type != F_UNLCK) {
-			editorSetStatusMessage(msg_file_locked,
-					       (int)query.l_pid);
+			setStatusMessage(msg_file_locked, (int)query.l_pid);
 		} else {
-			editorSetStatusMessage(msg_file_locked, 0);
+			setStatusMessage(msg_file_locked, 0);
 		}
 	}
 
@@ -90,7 +90,7 @@ int editorLockFile(struct editorBuffer *bufr, const char *filename) {
 
 /* Release the advisory lock held by this buffer. */
 
-void editorReleaseLock(struct editorBuffer *bufr) {
+void releaseLock(struct buffer *bufr) {
 	if (bufr->lock_fd >= 0) {
 		close(bufr->lock_fd);
 		bufr->lock_fd = -1;
@@ -103,24 +103,24 @@ void editorReleaseLock(struct editorBuffer *bufr) {
  * Called periodically (e.g. from refreshScreen).  Sets bufr->external_mod
  * and fires a one-time status message. */
 
-void editorCheckFileModified(struct editorBuffer *bufr) {
-	if (bufr->filename == NULL || bufr->open_mtime == 0)
+void checkFileModified(void) {
+	if (E.buf->filename == NULL || E.buf->open_mtime == 0)
 		return;
-	if (bufr->external_mod)
+	if (E.buf->external_mod)
 		return; /* already flagged */
 
 	struct stat st;
-	if (stat(bufr->filename, &st) == 0) {
-		if (st.st_mtime != bufr->open_mtime) {
-			bufr->external_mod = 1;
-			editorSetStatusMessage(msg_file_changed_on_disk);
+	if (stat(E.buf->filename, &st) == 0) {
+		if (st.st_mtime != E.buf->open_mtime) {
+			E.buf->external_mod = 1;
+			setStatusMessage(msg_file_changed_on_disk);
 		}
 	}
 }
 
 /*** file i/o ***/
 
-char *editorRowsToString(struct editorBuffer *bufr, int *buflen) {
+char *rowsToString(struct buffer *bufr, int *buflen) {
 	int totlen = 0;
 	int j;
 	for (j = 0; j < bufr->numrows; j++) {
@@ -145,7 +145,7 @@ char *editorRowsToString(struct editorBuffer *bufr, int *buflen) {
  * and codepoints above U+10FFFF.
  * Returns 1 if valid, 0 if invalid. */
 
-static int checkUTF8Validity(struct editorBuffer *bufr) {
+static int checkUTF8Validity(struct buffer *bufr) {
 	for (int row = 0; row < bufr->numrows; row++) {
 		if (!utf8_validate(bufr->row[row].chars, bufr->row[row].size))
 			return 0;
@@ -176,17 +176,17 @@ static int fileContainsNullBytes(FILE *fp) {
  * Returns 0 on success, -1 on failure (file not found is not a failure;
  * the buffer is left empty with the filename set). */
 
-int editorOpen(struct editorBuffer *bufr, char *filename) {
+int editorOpen(struct buffer *bufr, char *filename) {
 	free(bufr->filename);
 	bufr->filename = xstrdup(filename);
 
 	FILE *fp = fopen(filename, "r");
 	if (!fp) {
 		if (errno == ENOENT) {
-			editorSetStatusMessage(msg_new_file, bufr->filename);
+			setStatusMessage(msg_new_file, bufr->filename);
 			return 0;
 		}
-		editorSetStatusMessage(msg_cant_open, strerror(errno));
+		setStatusMessage(msg_cant_open, strerror(errno));
 		free(bufr->filename);
 		bufr->filename = NULL;
 		return -1;
@@ -196,8 +196,7 @@ int editorOpen(struct editorBuffer *bufr, char *filename) {
 	 * emil_getline (fgets/strlen) silently truncates at '\0'. */
 	if (fileContainsNullBytes(fp)) {
 		fclose(fp);
-		editorSetStatusMessage(
-			msg_invalid_utf8); // * TODO this message maybe imprecise
+		setStatusMessage(msg_binary_file);
 		free(bufr->filename);
 		bufr->filename = NULL;
 		return -1;
@@ -211,7 +210,7 @@ int editorOpen(struct editorBuffer *bufr, char *filename) {
 		while (linelen > 0 &&
 		       (line[linelen - 1] == '\n' || line[linelen - 1] == '\r'))
 			linelen--;
-		editorInsertRow(bufr, bufr->numrows, line, linelen);
+		insertRow(bufr, bufr->numrows, line, linelen);
 	}
 
 	/* Get the display length of the longest column */
@@ -227,14 +226,17 @@ int editorOpen(struct editorBuffer *bufr, char *filename) {
 
 	/* Validate UTF-8 encoding of the loaded content */
 	if (!checkUTF8Validity(bufr)) {
-		/* Clean up: free rows from the end to avoid O(n^2) shifting */
-		for (int i = bufr->numrows - 1; i >= 0; i--) {
+		/* Clean up: free rows and the row array itself */
+		for (int i = 0; i < bufr->numrows; i++) {
 			freeRow(&bufr->row[i]);
 		}
+		free(bufr->row);
+		bufr->row = NULL;
 		bufr->numrows = 0;
+		bufr->rowcap = 0;
 		free(bufr->filename);
 		bufr->filename = NULL;
-		editorSetStatusMessage(msg_invalid_utf8);
+		setStatusMessage(msg_invalid_utf8);
 		return -1;
 	}
 
@@ -245,12 +247,12 @@ int editorOpen(struct editorBuffer *bufr, char *filename) {
 	}
 
 	/* Try to acquire advisory lock */
-	int lock_result = editorLockFile(bufr, filename);
+	int lock_result = lockFile(bufr, filename);
 	if (lock_result == -1) {
 		/* File is locked by another process — open read-only */
 		bufr->read_only = 1;
 	} else if (lock_result == 0) {
-		/* Lock acquired — mtime already recorded by editorLockFile */
+		/* Lock acquired — mtime already recorded by lockFile */
 	}
 
 	computeDisplayNames();
@@ -268,23 +270,24 @@ int editorOpen(struct editorBuffer *bufr, char *filename) {
 		}
 	}
 
-	editorSetStatusMessage(msg_lines_columns, bufr->numrows, max_width);
+	setStatusMessage(msg_lines_columns, bufr->numrows, max_width);
 	return 0;
 }
 
-void editorRevert(struct editorConfig *ed, struct editorBuffer *buf) {
-	struct editorBuffer *new = newBuffer();
+void revert(void) {
+	struct buffer *buf = E.buf;
+	struct buffer *new = newBuffer();
 	if (editorOpen(new, buf->filename) < 0) {
 		/* Open/validation failed — keep the current buffer */
 		destroyBuffer(new);
 		return;
 	}
 	new->next = buf->next;
-	ed->buf = new;
-	if (ed->headbuf == buf) {
-		ed->headbuf = new;
+	E.buf = new;
+	if (E.headbuf == buf) {
+		E.headbuf = new;
 	}
-	struct editorBuffer *cur = ed->headbuf;
+	struct buffer *cur = E.headbuf;
 	while (cur != NULL) {
 		if (cur->next == buf) {
 			cur->next = new;
@@ -292,9 +295,9 @@ void editorRevert(struct editorConfig *ed, struct editorBuffer *buf) {
 		}
 		cur = cur->next;
 	}
-	for (int i = 0; i < ed->nwindows; i++) {
-		if (ed->windows[i]->buf == buf) {
-			ed->windows[i]->buf = new;
+	for (int i = 0; i < E.nwindows; i++) {
+		if (E.windows[i]->buf == buf) {
+			E.windows[i]->buf = new;
 		}
 	}
 	new->indent = buf->indent;
@@ -312,35 +315,40 @@ void editorRevert(struct editorConfig *ed, struct editorBuffer *buf) {
 	destroyBuffer(buf);
 }
 
-void editorSave(struct editorBuffer *bufr) {
-	if (bufr->filename == NULL) {
-		bufr->filename = (char *)editorPrompt(
-			bufr, (uint8_t *)"Save as: %s", PROMPT_FILES, NULL);
-		if (bufr->filename == NULL) {
-			editorSetStatusMessage(msg_save_aborted);
+void save(void) {
+	/* Not allowed during macro record/playback */
+	if (E.recording || E.playback) {
+		setStatusMessage(msg_macro_blocked);
+		return;
+	}
+	if (E.buf->filename == NULL) {
+		E.buf->filename = (char *)editorPrompt(
+			E.buf, (uint8_t *)"Save as: %s", PROMPT_FILES, NULL);
+		if (E.buf->filename == NULL) {
+			setStatusMessage(msg_save_aborted);
 			return;
 		}
-		bufr->special_buffer = 0;
+		E.buf->special_buffer = 0;
 		computeDisplayNames();
 	}
 
 	int len;
-	char *buf = editorRowsToString(bufr, &len);
+	char *buf = rowsToString(E.buf, &len);
 
 	/* Build temp filename: <filename>.tmpXXXXXX */
 	char tmpname[PATH_MAX];
-	snprintf(tmpname, sizeof(tmpname), "%s.tmpXXXXXX", bufr->filename);
+	snprintf(tmpname, sizeof(tmpname), "%s.tmpXXXXXX", E.buf->filename);
 
 	int fd = mkstemp(tmpname);
 	if (fd == -1) {
 		free(buf);
-		editorSetStatusMessage(msg_save_failed, strerror(errno));
+		setStatusMessage(msg_save_failed, strerror(errno));
 		return;
 	}
 
 	/* Preserve permissions if file already exists */
 	struct stat st;
-	if (stat(bufr->filename, &st) == 0) {
+	if (stat(E.buf->filename, &st) == 0) {
 		fchmod(fd, st.st_mode);
 	}
 
@@ -354,15 +362,14 @@ void editorSave(struct editorBuffer *bufr) {
 			close(fd);
 			unlink(tmpname);
 			free(buf);
-			editorSetStatusMessage(msg_save_failed,
-					       strerror(errno));
+			setStatusMessage(msg_save_failed, strerror(errno));
 			return;
 		} else if (n == 0) {
 			// shouldn't happen for regular files, treat as error
 			close(fd);
 			unlink(tmpname);
 			free(buf);
-			editorSetStatusMessage(msg_save_failed);
+			setStatusMessage(msg_save_failed);
 			return;
 		}
 		total += n;
@@ -372,67 +379,73 @@ void editorSave(struct editorBuffer *bufr) {
 		close(fd);
 		unlink(tmpname);
 		free(buf);
-		editorSetStatusMessage(msg_save_failed, strerror(errno));
+		setStatusMessage(msg_save_failed, strerror(errno));
 		return;
 	}
 
 	close(fd);
 
-	if (rename(tmpname, bufr->filename) == -1) {
+	if (rename(tmpname, E.buf->filename) == -1) {
 		unlink(tmpname);
 		free(buf);
-		editorSetStatusMessage(msg_save_failed, strerror(errno));
+		setStatusMessage(msg_save_failed, strerror(errno));
 		return;
 	}
 
 	free(buf);
-	bufr->dirty = 0;
+	E.buf->dirty = 0;
 
 	/* Update stored mtime after save */
 	struct stat save_st;
-	if (stat(bufr->filename, &save_st) == 0)
-		bufr->open_mtime = save_st.st_mtime;
-	bufr->external_mod = 0;
-	bufr->internal_mod = 1;
+	if (stat(E.buf->filename, &save_st) == 0)
+		E.buf->open_mtime = save_st.st_mtime;
+	E.buf->external_mod = 0;
+	E.buf->internal_mod = 1;
 
 	/* If we didn't have a lock yet (new file), acquire one now */
-	if (bufr->lock_fd < 0)
-		editorLockFile(bufr, bufr->filename);
+	if (E.buf->lock_fd < 0)
+		lockFile(E.buf, E.buf->filename);
 
 	/* TODO Interactive fallback to direct write if temp creation fails */
 	/* TODO: fsync parent dir after rename */
 
-	editorSetStatusMessage(msg_wrote_bytes, len, bufr->filename);
+	setStatusMessage(msg_wrote_bytes, len, E.buf->filename);
 }
 
-void editorSaveAs(struct editorBuffer *bufr) {
-	char *new_filename = (char *)editorPrompt(
-		bufr, (uint8_t *)"Save as: %s", PROMPT_FILES, NULL);
-	if (new_filename == NULL) {
-		editorSetStatusMessage(msg_save_aborted);
+void saveAs(void) {
+	/* Not allowed during macro record/playback */
+	if (E.recording || E.playback) {
+		setStatusMessage(msg_macro_blocked);
 		return;
 	}
-	free(bufr->filename);
-	bufr->filename = new_filename;
+	char *new_filename = (char *)editorPrompt(
+		E.buf, (uint8_t *)"Save as: %s", PROMPT_FILES, NULL);
+	if (new_filename == NULL) {
+		setStatusMessage(msg_save_aborted);
+		return;
+	}
+	free(E.buf->filename);
+	E.buf->filename = new_filename;
+	/* Release lock on the old file before saving to the new one */
+	releaseLock(E.buf);
 	computeDisplayNames();
-	editorSave(bufr);
+	save();
 }
 
 /* Switch the focused window to the named file.  If a buffer with that
  * filename already exists, reuse it; otherwise open a new one.
  * Returns the buffer on success, NULL on failure. */
-struct editorBuffer *editorSwitchToFile(const char *filename) {
+struct buffer *switchToFile(const char *filename) {
 	/* Check if already open */
-	for (struct editorBuffer *buf = E.headbuf; buf; buf = buf->next) {
-		if (buf->filename && strcmp(buf->filename, filename) == 0) {
-			E.buf = buf;
-			E.windows[windowFocusedIdx()]->buf = buf;
-			return buf;
-		}
+	struct buffer *buf = findBufferByName(filename);
+	if (buf) {
+		E.buf = buf;
+		E.windows[windowFocusedIdx()]->buf = buf;
+		return buf;
 	}
 
 	/* Open new buffer */
-	struct editorBuffer *nb = newBuffer();
+	struct buffer *nb = newBuffer();
 	if (editorOpen(nb, (char *)filename) < 0) {
 		destroyBuffer(nb);
 		return NULL;
@@ -444,43 +457,106 @@ struct editorBuffer *editorSwitchToFile(const char *filename) {
 	return nb;
 }
 
+/* Check whether a filename contains glob wildcard characters. */
+static int hasGlobChars(const char *s) {
+	for (; *s; s++) {
+		if (*s == '*' || *s == '?' || *s == '[')
+			return 1;
+	}
+	return 0;
+}
+
 void findFile(void) {
+	/* Not allowed during macro record/playback */
+	if (E.recording || E.playback) {
+		setStatusMessage(msg_macro_blocked);
+		return;
+	}
 	uint8_t *prompt =
 		editorPrompt(E.buf, msg_find_file, PROMPT_FILES, NULL);
 
 	if (prompt == NULL) {
-		editorSetStatusMessage(msg_canceled);
+		setStatusMessage(msg_canceled);
 		return;
 	}
-	// I think this probably never gets called anymore
-	if (prompt[strlen(prompt) - 1] == '/') {
-		editorSetStatusMessage(msg_dir_not_supported);
+
+	/* If the input contains glob wildcards, expand and open all matches */
+	if (hasGlobChars((char *)prompt)) {
+		glob_t gl;
+		int rc = glob((char *)prompt, GLOB_MARK, NULL, &gl);
+		if (rc != 0 || gl.gl_pathc == 0) {
+			if (rc == 0)
+				globfree(&gl);
+			setStatusMessage(msg_no_glob_match, prompt);
+			free(prompt);
+			return;
+		}
+
+		struct buffer *last = NULL;
+		int opened = 0;
+		for (size_t i = 0; i < gl.gl_pathc; i++) {
+			/* Skip directories (GLOB_MARK appends '/') */
+			size_t plen = strlen(gl.gl_pathv[i]);
+			if (plen > 0 && gl.gl_pathv[i][plen - 1] == '/')
+				continue;
+			struct buffer *buf = switchToFile(gl.gl_pathv[i]);
+			if (buf) {
+				last = buf;
+				opened++;
+			}
+		}
+		globfree(&gl);
+		free(prompt);
+
+		if (last) {
+			E.buf = last;
+			E.windows[windowFocusedIdx()]->buf = last;
+			computeDisplayNames();
+			refreshScreen();
+		}
+		if (opened > 1)
+			setStatusMessage("Opened %d files", opened);
+		return;
+	}
+
+	/* Safety net: if a directory path somehow gets through the prompt,
+	 * don't try to open it as a file. */
+	struct stat st;
+	if (stat((char *)prompt, &st) == 0 && S_ISDIR(st.st_mode)) {
+		setStatusMessage(msg_dir_not_supported);
 		free(prompt);
 		return;
 	}
 
-	struct editorBuffer *buf = editorSwitchToFile((char *)prompt);
+	struct buffer *buf = switchToFile((char *)prompt);
 	computeDisplayNames();
 	free(prompt);
 	if (buf)
 		refreshScreen();
 }
 
-void editorInsertFile(struct editorConfig *UNUSED(ed),
-		      struct editorBuffer *buf) {
+void insertFile(void) {
+	struct buffer *buf = E.buf;
 	uint8_t *filename =
 		editorPrompt(buf, "Insert file: %s", PROMPT_FILES, NULL);
 	if (filename == NULL) {
 		return;
 	}
 
+	/* Reject directories */
+	struct stat ist;
+	if (stat((char *)filename, &ist) == 0 && S_ISDIR(ist.st_mode)) {
+		setStatusMessage(msg_dir_not_supported);
+		free(filename);
+		return;
+	}
+
 	FILE *fp = fopen((char *)filename, "r");
 	if (!fp) {
 		if (errno == ENOENT) {
-			editorSetStatusMessage(msg_file_not_found, filename);
+			setStatusMessage(msg_file_not_found, filename);
 		} else {
-			editorSetStatusMessage(msg_error_opening,
-					       strerror(errno));
+			setStatusMessage(msg_error_opening, strerror(errno));
 		}
 		free(filename);
 		return;
@@ -489,15 +565,14 @@ void editorInsertFile(struct editorConfig *UNUSED(ed),
 	/* Pre-scan for null bytes */
 	if (fileContainsNullBytes(fp)) {
 		fclose(fp);
-		editorSetStatusMessage(
-			msg_invalid_utf8); // * TODO needa  null bytes msg
+		setStatusMessage(msg_binary_file);
 		free(filename);
 		return;
 	}
 
 	/* Load into a temporary buffer so we can validate before
 	 * modifying the real buffer */
-	struct editorBuffer *tmpbuf = newBuffer();
+	struct buffer *tmpbuf = newBuffer();
 
 	char *line = NULL;
 	size_t linecap = 0;
@@ -508,7 +583,7 @@ void editorInsertFile(struct editorConfig *UNUSED(ed),
 				       line[linelen - 1] == '\r')) {
 			linelen--;
 		}
-		editorInsertRow(tmpbuf, tmpbuf->numrows, line, linelen);
+		insertRow(tmpbuf, tmpbuf->numrows, line, linelen);
 	}
 
 	free(line);
@@ -517,7 +592,7 @@ void editorInsertFile(struct editorConfig *UNUSED(ed),
 	/* Validate UTF-8 before inserting */
 	if (!checkUTF8Validity(tmpbuf)) {
 		destroyBuffer(tmpbuf);
-		editorSetStatusMessage(msg_invalid_utf8);
+		setStatusMessage(msg_invalid_utf8);
 		free(filename);
 		return;
 	}
@@ -527,9 +602,8 @@ void editorInsertFile(struct editorConfig *UNUSED(ed),
 	int lines_inserted = 0;
 
 	for (int i = 0; i < tmpbuf->numrows; i++) {
-		editorInsertRow(buf, saved_cy + lines_inserted,
-				(char *)tmpbuf->row[i].chars,
-				tmpbuf->row[i].size);
+		insertRow(buf, saved_cy + lines_inserted,
+			  (char *)tmpbuf->row[i].chars, tmpbuf->row[i].size);
 		lines_inserted++;
 	}
 
@@ -540,7 +614,7 @@ void editorInsertFile(struct editorConfig *UNUSED(ed),
 		buf->cx = buf->row[buf->cy].size;
 	}
 
-	editorSetStatusMessage(msg_inserted_lines, lines_inserted, filename);
+	setStatusMessage(msg_inserted_lines, lines_inserted, filename);
 	free(filename);
 
 	buf->dirty++;
@@ -654,7 +728,7 @@ static char *cleanPath(char *path) {
 
 /* Rebase a relative filename from old_cwd to new_cwd.
  * Returns a new malloc'd string.  Absolute paths are returned as-is (duped).
- * Used by editorChangeDirectory and exposed for testing. */
+ * Used by changeDirectory and exposed for testing. */
 char *rebaseFilename(const char *filename, const char *old_cwd,
 		     const char *new_cwd) {
 	if (filename[0] == '/')
@@ -685,27 +759,24 @@ char *rebaseFilename(const char *filename, const char *old_cwd,
 	return new_name;
 }
 
-void editorChangeDirectory(struct editorConfig *ed, struct editorBuffer *buf) {
-	(void)buf; /* unused parameter */
-
-	uint8_t *dir = editorPrompt(ed->buf, (uint8_t *)"Directory: %s",
+void changeDirectory(void) {
+	uint8_t *dir = editorPrompt(E.buf, (uint8_t *)"Directory: %s",
 				    PROMPT_DIR, NULL);
 	if (dir == NULL) {
-		editorSetStatusMessage(msg_canceled);
+		setStatusMessage(msg_canceled);
 		return;
 	}
 
 	/* Grab the old cwd before changing */
 	char old_cwd[PATH_MAX];
 	if (getcwd(old_cwd, sizeof(old_cwd)) == NULL) {
-		editorSetStatusMessage(msg_indeterminate_cd);
+		setStatusMessage(msg_indeterminate_cd);
 		free(dir);
 		return;
 	}
 
 	if (chdir((char *)dir) != 0) {
-		editorSetStatusMessage("cd: %s: %s", (char *)dir,
-				       strerror(errno));
+		setStatusMessage("cd: %s: %s", (char *)dir, strerror(errno));
 		free(dir);
 		return;
 	}
@@ -714,15 +785,14 @@ void editorChangeDirectory(struct editorConfig *ed, struct editorBuffer *buf) {
 	if (getcwd(new_cwd, sizeof(new_cwd)) == NULL) {
 		/* chdir succeeded but getcwd failed — unlikely but
 		 * leave filenames as-is */
-		editorSetStatusMessage(msg_changed_dir);
+		setStatusMessage(msg_changed_dir);
 		free(dir);
 		return;
 	}
 
 	/* If the directory actually changed, update relative filenames */
 	if (strcmp(old_cwd, new_cwd) != 0) {
-		for (struct editorBuffer *b = ed->headbuf; b != NULL;
-		     b = b->next) {
+		for (struct buffer *b = E.headbuf; b != NULL; b = b->next) {
 			if (b->filename == NULL || b->special_buffer)
 				continue;
 			char *new_name =
@@ -734,6 +804,6 @@ void editorChangeDirectory(struct editorConfig *ed, struct editorBuffer *buf) {
 		computeDisplayNames();
 	}
 
-	editorSetStatusMessage(msg_current_dir, new_cwd);
+	setStatusMessage(msg_current_dir, new_cwd);
 	free(dir);
 }

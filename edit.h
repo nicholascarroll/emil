@@ -4,93 +4,91 @@
 #include "emil.h"
 
 /* Character insertion */
-void editorInsertChar(struct editorBuffer *bufr, int c, int count);
-void editorInsertUnicode(struct editorBuffer *bufr, int count);
+void insertChar(struct buffer *bufr, int c, int count);
+void insertUnicode(int count);
 
 /* Line operations */
-void editorInsertNewlineRaw(struct editorBuffer *bufr);
-void editorInsertNewline(struct editorBuffer *bufr, int count);
-void editorOpenLine(struct editorBuffer *bufr, int count);
-void editorInsertNewlineAndIndent(struct editorBuffer *bufr, int count);
+void insertNewlineRaw(void);
+void insertNewline(int count);
+void openLine(int count);
+void insertNewlineAndIndent(int count);
 
 /* Indentation */
-void editorIndent(struct editorBuffer *bufr, int rept);
-void editorUnindent(struct editorBuffer *bufr, int rept);
-void editorIndentTabs(struct editorConfig *ed, struct editorBuffer *buf);
-void editorIndentSpaces(struct editorConfig *ed, struct editorBuffer *buf);
+void editorIndent(int rept);
+void unindent(int rept);
+void indentTabs(void);
+void indentSpaces(void);
 
 /* Character deletion */
-void editorDelChar(struct editorBuffer *bufr, int count);
-void editorBackSpace(struct editorBuffer *bufr, int count);
+void delChar(int count);
+void backSpace(int count);
 
 /* Boundary detection */
 int isParaBoundary(erow *row);
 
 /* Cursor movement */
-void editorMoveCursor(int key, int count);
+void moveCursor(int key, int count);
 
 /* Word movement */
-void bufferEndOfForwardWord(struct editorBuffer *buf, int *dx, int *dy);
-void bufferEndOfBackwardWord(struct editorBuffer *buf, int *dx, int *dy);
-void editorForwardWord(int count);
-void editorBackWord(int count);
+void forwardWordEnd(int *dx, int *dy);
+void backwardWordEnd(int *dx, int *dy);
+void forwardWord(int count);
+void backWord(int count);
 
 /* Paragraph movement */
-void bufferBackwardParagraphBoundary(struct editorBuffer *buf, int *cx,
-				     int *cy);
-void bufferForwardParagraphBoundary(struct editorBuffer *buf, int *cx, int *cy);
-void editorBackPara(int count);
-void editorForwardPara(int count);
+void backwardParaBoundary(int *cx, int *cy);
+void forwardParaBoundary(int *cx, int *cy);
+void backPara(int count);
+void forwardPara(int count);
 
 /* Sexp (balanced expression) movement */
-void editorForwardSexp(int count);
-void editorBackwardSexp(int count);
+void forwardSexp(int count);
+void backwardSexp(int count);
 
 /* Sentence movement */
-int bufferForwardSentenceEnd(struct editorBuffer *buf, int *cx, int *cy);
-int bufferBackwardSentenceStart(struct editorBuffer *buf, int *cx, int *cy);
-void editorForwardSentence(int count);
-void editorBackwardSentence(int count);
+int forwardSentenceEnd(int *cx, int *cy);
+int backwardSentenceStart(int *cx, int *cy);
+void forwardSentence(int count);
+void backwardSentence(int count);
 
 /* Word transformations */
-void wordTransform(struct editorBuffer *bufr, int times,
-		   uint8_t *(*transformer)(uint8_t *));
-void editorUpcaseWord(struct editorBuffer *bufr, int times);
-void editorDowncaseWord(struct editorBuffer *bufr, int times);
-void editorCapitalCaseWord(struct editorBuffer *bufr, int times);
+void wordTransform(int times, uint8_t *(*transformer)(uint8_t *));
+void upcaseWord(int times);
+void downcaseWord(int times);
+void capitalCaseWord(int times);
 
 /* Word deletion */
-void editorDeleteWord(struct editorBuffer *bufr, int count);
-void editorBackspaceWord(struct editorBuffer *bufr, int count);
+void deleteWord(int count);
+void backspaceWord(int count);
 
 /* Character/word transposition */
-void editorTransposeWords(struct editorBuffer *bufr);
-void editorTransposeChars(struct editorBuffer *bufr);
+void transposeWords(void);
+void transposeChars(void);
 
 /* Line operations */
-void editorKillLine(int count);
-void editorKillLineBackwards(void);
+void killLine(int count);
+void killLineBackwards(void);
 
 /* Kill/mark operations */
-void editorKillSexp(int count);
-void editorKillParagraph(int count);
-void editorMarkParagraph(void);
+void killSexp(int count);
+void killParagraph(int count);
+void markParagraph(void);
 
 /* Sentence transposition */
-void editorTransposeSentences(struct editorBuffer *bufr);
+void transposeSentences(void);
 
 /* Zap to char */
-void editorZapToChar(struct editorBuffer *bufr);
+void zapToChar(void);
 
 /* Navigation */
-void editorGotoLine(void);
-void editorPageUp(int count);
-void editorPageDown(int count);
-void editorScrollLineUp(int count);
-void editorScrollLineDown(int count);
-void editorBeginningOfLine(int count);
-void editorEndOfLine(int count);
-void editorQuit(void);
+void gotoLine(void);
+void pageUp(int count);
+void pageDown(int count);
+void scrollLineUp(int count);
+void scrollLineDown(int count);
+void beginningOfLine(void);
+void endOfLine(int count);
+void quit(void);
 
 /* External constants */
 extern const int page_overlap;

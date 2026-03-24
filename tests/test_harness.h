@@ -15,16 +15,16 @@
 #include <stdlib.h>
 
 /* E is defined in stubs.c (which replaces main.o) */
-extern struct editorConfig E;
+extern struct config E;
 
 /* Set up a minimal but valid editor state. Call once at test start. */
 static void initTestEditor(void) {
 	memset(&E, 0, sizeof(E));
 	E.screencols = 80;
 	E.screenrows = 24;
-	E.kill = (struct editorText){0};
-	E.windows = malloc(sizeof(struct editorWindow *));
-	E.windows[0] = calloc(1, sizeof(struct editorWindow));
+	E.kill = (struct text){0};
+	E.windows = malloc(sizeof(struct window *));
+	E.windows[0] = calloc(1, sizeof(struct window));
 	E.windows[0]->focused = 1;
 	E.nwindows = 1;
 	E.headbuf = NULL;
@@ -36,7 +36,7 @@ static void initTestEditor(void) {
 	E.kill_ring_pos = -1;
 	E.macro_depth = 0;
 	memset(E.registers, 0, sizeof(E.registers));
-	setupCommands(&E);
+	setupCommands();
 
 	initHistory(&E.file_history);
 	initHistory(&E.command_history);
@@ -46,10 +46,10 @@ static void initTestEditor(void) {
 }
 
 /* Create a buffer with one line of content and wire it into E. */
-static struct editorBuffer *make_test_buffer(const char *line) {
-	struct editorBuffer *buf = newBuffer();
+static struct buffer *make_test_buffer(const char *line) {
+	struct buffer *buf = newBuffer();
 	if (line && *line)
-		editorInsertRow(buf, 0, (char *)line, strlen(line));
+		insertRow(buf, 0, (char *)line, strlen(line));
 	buf->cx = 0;
 	buf->cy = 0;
 	buf->dirty = 0;
@@ -63,10 +63,10 @@ static struct editorBuffer *make_test_buffer(const char *line) {
 }
 
 /* Create a buffer with multiple lines and wire it into E. */
-static struct editorBuffer *make_test_buffer_lines(const char **lines, int n) {
-	struct editorBuffer *buf = newBuffer();
+static struct buffer *make_test_buffer_lines(const char **lines, int n) {
+	struct buffer *buf = newBuffer();
 	for (int i = 0; i < n; i++)
-		editorInsertRow(buf, i, (char *)lines[i], strlen(lines[i]));
+		insertRow(buf, i, (char *)lines[i], strlen(lines[i]));
 	buf->cx = 0;
 	buf->cy = 0;
 	buf->dirty = 0;
@@ -79,7 +79,7 @@ static struct editorBuffer *make_test_buffer_lines(const char **lines, int n) {
 }
 
 /* Get row content as string (safe for assertion). */
-static const char *row_str(struct editorBuffer *buf, int row) {
+static const char *row_str(struct buffer *buf, int row) {
 	if (row >= buf->numrows)
 		return "";
 	return (const char *)buf->row[row].chars;

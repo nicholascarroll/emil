@@ -1,5 +1,5 @@
-#ifndef KEYMAP_H
-#define KEYMAP_H
+#ifndef EMIL_KEYMAP_H
+#define EMIL_KEYMAP_H
 
 /* Key constants */
 #ifndef CTRL
@@ -49,7 +49,7 @@ enum keyToken {
  * Command tokens — editor actions produced by the binding layer.
  * These represent what the editor should do.
  */
-enum editorCommand_t {
+enum command_t {
 	/* Returned when binding is incomplete (need more keys) */
 	CMD_NONE = 0,
 	CMD_FORWARD_CHAR = 4000,
@@ -174,17 +174,17 @@ enum editorCommand_t {
 /* Prefix state for key sequences */
 enum PrefixState { PREFIX_NONE, PREFIX_CTRL_X, PREFIX_CTRL_X_R };
 
-struct editorBuffer;
-struct editorMacro;
-struct editorConfig;
+struct buffer;
+struct macro;
+struct config;
 
 /* Function declarations */
-void editorRecordKey(int c);
-void editorProcessKeypress(int cmd);
-void editorExecMacro(struct editorMacro *macro);
-void setupCommands(struct editorConfig *ed);
-void runCommand(char *cmd, struct editorConfig *ed, struct editorBuffer *buf);
+void recordKey(int c);
+void processKeypress(int cmd);
+void execMacro(struct macro *macro);
+void setupCommands(void);
+void runCommand(char *cmd);
 int resolveBinding(int key);
 void showPrefix(const char *prefix);
 
-#endif /* KEYMAP_H */
+#endif /* EMIL_KEYMAP_H */

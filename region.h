@@ -1,54 +1,33 @@
 #ifndef EMIL_REGION_H
 #define EMIL_REGION_H 1
 
-#include <stdint.h>
 #include "emil.h"
+#include <stdint.h>
 
 int markInvalid(void);
 int markInvalidSilent(void);
 
-void editorSetMark(void);
-void editorSetMarkSilent(void);
-
-void editorDeactivateMark(void);
-
-void editorPopMark(void);
-
-void editorClearMark(void);
-
-void editorToggleRectangleMode(void);
-
-void editorMarkBuffer(void);
-
-void editorDeleteRange(struct editorBuffer *buf, int startx, int starty,
-		       int endx, int endy, int add_to_kill_ring);
-
-void editorKillRegion(struct editorConfig *ed, struct editorBuffer *buf);
-
-void editorCopyRegion(struct editorConfig *ed, struct editorBuffer *buf);
-
-void editorYank(struct editorConfig *ed, struct editorBuffer *buf, int count);
-
-void editorYankPop(struct editorConfig *ed, struct editorBuffer *buf);
-
-void editorTransformRange(struct editorConfig *ed, struct editorBuffer *buf,
-			  int startx, int starty, int endx, int endy,
-			  uint8_t *(*transformer)(uint8_t *));
-
-void editorTransformRegion(struct editorConfig *ed, struct editorBuffer *buf,
-			   uint8_t *(*transformer)(uint8_t *));
-
-void editorReplaceRegex(struct editorConfig *ed, struct editorBuffer *buf);
-
-void editorStringRectangle(struct editorConfig *ed, struct editorBuffer *buf);
-
-void editorCopyRectangle(struct editorConfig *ed, struct editorBuffer *buf);
-
-void editorKillRectangle(struct editorConfig *ed, struct editorBuffer *buf);
-
-void editorYankRectangle(struct editorConfig *ed, struct editorBuffer *buf);
-
+void setMark(void);
+void setMarkSilent(void);
+void deactivateMark(void);
+void popMark(void);
+void clearMark(void);
+void toggleRectangleMode(void);
+void markBuffer(void);
+void deleteRange(int startx, int starty, int endx, int endy,
+		 int add_to_kill_ring);
+void killRegion(void);
+void copyRegion(void);
+void yank(int count);
+void yankPop(void);
+void transformRange(int startx, int starty, int endx, int endy,
+		    uint8_t *(*transformer)(uint8_t *));
+void transformRegion(uint8_t *(*transformer)(uint8_t *));
+void replaceRegex(void);
+void stringRectangle(void);
+void copyRectangle(void);
+void killRectangle(void);
+void yankRectangle(void);
 void addToKillRing(const char *text, int is_rect, int rect_width,
 		   int rect_height);
-
 #endif

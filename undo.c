@@ -1,30 +1,31 @@
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
-#include <limits.h>
+#include "undo.h"
+#include "adjust.h"
+#include "buffer.h"
+#include "display.h"
 #include "emil.h"
 #include "message.h"
 #include "region.h"
-#include "buffer.h"
-#include "undo.h"
 #include "unicode.h"
-#include "display.h"
 #include "unused.h"
 #include "util.h"
-#include "adjust.h"
+#include <limits.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
+extern struct config E;
 /* Bulk-insert text from 'data' (length 'datalen') into 'buf' starting
  * at buffer position (startx, starty).  Uses direct memmove/memcpy and
- * editorInsertRow — no character-at-a-time primitives.  Does NOT record
+ * insertRow — no character-at-a-time primitives.  Does NOT record
  * undo.  Calls adjustAllPoints internally. */
-void bulkInsert(struct editorBuffer *buf, int startx, int starty,
-		const uint8_t *data, int datalen) {
+void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
+		int datalen) {
 	if (datalen <= 0)
 		return;
 
 	/* Ensure the target row exists */
 	if (starty >= buf->numrows)
-		editorInsertRow(buf, buf->numrows, "", 0);
+		insertRow(buf, buf->numrows, "", 0);
 
 	/* Scan for newlines to decide single-line vs multi-line */
 	const uint8_t *first_nl = memchr(data, '\n', datalen);
@@ -102,8 +103,8 @@ void bulkInsert(struct editorBuffer *buf, int startx, int starty,
 				memcpy(&combined[last_frag_len], suffix,
 				       suffix_len);
 			combined[combined_len] = '\0';
-			editorInsertRow(buf, insert_at, (char *)combined,
-					combined_len);
+			insertRow(buf, insert_at, (char *)combined,
+				  combined_len);
 			free(combined);
 			free(suffix);
 			buf->dirty = 1;
@@ -114,7 +115,7 @@ void bulkInsert(struct editorBuffer *buf, int startx, int starty,
 		}
 		/* Interior complete line */
 		int line_len = (int)(nl - p);
-		editorInsertRow(buf, insert_at, (char *)p, line_len);
+		insertRow(buf, insert_at, (char *)p, line_len);
 		insert_at++;
 		p = nl + 1;
 	}
@@ -122,9 +123,9 @@ void bulkInsert(struct editorBuffer *buf, int startx, int starty,
 	/* If data ended with '\n', we still need to insert the suffix
 	 * as a new row */
 	if (suffix_len > 0) {
-		editorInsertRow(buf, insert_at, (char *)suffix, suffix_len);
+		insertRow(buf, insert_at, (char *)suffix, suffix_len);
 	} else {
-		editorInsertRow(buf, insert_at, "", 0);
+		insertRow(buf, insert_at, "", 0);
 	}
 	free(suffix);
 	buf->dirty = 1;
@@ -133,10 +134,10 @@ void bulkInsert(struct editorBuffer *buf, int startx, int starty,
 }
 
 /* Bulk-delete text from (startx, starty) to (endx, endy).
- * Uses direct memmove/memcpy and editorDelRow — no character-at-a-time
+ * Uses direct memmove/memcpy and delRow — no character-at-a-time
  * primitives.  Does NOT record undo. */
-static void bulkDelete(struct editorBuffer *buf, int startx, int starty,
-		       int endx, int endy) {
+static void bulkDelete(struct buffer *buf, int startx, int starty, int endx,
+		       int endy) {
 	if (buf->numrows == 0 || starty >= buf->numrows)
 		return;
 
@@ -158,7 +159,7 @@ static void bulkDelete(struct editorBuffer *buf, int startx, int starty,
 		 *   2. Merge start row prefix with end row suffix. */
 		int rows_to_del = endy - starty - 1;
 		for (int i = 0; i < rows_to_del; i++)
-			editorDelRow(buf, starty + 1);
+			delRow(buf, starty + 1);
 
 		/* After deleting interior rows, the end row is now at
 		 * starty + 1 */
@@ -174,15 +175,15 @@ static void bulkDelete(struct editorBuffer *buf, int startx, int starty,
 		first->size = new_size;
 		first->chars[first->size] = '\0';
 		first->cached_width = -1;
-		editorDelRow(buf, starty + 1);
+		delRow(buf, starty + 1);
 		buf->dirty = 1;
 		invalidateScreenCache(buf);
 	}
 }
 
-void editorDoUndo(struct editorBuffer *buf, int count) {
+void doUndo(struct buffer *buf, int count) {
 	if (buf->read_only) {
-		editorSetStatusMessage(msg_read_only);
+		setStatusMessage(msg_read_only);
 		return;
 	}
 
@@ -191,7 +192,7 @@ void editorDoUndo(struct editorBuffer *buf, int count) {
 	int times = count ? count : 1;
 	for (int j = 0; j < times; j++) {
 		if (buf->undo == NULL) {
-			editorSetStatusMessage(msg_no_undo);
+			setStatusMessage(msg_no_undo);
 			if (!buf->undo_pruned && !buf->internal_mod) {
 				buf->dirty = 0;
 			}
@@ -216,40 +217,41 @@ void editorDoUndo(struct editorBuffer *buf, int count) {
 			buf->cy = buf->undo->starty;
 		}
 
-		editorUpdateBuffer(buf);
+		updateBuffer(buf);
 
-		struct editorUndo *orig = buf->redo;
+		struct undo *orig = buf->redo;
 		buf->redo = buf->undo;
 		buf->undo = buf->undo->prev;
 		buf->redo->prev = orig;
 		buf->undo_count--;
-		editorSetStatusMessage(msg_undo);
+		setStatusMessage(msg_undo);
 
 		if (paired) {
-			editorDoUndo(buf, 1);
+			doUndo(buf, 1);
 		}
 	}
 }
 
 #ifdef EMIL_DEBUG_UNDO
-void debugUnpair(struct editorConfig *UNUSED(ed), struct editorBuffer *buf) {
+void debugUnpair(void) {
+	struct buffer *buf = E.buf;
 	int undos = 0;
 	int redos = 0;
-	for (struct editorUndo *i = buf->undo; i; i = i->prev) {
+	for (struct undo *i = buf->undo; i; i = i->prev) {
 		i->paired = 0;
 		undos++;
 	}
-	for (struct editorUndo *i = buf->redo; i; i = i->prev) {
+	for (struct undo *i = buf->redo; i; i = i->prev) {
 		i->paired = 0;
 		redos++;
 	}
-	editorSetStatusMessage(msg_unpaired_undo_redo, undos, redos);
+	setStatusMessage(msg_unpaired_undo_redo, undos, redos);
 }
 #endif
 
-void editorDoRedo(struct editorBuffer *buf, int count) {
+void doRedo(struct buffer *buf, int count) {
 	if (buf->read_only) {
-		editorSetStatusMessage(msg_read_only);
+		setStatusMessage(msg_read_only);
 		return;
 	}
 
@@ -258,7 +260,7 @@ void editorDoRedo(struct editorBuffer *buf, int count) {
 	int times = count ? count : 1;
 	for (int j = 0; j < times; j++) {
 		if (buf->redo == NULL) {
-			editorSetStatusMessage(msg_no_redo);
+			setStatusMessage(msg_no_redo);
 			return;
 		}
 
@@ -277,22 +279,22 @@ void editorDoRedo(struct editorBuffer *buf, int count) {
 			buf->cy = buf->redo->endy;
 		}
 
-		editorUpdateBuffer(buf);
+		updateBuffer(buf);
 
-		struct editorUndo *orig = buf->undo;
+		struct undo *orig = buf->undo;
 		buf->undo = buf->redo;
 		buf->redo = buf->redo->prev;
 		buf->undo->prev = orig;
 		buf->undo_count++;
 
 		if (buf->redo != NULL && buf->redo->paired) {
-			editorDoRedo(buf, 1);
+			doRedo(buf, 1);
 		}
 	}
 }
 
-struct editorUndo *newUndo(void) {
-	struct editorUndo *ret = xmalloc(sizeof(*ret));
+struct undo *newUndo(void) {
+	struct undo *ret = xmalloc(sizeof(*ret));
 	ret->prev = NULL;
 	ret->paired = 0;
 	ret->startx = 0;
@@ -308,16 +310,16 @@ struct editorUndo *newUndo(void) {
 	return ret;
 }
 
-static void freeUndos(struct editorUndo *first);
+static void freeUndos(struct undo *first);
 
-void pushUndo(struct editorBuffer *buf, struct editorUndo *new) {
+void pushUndo(struct buffer *buf, struct undo *new) {
 	new->prev = buf->undo;
 	buf->undo = new;
 	buf->undo_count++;
 
 	if (buf->undo_count > UNDO_LIMIT) {
 		/* Walk to the node just before the tail to prune */
-		struct editorUndo *cur = buf->undo;
+		struct undo *cur = buf->undo;
 		for (int i = 1; i < UNDO_LIMIT && cur->prev != NULL; i++) {
 			cur = cur->prev;
 		}
@@ -332,9 +334,9 @@ void pushUndo(struct editorBuffer *buf, struct editorUndo *new) {
 	}
 }
 
-static void freeUndos(struct editorUndo *first) {
-	struct editorUndo *cur = first;
-	struct editorUndo *prev;
+static void freeUndos(struct undo *first) {
+	struct undo *cur = first;
+	struct undo *prev;
 
 	while (cur != NULL) {
 		free(cur->data);
@@ -344,12 +346,12 @@ static void freeUndos(struct editorUndo *first) {
 	}
 }
 
-void clearRedos(struct editorBuffer *buf) {
+void clearRedos(struct buffer *buf) {
 	freeUndos(buf->redo);
 	buf->redo = NULL;
 }
 
-void clearUndosAndRedos(struct editorBuffer *buf) {
+void clearUndosAndRedos(struct buffer *buf) {
 	freeUndos(buf->undo);
 	buf->undo = NULL;
 	buf->undo_count = 0;
@@ -358,13 +360,13 @@ void clearUndosAndRedos(struct editorBuffer *buf) {
 
 #define ALIGNED(x1, y1, x2, y2) ((x1 == x2) && (y1 == y2))
 
-void editorUndoAppendChar(struct editorBuffer *buf, uint8_t c) {
+void undoAppendChar(struct buffer *buf, uint8_t c) {
 	clearRedos(buf);
 	if (buf->undo == NULL || !(buf->undo->append) || buf->undo->delete ||
 	    !ALIGNED(buf->undo->endx, buf->undo->endy, buf->cx, buf->cy)) {
 		if (buf->undo != NULL)
 			buf->undo->append = 0;
-		struct editorUndo *new = newUndo();
+		struct undo *new = newUndo();
 		new->startx = buf->cx;
 		new->starty = buf->cy;
 		new->endx = buf->cx;
@@ -409,35 +411,34 @@ void editorUndoAppendChar(struct editorBuffer *buf, uint8_t c) {
 	}
 }
 
-void editorUndoAppendUnicode(struct editorConfig *ed,
-			     struct editorBuffer *buf) {
+void undoAppendUnicode(struct buffer *buf) {
 	clearRedos(buf);
 	if (buf->undo == NULL || !(buf->undo->append) ||
-	    (buf->undo->datalen + ed->nunicode >= buf->undo->datasize) ||
+	    (buf->undo->datalen + E.nunicode >= buf->undo->datasize) ||
 	    buf->undo->delete ||
 	    !ALIGNED(buf->undo->endx, buf->undo->endy, buf->cx, buf->cy)) {
 		if (buf->undo != NULL)
 			buf->undo->append = 0;
-		struct editorUndo *new = newUndo();
+		struct undo *new = newUndo();
 		new->startx = buf->cx;
 		new->starty = buf->cy;
 		new->endx = buf->cx;
 		new->endy = buf->cy;
 		pushUndo(buf, new);
 	}
-	for (int i = 0; i < ed->nunicode; i++) {
-		buf->undo->data[buf->undo->datalen++] = ed->unicode[i];
+	for (int i = 0; i < E.nunicode; i++) {
+		buf->undo->data[buf->undo->datalen++] = E.unicode[i];
 	}
 	buf->undo->data[buf->undo->datalen] = 0;
 	buf->undo->append = !(buf->undo->datalen >= buf->undo->datasize - 2);
-	buf->undo->endx += ed->nunicode;
+	buf->undo->endx += E.nunicode;
 
 	/* Adjust tracked points for this unicode insertion (always same-line) */
-	adjustAllPoints(buf, buf->cx, buf->cy, buf->cx + ed->nunicode, buf->cy,
+	adjustAllPoints(buf, buf->cx, buf->cy, buf->cx + E.nunicode, buf->cy,
 			0);
 }
 
-void editorUndoBackSpace(struct editorBuffer *buf, uint8_t c) {
+void undoBackSpace(struct buffer *buf, uint8_t c) {
 	clearRedos(buf);
 	if (buf->undo == NULL || !(buf->undo->append) || !(buf->undo->delete) ||
 	    !((c == '\n' && buf->undo->startx == 0 &&
@@ -446,7 +447,7 @@ void editorUndoBackSpace(struct editorBuffer *buf, uint8_t c) {
 	       buf->cy == buf->undo->starty))) {
 		if (buf->undo != NULL)
 			buf->undo->append = 0;
-		struct editorUndo *new = newUndo();
+		struct undo *new = newUndo();
 		new->endx = buf->cx;
 		if (c != '\n')
 			new->endx++;
@@ -489,13 +490,13 @@ void editorUndoBackSpace(struct editorBuffer *buf, uint8_t c) {
 			old_starty, 1);
 }
 
-void editorUndoDelChar(struct editorBuffer *buf, erow *row) {
+void undoDelChar(struct buffer *buf, erow *row) {
 	clearRedos(buf);
 	if (buf->undo == NULL || !(buf->undo->append) || !(buf->undo->delete) ||
 	    !(buf->undo->startx == buf->cx && buf->undo->starty == buf->cy)) {
 		if (buf->undo != NULL)
 			buf->undo->append = 0;
-		struct editorUndo *new = newUndo();
+		struct undo *new = newUndo();
 		new->endx = buf->cx;
 		new->endy = buf->cy;
 		new->startx = buf->cx;
@@ -548,17 +549,17 @@ void editorUndoDelChar(struct editorBuffer *buf, erow *row) {
 	}
 }
 
-void editorUndoSelfInsert(struct editorBuffer *buf, uint8_t c, int count) {
+void undoSelfInsert(uint8_t c, int count) {
 	if (count == 1) {
-		editorUndoAppendChar(buf, c);
+		undoAppendChar(E.buf, c);
 		return;
 	}
-	clearRedos(buf);
-	struct editorUndo *new = newUndo();
-	new->startx = buf->cx;
-	new->starty = buf->cy;
-	new->endx = buf->cx + count;
-	new->endy = buf->cy;
+	clearRedos(E.buf);
+	struct undo *new = newUndo();
+	new->startx = E.buf->cx;
+	new->starty = E.buf->cy;
+	new->endx = E.buf->cx + count;
+	new->endy = E.buf->cy;
 	new->append = 0;
 	if (count + 1 > new->datasize) {
 		new->datasize = count + 1;
@@ -567,5 +568,5 @@ void editorUndoSelfInsert(struct editorBuffer *buf, uint8_t c, int count) {
 	memset(new->data, c, count);
 	new->data[count] = 0;
 	new->datalen = count;
-	pushUndo(buf, new);
+	pushUndo(E.buf, new);
 }

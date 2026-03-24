@@ -13,7 +13,7 @@
 #include "window.h"
 #include "util.h"
 
-extern struct editorConfig E;
+extern struct config E;
 
 /* ---- jump-back stack ---- */
 
@@ -46,11 +46,11 @@ static int isIdentChar(uint8_t c) {
 	       (c >= '0' && c <= '9') || c == '_';
 }
 
-static char *wordAtPoint(struct editorBuffer *buf) {
-	if (buf->cy >= buf->numrows)
+static char *wordAtPoint(void) {
+	if (E.buf->cy >= E.buf->numrows)
 		return NULL;
-	erow *row = &buf->row[buf->cy];
-	int cx = buf->cx;
+	erow *row = &E.buf->row[E.buf->cy];
+	int cx = E.buf->cx;
 	if (cx >= row->size || !isIdentChar(row->chars[cx])) {
 		if (cx > 0 && isIdentChar(row->chars[cx - 1]))
 			cx--;
@@ -150,10 +150,10 @@ static int ctagsLookup(const char *sym, char *out_file, size_t filesz,
 
 /* ---- public API ---- */
 
-void editorCtagsJump(void) {
-	char *sym = wordAtPoint(E.buf);
+void ctagsJump(void) {
+	char *sym = wordAtPoint();
 	if (!sym) {
-		editorSetStatusMessage(msg_no_symbol_at_point);
+		setStatusMessage(msg_no_symbol_at_point);
 		return;
 	}
 
@@ -162,13 +162,13 @@ void editorCtagsJump(void) {
 	int tagline;
 	if (ctagsLookup(sym, tagfile, sizeof(tagfile), &tagline, tagpat,
 			sizeof(tagpat)) < 0) {
-		editorSetStatusMessage(msg_tag_not_found, sym);
+		setStatusMessage(msg_tag_not_found, sym);
 		free(sym);
 		return;
 	}
 
 	pushLocation();
-	struct editorBuffer *buf = editorSwitchToFile(tagfile);
+	struct buffer *buf = switchToFile(tagfile);
 	if (buf) {
 		if (tagline > 0) {
 			buf->cy = (tagline - 1 < buf->numrows) ? tagline - 1 :
@@ -188,17 +188,17 @@ void editorCtagsJump(void) {
 		}
 		recenter(E.windows[windowFocusedIdx()]);
 	}
-	editorSetStatusMessage(msg_tag, sym);
+	setStatusMessage(msg_tag, sym);
 	free(sym);
 }
 
-void editorCtagsBack(void) {
+void ctagsBack(void) {
 	if (jsp == 0) {
-		editorSetStatusMessage(msg_tag_stack_empty);
+		setStatusMessage(msg_tag_stack_empty);
 		return;
 	}
 	jsp--;
-	struct editorBuffer *buf = editorSwitchToFile(jstack[jsp].filename);
+	struct buffer *buf = switchToFile(jstack[jsp].filename);
 	if (buf) {
 		buf->cy = jstack[jsp].cy;
 		buf->cx = jstack[jsp].cx;
@@ -207,13 +207,13 @@ void editorCtagsBack(void) {
 	jstack[jsp].filename = NULL;
 }
 
-void editorToggleHeaderBody(void) {
+void toggleHeaderBody(void) {
 	if (!E.buf->filename)
 		return;
 
 	char *ext = strrchr(E.buf->filename, '.');
 	if (!ext) {
-		editorSetStatusMessage(msg_no_file_extension);
+		setStatusMessage(msg_no_file_extension);
 		return;
 	}
 
@@ -239,7 +239,7 @@ void editorToggleHeaderBody(void) {
 	}
 
 	if (!target_ext) {
-		editorSetStatusMessage(msg_no_ext_mapping, ext);
+		setStatusMessage(msg_no_ext_mapping, ext);
 		return;
 	}
 
@@ -250,10 +250,10 @@ void editorToggleHeaderBody(void) {
 	snprintf(other + base_len, sizeof(other) - base_len, "%s", target_ext);
 
 	if (access(other, F_OK) != 0) {
-		editorSetStatusMessage(msg_no_ext_file, other);
+		setStatusMessage(msg_no_ext_file, other);
 		return;
 	}
 
 	pushLocation();
-	editorSwitchToFile(other);
+	switchToFile(other);
 }

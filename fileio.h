@@ -1,26 +1,26 @@
-#ifndef FILEIO_H
-#define FILEIO_H
+#ifndef EMIL_FILEIO_H
+#define EMIL_FILEIO_H
 
-struct editorBuffer;
-struct editorConfig;
+struct buffer;
+struct config;
 
 /* File locking */
-int editorLockFile(struct editorBuffer *bufr, const char *filename);
-void editorReleaseLock(struct editorBuffer *bufr);
-void editorCheckFileModified(struct editorBuffer *bufr);
+int lockFile(struct buffer *bufr, const char *filename);
+void releaseLock(struct buffer *bufr);
+void checkFileModified(void);
 
 /* File I/O operations */
-char *editorRowsToString(struct editorBuffer *bufr, int *buflen);
-int editorOpen(struct editorBuffer *bufr, char *filename);
-void editorSave(struct editorBuffer *bufr);
-void editorSaveAs(struct editorBuffer *bufr);
-void editorRevert(struct editorConfig *ed, struct editorBuffer *buf);
+char *rowsToString(struct buffer *bufr, int *buflen);
+int editorOpen(struct buffer *bufr, char *filename);
+void save(void);
+void saveAs(void);
+void revert(void);
 void findFile(void);
-struct editorBuffer *editorSwitchToFile(const char *filename);
-void editorInsertFile(struct editorConfig *ed, struct editorBuffer *buf);
-void editorChangeDirectory(struct editorConfig *ed, struct editorBuffer *buf);
+struct buffer *switchToFile(const char *filename);
+void insertFile(void);
+void changeDirectory(void);
 
 char *relativePath(const char *from, const char *to);
 char *rebaseFilename(const char *filename, const char *old_cwd,
 		     const char *new_cwd);
-#endif /* FILEIO_H */
+#endif /* EMIL_FILEIO_H */

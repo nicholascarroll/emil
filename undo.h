@@ -5,21 +5,21 @@
 
 #define UNDO_LIMIT 100
 
-void editorDoUndo(struct editorBuffer *buf, int count);
-void editorDoRedo(struct editorBuffer *buf, int count);
-void editorUndoAppendChar(struct editorBuffer *buf, uint8_t c);
-void editorUndoAppendUnicode(struct editorConfig *ed, struct editorBuffer *buf);
-void editorUndoBackSpace(struct editorBuffer *buf, uint8_t c);
-void editorUndoDelChar(struct editorBuffer *buf, erow *row);
-struct editorUndo *newUndo(void);
-void pushUndo(struct editorBuffer *buf, struct editorUndo *new);
-void clearRedos(struct editorBuffer *buf);
-void clearUndosAndRedos(struct editorBuffer *buf);
-void bulkInsert(struct editorBuffer *buf, int startx, int starty,
-		const uint8_t *data, int datalen);
-void editorUndoSelfInsert(struct editorBuffer *buf, uint8_t c, int count);
+void doUndo(struct buffer *buf, int count);
+void doRedo(struct buffer *buf, int count);
+void undoAppendChar(struct buffer *buf, uint8_t c);
+void undoAppendUnicode(struct buffer *buf);
+void undoBackSpace(struct buffer *buf, uint8_t c);
+void undoDelChar(struct buffer *buf, erow *row);
+struct undo *newUndo(void);
+void pushUndo(struct buffer *buf, struct undo *new);
+void clearRedos(struct buffer *buf);
+void clearUndosAndRedos(struct buffer *buf);
+void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
+		int datalen);
+void undoSelfInsert(uint8_t c, int count);
 
 #ifdef EMIL_DEBUG_UNDO
-void debugUnpair(struct editorConfig *ed, struct editorBuffer *buf);
+void debugUnpair(void);
 #endif
 #endif

@@ -1,11 +1,11 @@
 #ifndef EMIL_H
 #define EMIL_H 1
 
+#include "keymap.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <termios.h>
 #include <time.h>
-#include "keymap.h"
 
 /*** util ***/
 
@@ -44,8 +44,8 @@ typedef struct erow {
 	int cached_width; /* display width in columns, or -1 if stale */
 } erow;
 
-struct editorUndo {
-	struct editorUndo *prev;
+struct undo {
+	struct undo *prev;
 	int startx;
 	int starty;
 	int endx;
@@ -83,7 +83,7 @@ struct markRingEntry {
 	int cy;
 };
 
-struct editorBuffer {
+struct buffer {
 	int indent;
 	int cx, cy;
 	int markx, marky;
@@ -110,20 +110,20 @@ struct editorBuffer {
 	int min_name_len;   /* Min chars to show without colliding */
 	uint8_t *query;
 	uint8_t match;
-	struct editorUndo *undo;
-	struct editorUndo *redo;
+	struct undo *undo;
+	struct undo *redo;
 	int undo_count;
 	int undo_pruned;
-	struct editorBuffer *next;
+	struct buffer *next;
 	int *screen_line_start;
 	int screen_line_cache_size;
 	int screen_line_cache_valid;
 	struct completion_state completion_state;
 };
 
-struct editorWindow {
+struct window {
 	int focused;
-	struct editorBuffer *buf;
+	struct buffer *buf;
 	int scx, scy;
 	int cx, cy; // Buffer cx,cy  (only updated when switching windows)
 	int rowoff;
@@ -132,27 +132,25 @@ struct editorWindow {
 	int skip_sublines; /* sub-lines of rowoff row to skip (derived per frame) */
 };
 
-struct editorMacro {
+struct macro {
 	int *keys;
 	int nkeys;
 	int skeys;
 };
 
-struct editorConfig;
-
-struct editorCommand {
+struct command {
 	const char *key;
-	void (*cmd)(struct editorConfig *, struct editorBuffer *);
+	void (*cmd)(void);
 };
 
-struct editorText {
+struct text {
 	uint8_t *str;	  /* NUL-terminated data */
 	int is_rectangle; /* 1 = rectangle data, 0 = plain text */
 	int rect_width;	  /* column width (meaningful when is_rectangle) */
 	int rect_height;  /* row count (meaningful when is_rectangle) */
 };
 
-static inline void clearEditorText(struct editorText *t) {
+static inline void clearText(struct text *t) {
 	free(t->str);
 	t->str = NULL;
 	t->is_rectangle = 0;
@@ -166,17 +164,17 @@ enum registerType {
 	REGISTER_TEXT,
 };
 
-struct editorPoint {
+struct point {
 	int cx;
 	int cy;
-	struct editorBuffer *buf;
+	struct buffer *buf;
 };
 
 struct editorRegister {
 	enum registerType rtype;
 	union {
-		struct editorPoint point;
-		struct editorText text;
+		struct point point;
+		struct text text;
 	} data;
 };
 
@@ -191,14 +189,14 @@ struct historyEntry {
 	struct historyEntry *next;
 };
 
-struct editorHistory {
+struct history {
 	struct historyEntry *head;
 	struct historyEntry *tail;
 	int count;
 };
 
-struct editorConfig {
-	struct editorText kill; /* active kill entry */
+struct config {
+	struct text kill; /* active kill entry */
 	int screenrows;
 	int screencols;
 	uint8_t unicode[4];
@@ -207,49 +205,50 @@ struct editorConfig {
 	char prefix_display[32]; /* Display prefix commands like C-u */
 
 	/* Buffer management for minibuffer */
-	struct editorBuffer *edbuf;   /* Saved editor context */
-	struct editorBuffer *minibuf; /* Minibuffer object */
+	struct buffer *edbuf;	/* Saved editor context */
+	struct buffer *minibuf; /* Minibuffer object */
 
 	time_t statusmsg_time;
 	struct termios orig_termios;
-	struct editorBuffer *headbuf;
-	struct editorBuffer *buf; /* Current active buffer */
+	struct buffer *headbuf;
+	struct buffer *buf; /* Current active buffer */
 	int nwindows;
-	struct editorWindow **windows;
+	struct window **windows;
 	int recording;
-	struct editorMacro macro;
+	struct macro macro;
 	int playback;
 	int micro;
-	struct editorCommand *cmd;
+	struct command *cmd;
 	int cmd_count;
 	struct editorRegister registers[127];
-	struct editorBuffer *lastVisitedBuffer;
+	struct buffer *lastVisitedBuffer;
 	int uarg; /* Universal argument: 0 = off, non-zero = active with that value */
-	int macro_depth; /* Current macro execution depth to prevent infinite recursion */
+	int macro_depth; /* Current macro execution depth to prevent infinite
+                      recursion */
 
-	struct editorHistory file_history;
-	struct editorHistory command_history;
-	struct editorHistory shell_history;
-	struct editorHistory search_history;
-	struct editorHistory kill_history;
+	struct history file_history;
+	struct history command_history;
+	struct history shell_history;
+	struct history search_history;
+	struct history kill_history;
 	int kill_ring_pos;   /* Current position in kill ring for M-y */
 	int self_insert_key; /* Stashed key for CMD_SELF_INSERT */
 };
 
 /*** prototypes ***/
 
-uint8_t *editorPrompt(struct editorBuffer *bufr, const uint8_t *prompt,
+uint8_t *editorPrompt(struct buffer *bufr, const uint8_t *prompt,
 		      enum promptType t,
-		      void (*callback)(struct editorBuffer *, uint8_t *, int));
-void editorUpdateBuffer(struct editorBuffer *buf);
-void editorInsertNewlineRaw(struct editorBuffer *bufr);
-void editorInsertNewline(struct editorBuffer *bufr, int count);
-void editorInsertChar(struct editorBuffer *bufr, int c, int count);
-int editorOpen(struct editorBuffer *bufr, char *filename);
+		      void (*callback)(struct buffer *, uint8_t *, int));
+void updateBuffer(struct buffer *buf);
+void insertNewlineRaw(void);
+void insertNewline(int count);
+void insertChar(struct buffer *bufr, int c, int count);
+int editorOpen(struct buffer *bufr, char *filename);
 void die(const char *s);
-struct editorBuffer *newBuffer(void);
-void destroyBuffer(struct editorBuffer *);
-void editorRecordKey(int c);
-void editorExecMacro(struct editorMacro *macro);
+struct buffer *newBuffer(void);
+void destroyBuffer(struct buffer *);
+void recordKey(int c);
+void execMacro(struct macro *macro);
 
 #endif

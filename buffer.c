@@ -12,14 +12,15 @@
 #include "display.h"
 #include "util.h"
 #include "terminal.h"
+#include "window.h"
 
-extern struct editorConfig E;
+extern struct config E;
 
-void invalidateScreenCache(struct editorBuffer *buf) {
+void invalidateScreenCache(struct buffer *buf) {
 	buf->screen_line_cache_valid = 0;
 }
 
-void buildScreenCache(struct editorBuffer *buf, int screencols) {
+void buildScreenCache(struct buffer *buf, int screencols) {
 	if (buf->screen_line_cache_valid)
 		return;
 
@@ -59,7 +60,7 @@ void buildScreenCache(struct editorBuffer *buf, int screencols) {
 	buf->screen_line_cache_valid = 1;
 }
 
-int getScreenLineForRow(struct editorBuffer *buf, int row, int screencols) {
+int getScreenLineForRow(struct buffer *buf, int row, int screencols) {
 	if (!buf->screen_line_cache_valid) {
 		buildScreenCache(buf, screencols);
 	}
@@ -323,7 +324,7 @@ int displayColumnToByteOffset(erow *row, int screencols, int target_subline,
 	return bidx;
 }
 
-void editorInsertRow(struct editorBuffer *bufr, int at, char *s, size_t len) {
+void insertRow(struct buffer *bufr, int at, char *s, size_t len) {
 	if (at < 0 || at > bufr->numrows)
 		return;
 
@@ -361,9 +362,10 @@ void freeRow(erow *row) {
 	free(row->chars);
 }
 
-void editorDelRow(struct editorBuffer *bufr, int at) {
+void delRow(struct buffer *bufr, int at) {
 	if (bufr->read_only) {
-		editorSetStatusMessage(msg_read_only);
+		setStatusMessage(msg_read_only);
+		return;
 	}
 
 	if (at < 0 || at >= bufr->numrows)
@@ -381,7 +383,7 @@ void editorDelRow(struct editorBuffer *bufr, int at) {
 	invalidateScreenCache(bufr);
 }
 
-void rowInsertChar(struct editorBuffer *bufr, erow *row, int at, int c) {
+void rowInsertChar(struct buffer *bufr, erow *row, int at, int c) {
 	if (at < 0 || at > row->size)
 		at = row->size;
 
@@ -399,27 +401,25 @@ void rowInsertChar(struct editorBuffer *bufr, erow *row, int at, int c) {
 	invalidateScreenCache(bufr);
 }
 
-void editorRowInsertUnicode(struct editorConfig *ed, struct editorBuffer *bufr,
-			    erow *row, int at) {
+void rowInsertUnicode(struct buffer *bufr, erow *row, int at) {
 	if (bufr->read_only) {
-		editorSetStatusMessage(msg_read_only);
+		setStatusMessage(msg_read_only);
 		return;
 	}
 
 	if (at < 0 || at > row->size)
 		at = row->size;
-	row->chars = xrealloc(row->chars, row->size + 1 + ed->nunicode);
-	memmove(&row->chars[at + ed->nunicode], &row->chars[at],
+	row->chars = xrealloc(row->chars, row->size + 1 + E.nunicode);
+	memmove(&row->chars[at + E.nunicode], &row->chars[at],
 		row->size - at + 1);
-	row->size += ed->nunicode;
-	memcpy(&row->chars[at], ed->unicode, ed->nunicode);
+	row->size += E.nunicode;
+	memcpy(&row->chars[at], E.unicode, E.nunicode);
 	row->cached_width = -1;
 	bufr->dirty = 1;
 	invalidateScreenCache(bufr);
 }
 
-void rowAppendString(struct editorBuffer *bufr, erow *row, char *s,
-		     size_t len) {
+void rowAppendString(struct buffer *bufr, erow *row, char *s, size_t len) {
 	row->chars = xrealloc(row->chars, row->size + len + 1);
 	memcpy(&row->chars[row->size], s, len);
 	row->size += len;
@@ -429,7 +429,7 @@ void rowAppendString(struct editorBuffer *bufr, erow *row, char *s,
 	invalidateScreenCache(bufr);
 }
 
-void rowDelChar(struct editorBuffer *bufr, erow *row, int at) {
+void rowDelChar(struct buffer *bufr, erow *row, int at) {
 	if (at < 0 || at >= row->size)
 		return;
 	int size = utf8_nBytes(row->chars[at]);
@@ -441,8 +441,8 @@ void rowDelChar(struct editorBuffer *bufr, erow *row, int at) {
 	invalidateScreenCache(bufr);
 }
 
-struct editorBuffer *newBuffer(void) {
-	struct editorBuffer *ret = xmalloc(sizeof(struct editorBuffer));
+struct buffer *newBuffer(void) {
+	struct buffer *ret = xmalloc(sizeof(struct buffer));
 	ret->indent = 0;
 	ret->markx = -1;
 	ret->marky = -1;
@@ -485,8 +485,10 @@ struct editorBuffer *newBuffer(void) {
 	return ret;
 }
 
-void destroyBuffer(struct editorBuffer *buf) {
-	editorReleaseLock(buf);
+void destroyBuffer(struct buffer *buf) {
+	if (E.lastVisitedBuffer == buf)
+		E.lastVisitedBuffer = NULL;
+	releaseLock(buf);
 	clearUndosAndRedos(buf);
 	free(buf->filename);
 	free(buf->display_name);
@@ -505,26 +507,81 @@ void destroyBuffer(struct editorBuffer *buf) {
 	free(buf);
 }
 
-void editorUpdateBuffer(struct editorBuffer *buf) {
+void updateBuffer(struct buffer *buf) {
 	for (int i = 0; i < buf->numrows; i++) {
 		buf->row[i].cached_width = -1;
 	}
 	invalidateScreenCache(buf);
 }
 
-void editorSwitchToNamedBuffer(struct editorConfig *ed,
-			       struct editorBuffer *current) {
-	char prompt[512];
-	struct editorBuffer *defaultBuffer = NULL;
+struct buffer *findBufferByName(const char *name) {
+	for (struct buffer *b = E.headbuf; b != NULL; b = b->next) {
+		if (b->filename && strcmp(b->filename, name) == 0)
+			return b;
+	}
+	return NULL;
+}
 
-	if (ed->lastVisitedBuffer && ed->lastVisitedBuffer != current) {
-		defaultBuffer = ed->lastVisitedBuffer;
+struct buffer *findOrCreateSpecialBuffer(const char *name) {
+	struct buffer *buf = findBufferByName(name);
+	if (buf)
+		return buf;
+	buf = newBuffer();
+	buf->filename = xstrdup(name);
+	buf->special_buffer = 1;
+	buf->next = E.headbuf;
+	E.headbuf = buf;
+	return buf;
+}
+
+void clearBuffer(struct buffer *buf) {
+	int was_read_only = buf->read_only;
+	buf->read_only = 0;
+	while (buf->numrows > 0)
+		delRow(buf, 0);
+	buf->read_only = was_read_only;
+}
+
+void closeSpecialBuffer(const char *name) {
+	struct buffer *target = NULL;
+	struct buffer *prev = NULL;
+
+	for (struct buffer *b = E.headbuf; b != NULL; prev = b, b = b->next) {
+		if (b->filename && strcmp(b->filename, name) == 0) {
+			target = b;
+			break;
+		}
+	}
+	if (!target)
+		return;
+
+	int win = findBufferWindow(target);
+	if (win >= 0 && E.nwindows > 1)
+		destroyWindow(win);
+
+	if (prev)
+		prev->next = target->next;
+	else
+		E.headbuf = target->next;
+
+	if (E.buf == target)
+		E.buf = target->next ? target->next : E.headbuf;
+
+	destroyBuffer(target);
+}
+
+void switchToNamedBuffer(void) {
+	char prompt[512];
+	struct buffer *defaultBuffer = NULL;
+
+	if (E.lastVisitedBuffer && E.lastVisitedBuffer != E.buf) {
+		defaultBuffer = E.lastVisitedBuffer;
 	} else {
 		/* Find the first buffer that isn't the current one */
-		struct editorBuffer *b = ed->headbuf;
-		while (b == current && b->next)
+		struct buffer *b = E.headbuf;
+		while (b == E.buf && b->next)
 			b = b->next;
-		if (b != current)
+		if (b != E.buf)
 			defaultBuffer = b;
 	}
 
@@ -541,27 +598,28 @@ void editorSwitchToNamedBuffer(struct editorConfig *ed,
 	}
 
 	uint8_t *buffer_name =
-		editorPrompt(current, (uint8_t *)prompt, PROMPT_BUFFER, NULL);
+		editorPrompt(E.buf, (uint8_t *)prompt, PROMPT_BUFFER, NULL);
 
 	if (buffer_name == NULL) {
-		editorSetStatusMessage(msg_buffer_switch_canceled);
+		setStatusMessage(msg_buffer_switch_canceled);
+		return;
 	}
 
-	struct editorBuffer *targetBuffer = NULL;
+	struct buffer *targetBuffer = NULL;
 
 	if (buffer_name[0] == '\0') {
 		/* User pressed Enter without typing — use default */
 		targetBuffer = defaultBuffer;
 		if (!targetBuffer) {
-			editorSetStatusMessage(msg_no_buffer_switch);
+			setStatusMessage(msg_no_buffer_switch);
 			free(buffer_name);
 			return;
 		}
 	} else {
 		/* Try exact match on full path first */
-		for (struct editorBuffer *buf = ed->headbuf; buf != NULL;
+		for (struct buffer *buf = E.headbuf; buf != NULL;
 		     buf = buf->next) {
-			if (buf == current)
+			if (buf == E.buf)
 				continue;
 			const char *name = buf->filename ? buf->filename :
 							   "*scratch*";
@@ -573,11 +631,11 @@ void editorSwitchToNamedBuffer(struct editorConfig *ed,
 
 		/* If no exact full-path match, try basename match */
 		if (!targetBuffer) {
-			struct editorBuffer *basename_match = NULL;
+			struct buffer *basename_match = NULL;
 			int match_count = 0;
-			for (struct editorBuffer *buf = ed->headbuf;
-			     buf != NULL; buf = buf->next) {
-				if (buf == current)
+			for (struct buffer *buf = E.headbuf; buf != NULL;
+			     buf = buf->next) {
+				if (buf == E.buf)
 					continue;
 				const char *name = buf->filename ?
 							   buf->filename :
@@ -592,40 +650,38 @@ void editorSwitchToNamedBuffer(struct editorConfig *ed,
 			if (match_count == 1) {
 				targetBuffer = basename_match;
 			} else if (match_count > 1) {
-				editorSetStatusMessage(
-					"[Complete, but not unique]");
+				setStatusMessage("[Complete, but not unique]");
 				free(buffer_name);
 				return;
 			}
 		}
 
 		if (!targetBuffer) {
-			editorSetStatusMessage(msg_no_buffer_named,
-					       buffer_name);
+			setStatusMessage(msg_no_buffer_named, buffer_name);
 			free(buffer_name);
 			return;
 		}
 	}
 
-	ed->lastVisitedBuffer = current;
-	ed->buf = targetBuffer;
+	E.lastVisitedBuffer = E.buf;
+	E.buf = targetBuffer;
 
 	const char *switchedName =
-		ed->buf->display_name ?
-			ed->buf->display_name :
-			(ed->buf->filename ? ed->buf->filename : "*scratch*");
-	editorSetStatusMessage(msg_switched_to, switchedName);
+		E.buf->display_name ?
+			E.buf->display_name :
+			(E.buf->filename ? E.buf->filename : "*scratch*");
+	setStatusMessage(msg_switched_to, switchedName);
 
-	for (int i = 0; i < ed->nwindows; i++) {
-		if (ed->windows[i]->focused) {
-			ed->windows[i]->buf = ed->buf;
+	for (int i = 0; i < E.nwindows; i++) {
+		if (E.windows[i]->focused) {
+			E.windows[i]->buf = E.buf;
 		}
 	}
 
 	free(buffer_name);
 }
 
-void editorPreviousBuffer(void) {
+void previousBuffer(void) {
 	E.buf = E.buf->next;
 	if (E.buf == NULL) {
 		E.buf = E.headbuf;
@@ -637,7 +693,7 @@ void editorPreviousBuffer(void) {
 	}
 }
 
-void editorNextBuffer(void) {
+void nextBuffer(void) {
 	if (E.buf == E.headbuf) {
 		// If we're at the first buffer, go to the last buffer
 		while (E.buf->next != NULL) {
@@ -645,7 +701,7 @@ void editorNextBuffer(void) {
 		}
 	} else {
 		// Otherwise, go to the previous buffer
-		struct editorBuffer *temp = E.headbuf;
+		struct buffer *temp = E.headbuf;
 		while (temp->next != E.buf) {
 			temp = temp->next;
 		}
@@ -659,8 +715,8 @@ void editorNextBuffer(void) {
 	}
 }
 
-void editorKillBuffer(void) {
-	struct editorBuffer *bufr = E.buf;
+void killBuffer(void) {
+	struct buffer *bufr = E.buf;
 
 	// Bypass confirmation for special buffers
 	if (bufr->dirty && bufr->filename != NULL && !bufr->special_buffer) {
@@ -668,18 +724,18 @@ void editorKillBuffer(void) {
 			bufr->display_name ?
 				bufr->display_name :
 				(bufr->filename ? bufr->filename : "*scratch*");
-		editorSetStatusMessage(
-			"Buffer %s modified; kill anyway? (y or n)", killName);
+		setStatusMessage("Buffer %s modified; kill anyway? (y or n)",
+				 killName);
 		refreshScreen();
-		int c = editorReadKey();
+		int c = readKey();
 		if (c != 'y' && c != 'Y') {
-			editorSetStatusMessage("");
+			setStatusMessage("");
 			return;
 		}
 	}
 
 	// Find the previous buffer (if any)
-	struct editorBuffer *prevBuf = NULL;
+	struct buffer *prevBuf = NULL;
 	if (E.buf != E.headbuf) {
 		prevBuf = E.headbuf;
 		while (prevBuf->next != E.buf) {
@@ -841,19 +897,19 @@ void computeDisplayNames(void) {
 		max_width = 4;
 
 	/* Pass 1: full name or left-truncated. */
-	for (struct editorBuffer *b = E.headbuf; b != NULL; b = b->next) {
+	for (struct buffer *b = E.headbuf; b != NULL; b = b->next) {
 		free(b->display_name);
 		const char *name = b->filename ? b->filename : "*scratch*";
 		b->display_name = leftTruncate(name, max_width);
 	}
 
 	/* Pass 2: disambiguate collisions via middle-truncate. */
-	for (struct editorBuffer *a = E.headbuf; a != NULL; a = a->next) {
+	for (struct buffer *a = E.headbuf; a != NULL; a = a->next) {
 		const char *a_full = a->filename ? a->filename : "*scratch*";
 		if (strcmp(a->display_name, a_full) == 0)
 			continue;
 
-		for (struct editorBuffer *b = a->next; b != NULL; b = b->next) {
+		for (struct buffer *b = a->next; b != NULL; b = b->next) {
 			if (strcmp(a->display_name, b->display_name) != 0)
 				continue;
 
@@ -871,13 +927,12 @@ void computeDisplayNames(void) {
 	/* Pass 3: compute min_name_len for each buffer.
 	 * Find the shortest right-end of display_name that doesn't
 	 * match any other buffer's right-end at the same length. */
-	for (struct editorBuffer *a = E.headbuf; a != NULL; a = a->next) {
+	for (struct buffer *a = E.headbuf; a != NULL; a = a->next) {
 		int alen = strlen(a->display_name);
 		const char *bn = baseName(a->display_name);
 		a->min_name_len = strlen(bn); /* at least the basename */
 
-		for (struct editorBuffer *b = E.headbuf; b != NULL;
-		     b = b->next) {
+		for (struct buffer *b = E.headbuf; b != NULL; b = b->next) {
 			if (b == a)
 				continue;
 			int blen = strlen(b->display_name);
@@ -901,7 +956,7 @@ void computeDisplayNames(void) {
 /* Clamp cursor and mark to valid buffer positions.
  * Called after every command to prevent out-of-bounds
  * row access in rendering or subsequent commands. */
-void editorClampPositions(struct editorBuffer *buf) {
+void clampPositions(struct buffer *buf) {
 	if (buf->numrows == 0) {
 		buf->cy = 0;
 		buf->cx = 0;

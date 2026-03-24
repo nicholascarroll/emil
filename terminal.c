@@ -20,8 +20,8 @@
 #include "keymap.h"
 #include "display.h"
 
-extern struct editorConfig E;
-void editorDeserializeUnicode(void);
+extern struct config E;
+void deserializeUnicode(void);
 
 void die(const char *s) {
 	IGNORE_RETURN(write(STDOUT_FILENO, CSI "2J", 4));
@@ -63,7 +63,7 @@ void disableRawModeKeepScreen(void) {
  *      region, re-enters raw mode, and redraws — closing the drawer.
  */
 
-void editorOpenShellDrawer(void) {
+void openShellDrawer(void) {
 	struct winsize ws;
 	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_row < 12)
 		return;
@@ -77,8 +77,8 @@ void editorOpenShellDrawer(void) {
 	 * The bottom window's modeline becomes the visual separator
 	 * between the editor and the shell drawer area.
 	 */
-	int editorRows = ws.ws_row - drawerHeight;
-	E.screenrows = editorRows;
+	int rows = ws.ws_row - drawerHeight;
+	E.screenrows = rows;
 
 	/* Force all windows to recalculate heights for the smaller space */
 	for (int i = 0; i < E.nwindows; i++)
@@ -92,12 +92,12 @@ void editorOpenShellDrawer(void) {
 	refreshScreen();
 
 	/*
-	 * The editor content now occupies rows 1..editorRows.
-	 * The minibuffer sits at row editorRows; start the drawer
+	 * The editor content now occupies rows 1..rows.
+	 * The minibuffer sits at row rows; start the drawer
 	 * there so the clear below erases it, leaving the bottom
 	 * window's modeline as the boundary.
 	 */
-	int drawerTop = editorRows;
+	int drawerTop = rows;
 	char buf[64];
 	int n = snprintf(buf, sizeof(buf), CSI "%d;%dr", drawerTop, ws.ws_row);
 	if (n > 0)
@@ -175,7 +175,7 @@ int getWindowSize(int *rows, int *cols) {
 	}
 }
 
-void editorCopyToClipboard(const uint8_t *text) {
+void copyToClipboard(const uint8_t *text) {
 	if (text == NULL || text[0] == '\0')
 		return;
 
@@ -216,7 +216,7 @@ void editorCopyToClipboard(const uint8_t *text) {
 	free(encoded);
 }
 
-void editorDeserializeUnicode(void) {
+void deserializeUnicode(void) {
 	E.unicode[0] = E.macro.keys[E.playback++];
 	E.nunicode = utf8_nBytes(E.unicode[0]);
 	for (int i = 1; i < E.nunicode; i++) {
@@ -258,11 +258,11 @@ static void drainCSI(uint8_t last_read) {
 /* Raw reading a keypress - terminal layer only handles raw byte
  * reading, escape sequence decoding, and UTF-8 assembly.
  * Returns key tokens only — no binding policy. */
-int editorReadKey(void) {
+int readKey(void) {
 	if (E.playback) {
 		int ret = E.macro.keys[E.playback++];
 		if (ret == KEY_UNICODE) {
-			editorDeserializeUnicode();
+			deserializeUnicode();
 		}
 		return ret;
 	}
@@ -380,7 +380,7 @@ ESC_UNKNOWN:
 				}
 				emil_strlcat(seqR, buf, sizeof(seqR));
 			}
-			editorSetStatusMessage(msg_unknown_meta, seqR);
+			setStatusMessage(msg_unknown_meta, seqR);
 		}
 		return 033;
 	} else if (utf8_is2Char(c)) {

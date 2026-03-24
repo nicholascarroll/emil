@@ -1,5 +1,5 @@
 # Remember to keep the version number up to date
-VERSION = 0.2.1
+VERSION = 0.3.0
 
 PROGNAME = emil
 PREFIX = /usr/local

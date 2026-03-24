@@ -106,7 +106,6 @@ set bind-tty-special-chars off
 ```
 In `emil`, as in Readline,  `Ctrl-h` deletes the previous character, whereas in `emacs` it is the help prefix key.
 
-Readline supports two ways to kill to the beginning of the line: `Ctrl-x BACKSPACE` (supported in *emacs*) and the more ergonomic `Ctrl-u` which conflicts with the *emacs* universal argument. `emil` resolves the conflict by binding `Ctrl-u Ctrl-a` to kill to the beginning of the line.
 
 ### Shell Integration
 

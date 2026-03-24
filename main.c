@@ -1,3 +1,20 @@
+#include "buffer.h"
+#include "completion.h"
+#include "display.h"
+#include "emil.h"
+#include "fileio.h"
+#include "find.h"
+#include "history.h"
+#include "keymap.h"
+#include "message.h"
+#include "pipe.h"
+#include "region.h"
+#include "register.h"
+#include "terminal.h"
+#include "transform.h"
+#include "undo.h"
+#include "unicode.h"
+#include "unused.h"
 #include "util.h"
 #include <errno.h>
 #include <fcntl.h>
@@ -11,28 +28,10 @@
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
-#include "emil.h"
-#include "message.h"
-#include "fileio.h"
-#include "find.h"
-#include "pipe.h"
-#include "region.h"
-#include "register.h"
-#include "history.h"
-#include "buffer.h"
-#include "completion.h"
-#include "transform.h"
-#include "undo.h"
-#include "unicode.h"
-#include "unused.h"
-#include "terminal.h"
-#include "display.h"
-#include "keymap.h"
-#include "util.h"
 
 const int page_overlap = 2;
 
-struct editorConfig E;
+struct config E;
 void setupHandlers(void);
 
 /*** output ***/
@@ -46,7 +45,7 @@ void editorSuspend(int UNUSED(sig)) {
 void editorResume(int UNUSED(sig)) {
 	/* Reset scrolling region in case we came back from a shell drawer */
 	IGNORE_RETURN(write(STDOUT_FILENO, CSI "r", 3));
-	/* Restore cursor (matches ESC 7 in editorOpenShellDrawer) */
+	/* Restore cursor (matches ESC 7 in openShellDrawer) */
 	IGNORE_RETURN(write(STDOUT_FILENO, ESC "8", 2));
 	setupHandlers();
 	enableRawMode();
@@ -55,12 +54,12 @@ void editorResume(int UNUSED(sig)) {
 	for (int i = 0; i < E.nwindows; i++)
 		E.windows[i]->height = 0;
 
-	editorResizeScreen(0);
+	resizeScreen(0);
 }
 
 #ifdef SIGWINCH
 void sigwinchHandler(int UNUSED(sig)) {
-	editorResizeScreen(0);
+	resizeScreen(0);
 }
 #endif
 
@@ -76,9 +75,9 @@ void setupHandlers(void) {
 
 void initEditor(void) {
 	E.statusmsg[0] = 0;
-	E.kill = (struct editorText){ 0 };
-	E.windows = xmalloc(sizeof(struct editorWindow *) * 1);
-	E.windows[0] = xcalloc(1, sizeof(struct editorWindow));
+	E.kill = (struct text){ 0 };
+	E.windows = xmalloc(sizeof(struct window *) * 1);
+	E.windows[0] = xcalloc(1, sizeof(struct window));
 	E.windows[0]->focused = 1;
 	E.nwindows = 1;
 	E.recording = 0;
@@ -88,7 +87,7 @@ void initEditor(void) {
 	E.playback = 0;
 	E.headbuf = NULL;
 	memset(E.registers, 0, sizeof(E.registers));
-	setupCommands(&E);
+	setupCommands();
 	E.lastVisitedBuffer = NULL;
 	E.macro_depth = 0;
 
@@ -133,13 +132,13 @@ static char *readAllFromFd(int fd, size_t *out_len) {
  * Returns the new buffer, or NULL if the data contains null bytes
  * (which would indicate binary / non-UTF-8 content).
  */
-static struct editorBuffer *loadStdinBuffer(const char *data, size_t len) {
+static struct buffer *loadStdinBuffer(const char *data, size_t len) {
 	/* Reject binary data: null bytes can't be represented */
 	if (memchr(data, '\0', len) != NULL) {
 		return NULL;
 	}
 
-	struct editorBuffer *buf = newBuffer();
+	struct buffer *buf = newBuffer();
 	buf->filename = xstrdup("*stdin*");
 
 	size_t start = 0;
@@ -149,8 +148,8 @@ static struct editorBuffer *loadStdinBuffer(const char *data, size_t len) {
 			size_t end = i;
 			if (end > start && data[end - 1] == '\r')
 				end--;
-			editorInsertRow(buf, buf->numrows, (char *)&data[start],
-					(int)(end - start));
+			insertRow(buf, buf->numrows, (char *)&data[start],
+				  (int)(end - start));
 			start = i + 1;
 		}
 	}
@@ -159,8 +158,8 @@ static struct editorBuffer *loadStdinBuffer(const char *data, size_t len) {
 		size_t end = len;
 		if (end > start && data[end - 1] == '\r')
 			end--;
-		editorInsertRow(buf, buf->numrows, (char *)&data[start],
-				(int)(end - start));
+		insertRow(buf, buf->numrows, (char *)&data[start],
+			  (int)(end - start));
 	}
 
 	buf->dirty = 0;
@@ -217,7 +216,7 @@ int main(int argc, char *argv[]) {
 	/* Load piped stdin data if present */
 	if (stdin_data != NULL) {
 		if (stdin_len > 0) {
-			struct editorBuffer *stdinBuf =
+			struct buffer *stdinBuf =
 				loadStdinBuffer(stdin_data, stdin_len);
 			if (stdinBuf == NULL) {
 				/* Binary data — bail out cleanly */
@@ -252,11 +251,11 @@ int main(int argc, char *argv[]) {
 				}
 				/* stdin was a tty and not piped —
 				 * nothing to read */
-				editorSetStatusMessage(msg_no_piped_input);
+				setStatusMessage(msg_no_piped_input);
 				continue;
 			}
 
-			struct editorBuffer *newBuf = newBuffer();
+			struct buffer *newBuf = newBuffer();
 			if (editorOpen(newBuf, argv[i]) < 0) {
 				disableRawMode();
 
@@ -291,15 +290,15 @@ int main(int argc, char *argv[]) {
 	computeDisplayNames();
 
 #ifdef EMIL_DISABLE_SHELL
-	editorSetStatusMessage(msg_shell_disabled);
+	setStatusMessage(msg_shell_disabled);
 #endif /* EMIL_DISABLE_SHELL */
 	setupHandlers();
 
 	for (;;) {
 		refreshScreen();
 
-		int key = editorReadKey();
-		editorRecordKey(key);
+		int key = readKey();
+		recordKey(key);
 
 		/* Stash printable key for self-insert */
 		if (key >= ' ' && key < KEY_ARROW_LEFT)
@@ -307,11 +306,11 @@ int main(int argc, char *argv[]) {
 
 		int cmd = resolveBinding(key);
 		if (cmd != CMD_NONE)
-			editorProcessKeypress(cmd);
+			processKeypress(cmd);
 	}
 
 	/* cleanup */
-	clearEditorText(&E.kill);
+	clearText(&E.kill);
 
 	return 0;
 }

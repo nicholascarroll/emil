@@ -4,7 +4,7 @@
 #include <stdarg.h>
 
 /* Status message display */
-void editorSetStatusMessage(const char *fmt, ...);
+void setStatusMessage(const char *fmt, ...);
 
 /*
  * All user-facing messages for emil.
@@ -52,6 +52,8 @@ static const char *const msg_save_aborted = "保存已中止。";
 static const char *const msg_save_failed = "保存失败：%s";
 static const char *const msg_file_not_found = "文件未找到：%s";
 static const char *const msg_invalid_utf8 = "UTF-8 验证失败";
+static const char *const msg_binary_file = "文件包含空字节（二进制文件？）";
+static const char *const msg_no_glob_match = "没有匹配的文件: %s";
 
 static const char *const msg_file_locked = "[文件被 PID %d 锁定]";
 static const char *const msg_file_changed_on_disk = "[文件已被外部修改]";
@@ -70,7 +72,6 @@ static const char *const msg_regex_error = "正则表达式错误：%s";
 static const char *const msg_regex_compile = "无法编译正则表达式：%s";
 static const char *const msg_no_match = "未匹配到 %s";
 static const char *const msg_no_match_bracket = "[无匹配]";
-static const char *const msg_backward_regex_todo = "反向正则搜索尚未实现";
 
 static const char *const msg_nothing_to_complete = "此处无可补全内容。";
 static const char *const msg_possible_completions = "可能的补全 (%d):";
@@ -178,6 +179,9 @@ static const char *const msg_save_aborted = "Save aborted.";
 static const char *const msg_save_failed = "Save failed: %s";
 static const char *const msg_file_not_found = "File not found: %s";
 static const char *const msg_invalid_utf8 = "Failed UTF-8 validation";
+static const char *const msg_binary_file =
+	"File contains null bytes (binary file?)";
+static const char *const msg_no_glob_match = "No matching files: %s";
 static const char *const msg_file_locked = "[FILE LOCKED BY PID %d]";
 static const char *const msg_file_changed_on_disk = "[FILE CHANGED ON DISK]";
 static const char *const msg_lines_columns = "%d lines, %d columns";
@@ -197,8 +201,6 @@ static const char *const msg_regex_error = "Regex error: %s";
 static const char *const msg_regex_compile = "Could not compile regex: %s";
 static const char *const msg_no_match = "No match for %s";
 static const char *const msg_no_match_bracket = "[No match]";
-static const char *const msg_backward_regex_todo =
-	"Backward regex search not yet implemented";
 
 static const char *const msg_nothing_to_complete = "Nothing to complete here.";
 static const char *const msg_possible_completions =

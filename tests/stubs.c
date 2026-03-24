@@ -13,7 +13,7 @@
 #include "emil.h"
 
 /* Normally defined in main.c */
-struct editorConfig E;
+struct config E;
 const int page_overlap = 2;
 
 void die(const char *s) {
@@ -25,7 +25,7 @@ void enableRawMode(void) {}
 void disableRawMode(void) {}
 void disableRawModeKeepScreen(void) {}
 
-int editorReadKey(void) {
+int readKey(void) {
 	return 0;
 }
 
@@ -41,10 +41,10 @@ int getWindowSize(int *rows, int *cols) {
 	return 0;
 }
 
-void editorCopyToClipboard(const uint8_t *text) {
+void copyToClipboard(const uint8_t *text) {
 	(void)text;
 }
 
-void editorDeserializeUnicode(void) {}
+void deserializeUnicode(void) {}
 
-void editorOpenShellDrawer(void) {}
+void openShellDrawer(void) {}

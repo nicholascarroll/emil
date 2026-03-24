@@ -16,9 +16,10 @@
 #include "edit.h"
 #include "unicode.h"
 #include "undo.h"
+#include "window.h"
 #include <regex.h>
 
-extern struct editorConfig E;
+extern struct config E;
 
 void resetCompletionState(struct completion_state *state) {
 	free(state->last_completed_text);
@@ -150,8 +151,8 @@ static void getFileCompletions(const char *prefix,
 	}
 }
 
-static void getBufferCompletions(struct editorConfig *ed, const char *prefix,
-				 struct editorBuffer *currentBuffer,
+static void getBufferCompletions(const char *prefix,
+				 struct buffer *currentBuffer,
 				 struct completion_result *result) {
 	result->matches = NULL;
 	result->n_matches = 0;
@@ -165,7 +166,7 @@ static void getBufferCompletions(struct editorConfig *ed, const char *prefix,
 	 * since the user types basenames in the prompt. */
 	char **basenames = xmalloc(capacity * sizeof(char *));
 
-	for (struct editorBuffer *b = ed->headbuf; b != NULL; b = b->next) {
+	for (struct buffer *b = E.headbuf; b != NULL; b = b->next) {
 		if (b == currentBuffer)
 			continue;
 
@@ -214,7 +215,7 @@ static void getBufferCompletions(struct editorConfig *ed, const char *prefix,
 	free(basenames);
 }
 
-static void getCommandCompletions(struct editorConfig *ed, const char *prefix,
+static void getCommandCompletions(const char *prefix,
 				  struct completion_result *result) {
 	result->matches = NULL;
 	result->n_matches = 0;
@@ -235,8 +236,8 @@ static void getCommandCompletions(struct editorConfig *ed, const char *prefix,
 		lower_prefix[i] = c;
 	}
 
-	for (int i = 0; i < ed->cmd_count; i++) {
-		if (strncmp(ed->cmd[i].key, lower_prefix, prefix_len) == 0) {
+	for (int i = 0; i < E.cmd_count; i++) {
+		if (strncmp(E.cmd[i].key, lower_prefix, prefix_len) == 0) {
 			if (result->n_matches >= capacity) {
 				if (capacity > INT_MAX / 2 ||
 				    (size_t)capacity >
@@ -249,7 +250,7 @@ static void getCommandCompletions(struct editorConfig *ed, const char *prefix,
 						 capacity * sizeof(char *));
 			}
 			result->matches[result->n_matches++] =
-				xstrdup(ed->cmd[i].key);
+				xstrdup(E.cmd[i].key);
 		}
 	}
 
@@ -264,46 +265,22 @@ static void getCommandCompletions(struct editorConfig *ed, const char *prefix,
 	}
 }
 
-static void replaceMinibufferText(struct editorBuffer *minibuf,
-				  const char *text) {
+static void replaceMinibufferText(struct buffer *minibuf, const char *text) {
 	/* Clear current content */
 	while (minibuf->numrows > 0) {
-		editorDelRow(minibuf, 0);
+		delRow(minibuf, 0);
 	}
 
 	/* Insert new text */
-	editorInsertRow(minibuf, 0, (char *)text, strlen(text));
+	insertRow(minibuf, 0, (char *)text, strlen(text));
 	minibuf->cx = strlen(text);
 	minibuf->cy = 0;
-}
-
-static struct editorBuffer *findOrCreateBuffer(const char *name) {
-	/* Search for existing buffer */
-	for (struct editorBuffer *b = E.headbuf; b != NULL; b = b->next) {
-		if (b->filename && strcmp(b->filename, name) == 0) {
-			return b;
-		}
-	}
-
-	/* Create new buffer */
-	struct editorBuffer *new_buf = newBuffer();
-	new_buf->filename = xstrdup(name);
-	new_buf->special_buffer = 1;
-	new_buf->next = E.headbuf;
-	E.headbuf = new_buf;
-	return new_buf;
-}
-
-static void clearBuffer(struct editorBuffer *buf) {
-	while (buf->numrows > 0) {
-		editorDelRow(buf, 0);
-	}
 }
 
 static void showCompletionsBuffer(char **matches, int n_matches,
 				  enum promptType type) {
 	/* Find or create completions buffer */
-	struct editorBuffer *comp_buf = findOrCreateBuffer("*Completions*");
+	struct buffer *comp_buf = findOrCreateSpecialBuffer("*Completions*");
 	clearBuffer(comp_buf);
 	comp_buf->read_only = 1;
 	comp_buf->word_wrap = 0;
@@ -311,8 +288,8 @@ static void showCompletionsBuffer(char **matches, int n_matches,
 	/* Add header */
 	char header[100];
 	snprintf(header, sizeof(header), msg_possible_completions, n_matches);
-	editorInsertRow(comp_buf, 0, header, strlen(header));
-	editorInsertRow(comp_buf, 1, "", 0);
+	insertRow(comp_buf, 0, header, strlen(header));
+	insertRow(comp_buf, 1, "", 0);
 
 	if (type == PROMPT_BUFFER) {
 		/* Buffer completions: vertical list with display names.
@@ -321,7 +298,7 @@ static void showCompletionsBuffer(char **matches, int n_matches,
 		for (int i = 0; i < n_matches; i++) {
 			/* Find the buffer to get its display_name */
 			const char *show = matches[i];
-			for (struct editorBuffer *b = E.headbuf; b != NULL;
+			for (struct buffer *b = E.headbuf; b != NULL;
 			     b = b->next) {
 				const char *bname = b->filename ? b->filename :
 								  "*scratch*";
@@ -332,8 +309,8 @@ static void showCompletionsBuffer(char **matches, int n_matches,
 				}
 			}
 			int len = (int)strlen(show);
-			editorInsertRow(comp_buf, comp_buf->numrows,
-					(char *)show, len);
+			insertRow(comp_buf, comp_buf->numrows, (char *)show,
+				  len);
 		}
 
 		/* Store match list for M-n/M-p navigation. */
@@ -388,119 +365,19 @@ static void showCompletionsBuffer(char **matches, int n_matches,
 				line_pos--;
 			line[line_pos] = '\0';
 
-			editorInsertRow(comp_buf, comp_buf->numrows, line,
-					line_pos);
+			insertRow(comp_buf, comp_buf->numrows, line, line_pos);
 		}
 	}
 
-	/* Display in window if not already visible */
-	int comp_window = findBufferWindow(comp_buf);
-	if (comp_window == -1) {
-		/* Not visible - create new window at bottom */
-		if (E.nwindows >= 1) {
-			/* Create new window for completions */
-			int new_window_idx = E.nwindows;
-			editorCreateWindow();
-
-			/* Set the new window to show completions buffer */
-			E.windows[new_window_idx]->buf = comp_buf;
-			E.windows[new_window_idx]->focused = 0;
-
-			/* Keep focus on the first window */
-			for (int i = 0; i < E.nwindows; i++) {
-				E.windows[i]->focused = (i == 0);
-			}
-
-			comp_window = new_window_idx;
-		}
-	} else {
-	}
-
-	/* Adjust window sizes for completions display */
-	if (E.nwindows >= 2 && comp_window >= 0) {
-		/* Calculate desired height for completions window */
-		int comp_height = comp_buf->numrows + 2; /* +2 for padding */
-
-		/* Calculate total available height */
-		int total_height = E.screenrows - minibuffer_height -
-				   (statusbar_height * E.nwindows);
-
-		/* Calculate minimum space needed for non-completion windows */
-		int non_comp_windows = E.nwindows - 1;
-		int min_space_for_others =
-			non_comp_windows * 3; /* 3 lines minimum each */
-
-		/* Maximum height for completions is what's left after ensuring minimums */
-		int max_comp_height = total_height - min_space_for_others;
-		if (comp_height > max_comp_height) {
-			comp_height = max_comp_height;
-		}
-
-		/* Ensure completions window itself gets at least 3 lines */
-		if (comp_height < 3) {
-			comp_height = 3;
-		}
-
-		/* Distribute remaining space to other windows */
-		int remaining_height = total_height - comp_height;
-		int height_per_window = remaining_height / non_comp_windows;
-
-		/* Set window heights */
-		for (int i = 0; i < E.nwindows; i++) {
-			if (i == comp_window) {
-				E.windows[i]->height = comp_height;
-			} else {
-				E.windows[i]->height = height_per_window;
-			}
-		}
-	}
-
+	showPopupBuffer(comp_buf);
 	refreshScreen();
 }
 
 void closeCompletionsBuffer(void) {
-	struct editorBuffer *comp_buf = NULL;
-	struct editorBuffer *prev_buf = NULL;
-
-	/* Find the completions buffer and its predecessor */
-	for (struct editorBuffer *b = E.headbuf; b != NULL;
-	     prev_buf = b, b = b->next) {
-		if (b->filename && strcmp(b->filename, "*Completions*") == 0) {
-			comp_buf = b;
-			break;
-		}
-	}
-
-	if (comp_buf) {
-		int comp_window = findBufferWindow(comp_buf);
-		if (comp_window >= 0 && E.nwindows > 1) {
-			editorDestroyWindow(comp_window);
-		}
-
-		/* Remove the buffer from the buffer list */
-		if (prev_buf) {
-			prev_buf->next = comp_buf->next;
-		} else {
-			E.headbuf = comp_buf->next;
-		}
-
-		/* Update E.buf if it pointed to the completions buffer */
-		if (E.buf == comp_buf) {
-			E.buf = comp_buf->next ? comp_buf->next : E.headbuf;
-		}
-
-		/* Update lastVisitedBuffer if it pointed to completions buffer */
-		if (E.lastVisitedBuffer == comp_buf) {
-			E.lastVisitedBuffer = NULL;
-		}
-
-		/* Destroy the buffer */
-		destroyBuffer(comp_buf);
-	}
+	closeSpecialBuffer("*Completions*");
 }
 
-void handleMinibufferCompletion(struct editorBuffer *minibuf,
-				enum promptType type) {
+void handleMinibufferCompletion(struct buffer *minibuf, enum promptType type) {
 	/* Get current buffer text */
 	char *current_text =
 		minibuf->numrows > 0 ? (char *)minibuf->row[0].chars : "";
@@ -556,20 +433,20 @@ void handleMinibufferCompletion(struct editorBuffer *minibuf,
 		}
 		break;
 	case PROMPT_BUFFER:
-		getBufferCompletions(&E, current_text, E.edbuf, &result);
+		getBufferCompletions(current_text, E.edbuf, &result);
 		break;
 	case PROMPT_COMMAND:
-		getCommandCompletions(&E, current_text, &result);
+		getCommandCompletions(current_text, &result);
 		break;
 	case PROMPT_SEARCH:
 		/* For search, we can provide buffer completions */
-		getBufferCompletions(&E, current_text, E.edbuf, &result);
+		getBufferCompletions(current_text, E.edbuf, &result);
 		break;
 	}
 
 	/* Handle based on number of matches */
 	if (result.n_matches == 0) {
-		editorSetStatusMessage(msg_no_match_bracket);
+		setStatusMessage(msg_no_match_bracket);
 		minibuf->completion_state.preserve_message = 1;
 	} else if (result.n_matches == 1) {
 		/* Complete fully */
@@ -588,7 +465,7 @@ void handleMinibufferCompletion(struct editorBuffer *minibuf,
 				showCompletionsBuffer(result.matches,
 						      result.n_matches, type);
 			} else {
-				editorSetStatusMessage(msg_complete_not_unique);
+				setStatusMessage(msg_complete_not_unique);
 				minibuf->completion_state.preserve_message = 1;
 			}
 		}
@@ -604,7 +481,7 @@ void handleMinibufferCompletion(struct editorBuffer *minibuf,
 	freeCompletionResult(&result);
 }
 
-void cycleCompletion(struct editorBuffer *minibuf, int direction) {
+void cycleCompletion(struct buffer *minibuf, int direction) {
 	struct completion_state *cs = &minibuf->completion_state;
 	if (!cs->matches || cs->n_matches == 0)
 		return;
@@ -628,10 +505,8 @@ void cycleCompletion(struct editorBuffer *minibuf, int direction) {
 
 	/* Update the completions buffer cursor to highlight the
 	 * selected row.  Data rows start at row 2. */
-	for (struct editorBuffer *b = E.headbuf; b != NULL; b = b->next) {
-		if (b->filename && strcmp(b->filename, "*Completions*") == 0) {
-			b->cy = cs->selected + 2;
-			break;
-		}
+	struct buffer *b = findBufferByName("*Completions*");
+	if (b) {
+		b->cy = cs->selected + 2;
 	}
 }

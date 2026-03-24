@@ -1,7 +1,7 @@
 #include "adjust.h"
 #include "emil.h"
 
-extern struct editorConfig E;
+extern struct config E;
 
 int adjustPoint(int *px, int *py, int startx, int starty, int endx, int endy,
 		int is_delete) {
@@ -56,7 +56,7 @@ int adjustPoint(int *px, int *py, int startx, int starty, int endx, int endy,
 	}
 }
 
-void adjustAllPoints(struct editorBuffer *buf, int startx, int starty, int endx,
+void adjustAllPoints(struct buffer *buf, int startx, int starty, int endx,
 		     int endy, int is_delete) {
 	/* Nothing to adjust if the mutation is a no-op */
 	if (startx == endx && starty == endy)
