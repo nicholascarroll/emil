@@ -314,7 +314,7 @@ static void showCompletionsBuffer(char **matches, int n_matches,
 	editorInsertRow(comp_buf, 0, header, strlen(header));
 	editorInsertRow(comp_buf, 1, "", 0);
 
-	if (type == PROMPT_BASIC) {
+	if (type == PROMPT_BUFFER) {
 		/* Buffer completions: vertical list with display names.
 		 * Show one match per row using display_name for each
 		 * buffer.  The basename is highlighted by the renderer. */
@@ -516,6 +516,8 @@ void handleMinibufferCompletion(struct editorBuffer *minibuf,
 	/* Get matches based on type */
 	struct completion_result result = { 0 };
 	switch (type) {
+	case PROMPT_BASIC:
+		break;
 	case PROMPT_FILES:
 		getFileCompletions(current_text, &result);
 		break;
@@ -553,7 +555,7 @@ void handleMinibufferCompletion(struct editorBuffer *minibuf,
 			}
 		}
 		break;
-	case PROMPT_BASIC:
+	case PROMPT_BUFFER:
 		getBufferCompletions(&E, current_text, E.edbuf, &result);
 		break;
 	case PROMPT_COMMAND:

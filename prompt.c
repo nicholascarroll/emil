@@ -141,7 +141,11 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, const uint8_t *prompt,
 			goto done;
 
 		case '\t':
-			handleMinibufferCompletion(E.minibuf, t);
+			if (t != PROMPT_BASIC) {
+				handleMinibufferCompletion(E.minibuf, t);
+			} else {
+				editorInsertChar(E.minibuf, '\t', 1);
+			}
 			break;
 
 		case CTRL('s'):
@@ -231,6 +235,7 @@ uint8_t *editorPrompt(struct editorBuffer *bufr, const uint8_t *prompt,
 				hist = &E.command_history;
 				break;
 			case PROMPT_BASIC:
+			case PROMPT_BUFFER:
 				hist = &E.shell_history;
 				break;
 			case PROMPT_SEARCH:
@@ -358,6 +363,7 @@ done:
 			hist = &E.command_history;
 			break;
 		case PROMPT_BASIC:
+		case PROMPT_BUFFER:
 			hist = &E.shell_history;
 			break;
 		case PROMPT_SEARCH:

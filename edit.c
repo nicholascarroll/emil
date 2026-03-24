@@ -877,14 +877,21 @@ void editorCapitalCaseWord(struct editorBuffer *bufr, int times) {
 
 /* Word deletion */
 
-void editorDeleteWord(struct editorBuffer *bufr, int count) {
+static void editorDeleteByWord(struct editorBuffer *bufr, int count,
+			       void (*boundary)(struct editorBuffer *, int *,
+						int *)) {
+	if (bufr->read_only) {
+		editorSetStatusMessage(msg_read_only);
+		return;
+	}
+	bufr->mark_active = 0;
 	int startx = bufr->cx;
 	int starty = bufr->cy;
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
 		int endx = bufr->cx;
 		int endy = bufr->cy;
-		bufferEndOfForwardWord(bufr, &endx, &endy);
+		boundary(bufr, &endx, &endy);
 		if (endx == bufr->cx && endy == bufr->cy)
 			break;
 		bufr->cx = endx;
@@ -899,26 +906,12 @@ void editorDeleteWord(struct editorBuffer *bufr, int count) {
 	editorDeleteRange(bufr, bufr->cx, bufr->cy, endx, endy, 1);
 }
 
+void editorDeleteWord(struct editorBuffer *bufr, int count) {
+	editorDeleteByWord(bufr, count, bufferEndOfForwardWord);
+}
+
 void editorBackspaceWord(struct editorBuffer *bufr, int count) {
-	int startx = bufr->cx;
-	int starty = bufr->cy;
-	int times = count ? count : 1;
-	for (int i = 0; i < times; i++) {
-		int endx = bufr->cx;
-		int endy = bufr->cy;
-		bufferEndOfBackwardWord(bufr, &endx, &endy);
-		if (endx == bufr->cx && endy == bufr->cy)
-			break;
-		bufr->cx = endx;
-		bufr->cy = endy;
-	}
-	if (bufr->cx == startx && bufr->cy == starty)
-		return;
-	int endx = bufr->cx;
-	int endy = bufr->cy;
-	bufr->cx = startx;
-	bufr->cy = starty;
-	editorDeleteRange(bufr, bufr->cx, bufr->cy, endx, endy, 1);
+	editorDeleteByWord(bufr, count, bufferEndOfBackwardWord);
 }
 
 /* Character/word transposition */

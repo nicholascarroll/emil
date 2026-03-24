@@ -683,6 +683,9 @@ static int dispatchEdit(int c, int uarg) {
 	case CMD_BACKSPACE_WORD:
 		editorBackspaceWord(E.buf, uarg);
 		return 1;
+	case CMD_DELETE_WORD:
+		editorDeleteWord(E.buf, uarg);
+		return 1;
 	case CMD_UPCASE_WORD:
 		editorUpcaseWord(E.buf, uarg ? uarg : 1);
 		return 1;

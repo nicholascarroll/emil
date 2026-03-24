@@ -541,7 +541,7 @@ void editorSwitchToNamedBuffer(struct editorConfig *ed,
 	}
 
 	uint8_t *buffer_name =
-		editorPrompt(current, (uint8_t *)prompt, PROMPT_BASIC, NULL);
+		editorPrompt(current, (uint8_t *)prompt, PROMPT_BUFFER, NULL);
 
 	if (buffer_name == NULL) {
 		editorSetStatusMessage(msg_buffer_switch_canceled);
