@@ -20,8 +20,6 @@
 #include "unused.h"
 #include "util.h"
 #include <errno.h>
-#include <fcntl.h>
-#include <limits.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -54,6 +52,7 @@ void setupCommands(void) {
 		{ "insert-file", insertFile },
 		{ "cd", changeDirectory },
 		{ "diff-buffer-with-file", diffBufferWithFile },
+		{ "editor-status", editorStatus },
 		{ "isearch-forward-regexp", regexFindWrapper },
 		{ "query-replace", queryReplace },
 		{ "replace-regexp", replaceRegex },
@@ -103,11 +102,6 @@ void recordKey(int c) {
 	if (E.recording) {
 		E.macro.keys[E.macro.nkeys++] = c;
 		if (E.macro.nkeys >= E.macro.skeys) {
-			if (E.macro.skeys > INT_MAX / 2 ||
-			    (size_t)E.macro.skeys >
-				    SIZE_MAX / (2 * sizeof(int))) {
-				die("buffer size overflow");
-			}
 			E.macro.skeys *= 2;
 			E.macro.keys = xrealloc(E.macro.keys,
 						E.macro.skeys * sizeof(int));
@@ -116,12 +110,6 @@ void recordKey(int c) {
 			for (int i = 0; i < E.nunicode; i++) {
 				E.macro.keys[E.macro.nkeys++] = E.unicode[i];
 				if (E.macro.nkeys >= E.macro.skeys) {
-					if (E.macro.skeys > INT_MAX / 2 ||
-					    (size_t)E.macro.skeys >
-						    SIZE_MAX /
-							    (2 * sizeof(int))) {
-						die("buffer size overflow");
-					}
 					E.macro.skeys *= 2;
 					E.macro.keys = xrealloc(
 						E.macro.keys,

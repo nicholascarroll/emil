@@ -1,9 +1,27 @@
 #include "util.h"
+#include "emil.h"
 #include <errno.h>
 #include <string.h>
 #include <unistd.h>
 #include <pwd.h>
 #include <sys/types.h>
+
+extern struct config E;
+
+int trackAlloc(size_t n) {
+	if (n > (size_t)EMIL_MAX_TOTAL_BYTES ||
+	    E.tracked_bytes > (size_t)EMIL_MAX_TOTAL_BYTES - n)
+		return 0;
+	E.tracked_bytes += n;
+	return 1;
+}
+
+void trackFree(size_t n) {
+	if (n > E.tracked_bytes)
+		E.tracked_bytes = 0;
+	else
+		E.tracked_bytes -= n;
+}
 
 void *xmalloc(size_t size) {
 	void *ptr = malloc(size);

@@ -2,7 +2,6 @@
 #include "emil.h"
 #include <stdarg.h>
 #include <stdio.h>
-#include <time.h>
 
 extern struct config E;
 
@@ -11,5 +10,5 @@ void setStatusMessage(const char *fmt, ...) {
 	va_start(ap, fmt);
 	vsnprintf(E.statusmsg, sizeof(E.statusmsg), fmt, ap);
 	va_end(ap);
-	E.statusmsg_time = time(NULL);
+	E.statusmsg_show = 1;
 }

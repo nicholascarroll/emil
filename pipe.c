@@ -223,9 +223,9 @@ void diffBufferWithFile(void) {
 		return;
 	}
 
-	int buflen;
+	size_t buflen;
 	char *bufstr = rowsToString(bufr, &buflen);
-	ssize_t total = 0;
+	size_t total = 0;
 	while (total < buflen) {
 		ssize_t n = write(fd, bufstr + total, buflen - total);
 		if (n < 0) {

@@ -1,6 +1,7 @@
 #ifndef EMIL_H
 #define EMIL_H 1
 
+#include "abuf.h"
 #include "keymap.h"
 #include <stdint.h>
 #include <stdlib.h>
@@ -10,6 +11,10 @@
 /*** util ***/
 
 #define EMIL_TAB_STOP 8
+
+#ifndef EMIL_MAX_TOTAL_BYTES
+#define EMIL_MAX_TOTAL_BYTES (1024 * 1024 * 1024)
+#endif
 
 #ifndef EMIL_VERSION
 #define EMIL_VERSION "unknown"
@@ -38,8 +43,14 @@ enum promptType {
 };
 /*** data ***/
 
+/* Type policy:
+ * Positions (cx, cy, markx, marky) — int, signed for sentinels
+ * Sizes (erow.size, abuf.len) — int, bounded by EMIL_MAX_TOTAL_BYTES
+ * Accumulations to malloc — size_t (e.g. rowsToString totlen)  */
+
 typedef struct erow {
 	int size;
+	int charcap; /* bytes allocated (>= size + 1) */
 	uint8_t *chars;
 	int cached_width; /* display width in columns, or -1 if stale */
 } erow;
@@ -100,7 +111,10 @@ struct buffer {
 	int rectangle_mode;
 	int single_line;
 	int read_only;
-	int lock_fd;	   /* fd holding advisory lock, or -1 */
+	int lock_fd; /* fd holding advisory lock, or -1 */
+	/* Only used for equality comparison with stat().st_mtime.
+	 * Safe across the 2038 boundary.  Do NOT do arithmetic on
+	 * this field. */
 	time_t open_mtime; /* st_mtime at open/save, 0 if unset */
 	int external_mod;  /* 1 if file changed on disk since open/save */
 	int internal_mod;
@@ -208,7 +222,7 @@ struct config {
 	struct buffer *edbuf;	/* Saved editor context */
 	struct buffer *minibuf; /* Minibuffer object */
 
-	time_t statusmsg_time;
+	int statusmsg_show;
 	struct termios orig_termios;
 	struct buffer *headbuf;
 	struct buffer *buf; /* Current active buffer */
@@ -231,8 +245,10 @@ struct config {
 	struct history shell_history;
 	struct history search_history;
 	struct history kill_history;
-	int kill_ring_pos;   /* Current position in kill ring for M-y */
-	int self_insert_key; /* Stashed key for CMD_SELF_INSERT */
+	int kill_ring_pos;	/* Current position in kill ring for M-y */
+	int self_insert_key;	/* Stashed key for CMD_SELF_INSERT */
+	size_t tracked_bytes;	/* Total tracked memory usage */
+	struct abuf render_buf; /* Persistent screen-render buffer */
 };
 
 /*** prototypes ***/
@@ -250,5 +266,6 @@ struct buffer *newBuffer(void);
 void destroyBuffer(struct buffer *);
 void recordKey(int c);
 void execMacro(struct macro *macro);
+void editorCleanup(void);
 
 #endif

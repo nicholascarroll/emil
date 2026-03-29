@@ -120,8 +120,8 @@ void checkFileModified(void) {
 
 /*** file i/o ***/
 
-char *rowsToString(struct buffer *bufr, int *buflen) {
-	int totlen = 0;
+char *rowsToString(struct buffer *bufr, size_t *buflen) {
+	size_t totlen = 0;
 	int j;
 	for (j = 0; j < bufr->numrows; j++) {
 		totlen += bufr->row[j].size + 1;
@@ -192,6 +192,21 @@ int editorOpen(struct buffer *bufr, char *filename) {
 		return -1;
 	}
 
+	/* Check file size against remaining memory budget */
+	{
+		struct stat st;
+		if (fstat(fileno(fp), &st) == 0 && S_ISREG(st.st_mode)) {
+			if ((size_t)st.st_size + E.tracked_bytes >
+			    (size_t)EMIL_MAX_TOTAL_BYTES) {
+				fclose(fp);
+				setStatusMessage(msg_memory_limit);
+				free(bufr->filename);
+				bufr->filename = NULL;
+				return -1;
+			}
+		}
+	}
+
 	/* Pre-scan for null bytes before line-based reading because
 	 * emil_getline (fgets/strlen) silently truncates at '\0'. */
 	if (fileContainsNullBytes(fp)) {
@@ -223,6 +238,22 @@ int editorOpen(struct buffer *bufr, char *filename) {
 
 	free(line);
 	fclose(fp);
+
+	/* Guard against pathological files with billions of tiny lines.
+	 * numrows is int; keep it well below INT_MAX to avoid overflow
+	 * in row-index arithmetic elsewhere. */
+	if (bufr->numrows > INT_MAX / 2) {
+		for (int i = 0; i < bufr->numrows; i++)
+			freeRow(&bufr->row[i]);
+		free(bufr->row);
+		bufr->row = NULL;
+		bufr->numrows = 0;
+		bufr->rowcap = 0;
+		free(bufr->filename);
+		bufr->filename = NULL;
+		setStatusMessage("File has too many lines");
+		return -1;
+	}
 
 	/* Validate UTF-8 encoding of the loaded content */
 	if (!checkUTF8Validity(bufr)) {
@@ -332,7 +363,7 @@ void save(void) {
 		computeDisplayNames();
 	}
 
-	int len;
+	size_t len;
 	char *buf = rowsToString(E.buf, &len);
 
 	/* Build temp filename: <filename>.tmpXXXXXX */
@@ -353,7 +384,7 @@ void save(void) {
 	}
 
 	/* Write buffer fully, handling partial writes and EINTR */
-	ssize_t total = 0;
+	size_t total = 0;
 	while (total < len) {
 		ssize_t n = write(fd, buf + total, len - total);
 		if (n < 0) {
@@ -372,7 +403,7 @@ void save(void) {
 			setStatusMessage(msg_save_failed);
 			return;
 		}
-		total += n;
+		total += (size_t)n;
 	}
 
 	if (fsync(fd) == -1) {
@@ -395,6 +426,16 @@ void save(void) {
 	free(buf);
 	E.buf->dirty = 0;
 
+	/* Compact row buffers: shrink any over-allocated rows now that
+	 * the buffer is saved and editing pressure has settled. */
+	for (int i = 0; i < E.buf->numrows; i++) {
+		erow *row = &E.buf->row[i];
+		if (row->charcap > row->size + 1) {
+			row->chars = xrealloc(row->chars, row->size + 1);
+			row->charcap = row->size + 1;
+		}
+	}
+
 	/* Update stored mtime after save */
 	struct stat save_st;
 	if (stat(E.buf->filename, &save_st) == 0)
@@ -409,7 +450,7 @@ void save(void) {
 	/* TODO Interactive fallback to direct write if temp creation fails */
 	/* TODO: fsync parent dir after rename */
 
-	setStatusMessage(msg_wrote_bytes, len, E.buf->filename);
+	setStatusMessage(msg_wrote_bytes, (int)len, E.buf->filename);
 }
 
 void saveAs(void) {

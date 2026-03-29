@@ -328,9 +328,9 @@ void insertRow(struct buffer *bufr, int at, char *s, size_t len) {
 	if (at < 0 || at > bufr->numrows)
 		return;
 
-	const size_t MAX_LINE_LENGTH = 1000000;
-	if (len > MAX_LINE_LENGTH) {
-		len = MAX_LINE_LENGTH;
+	if (!trackAlloc(len + 1)) {
+		setStatusMessage(msg_memory_limit);
+		return;
 	}
 
 	if (bufr->numrows >= bufr->rowcap) {
@@ -348,6 +348,7 @@ void insertRow(struct buffer *bufr, int at, char *s, size_t len) {
 
 	bufr->row[at].size = len;
 	bufr->row[at].chars = xmalloc(len + 1);
+	bufr->row[at].charcap = len + 1;
 	memcpy(bufr->row[at].chars, s, len);
 	bufr->row[at].chars[len] = '\0';
 
@@ -359,6 +360,7 @@ void insertRow(struct buffer *bufr, int at, char *s, size_t len) {
 }
 
 void freeRow(erow *row) {
+	trackFree(row->size + 1);
 	free(row->chars);
 }
 
@@ -387,12 +389,14 @@ void rowInsertChar(struct buffer *bufr, erow *row, int at, int c) {
 	if (at < 0 || at > row->size)
 		at = row->size;
 
-	const size_t MAX_LINE_LENGTH = 1000000;
-	if ((size_t)row->size >= MAX_LINE_LENGTH) {
-		return;
+	int needed = row->size + 2;
+	if (needed > row->charcap) {
+		int new_cap = row->charcap < 16 ? 16 : row->charcap * 2;
+		if (new_cap < needed)
+			new_cap = needed;
+		row->chars = xrealloc(row->chars, new_cap);
+		row->charcap = new_cap;
 	}
-
-	row->chars = xrealloc(row->chars, row->size + 2);
 	memmove(&row->chars[at + 1], &row->chars[at], row->size - at + 1);
 	row->size++;
 	row->chars[at] = c;
@@ -409,7 +413,14 @@ void rowInsertUnicode(struct buffer *bufr, erow *row, int at) {
 
 	if (at < 0 || at > row->size)
 		at = row->size;
-	row->chars = xrealloc(row->chars, row->size + 1 + E.nunicode);
+	int needed = row->size + 1 + E.nunicode;
+	if (needed > row->charcap) {
+		int new_cap = row->charcap < 16 ? 16 : row->charcap * 2;
+		if (new_cap < needed)
+			new_cap = needed;
+		row->chars = xrealloc(row->chars, new_cap);
+		row->charcap = new_cap;
+	}
 	memmove(&row->chars[at + E.nunicode], &row->chars[at],
 		row->size - at + 1);
 	row->size += E.nunicode;
@@ -420,7 +431,14 @@ void rowInsertUnicode(struct buffer *bufr, erow *row, int at) {
 }
 
 void rowAppendString(struct buffer *bufr, erow *row, char *s, size_t len) {
-	row->chars = xrealloc(row->chars, row->size + len + 1);
+	int needed = row->size + len + 1;
+	if (needed > row->charcap) {
+		int new_cap = row->charcap < 16 ? 16 : row->charcap * 2;
+		if (new_cap < needed)
+			new_cap = needed;
+		row->chars = xrealloc(row->chars, new_cap);
+		row->charcap = new_cap;
+	}
 	memcpy(&row->chars[row->size], s, len);
 	row->size += len;
 	row->chars[row->size] = '\0';

@@ -2,7 +2,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <limits.h>
 #include <stdio.h>
 #include "emil.h"
 #include "message.h"
@@ -182,11 +181,6 @@ static void getBufferCompletions(const char *prefix,
 
 		if (strncmp(base, prefix, strlen(prefix)) == 0) {
 			if (result->n_matches >= capacity) {
-				if (capacity > INT_MAX / 2 ||
-				    (size_t)capacity >
-					    SIZE_MAX / (2 * sizeof(char *))) {
-					die("buffer size overflow");
-				}
 				capacity *= 2;
 				result->matches =
 					xrealloc(result->matches,
@@ -239,11 +233,6 @@ static void getCommandCompletions(const char *prefix,
 	for (int i = 0; i < E.cmd_count; i++) {
 		if (strncmp(E.cmd[i].key, lower_prefix, prefix_len) == 0) {
 			if (result->n_matches >= capacity) {
-				if (capacity > INT_MAX / 2 ||
-				    (size_t)capacity >
-					    SIZE_MAX / (2 * sizeof(char *))) {
-					die("buffer size overflow");
-				}
 				capacity *= 2;
 				result->matches =
 					xrealloc(result->matches,

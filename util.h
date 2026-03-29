@@ -23,4 +23,8 @@ size_t emil_strlcat(char *dst, const char *src, size_t dsize);
 /* Character classification */
 int isWordBoundary(uint8_t c);
 
+/* Memory budget tracking */
+int trackAlloc(size_t n);
+void trackFree(size_t n);
+
 #endif /* EMIL_UTIL_H */

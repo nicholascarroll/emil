@@ -1,6 +1,8 @@
 #ifndef EMIL_FILEIO_H
 #define EMIL_FILEIO_H
 
+#include <stddef.h>
+
 struct buffer;
 struct config;
 
@@ -10,7 +12,7 @@ void releaseLock(struct buffer *bufr);
 void checkFileModified(void);
 
 /* File I/O operations */
-char *rowsToString(struct buffer *bufr, int *buflen);
+char *rowsToString(struct buffer *bufr, size_t *buflen);
 int editorOpen(struct buffer *bufr, char *filename);
 void save(void);
 void saveAs(void);

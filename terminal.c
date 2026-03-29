@@ -23,11 +23,21 @@
 extern struct config E;
 void deserializeUnicode(void);
 
+void install_handler(int signum, void (*handler)(int), int flags) {
+	struct sigaction sa;
+	memset(&sa, 0, sizeof(sa));
+	sa.sa_handler = handler;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = flags;
+	sigaction(signum, &sa, NULL);
+}
+
 void die(const char *s) {
 	IGNORE_RETURN(write(STDOUT_FILENO, CSI "2J", 4));
 	IGNORE_RETURN(write(STDOUT_FILENO, CSI "H", 3));
 	perror(s);
 	IGNORE_RETURN(write(STDOUT_FILENO, CRLF, 2));
+	editorCleanup();
 	exit(1);
 }
 
@@ -269,7 +279,7 @@ int readKey(void) {
 	int nread;
 	uint8_t c;
 	while ((nread = read(STDIN_FILENO, &c, 1)) != 1) {
-		if (nread == -1 && errno != EAGAIN)
+		if (nread == -1 && errno != EAGAIN && errno != EINTR)
 			die("read");
 	}
 	if (c == 033) {

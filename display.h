@@ -29,6 +29,7 @@ void resizeScreen(int sig);
 void recenter(struct window *win);
 void toggleVisualLineMode(void);
 void editorVersion(void);
+void editorStatus(void);
 void whatCursor(void);
 
 #endif /* EMIL_DISPLAY_H */

@@ -361,6 +361,7 @@ void deleteRange(int startx, int starty, int endx, int endy,
 		row->size = startx;
 		row->size += last->size - endx;
 		row->chars = xrealloc(row->chars, row->size + 1);
+		row->charcap = row->size + 1;
 		memcpy(&row->chars[startx], &last->chars[endx],
 		       last->size - endx);
 		row->chars[row->size] = '\0';
@@ -849,6 +850,7 @@ void stringRectangle(void) {
 	struct erow *row = &E.buf->row[topy];
 	if (row->size < botx) {
 		row->chars = xrealloc(row->chars, botx + 1);
+		row->charcap = botx + 1;
 		memset(&row->chars[row->size], ' ', botx - row->size);
 		row->size = botx;
 		/* Better safe than sorry */
@@ -857,6 +859,7 @@ void stringRectangle(void) {
 	}
 	if (extra > 0) {
 		row->chars = xrealloc(row->chars, row->size + 1 + extra);
+		row->charcap = row->size + 1 + extra;
 	}
 	memmove(&row->chars[topx + slen], &row->chars[botx], row->size - botx);
 	memcpy(&row->chars[topx], string, slen);
@@ -879,6 +882,7 @@ void stringRectangle(void) {
 		row = &E.buf->row[i];
 		if (row->size < botx) {
 			row->chars = xrealloc(row->chars, botx + 1);
+			row->charcap = botx + 1;
 			memset(&row->chars[row->size], ' ', botx - row->size);
 			row->size = botx;
 			new->datasize += row->size + 1;
@@ -887,6 +891,7 @@ void stringRectangle(void) {
 		if (extra > 0) {
 			row->chars =
 				xrealloc(row->chars, row->size + 1 + extra);
+			row->charcap = row->size + 1 + extra;
 		}
 		memmove(&row->chars[topx + slen], &row->chars[botx],
 			row->size - botx);
@@ -906,6 +911,7 @@ void stringRectangle(void) {
 		row = &E.buf->row[boty];
 		if (row->size < botx) {
 			row->chars = xrealloc(row->chars, botx + 1);
+			row->charcap = botx + 1;
 			memset(&row->chars[row->size], ' ', botx - row->size);
 			row->size = botx;
 			new->datasize += row->size + 1;
@@ -914,6 +920,7 @@ void stringRectangle(void) {
 		if (extra > 0) {
 			row->chars =
 				xrealloc(row->chars, row->size + 1 + extra);
+			row->charcap = row->size + 1 + extra;
 		}
 		memmove(&row->chars[topx + slen], &row->chars[botx],
 			row->size - botx);
@@ -1320,6 +1327,7 @@ void yankRectangle(void) {
 		/* Pad row with spaces if shorter than insertion column */
 		if (row->size < botx) {
 			row->chars = xrealloc(row->chars, botx + 1);
+			row->charcap = botx + 1;
 			memset(&row->chars[row->size], ' ', botx - row->size);
 			row->size = botx;
 			ins_undo->datasize += row->size + 1;
@@ -1328,8 +1336,10 @@ void yankRectangle(void) {
 		}
 
 		/* Make room and insert rectangle slice */
-		if (rw > 0)
+		if (rw > 0) {
 			row->chars = xrealloc(row->chars, row->size + 1 + rw);
+			row->charcap = row->size + 1 + rw;
+		}
 		memmove(&row->chars[topx + rw], &row->chars[botx],
 			row->size - botx);
 		memcpy(&row->chars[topx], string, rw);

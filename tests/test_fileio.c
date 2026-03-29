@@ -126,9 +126,9 @@ void test_rows_to_string(void) {
 	insertRow(buf, 1, "World", 5);
 	insertRow(buf, 2, "", 0);
 
-	int buflen = 0;
+	size_t buflen = 0;
 	char *str = rowsToString(buf, &buflen);
-	TEST_ASSERT_EQUAL_INT(13, buflen);
+	TEST_ASSERT_EQUAL_INT(13, (int)buflen);
 	TEST_ASSERT(memcmp(str, "Hello\nWorld\n\n", 13) == 0);
 
 	free(str);

@@ -8,7 +8,6 @@
 #include "unicode.h"
 #include "unused.h"
 #include "util.h"
-#include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,7 +32,14 @@ void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
 	if (first_nl == NULL) {
 		/* Single-line insert: memmove tail right, memcpy data in */
 		struct erow *row = &buf->row[starty];
-		row->chars = xrealloc(row->chars, row->size + datalen + 1);
+		int needed = row->size + datalen + 1;
+		if (needed > row->charcap) {
+			int new_cap = row->charcap < 16 ? 16 : row->charcap * 2;
+			if (new_cap < needed)
+				new_cap = needed;
+			row->chars = xrealloc(row->chars, new_cap);
+			row->charcap = new_cap;
+		}
 		memmove(&row->chars[startx + datalen], &row->chars[startx],
 			row->size - startx + 1); /* +1 for NUL */
 		memcpy(&row->chars[startx], data, datalen);
@@ -80,6 +86,7 @@ void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
 	int first_frag_len = (int)(first_nl - data);
 	int new_size = startx + first_frag_len;
 	row->chars = xrealloc(row->chars, new_size + 1);
+	row->charcap = new_size + 1;
 	if (first_frag_len > 0)
 		memcpy(&row->chars[startx], data, first_frag_len);
 	row->size = new_size;
@@ -170,6 +177,7 @@ static void bulkDelete(struct buffer *buf, int startx, int starty, int endx,
 		struct erow *last = &buf->row[starty + 1];
 		int new_size = startx + (last->size - endx);
 		first->chars = xrealloc(first->chars, new_size + 1);
+		first->charcap = new_size + 1;
 		memcpy(&first->chars[startx], &last->chars[endx],
 		       last->size - endx);
 		first->size = new_size;
@@ -307,6 +315,7 @@ struct undo *newUndo(void) {
 	ret->datasize = 22;
 	ret->data = xmalloc(ret->datasize);
 	ret->data[0] = 0;
+	trackAlloc((size_t)ret->datasize);
 	return ret;
 }
 
@@ -339,6 +348,7 @@ static void freeUndos(struct undo *first) {
 	struct undo *prev;
 
 	while (cur != NULL) {
+		trackFree((size_t)cur->datasize);
 		free(cur->data);
 		prev = cur;
 		cur = prev->prev;
@@ -376,9 +386,6 @@ void undoAppendChar(struct buffer *buf, uint8_t c) {
 	buf->undo->data[buf->undo->datalen++] = c;
 	buf->undo->data[buf->undo->datalen] = 0;
 	if (buf->undo->datalen >= buf->undo->datasize - 2) {
-		if ((size_t)buf->undo->datasize > SIZE_MAX / 2) {
-			die("buffer size overflow");
-		}
 		buf->undo->datasize *= 2;
 		buf->undo->data =
 			xrealloc(buf->undo->data, buf->undo->datasize);
@@ -461,9 +468,6 @@ void undoBackSpace(struct buffer *buf, uint8_t c) {
 	 * Backspace delivers bytes from right to left, so prepending
 	 * reconstructs the original left-to-right sequence. */
 	if (buf->undo->datalen + 1 >= buf->undo->datasize - 2) {
-		if ((size_t)buf->undo->datasize > SIZE_MAX / 2) {
-			die("buffer size overflow");
-		}
 		buf->undo->datasize *= 2;
 		buf->undo->data =
 			xrealloc(buf->undo->data, buf->undo->datasize);
@@ -508,9 +512,6 @@ void undoDelChar(struct buffer *buf, erow *row) {
 	if (buf->cx == row->size) {
 		/* Deleting a newline — append it */
 		if (buf->undo->datalen >= buf->undo->datasize - 2) {
-			if ((size_t)buf->undo->datasize > SIZE_MAX / 2) {
-				die("buffer size overflow");
-			}
 			buf->undo->datasize *= 2;
 			buf->undo->data =
 				xrealloc(buf->undo->data, buf->undo->datasize);
@@ -525,9 +526,6 @@ void undoDelChar(struct buffer *buf, erow *row) {
 	} else {
 		int n = utf8_nBytes(row->chars[buf->cx]);
 		if (buf->undo->datalen + n >= buf->undo->datasize - 2) {
-			if ((size_t)buf->undo->datasize > SIZE_MAX / 2) {
-				die("buffer size overflow");
-			}
 			buf->undo->datasize *= 2;
 			if (buf->undo->datalen + n >= buf->undo->datasize - 2) {
 				buf->undo->datasize =

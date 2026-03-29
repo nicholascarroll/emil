@@ -1,3 +1,4 @@
+#include "abuf.h"
 #include "buffer.h"
 #include "completion.h"
 #include "display.h"
@@ -34,43 +35,104 @@ const int page_overlap = 2;
 struct config E;
 void setupHandlers(void);
 
-/*** output ***/
+/*** signal handlers (async-signal-safe) ***/
 
-void editorSuspend(int UNUSED(sig)) {
+static volatile sig_atomic_t got_sigwinch = 0;
+static volatile sig_atomic_t got_sigcont = 0;
+static volatile sig_atomic_t got_sigterm = 0;
+static volatile sig_atomic_t got_sighup = 0;
+
+void editorSuspend(int sig) {
+	(void)sig;
+	IGNORE_RETURN(tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_termios));
+	IGNORE_RETURN(write(STDOUT_FILENO, CSI "?1049l", 8));
 	signal(SIGTSTP, SIG_DFL);
-	disableRawMode();
 	raise(SIGTSTP);
 }
 
-void editorResume(int UNUSED(sig)) {
-	/* Reset scrolling region in case we came back from a shell drawer */
-	IGNORE_RETURN(write(STDOUT_FILENO, CSI "r", 3));
-	/* Restore cursor (matches ESC 7 in openShellDrawer) */
-	IGNORE_RETURN(write(STDOUT_FILENO, ESC "8", 2));
-	setupHandlers();
-	enableRawMode();
-
-	/* Force all windows to recalculate heights for the restored screen */
-	for (int i = 0; i < E.nwindows; i++)
-		E.windows[i]->height = 0;
-
-	resizeScreen(0);
+void editorResume(int sig) {
+	(void)sig;
+	got_sigcont = 1;
 }
 
 #ifdef SIGWINCH
-void sigwinchHandler(int UNUSED(sig)) {
-	resizeScreen(0);
+void sigwinchHandler(int sig) {
+	(void)sig;
+	got_sigwinch = 1;
 }
 #endif
+
+void handleSigterm(int sig) {
+	(void)sig;
+	got_sigterm = 1;
+}
+
+void handleSighup(int sig) {
+	(void)sig;
+	got_sighup = 1;
+}
 
 /*** init ***/
 
 void setupHandlers(void) {
 #ifdef SIGWINCH
-	signal(SIGWINCH, sigwinchHandler);
+	install_handler(SIGWINCH, sigwinchHandler, SA_RESTART);
 #endif
-	signal(SIGCONT, editorResume);
-	signal(SIGTSTP, editorSuspend);
+	install_handler(SIGCONT, editorResume, SA_RESTART);
+	install_handler(SIGTSTP, editorSuspend, 0);
+	install_handler(SIGTERM, handleSigterm, 0);
+	install_handler(SIGHUP, handleSighup, 0);
+}
+
+void editorCleanup(void) {
+	/* Free all buffers */
+	struct buffer *b = E.headbuf;
+	while (b) {
+		struct buffer *next = b->next;
+		destroyBuffer(b);
+		b = next;
+	}
+	E.headbuf = NULL;
+	E.buf = NULL;
+	E.lastVisitedBuffer = NULL;
+
+	/* Free minibuffer */
+	if (E.minibuf) {
+		destroyBuffer(E.minibuf);
+		E.minibuf = NULL;
+	}
+
+	/* Free kill text */
+	clearText(&E.kill);
+
+	/* Free histories */
+	freeHistory(&E.file_history);
+	freeHistory(&E.command_history);
+	freeHistory(&E.shell_history);
+	freeHistory(&E.search_history);
+	freeHistory(&E.kill_history);
+
+	/* Free registers */
+	for (int r = 0; r < 127; r++) {
+		if (E.registers[r].rtype == REGISTER_TEXT)
+			clearText(&E.registers[r].data.text);
+		E.registers[r].rtype = REGISTER_NULL;
+	}
+
+	/* Free macro keys */
+	free(E.macro.keys);
+	E.macro.keys = NULL;
+
+	/* Free windows */
+	for (int i = 0; i < E.nwindows; i++)
+		free(E.windows[i]);
+	free(E.windows);
+	E.windows = NULL;
+	E.nwindows = 0;
+
+	/* Free persistent render buffer */
+	abFree(&E.render_buf);
+	E.render_buf.b = NULL;
 }
 
 void initEditor(void) {
@@ -97,6 +159,8 @@ void initEditor(void) {
 	initHistory(&E.search_history);
 	initHistory(&E.kill_history);
 	E.kill_ring_pos = -1;
+
+	E.render_buf = (struct abuf){ NULL, 0, 0 };
 
 	if (getWindowSize(&E.screenrows, &E.screencols) == -1)
 		die("getWindowSize");
@@ -209,6 +273,7 @@ int main(int argc, char *argv[]) {
 
 	enableRawMode();
 	initEditor();
+	atexit(editorCleanup);
 
 	E.headbuf = newBuffer();
 	E.buf = E.headbuf;
@@ -293,8 +358,30 @@ int main(int argc, char *argv[]) {
 	setStatusMessage(msg_shell_disabled);
 #endif /* EMIL_DISABLE_SHELL */
 	setupHandlers();
-
+	signal(SIGPIPE, SIG_IGN);
+	signal(SIGUSR1, SIG_IGN);
+	signal(SIGUSR2, SIG_IGN);
+	signal(SIGALRM, SIG_IGN);
 	for (;;) {
+		if (got_sigterm || got_sighup) {
+			disableRawMode();
+			_exit(1);
+		}
+		if (got_sigwinch) {
+			got_sigwinch = 0;
+			resizeScreen(0);
+		}
+		if (got_sigcont) {
+			got_sigcont = 0;
+			/* Restore terminal state after resume */
+			IGNORE_RETURN(write(STDOUT_FILENO, CSI "r", 3));
+			IGNORE_RETURN(write(STDOUT_FILENO, ESC "8", 2));
+			setupHandlers();
+			enableRawMode();
+			for (int i = 0; i < E.nwindows; i++)
+				E.windows[i]->height = 0;
+			resizeScreen(0);
+		}
 		refreshScreen();
 
 		int key = readKey();
@@ -303,6 +390,11 @@ int main(int argc, char *argv[]) {
 		/* Stash printable key for self-insert */
 		if (key >= ' ' && key < KEY_ARROW_LEFT)
 			E.self_insert_key = key;
+
+		/* Clear the status message flag before dispatch.
+		 * Any message posted by the command will set it
+		 * again, so it survives to the next refresh. */
+		E.statusmsg_show = 0;
 
 		int cmd = resolveBinding(key);
 		if (cmd != CMD_NONE)

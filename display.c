@@ -3,6 +3,7 @@
 #include "buffer.h"
 #include "emil.h"
 #include "fileio.h"
+#include "history.h"
 #include "message.h"
 #include "region.h"
 #include "terminal.h"
@@ -16,7 +17,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <unistd.h>
 #ifdef __sun
 #include <termios.h>
@@ -828,7 +828,7 @@ void drawMinibuffer(struct abuf *ab) {
 	/* Determine the message to display */
 	const char *msg = E.statusmsg;
 	int msglen = strlen(msg);
-	int valid = msglen && time(NULL) - E.statusmsg_time < 5;
+	int valid = msglen && E.statusmsg_show;
 
 	/* Prefix takes space on the first line */
 	int prefix_len = strlen(E.prefix_display);
@@ -880,10 +880,11 @@ void refreshScreen(void) {
 	/* Check for external modification of the focused buffer's file */
 	checkFileModified();
 
-	struct abuf ab = ABUF_INIT;
-	abAppend(&ab, "\x1b[?7l", 5);  // Disable auto-wrap
-	abAppend(&ab, "\x1b[?25l", 6); // Hide cursor
-	abAppend(&ab, "\x1b[H", 3);    // Move cursor to top-left corner
+	struct abuf *ab = &E.render_buf;
+	ab->len = 0; /* Reset for this frame; keep the allocation */
+	abAppend(ab, "\x1b[?7l", 5);  // Disable auto-wrap
+	abAppend(ab, "\x1b[?25l", 6); // Hide cursor
+	abAppend(ab, "\x1b[H", 3);    // Move cursor to top-left corner
 
 	/* Mandatory bounds clamp for all windows (§7.2) */
 	for (int i = 0; i < E.nwindows; i++) {
@@ -938,16 +939,16 @@ void refreshScreen(void) {
 
 		if (win->focused)
 			scroll();
-		drawRows(win, &ab, win->height, E.screencols);
+		drawRows(win, ab, win->height, E.screencols);
 		updateEndFlag(win, win->buf);
 		cumulative_height += win->height + statusbar_height;
-		drawStatusBar(win, &ab, cumulative_height);
+		drawStatusBar(win, ab, cumulative_height);
 	}
 
-	drawMinibuffer(&ab);
+	drawMinibuffer(ab);
 
 	// Clear any remaining lines below content
-	abAppend(&ab, "\x1b[J", 3);
+	abAppend(ab, "\x1b[J", 3);
 
 	// Position the cursor for the focused window
 	struct window *focusedWin = E.windows[focusedIdx];
@@ -970,14 +971,13 @@ void refreshScreen(void) {
 
 	snprintf(buf, sizeof(buf), "\x1b[%d;%dH", cursor_y,
 		 focusedWin->scx + 1);
-	abAppend(&ab, buf, strlen(buf));
-	abAppend(&ab, "\x1b[?7h", 5);  // Enable auto-wrap
-	abAppend(&ab, "\x1b[?25h", 6); // Show cursor
+	abAppend(ab, buf, strlen(buf));
+	abAppend(ab, "\x1b[?7h", 5);  // Enable auto-wrap
+	abAppend(ab, "\x1b[?25h", 6); // Show cursor
 
-	IGNORE_RETURN(write(STDOUT_FILENO, ab.b, ab.len));
+	IGNORE_RETURN(write(STDOUT_FILENO, ab->b, ab->len));
 
 	//	usleep(100000); // 100ms delay for simulating slow network or screen
-	abFree(&ab);
 }
 
 void cursorBottomLine(int curs) {
@@ -1073,4 +1073,71 @@ void toggleVisualLineMode(void) {
 
 void editorVersion(void) {
 	setStatusMessage("emil %s" EMIL_VERSION);
+}
+
+void editorStatus(void) {
+	struct buffer *sb = findOrCreateSpecialBuffer("*Editor Status*");
+	clearBuffer(sb);
+	sb->read_only = 0; /* temporarily writable so we can populate it */
+
+	char line[256];
+
+	/* Header */
+	snprintf(line, sizeof(line), "emil %s  (PID %d)", EMIL_VERSION,
+		 (int)getpid());
+	insertRow(sb, sb->numrows, line, strlen(line));
+	insertRow(sb, sb->numrows, "", 0);
+
+	/* Memory budget */
+	size_t used = E.tracked_bytes;
+	size_t total = (size_t)EMIL_MAX_TOTAL_BYTES;
+	int pct = total > 0 ? (int)((used * 100) / total) : 0;
+	snprintf(line, sizeof(line), "Memory: %zu / %zu bytes (%d%%)", used,
+		 total, pct);
+	insertRow(sb, sb->numrows, line, strlen(line));
+	insertRow(sb, sb->numrows, "", 0);
+
+	/* Per-buffer breakdown */
+	insertRow(sb, sb->numrows, "Buffers:", 8);
+	int total_undos = 0;
+	for (struct buffer *b = E.headbuf; b != NULL; b = b->next) {
+		const char *name =
+			b->display_name ?
+				b->display_name :
+				(b->filename ? b->filename : "*scratch*");
+		size_t bsize = 0;
+		for (int i = 0; i < b->numrows; i++)
+			bsize += (size_t)b->row[i].size + 1;
+		snprintf(line, sizeof(line),
+			 "  %-30s  %5d lines  %7zu bytes  %s  %s", name,
+			 b->numrows, bsize, b->dirty ? "dirty" : "clean",
+			 b->read_only ? "locked" : "unlocked");
+		insertRow(sb, sb->numrows, line, strlen(line));
+		total_undos += b->undo_count;
+	}
+	insertRow(sb, sb->numrows, "", 0);
+
+	/* Undo total */
+	snprintf(line, sizeof(line), "Undo records (all buffers): %d",
+		 total_undos);
+	insertRow(sb, sb->numrows, line, strlen(line));
+
+	/* Kill ring */
+	snprintf(line, sizeof(line), "Kill ring: %d entries",
+		 E.kill_history.count);
+	insertRow(sb, sb->numrows, line, strlen(line));
+
+	/* Window count */
+	snprintf(line, sizeof(line), "Windows: %d", E.nwindows);
+	insertRow(sb, sb->numrows, line, strlen(line));
+
+	sb->read_only = 1;
+	sb->dirty = 0;
+	sb->cx = 0;
+	sb->cy = 0;
+
+	/* Switch to the status buffer */
+	E.buf = sb;
+	int idx = windowFocusedIdx();
+	E.windows[idx]->buf = sb;
 }

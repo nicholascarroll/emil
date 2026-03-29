@@ -137,6 +137,7 @@ static const char *const msg_diff_cannot_subprocess =
 static const char *const msg_diff_no_differences = "无差异";
 static const char *const msg_diff_failed = "Diff 失败 (退出状态 %d)";
 static const char *const msg_unknown_cx_x = "未知命令 C-x x %c";
+static const char *const msg_memory_limit = "内存预算超限";
 
 #else
 
@@ -269,6 +270,7 @@ static const char *const msg_diff_cannot_subprocess =
 static const char *const msg_diff_no_differences = "No differences";
 static const char *const msg_diff_failed = "Diff failed (exit status %d)";
 static const char *const msg_unknown_cx_x = "Unknown command C-x x %c";
+static const char *const msg_memory_limit = "Memory budget exceeded";
 
 #endif
 
