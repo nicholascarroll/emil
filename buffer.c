@@ -684,11 +684,11 @@ void switchToNamedBuffer(void) {
 	E.lastVisitedBuffer = E.buf;
 	E.buf = targetBuffer;
 
-	const char *switchedName =
-		E.buf->display_name ?
-			E.buf->display_name :
-			(E.buf->filename ? E.buf->filename : "*scratch*");
+	const char *full = E.buf->filename ? E.buf->filename : "*scratch*";
+	int n = snprintf(NULL, 0, msg_switched_to, full);
+	char *switchedName = leftTruncate(full, nameFit(full, n));
 	setStatusMessage(msg_switched_to, switchedName);
+	free(switchedName);
 
 	for (int i = 0; i < E.nwindows; i++) {
 		if (E.windows[i]->focused) {
@@ -738,12 +738,14 @@ void killBuffer(void) {
 
 	// Bypass confirmation for special buffers
 	if (bufr->dirty && bufr->filename != NULL && !bufr->special_buffer) {
-		const char *killName =
-			bufr->display_name ?
-				bufr->display_name :
-				(bufr->filename ? bufr->filename : "*scratch*");
-		setStatusMessage("Buffer %s modified; kill anyway? (y or n)",
-				 killName);
+		const char *kill_fmt =
+			"Buffer %s modified; kill anyway? (y or n)";
+		const char *fname = bufr->filename ? bufr->filename :
+						     "*scratch*";
+		int n = snprintf(NULL, 0, kill_fmt, fname);
+		char *killName = leftTruncate(fname, nameFit(fname, n));
+		setStatusMessage(kill_fmt, killName);
+		free(killName);
 		refreshScreen();
 		int c = readKey();
 		if (c != 'y' && c != 'Y') {
@@ -805,23 +807,46 @@ static const char *baseName(const char *path) {
 }
 
 /* Left-truncate a string to fit in max_width, prepending "...".
+ * Always returns a string that fits in max_width.
  * Returns a newly allocated string. */
-static char *leftTruncate(const char *s, int max_width) {
+char *leftTruncate(const char *s, int max_width) {
+	if (max_width < 1)
+		max_width = 1;
 	int len = (int)strlen(s);
 	if (len <= max_width)
 		return xstrdup(s);
-	/* Never truncate into the basename */
-	const char *base = strrchr(s, '/');
-	base = base ? base + 1 : s;
-	int blen = strlen(base);
-	if (max_width <= blen + 3)
-		return xstrdup(base); /* basename alone if ... won't help */
+	if (max_width <= 3) {
+		/* No room for "..." prefix, just return the tail */
+		char *r = xstrdup(s + (len - max_width));
+		return r;
+	}
 	int tail = max_width - 3;
-	if (tail < blen)
-		tail = blen;
-	char *r = xmalloc(tail + 4);
-	snprintf(r, tail + 4, "...%s", s + (len - tail));
+	char *r = xmalloc(max_width + 1);
+	snprintf(r, max_width + 1, "...%s", s + (len - tail));
 	return r;
+}
+
+/* How many display columns are available for a filename in a
+ * status message?
+ *
+ * |name|           — the full filename
+ * |formatted_len|  — the result of snprintf(NULL,0,fmt,...) with
+ *                    the full name already included
+ *
+ * The caller measures the fully-formatted message, we subtract
+ * the name to get the chrome width, then return screencols minus
+ * that.  Exact, locale-proof, no magic numbers.
+ *
+ * Typical usage:
+ *   int n = snprintf(NULL, 0, msg_wrote_bytes, len, filename);
+ *   char *show = leftTruncate(filename, nameFit(filename, n));
+ *   setStatusMessage(msg_wrote_bytes, len, show);
+ *   free(show);
+ */
+int nameFit(const char *name, int formatted_len) {
+	int chrome = formatted_len - (int)strlen(name);
+	int budget = E.screencols - chrome;
+	return budget > 8 ? budget : 8;
 }
 
 /* Build a middle-truncated display name for a colliding pair.
@@ -982,7 +1007,6 @@ void clampToBuffer(struct buffer *buf, int *px, int *py) {
 		*px = buf->row[*py].size;
 	}
 }
-
 
 /* Clamp cursor and mark to valid buffer positions.
  * Called after every command to prevent out-of-bounds

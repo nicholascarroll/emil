@@ -318,15 +318,23 @@ static void showCompletionsBuffer(char **matches, int n_matches,
 		/* Track selected row for highlighting (data starts row 2). */
 		comp_buf->cy = 2;
 	} else {
-		/* File/command completions: columnar layout. */
+		/* File/command completions: columnar layout.
+		 * Left-truncate long names so the basename is always
+		 * visible (issue #31). */
+		int term_width = E.screencols;
+
+		/* Build truncated copies for display. */
+		char **display = xmalloc(n_matches * sizeof(char *));
+		for (int i = 0; i < n_matches; i++)
+			display[i] = leftTruncate(matches[i], term_width - 2);
+
 		int max_width = 0;
 		for (int i = 0; i < n_matches; i++) {
-			int width = stringWidth((uint8_t *)matches[i]);
+			int width = stringWidth((uint8_t *)display[i]);
 			if (width > max_width)
 				max_width = width;
 		}
 
-		int term_width = E.screencols;
 		int col_width = max_width + 2;
 		int columns = term_width / col_width;
 		if (columns < 1)
@@ -345,7 +353,7 @@ static void showCompletionsBuffer(char **matches, int n_matches,
 				int written = snprintf(line + line_pos,
 						       sizeof(line) - line_pos,
 						       "%-*s", col_width,
-						       matches[idx]);
+						       display[idx]);
 				if (written > 0)
 					line_pos += written;
 			}
@@ -356,6 +364,10 @@ static void showCompletionsBuffer(char **matches, int n_matches,
 
 			insertRow(comp_buf, comp_buf->numrows, line, line_pos);
 		}
+
+		for (int i = 0; i < n_matches; i++)
+			free(display[i]);
+		free(display);
 	}
 
 	showPopupBuffer(comp_buf);

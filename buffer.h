@@ -37,5 +37,7 @@ struct buffer *findBufferByName(const char *name);
 struct buffer *findOrCreateSpecialBuffer(const char *name);
 void clearBuffer(struct buffer *buf);
 void closeSpecialBuffer(const char *name);
+char *leftTruncate(const char *s, int max_width);
+int nameFit(const char *name, int formatted_len);
 
 #endif

@@ -450,7 +450,11 @@ void save(void) {
 	/* TODO Interactive fallback to direct write if temp creation fails */
 	/* TODO: fsync parent dir after rename */
 
-	setStatusMessage(msg_wrote_bytes, (int)len, E.buf->filename);
+	int n = snprintf(NULL, 0, msg_wrote_bytes, (int)len, E.buf->filename);
+	char *showName =
+		leftTruncate(E.buf->filename, nameFit(E.buf->filename, n));
+	setStatusMessage(msg_wrote_bytes, (int)len, showName);
+	free(showName);
 }
 
 void saveAs(void) {
@@ -595,7 +599,12 @@ void insertFile(void) {
 	FILE *fp = fopen((char *)filename, "r");
 	if (!fp) {
 		if (errno == ENOENT) {
-			setStatusMessage(msg_file_not_found, filename);
+			int n = snprintf(NULL, 0, msg_file_not_found,
+					 (char *)filename);
+			char *showName = leftTruncate(
+				(char *)filename, nameFit((char *)filename, n));
+			setStatusMessage(msg_file_not_found, showName);
+			free(showName);
 		} else {
 			setStatusMessage(msg_error_opening, strerror(errno));
 		}
@@ -655,7 +664,12 @@ void insertFile(void) {
 		buf->cx = buf->row[buf->cy].size;
 	}
 
-	setStatusMessage(msg_inserted_lines, lines_inserted, filename);
+	int n = snprintf(NULL, 0, msg_inserted_lines, lines_inserted,
+			 (char *)filename);
+	char *showName =
+		leftTruncate((char *)filename, nameFit((char *)filename, n));
+	setStatusMessage(msg_inserted_lines, lines_inserted, showName);
+	free(showName);
 	free(filename);
 
 	buf->dirty++;
