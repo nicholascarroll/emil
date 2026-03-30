@@ -203,6 +203,18 @@ Notes:
 
 ---
 
+## File Size
+
+`emil` can handle files up to its memory budget, which defaults to 1 GB.
+All buffer content, undo history, and clipboard data draw from a single
+pool. Use `M-x editor-status` to see current usage.
+
+The budget can be adjusted at build time:
+```
+    make CFLAGS="-DEMIL_MAX_TOTAL_BYTES=8388608"
+
+```
+
 ## Raw Console
 
 On a raw Linux virtual console (Ctrl+Alt+F3 etc.) the in-kernel console cannot display Chinese. Alternatives include **kmscon** and **fbterm**.
