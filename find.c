@@ -409,8 +409,13 @@ void queryReplace(void) {
 			break;
 		case '!':
 		case 'Y':
-			E.buf->marky = E.buf->numrows - 1;
-			E.buf->markx = E.buf->row[E.buf->marky].size;
+			if (E.buf->numrows > 0) {
+				E.buf->marky = E.buf->numrows - 1;
+				E.buf->markx = E.buf->row[E.buf->marky].size;
+			} else {
+				E.buf->marky = 0;
+				E.buf->markx = 0;
+			}
 			transformRegion(transformerReplaceString);
 			goto QR_CLEANUP;
 			break;

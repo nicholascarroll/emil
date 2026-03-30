@@ -971,6 +971,19 @@ void computeDisplayNames(void) {
 	}
 }
 
+void clampToBuffer(struct buffer *buf, int *px, int *py) {
+	if (buf->numrows == 0) {
+		*py = 0;
+		*px = 0;
+	} else if (*py >= buf->numrows) {
+		*py = buf->numrows - 1;
+		*px = buf->row[*py].size;
+	} else if (*py >= 0 && *px > buf->row[*py].size) {
+		*px = buf->row[*py].size;
+	}
+}
+
+
 /* Clamp cursor and mark to valid buffer positions.
  * Called after every command to prevent out-of-bounds
  * row access in rendering or subsequent commands. */
@@ -990,11 +1003,8 @@ void clampPositions(struct buffer *buf) {
 		buf->cx = buf->row[buf->cy].size;
 	if (buf->cy == buf->numrows)
 		buf->cx = 0;
+
 	/* Clamp mark */
-	if (buf->marky >= buf->numrows) {
-		buf->marky = buf->numrows - 1;
-		buf->markx = buf->row[buf->marky].size;
-	}
-	if (buf->marky >= 0 && buf->markx > buf->row[buf->marky].size)
-		buf->markx = buf->row[buf->marky].size;
+	if (buf->marky >= 0)
+		clampToBuffer(buf, &buf->markx, &buf->marky);
 }

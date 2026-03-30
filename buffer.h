@@ -30,7 +30,7 @@ int sublineBounds(erow *row, int screencols, int target_subline,
 		  int *start_byte, int *end_byte);
 int displayColumnToByteOffset(erow *row, int screencols, int target_subline,
 			      int target_col);
-
+void clampToBuffer(struct buffer *buf, int *px, int *py);
 void clampPositions(struct buffer *buf);
 
 struct buffer *findBufferByName(const char *name);

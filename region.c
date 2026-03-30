@@ -74,10 +74,7 @@ void setMark(void) {
 	E.buf->marky = E.buf->cy;
 	E.buf->mark_active = 1;
 	setStatusMessage(msg_mark_set);
-	if (E.buf->marky >= E.buf->numrows) {
-		E.buf->marky = E.buf->numrows - 1;
-		E.buf->markx = E.buf->row[E.buf->marky].size;
-	}
+	clampToBuffer(E.buf, &E.buf->markx, &E.buf->marky);
 }
 
 /* Set mark at point, push old mark onto ring, but do NOT activate
@@ -89,10 +86,7 @@ void setMarkSilent(void) {
 	E.buf->markx = E.buf->cx;
 	E.buf->marky = E.buf->cy;
 	/* mark_active intentionally left unchanged (typically 0) */
-	if (E.buf->marky >= E.buf->numrows) {
-		E.buf->marky = E.buf->numrows - 1;
-		E.buf->markx = E.buf->row[E.buf->marky].size;
-	}
+	clampToBuffer(E.buf, &E.buf->markx, &E.buf->marky);
 }
 
 static void clearMarkQuiet(void) {
@@ -225,11 +219,7 @@ static void normalizeRegion(void) {
 		E.buf->markx = swapx;
 		E.buf->marky = swapy;
 	}
-	/* Make sure mark is not outside buffer */
-	if (E.buf->marky >= E.buf->numrows) {
-		E.buf->marky = E.buf->numrows - 1;
-		E.buf->markx = E.buf->row[E.buf->marky].size;
-	}
+	clampToBuffer(E.buf, &E.buf->markx, &E.buf->marky);
 }
 
 /* Bounded append to undo data: append at most 'ncopy' bytes from 'src'
