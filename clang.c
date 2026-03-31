@@ -249,10 +249,13 @@ void toggleHeaderBody(void) {
 	size_t base_len = ext - E.buf->filename;
 	snprintf(other + base_len, sizeof(other) - base_len, "%s", target_ext);
 
-	if (access(other, F_OK) != 0) {
+	char *ioother = expandTilde(other);
+	if (access(ioother, F_OK) != 0) {
 		setStatusMessage(msg_no_ext_file, other);
+		free(ioother);
 		return;
 	}
+	free(ioother);
 
 	pushLocation();
 	switchToFile(other);

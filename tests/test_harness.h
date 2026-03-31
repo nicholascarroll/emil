@@ -1,7 +1,13 @@
 /* test_harness.h — Shared setup for Strategy C fat-binary tests.
  *
  * Provides initTestEditor() which mirrors main.c's initEditor()
- * but uses fixed screen dimensions and skips terminal setup. */
+ * but uses fixed screen dimensions and skips terminal setup.
+ *
+ * IMPORTANT: cleanupTestEditor must free ALL resources reachable from E.
+ * initTestEditor must fully reset E to a known state.  Together they
+ * ensure no leaked memory, no dangling pointers, and no state bleed
+ * between tests — which is required for sanitizer builds to pass
+ * cleanly. */
 
 #ifndef TEST_HARNESS_H
 #define TEST_HARNESS_H
@@ -17,33 +23,90 @@
 /* E is defined in stubs.c (which replaces main.o) */
 extern struct config E;
 
-/* Set up a minimal but valid editor state. Call once at test start. */
-static void initTestEditor(void) {
-	memset(&E, 0, sizeof(E));
-	E.screencols = 80;
-	E.screenrows = 24;
-	E.kill = (struct text){0};
-	E.windows = malloc(sizeof(struct window *));
-	E.windows[0] = calloc(1, sizeof(struct window));
-	E.windows[0]->focused = 1;
-	E.nwindows = 1;
-	E.headbuf = NULL;
-	E.recording = 0;
-	E.macro.nkeys = 0;
-	E.macro.keys = NULL;
-	E.micro = 0;
-	E.playback = 0;
-	E.kill_ring_pos = -1;
-	E.macro_depth = 0;
-	memset(E.registers, 0, sizeof(E.registers));
-	setupCommands();
 
-	initHistory(&E.file_history);
-	initHistory(&E.command_history);
-	initHistory(&E.shell_history);
-	initHistory(&E.search_history);
-	initHistory(&E.kill_history);
+static void cleanupTestEditor(void) {
+    /* Free the buffer list.  Tests are expected to destroyBuffer()
+     * their own buffers, but if one forgets (or crashes mid-test),
+     * clean up here so the sanitizer doesn't report leaks. */
+    while (E.headbuf) {
+        struct buffer *next = E.headbuf->next;
+        destroyBuffer(E.headbuf);
+        E.headbuf = next;
+    }
+    E.buf = NULL;
+    E.headbuf = NULL;
+
+    /* Free histories */
+    freeHistory(&E.file_history);
+    freeHistory(&E.command_history);
+    freeHistory(&E.shell_history);
+    freeHistory(&E.search_history);
+    freeHistory(&E.kill_history);
+
+    /* Free the kill text */
+    clearText(&E.kill);
+
+    /* Free registers */
+    for (int r = 0; r < 127; r++) {
+        if (E.registers[r].rtype == REGISTER_TEXT)
+            clearText(&E.registers[r].data.text);
+        E.registers[r].rtype = REGISTER_NULL;
+    }
+
+    /* Free macro */
+    free(E.macro.keys);
+    E.macro.keys = NULL;
+    E.macro.nkeys = 0;
+    E.macro.skeys = 0;
+
+    /* Free render buffer */
+    abFree(&E.render_buf);
+    E.render_buf = (struct abuf)ABUF_INIT;
+
+    /* Free windows */
+    if (E.windows) {
+        for (int i = 0; i < E.nwindows; i++)
+            free(E.windows[i]);
+        free(E.windows);
+        E.windows = NULL;
+    }
+
+    /* Reset all remaining scalar state */
+    E.nwindows = 0;
+    E.recording = 0;
+    E.playback = 0;
+    E.micro = 0;
+    E.uarg = 0;
+    E.kill_ring_pos = 0;
+    E.self_insert_key = 0;
+    E.macro_depth = 0;
+    E.lastVisitedBuffer = NULL;
+    E.edbuf = NULL;
+    E.minibuf = NULL;
+    E.statusmsg[0] = '\0';
+    E.statusmsg_show = 0;
+    E.prefix_display[0] = '\0';
 }
+
+
+static void initTestEditor(void) {
+    /* Always allocate fresh windows */
+    E.windows = malloc(sizeof(struct window *));
+    E.windows[0] = calloc(1, sizeof(struct window));
+
+    E.screencols = 80;
+    E.screenrows = 24;
+    E.nwindows = 1;
+    E.windows[0]->focused = 1;
+
+    /* Initialize histories (safe to call on already-zeroed structs) */
+    initHistory(&E.file_history);
+    initHistory(&E.command_history);
+    initHistory(&E.shell_history);
+    initHistory(&E.search_history);
+    initHistory(&E.kill_history);
+}
+
 
 /* Create a buffer with one line of content and wire it into E. */
 static struct buffer *make_test_buffer(const char *line) {

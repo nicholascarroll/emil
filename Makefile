@@ -1,5 +1,5 @@
 # Remember to keep the version number up to date
-VERSION = 0.3.0
+VERSION = 0.4.0
 
 PROGNAME = emil
 PREFIX = /usr/local
@@ -31,7 +31,8 @@ DOCDIR = $(PREFIX)/share/doc/emil
 OBJECTS = main.o wcwidth.o unicode.o buffer.o region.o undo.o transform.o \
           find.o pipe.o register.o fileio.o terminal.o display.o message.o \
           keymap.o edit.o prompt.o util.o completion.o history.o base64.o \
-          abuf.o window.o clang.o adjust.o
+          abuf.o window.o clang.o adjust.o mutate.o wrap.o motion.o dbuf.o \
+          emil_subprocess.o
 
 # Default target
 all: $(PROGNAME)
@@ -81,9 +82,16 @@ clean:
 
 # Testing
 test: $(PROGNAME)
-	./tests/run_tests.sh
+	@echo "Makefile: Launching tests with CC=$(CC)"
+	@uname -a
+	CC="$(CC)" CFLAGS="$(ALL_CFLAGS)" LDFLAGS="$(LDFLAGS)" ./tests/run_tests.sh
 
 check: test
+
+sanitize:
+	$(MAKE) clean
+	$(MAKE) CFLAGS="-g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer" \
+	        LDFLAGS="-fsanitize=address,undefined" test
 
 # Sorry Dave
 hal:
@@ -141,4 +149,4 @@ help:
 	@echo "  format    Format code with clang-format"
 	@echo "  hal       HAL-9000 compliance"
 
-.PHONY: all install uninstall clean test check hal debug format android msys2 minimal solaris darwin help
+.PHONY: all install uninstall clean test check sanitize hal debug format android msys2 minimal solaris darwin help

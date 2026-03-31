@@ -13,325 +13,58 @@
 #include "util.h"
 #include "terminal.h"
 #include "window.h"
+#include "wrap.h"
+#include <limits.h>
 
 extern struct config E;
 
-void invalidateScreenCache(struct buffer *buf) {
-	buf->screen_line_cache_valid = 0;
-}
-
-void buildScreenCache(struct buffer *buf, int screencols) {
-	if (buf->screen_line_cache_valid)
-		return;
-
-	if (buf->screen_line_cache_size < buf->numrows) {
-		size_t new_size = buf->numrows;
-		if (new_size <= SIZE_MAX - 100) {
-			new_size += 100;
-		}
-		if (new_size > SIZE_MAX / sizeof(int)) {
-			return;
-		}
-		buf->screen_line_cache_size = new_size;
-		buf->screen_line_start =
-			xrealloc(buf->screen_line_start,
-				 buf->screen_line_cache_size * sizeof(int));
-	}
-
-	if (!buf->screen_line_start)
-		return;
-
-	int screen_line = 0;
-	for (int i = 0; i < buf->numrows; i++) {
-		buf->screen_line_start[i] = screen_line;
-		if (!buf->word_wrap) {
-			screen_line += 1;
-		} else {
-			/* Recompute only if cached_width is stale (-1) */
-			if (buf->row[i].cached_width < 0) {
-				buf->row[i].cached_width =
-					calculateLineWidth(&buf->row[i]);
-			}
-			screen_line +=
-				countScreenLines(&buf->row[i], screencols);
-		}
-	}
-
-	buf->screen_line_cache_valid = 1;
-}
-
-int getScreenLineForRow(struct buffer *buf, int row, int screencols) {
-	if (!buf->screen_line_cache_valid) {
-		buildScreenCache(buf, screencols);
-	}
-	if (row >= buf->numrows || row < 0)
-		return 0;
-	return buf->screen_line_start[row];
-}
-
-int calculateLineWidth(erow *row) {
-	if (row->cached_width >= 0) {
-		return row->cached_width;
-	}
-
-	int screen_x = 0;
-	for (int i = 0; i < row->size;) {
-		screen_x = nextScreenX(row->chars, &i, screen_x);
-		i++;
-	}
-
-	row->cached_width = screen_x;
-	return screen_x;
-}
-
-int charsToDisplayColumn(erow *row, int char_pos) {
-	if (!row || char_pos < 0)
-		return 0;
-	if (char_pos > row->size) {
-		return calculateLineWidth(row);
-	}
-
-	int col = 0;
-	for (int i = 0; i < char_pos && i < row->size; i++) {
-		if (row->chars[i] == '\t') {
-			col = (col + EMIL_TAB_STOP) / EMIL_TAB_STOP *
-			      EMIL_TAB_STOP;
-		} else if (row->chars[i] < 0x20 || row->chars[i] == 0x7f) {
-			col += 2;
-		} else if (row->chars[i] < 0x80) {
-			col += 1;
-		} else {
-			col += charInStringWidth(row->chars, i);
-			i += utf8_nBytes(row->chars[i]) - 1;
-		}
-	}
-	return col;
-}
-
-/* Find the next word-wrap break point for a single screen line.
+/* Dirty-state transitions.  Editing the content mutates many places,
+ * so they all route through these two helpers rather than touching
+ * buf->dirty directly.  The advisory file lock tracks the dirty
+ * state: we hold the lock while the buffer has unsaved changes, and
+ * release it the moment the buffer matches what's on disk.
  *
- * Given a row, a screen width, and a starting position (column and byte
- * offset), compute where this screen line ends.  On return, *break_col
- * and *break_byte hold the position just past the last character that
- * fits on this screen line.
- *
- * Returns 1 if more content follows the break (i.e. the row continues
- * onto another screen line), or 0 if the rest of the row fits on this
- * screen line (meaning this is the last sub-line). */
-int wordWrapBreak(erow *row, int screencols, int line_start_col,
-		  int line_start_byte, int *break_col, int *break_byte) {
-	int col = line_start_col;
-	int bidx = line_start_byte;
-	int wb_col = -1;
-	int wb_byte = -1;
+ * Special / nameless  buffer  never get locked.  Lock-acquisition
+ * failures during editing are tolerated: we honour the user's edit
+ * (the buffer is already modified by the time we're called) and
+ * leave whatever status message lockFile posted in place. */
 
-	while (bidx < row->size) {
-		uint8_t c = row->chars[bidx];
-		int cwidth;
-
-		if (c == '\t') {
-			cwidth = EMIL_TAB_STOP - (col % EMIL_TAB_STOP);
-		} else if (ISCTRL(c)) {
-			cwidth = 2;
-		} else {
-			cwidth = charInStringWidth(row->chars, bidx);
-		}
-
-		/* Wide char won't fit: leave a 1-col gap and break. */
-		if (cwidth > 1 && col + cwidth - line_start_col > screencols)
-			break;
-		if (col + cwidth - line_start_col > screencols)
-			break;
-
-		if (isWordBoundary(c)) {
-			wb_col = col + cwidth;
-			wb_byte = bidx + utf8_nBytes(c);
-		}
-
-		col += cwidth;
-		bidx += utf8_nBytes(c);
-	}
-
-	if (bidx >= row->size) {
-		/* Rest of row fits on this screen line. */
-		*break_col = col;
-		*break_byte = row->size;
-		return 0;
-	} else if (wb_col > line_start_col) {
-		/* Break at the last word boundary. */
-		*break_col = wb_col;
-		*break_byte = wb_byte;
-	} else {
-		/* No word boundary — hard break at column limit. */
-		*break_col = col;
-		*break_byte = bidx;
-	}
-	return 1;
-}
-
-/* Count how many screen lines a row occupies under word wrap. */
-int countScreenLines(erow *row, int screencols) {
-	if (screencols <= 0 || row->size == 0)
-		return 1;
-
-	int lines = 0;
-	int line_start_col = 0;
-	int line_start_byte = 0;
-
-	do {
-		int break_col, break_byte;
-		int more = wordWrapBreak(row, screencols, line_start_col,
-					 line_start_byte, &break_col,
-					 &break_byte);
-		lines++;
-		if (!more)
-			break;
-		line_start_col = break_col;
-		line_start_byte = break_byte;
-	} while (line_start_byte < row->size);
-
-	return lines;
-}
-
-/* Find which screen line and column a cursor position falls on
- * under word wrap.  Sets *out_line (0-based sub-line within the
- * row) and *out_col (column offset within that sub-line). */
-void cursorScreenLine(erow *row, int cursor_col, int screencols, int *out_line,
-		      int *out_col) {
-	*out_line = 0;
-	*out_col = 0;
-
-	if (screencols <= 0 || row->size == 0) {
-		*out_col = cursor_col;
+void markBufferDirty(struct buffer *buf) {
+	if (buf->dirty)
 		return;
+	buf->dirty = 1;
+	if (buf->filename == NULL || buf->special_buffer || buf->read_only)
+		return;
+	if (buf->lock_fd >= 0)
+		return; /* already locked (e.g. from previous session) */
+	if (buf->external_mod)
+		return; /* buffer no longer reflects on-disk content —
+		         * acquiring the lock now would let us silently
+		         * overwrite the other process's changes on save.
+		         * User must revert or save-as to resolve. */
+	char *iopath = expandTilde(buf->filename);
+	if (lockFile(buf, iopath) == 0) {
+		/* Lock acquired — clear any prior "blocked by PID" state. */
+		buf->lock_blocked_pid = 0;
 	}
-
-	int line_start_col = 0;
-	int line_start_byte = 0;
-
-	while (line_start_byte < row->size) {
-		int break_col, break_byte;
-		int more = wordWrapBreak(row, screencols, line_start_col,
-					 line_start_byte, &break_col,
-					 &break_byte);
-
-		/* cursor_col falls within this screen line */
-		if (cursor_col < break_col || !more) {
-			*out_col = cursor_col - line_start_col;
-			return;
-		}
-
-		(*out_line)++;
-		line_start_col = break_col;
-		line_start_byte = break_byte;
-	}
-
-	/* Cursor is past the end — place on the last sub-line */
-	*out_col = cursor_col - line_start_col;
+	free(iopath);
 }
 
-/* Find the byte-offset boundaries of a given sub-line within a wrapped row.
- * Sets *start_byte and *end_byte.  end_byte is the first byte of the
- * next sub-line (or row->size for the last sub-line).
- * Returns 0 if target_subline is beyond the row's sub-lines. */
-int sublineBounds(erow *row, int screencols, int target_subline,
-		  int *start_byte, int *end_byte) {
-	int ls_col = 0, ls_byte = 0;
-
-	for (int sl = 0; sl < target_subline; sl++) {
-		int break_col, break_byte;
-		int more = wordWrapBreak(row, screencols, ls_col, ls_byte,
-					 &break_col, &break_byte);
-		if (!more) {
-			/* target_subline doesn't exist */
-			*start_byte = row->size;
-			*end_byte = row->size;
-			return 0;
-		}
-		ls_col = break_col;
-		ls_byte = break_byte;
-	}
-
-	*start_byte = ls_byte;
-
-	/* Find end of this sub-line */
-	int break_col, break_byte;
-	int more = wordWrapBreak(row, screencols, ls_col, ls_byte, &break_col,
-				 &break_byte);
-	if (!more)
-		*end_byte = row->size;
-	else
-		*end_byte = break_byte;
-
-	return 1;
-}
-
-/* Given a sub-line number and a display column within that sub-line,
- * return the byte offset in row->chars closest to that position.
- * If target_subline is past the end of the row, returns row->size. */
-int displayColumnToByteOffset(erow *row, int screencols, int target_subline,
-			      int target_col) {
-	if (!row || row->size == 0)
-		return 0;
-
-	/* Phase 1: find the start of the target sub-line */
-	int ls_col = 0, ls_byte = 0;
-
-	for (int sl = 0; sl < target_subline; sl++) {
-		int break_col, break_byte;
-		int more = wordWrapBreak(row, screencols, ls_col, ls_byte,
-					 &break_col, &break_byte);
-		if (!more) {
-			/* target sub-line doesn't exist */
-			return row->size;
-		}
-		ls_col = break_col;
-		ls_byte = break_byte;
-	}
-
-	/* Find end of this sub-line for clamping */
-	int end_col, end_byte;
-	int more = wordWrapBreak(row, screencols, ls_col, ls_byte, &end_col,
-				 &end_byte);
-	int subline_end_byte = more ? end_byte : row->size;
-
-	/* Phase 2: walk the sub-line to find the target column */
-	int col = 0; /* column relative to sub-line start */
-	int bidx = ls_byte;
-
-	while (bidx < subline_end_byte) {
-		uint8_t c = row->chars[bidx];
-		int cwidth;
-
-		if (c == '\t') {
-			int abs_col = ls_col + col;
-			cwidth = EMIL_TAB_STOP - (abs_col % EMIL_TAB_STOP);
-		} else if (ISCTRL(c)) {
-			cwidth = 2;
-		} else if (c < 0x80) {
-			cwidth = 1;
-		} else {
-			cwidth = charInStringWidth(row->chars, bidx);
-		}
-
-		if (col + cwidth > target_col)
-			break;
-
-		col += cwidth;
-		bidx += utf8_nBytes(c);
-	}
-
-	return bidx;
+void markBufferClean(struct buffer *buf) {
+	if (!buf->dirty)
+		return;
+	buf->dirty = 0;
+	if (buf->lock_fd >= 0)
+		releaseLock(buf);
+	/* If a previous acquire attempt set lock_blocked_pid, clear it
+	 * now: once clean, we aren't trying to hold the lock, so the
+	 * warning isn't meaningful.  The next edit will re-probe. */
+	buf->lock_blocked_pid = 0;
 }
 
 void insertRow(struct buffer *bufr, int at, char *s, size_t len) {
 	if (at < 0 || at > bufr->numrows)
 		return;
-
-	if (!trackAlloc(len + 1)) {
-		setStatusMessage(msg_memory_limit);
-		return;
-	}
 
 	if (bufr->numrows >= bufr->rowcap) {
 		int new_cap = bufr->rowcap ? bufr->rowcap * 2 : 16;
@@ -355,20 +88,48 @@ void insertRow(struct buffer *bufr, int at, char *s, size_t len) {
 	bufr->row[at].cached_width = -1;
 
 	bufr->numrows++;
-	bufr->dirty = 1;
+	markBufferDirty(bufr);
 	invalidateScreenCache(bufr);
 }
 
+/* Append a row without side effects.  Used by `editorOpen` when the
+ * buffer is being populated from disk: dirtying the buffer would be
+ * wrong (the content on disk matches the content in memory by
+ * definition) and would trigger the file-lock machinery, which is
+ * reserved for user edits.  Callers are responsible for invalidating
+ * the screen cache once, after the load finishes, rather than paying
+ * the O(N) cost per row.
+ *
+ * Not used by `insertFile` — inserting a file into an open buffer IS
+ * a user edit, so it goes through the mutation layer (mutateInsert)
+ * which dirties the buffer and records undo. */
+void appendRowRaw(struct buffer *bufr, const char *s, size_t len) {
+	if (bufr->numrows >= bufr->rowcap) {
+		int new_cap = bufr->rowcap ? bufr->rowcap * 2 : 16;
+		bufr->row = xrealloc(bufr->row, sizeof(erow) * new_cap);
+		memset(&bufr->row[bufr->rowcap], 0,
+		       sizeof(erow) * (new_cap - bufr->rowcap));
+		bufr->rowcap = new_cap;
+	}
+
+	int at = bufr->numrows;
+	bufr->row[at].size = len;
+	bufr->row[at].chars = xmalloc(len + 1);
+	bufr->row[at].charcap = len + 1;
+	memcpy(bufr->row[at].chars, s, len);
+	bufr->row[at].chars[len] = '\0';
+	bufr->row[at].cached_width = -1;
+
+	bufr->numrows++;
+}
+
 void freeRow(erow *row) {
-	trackFree(row->size + 1);
 	free(row->chars);
 }
 
 void delRow(struct buffer *bufr, int at) {
-	if (bufr->read_only) {
-		setStatusMessage(msg_read_only);
+	if (rejectIfReadOnly(bufr))
 		return;
-	}
 
 	if (at < 0 || at >= bufr->numrows)
 		return;
@@ -381,7 +142,7 @@ void delRow(struct buffer *bufr, int at) {
 			sizeof(erow) * (bufr->numrows - at - 1));
 		bufr->numrows--;
 	}
-	bufr->dirty = 1;
+	markBufferDirty(bufr);
 	invalidateScreenCache(bufr);
 }
 
@@ -400,16 +161,14 @@ void rowInsertChar(struct buffer *bufr, erow *row, int at, int c) {
 	memmove(&row->chars[at + 1], &row->chars[at], row->size - at + 1);
 	row->size++;
 	row->chars[at] = c;
-	bufr->dirty = 1;
+	markBufferDirty(bufr);
 	row->cached_width = -1;
 	invalidateScreenCache(bufr);
 }
 
 void rowInsertUnicode(struct buffer *bufr, erow *row, int at) {
-	if (bufr->read_only) {
-		setStatusMessage(msg_read_only);
+	if (rejectIfReadOnly(bufr))
 		return;
-	}
 
 	if (at < 0 || at > row->size)
 		at = row->size;
@@ -426,12 +185,15 @@ void rowInsertUnicode(struct buffer *bufr, erow *row, int at) {
 	row->size += E.nunicode;
 	memcpy(&row->chars[at], E.unicode, E.nunicode);
 	row->cached_width = -1;
-	bufr->dirty = 1;
+	markBufferDirty(bufr);
 	invalidateScreenCache(bufr);
 }
 
 void rowAppendString(struct buffer *bufr, erow *row, char *s, size_t len) {
-	int needed = row->size + len + 1;
+	/* Guard against int overflow: row->size is int */
+	if (len > (size_t)(INT_MAX - row->size - 1))
+		return;
+	int needed = row->size + (int)len + 1;
 	if (needed > row->charcap) {
 		int new_cap = row->charcap < 16 ? 16 : row->charcap * 2;
 		if (new_cap < needed)
@@ -443,19 +205,21 @@ void rowAppendString(struct buffer *bufr, erow *row, char *s, size_t len) {
 	row->size += len;
 	row->chars[row->size] = '\0';
 	row->cached_width = -1;
-	bufr->dirty = 1;
+	markBufferDirty(bufr);
 	invalidateScreenCache(bufr);
 }
 
 void rowDelChar(struct buffer *bufr, erow *row, int at) {
 	if (at < 0 || at >= row->size)
 		return;
+	/* at + size <= row->size is guaranteed: all input paths enforce
+	 * valid UTF-8, and all callers pass at on a character boundary. */
 	int size = utf8_nBytes(row->chars[at]);
 	memmove(&row->chars[at], &row->chars[at + size],
 		row->size - ((at + size) - 1));
 	row->size -= size;
 	row->cached_width = -1;
-	bufr->dirty = 1;
+	markBufferDirty(bufr);
 	invalidateScreenCache(bufr);
 }
 
@@ -499,7 +263,11 @@ struct buffer *newBuffer(void) {
 	ret->read_only = 0;
 	ret->lock_fd = -1;
 	ret->open_mtime = 0;
+	ret->file_size = 0;
 	ret->external_mod = 0;
+	ret->lock_blocked_pid = 0;
+	ret->internal_mod = 0;
+	ret->undo_pruned = 0;
 	return ret;
 }
 
@@ -533,10 +301,30 @@ void updateBuffer(struct buffer *buf) {
 }
 
 struct buffer *findBufferByName(const char *name) {
+	/* Literal match (fast path, covers special buffers) */
 	for (struct buffer *b = E.headbuf; b != NULL; b = b->next) {
 		if (b->filename && strcmp(b->filename, name) == 0)
 			return b;
 	}
+
+	/* For real file paths, compare absolute forms to avoid
+	 * duplicate buffers opened via different path forms. */
+	if (name[0] == '*')
+		return NULL;
+
+	char *abs_name = absolutePath(name);
+	for (struct buffer *b = E.headbuf; b != NULL; b = b->next) {
+		if (!b->filename || b->special_buffer)
+			continue;
+		char *abs_buf = absolutePath(b->filename);
+		int match = (strcmp(abs_buf, abs_name) == 0);
+		free(abs_buf);
+		if (match) {
+			free(abs_name);
+			return b;
+		}
+	}
+	free(abs_name);
 	return NULL;
 }
 
@@ -738,18 +526,16 @@ void killBuffer(void) {
 
 	// Bypass confirmation for special buffers
 	if (bufr->dirty && bufr->filename != NULL && !bufr->special_buffer) {
-		const char *kill_fmt =
-			"Buffer %s modified; kill anyway? (y or n)";
 		const char *fname = bufr->filename ? bufr->filename :
 						     "*scratch*";
-		int n = snprintf(NULL, 0, kill_fmt, fname);
+		int n = snprintf(NULL, 0, msg_buffer_modified_kill, fname);
 		char *killName = leftTruncate(fname, nameFit(fname, n));
-		setStatusMessage(kill_fmt, killName);
+		setStatusMessage(msg_buffer_modified_kill, killName);
 		free(killName);
 		refreshScreen();
 		int c = readKey();
+		clearStatusMessage();
 		if (c != 'y' && c != 'Y') {
-			setStatusMessage("");
 			return;
 		}
 	}
@@ -798,6 +584,11 @@ void killBuffer(void) {
 
 	destroyBuffer(bufr);
 	computeDisplayNames();
+
+	/* The closed buffer's text and undo chains are gone; the memory
+	 * budget may have dropped back under the limit.  Recheck so the
+	 * [MEMORY OVER!] warning clears when appropriate. */
+	recheckMemoryBudget();
 }
 
 /* Basename helper: returns pointer into path after the last '/'. */
@@ -927,6 +718,25 @@ static char *middleTruncate(const char *full, const char *other,
 	return leftTruncate(mid, max_width);
 }
 
+/* Best display form of a filename.  For relative paths that resolve
+ * to somewhere under $HOME, use the ~ form if it's shorter.
+ * E.g. "../../home/me/foo.c" → "~/foo.c", but "src/main.c" stays.
+ * Returns a new string; caller frees. */
+static char *displayPath(const char *name) {
+	if (name[0] == '/' || name[0] == '~' || name[0] == '*')
+		return xstrdup(name);
+
+	char *abs = absolutePath(name);
+	char *tilded = collapseHome(abs);
+	free(abs);
+
+	if (tilded[0] == '~' && strlen(tilded) < strlen(name))
+		return tilded;
+
+	free(tilded);
+	return xstrdup(name);
+}
+
 /* Compute display_name and min_name_len for every buffer.
  *
  * Called on buffer open/close/rename and on terminal resize.
@@ -939,32 +749,40 @@ void computeDisplayNames(void) {
 	if (max_width < 4)
 		max_width = 4;
 
-	/* Pass 1: full name or left-truncated. */
+	/* Pass 1: best display form, then left-truncate to fit. */
 	for (struct buffer *b = E.headbuf; b != NULL; b = b->next) {
 		free(b->display_name);
 		const char *name = b->filename ? b->filename : "*scratch*";
-		b->display_name = leftTruncate(name, max_width);
+		char *dp = displayPath(name);
+		b->display_name = leftTruncate(dp, max_width);
+		free(dp);
 	}
 
 	/* Pass 2: disambiguate collisions via middle-truncate. */
 	for (struct buffer *a = E.headbuf; a != NULL; a = a->next) {
-		const char *a_full = a->filename ? a->filename : "*scratch*";
-		if (strcmp(a->display_name, a_full) == 0)
+		const char *a_raw = a->filename ? a->filename : "*scratch*";
+		char *a_full = displayPath(a_raw);
+		if (strcmp(a->display_name, a_full) == 0) {
+			free(a_full);
 			continue;
+		}
 
 		for (struct buffer *b = a->next; b != NULL; b = b->next) {
 			if (strcmp(a->display_name, b->display_name) != 0)
 				continue;
 
-			const char *b_full = b->filename ? b->filename :
-							   "*scratch*";
+			const char *b_raw = b->filename ? b->filename :
+							  "*scratch*";
+			char *b_full = displayPath(b_raw);
 			free(a->display_name);
 			a->display_name =
 				middleTruncate(a_full, b_full, max_width);
 			free(b->display_name);
 			b->display_name =
 				middleTruncate(b_full, a_full, max_width);
+			free(b_full);
 		}
+		free(a_full);
 	}
 
 	/* Pass 3: compute min_name_len for each buffer.

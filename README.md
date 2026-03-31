@@ -8,12 +8,6 @@
 Written in standard C99, `emil` runs on any system providing a minimal POSIX.1-2001 interface (single-process subset) and a VT100-compatible terminal. It eschews common sources of complexity: scripting, plugins, configuration files, background network activity, or auto-save files. 
 
 
-## Status
-
-Feature complete, but **unstable**.
-
-Current work focuses on cleaning up the architecture, fixing bugs, and improving maintainability. Contributions that simplify internal structure, improve portability, or fix correctness issues are especially welcome.
-
 ## Functional Capabilities
 
 - Visual text selection
@@ -57,6 +51,28 @@ pacman -S msys2-devel msys2-runtime-devel
 ```bash
 make && make install
 ```
+
+## Internationalization Support
+
+Application message and man page language can be set at build time. Default is English. Other languages supported are:
+
+| Language                 | CFLAG        | Man Dir |
+| ------------------------ | ------------ |-------- |
+| Chinese (Simplified)     | EMIL_LANG_ZH | zh      |
+| Spanish (Latin American) | EMIL_LANG_ES | es      |
+
+To build (for example, Spanish):
+
+```bash
+make CFLAGS="-DEMIL_LANG_ES"
+sudo make install MAN_SOURCE=emil.es.1 MAN_SUBDIR=es
+```
+and to uninstall:
+
+```
+sudo make uninstall MAN_SUBDIR=es
+```
+ 
 
 ## Getting Started
 
@@ -104,7 +120,6 @@ set bind-tty-special-chars off
 "\C-w": kill-region
 "\ew": copy-region-as-kill 
 ```
-In `emil`, as in Readline,  `Ctrl-h` deletes the previous character, whereas in `emacs` it is the help prefix key.
 
 
 ### Shell Integration
@@ -146,18 +161,7 @@ Below are common "recipes" using standard Unix utilities.
 | **Trim whitespace**    | `sed 's/[[:space:]]\+$//'` | `Ctrl-u Alt-\|`        |
 | **De-duplicate lines** | `awk '!seen[$0]++'`   | `Ctrl-u Alt-\|`             |
 
-More complex commands can be converted into shell scripts. For example: to add a dictionary lookup, create a file named `edict` in your `$PATH`:
-
-```bash
-#!/bin/sh
-# edict: Look up the word provided via stdin
-word=$(cat)
-curl -s "dict://dict.org/d:${word}"
-```
-
-Now, you can simply highlight a word in emil and type `Alt-| edict` to see the definition.
-
-If you have an OpenAI API account you can place the included shell script [gpt](filters/gpt) in your `$PATH` and use:
+More complex commands can be converted into shell scripts. For example, if you have an OpenAI API account you can place the included shell script [gpt](filters/gpt) in your `$PATH` and use:
 
 ```
 Ctrl-x h Alt-| gpt "translate to Spanish"
@@ -174,45 +178,19 @@ Notes:
 ### System Clipboard Integration
 `Ctrl-c` copies selected text to both the kill ring and the user's system clipboard when an OSC 52 enabled terminal client is used.
 
-—-
 
-## Roadmap
+## Editing Large Files
 
-1. **Version 0.1.0** [DONE] ✅
-   - From here on we use `emil` to code `emil`
+`emil` is not designed for editing very large files. 
+ 
+`emil` tracks memory usage against a configurable limit (default 1 GB). This limit ('budget') counts the actual text content of all open buffers, kill ring and undo/redo data. Minor allocations like command history are not counted.
 
-2. **Version 0.1.1 Feature complete** [DONE] ✅
-
-3. **Version 0.2.1 First Prerelease**  [DONE] ✅
-
-4. **Rendering optimizations**
-   Reduce bytes over wire with an optional render acceleration layer 
-   - enabled by a run-time toggle
-   - render hints sent by edit, move and scroll operations
-
-5. **Remove dependency on `subprocess.h`**
-   Internalize the code being used for pipe/exec/fork.
-
-6. **Version 1.0.0 Bug free and loving it**
-   - Tested on Solaris, AIX, Linux, BSD, MSYS2
-     macOS, Android. 
-   - Tested with raw console and various terminal emulators
-   - Tested on RTEMS and NuttX
-   - Tested with IME and international keyboards
-   - Included in Linux distribution repositories
-
----
-
-## File Size
-
-`emil` can handle files up to its memory budget, which defaults to 1 GB.
-All buffer content, undo history, and clipboard data draw from a single
-pool. 
+When opening a new file would exceed the budget, the operation is refused. A warning is shown in the status bar when a kill or yank operation pushes total usage over the budget.
 
 The budget can be adjusted at build time:
-```
-    make CFLAGS="-DEMIL_MAX_TOTAL_BYTES=8388608"
 
+```
+    make CFLAGS="-DEMIL_BYTES_BUDGET=8388608"
 ```
 
 ## Raw Console
@@ -221,13 +199,13 @@ On a raw Linux virtual console (Ctrl+Alt+F3 etc.) the in-kernel console cannot d
 
 ## Internals
 
-Each buffer is an array of logical lines (`erow`), where each line stores its raw UTF-8 bytes. All buffers contain valid UTF-8; files that fail validation are rejected at load time. The buffer is never modified by rendering or text layout concerns.
+Each buffer is an array of logical lines (`erow`) holding raw UTF-8 bytes. All buffers contain valid UTF-8 exclusively; files that fail validation are rejected at load time. The buffer is never modified by rendering or text layout concerns.
 
 Display widths are cached per-row and recomputed only when a row is edited. A cumulative screen-line cache maps logical rows to screen positions, enabling efficient scrolling when word wrap is active.
 
-On each frame, the renderer reads raw bytes from the buffer and emits terminal-ready sequences directly into a disposable append buffer. No intermediate render buffers exist. The append buffer is written to the terminal in a single `write()` call.
+On each frame, the renderer reads raw bytes from the buffer and emits terminal-ready sequences directly into an append buffer. No intermediate render buffers exist. The append buffer is written to the terminal in a single `write()` call, then truncated.
 
-The rendering system uses only cursor positioning (CSI H), erase-to-end-of-line (CSI K), reverse video (CSI 7m / CSI 0m), and clear-below (CSI J). Scroll region manipulation and line insert/delete are not used by the core renderer; they are planned as optional render acceleration layer enabled by a run-time toggle.
+The rendering system uses only cursor positioning (CSI H), erase-to-end-of-line (CSI K), reverse video (CSI 7m / CSI 0m), and clear-below (CSI J). Scroll region manipulation and line insert/delete are not used by the core renderer [^2] .
 
 All input is processed in a single loop:
 
@@ -252,3 +230,4 @@ Distributed under the MIT License.
 
 [^1]: Omitted from POSIX.1, see [Rationale](https://pubs.opengroup.org/onlinepubs/007904975/utilities/sh.html).
 
+[^2]: Planned as an optional render acceleration layer enabled by a run-time toggle.

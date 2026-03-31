@@ -52,11 +52,11 @@ void setupCommands(void) {
 		{ "insert-file", insertFile },
 		{ "cd", changeDirectory },
 		{ "diff-buffer-with-file", diffBufferWithFile },
-		{ "isearch-forward-regexp", regexFindWrapper },
+		{ "isearch-forward-regexp", regexFind },
 		{ "query-replace", queryReplace },
 		{ "replace-regexp", replaceRegex },
 		{ "replace-string", replaceString },
-		{ "revert", revert },
+		{ "revert-buffer", revert },
 		{ "visual-line-mode", toggleVisualLineMode },
 		{ "version", editorVersion },
 		{ "view-register", viewRegister },
@@ -239,7 +239,7 @@ int resolveBinding(int key) {
 
 	if (key == CTRL('g') && prefix != PREFIX_NONE) {
 		prefix = PREFIX_NONE;
-		setStatusMessage("");
+		clearStatusMessage();
 		return CMD_NONE;
 	}
 
@@ -258,6 +258,8 @@ int resolveBinding(int key) {
 			return CMD_TOGGLE_READ_ONLY;
 		case CTRL('f'):
 			return CMD_FIND_FILE;
+		case CTRL('r'):
+			return CMD_FIND_FILE_READ_ONLY;
 		case CTRL('_'):
 			return CMD_REDO;
 		case CTRL('x'):
@@ -335,7 +337,8 @@ int resolveBinding(int key) {
 			return CMD_NONE;
 		default:
 			if (key < ' ') {
-				setStatusMessage(msg_unknown_cx, key + '`');
+				setStatusMessage(msg_unknown_cx_ctrl,
+						 key + '`');
 			} else {
 				setStatusMessage(msg_unknown_cx, key);
 			}
@@ -468,7 +471,7 @@ int resolveBinding(int key) {
 	case CTRL('g'):
 		return CMD_CANCEL;
 	case CTRL('h'):
-		return CMD_BACKSPACE;
+		return CMD_HELP;
 	case CTRL('j'):
 		return CMD_NEWLINE_INDENT;
 	case CTRL('k'):
@@ -624,6 +627,9 @@ static int dispatchEdit(int c, int uarg) {
 	case CMD_BACKSPACE:
 		backSpace(uarg);
 		return 1;
+	case CMD_HELP:
+		help();
+		return 1;
 	case CMD_DELETE:
 		delChar(uarg);
 		return 1;
@@ -778,7 +784,10 @@ static int dispatchBuffer(int c, int uarg) {
 		insertFile();
 		return 1;
 	case CMD_FIND_FILE:
-		findFile();
+		findFile(0);
+		return 1;
+	case CMD_FIND_FILE_READ_ONLY:
+		findFile(1);
 		return 1;
 	case CMD_TOGGLE_READ_ONLY:
 		E.buf->read_only = !E.buf->read_only;

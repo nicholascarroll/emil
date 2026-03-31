@@ -7,9 +7,11 @@
 void abAppend(struct abuf *ab, const char *s, int len) {
 	if (ab->len + len > ab->capacity) {
 		int new_capacity = ab->capacity == 0 ? 8192 : ab->capacity * 2;
-		while (new_capacity < ab->len + len) {
+		while (new_capacity > 0 && new_capacity < ab->len + len) {
 			new_capacity *= 2;
 		}
+		if (new_capacity <= 0)
+			new_capacity = ab->len + len;
 		ab->b = xrealloc(ab->b, new_capacity);
 		ab->capacity = new_capacity;
 	}

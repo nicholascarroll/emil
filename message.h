@@ -4,7 +4,9 @@
 #include <stdarg.h>
 
 /* Status message display */
-void setStatusMessage(const char *fmt, ...);
+void setStatusMessage(const char *fmt, ...)
+	__attribute__((format(printf, 1, 2)));
+void clearStatusMessage(void);
 
 /*
  * All user-facing messages for emil.
@@ -22,8 +24,9 @@ static const char *const msg_writable = "缓冲区已设为可写";
 static const char *const msg_buffer_empty = "缓冲区为空";
 static const char *const msg_beginning_of_buffer = "缓冲区开头";
 static const char *const msg_end_of_buffer = "缓冲区末尾";
-static const char *const msg_new_file = "（新文件）";
+static const char *const msg_new_file = "%s（新文件）";
 static const char *const msg_find_file = "查找文件: %s";
+static const char *const msg_find_file_read_only = "查找文件: %s"; // * TODO
 
 static const char *const msg_mark_set = "标记已设置。";
 static const char *const msg_mark_cleared = "标记已清除";
@@ -55,8 +58,12 @@ static const char *const msg_invalid_utf8 = "UTF-8 验证失败";
 static const char *const msg_binary_file = "文件包含空字节（二进制文件？）";
 static const char *const msg_no_glob_match = "没有匹配的文件: %s";
 
-static const char *const msg_file_locked = "[文件被 PID %d 锁定]";
-static const char *const msg_file_changed_on_disk = "[文件已被外部修改]";
+/* Status bar RHS warning messages. Max 13 display columns (6 CJK chars). */
+static const char *const msg_file_locked = "[%d 锁定]";
+static const char *const msg_file_changed_on_disk = "[文件已修改]";
+static const char *const msg_memory_over_limit = "[内存超限!]";
+/*-------------------------------------------------------------*/
+
 static const char *const msg_lines_columns = "%d 行，%d 列";
 static const char *const msg_dir_not_supported = "不支持编辑目录。";
 static const char *const msg_inserted_lines = "从 %s 插入了 %d 行";
@@ -112,12 +119,13 @@ static const char *const msg_no_change = "无变化。";
 
 static const char *const msg_unknown_ctrl = "未知命令 C-%c";
 static const char *const msg_unknown_cx = "未知命令 C-x %c";
+static const char *const msg_unknown_cx_ctrl = "未知命令 C-x C-%c";
 static const char *const msg_unknown_meta = "未知命令 M-%s";
 
 static const char *const msg_unsaved_quit =
 	"有未保存的更改。确定要退出吗？（y 或 n）";
 static const char *const msg_buffer_modified_kill =
-	"缓冲区 %.20s 已修改；仍要关闭吗？（y 或 n）";
+	"缓冲区 %s 已修改；仍要关闭吗？（y 或 n）";
 
 static const char *const msg_no_piped_input = "标准输入: 无管道输入";
 static const char *const msg_no_symbol_at_point = "当前光标处无符号";
@@ -137,7 +145,185 @@ static const char *const msg_diff_cannot_subprocess =
 static const char *const msg_diff_no_differences = "无差异";
 static const char *const msg_diff_failed = "Diff 失败 (退出状态 %d)";
 static const char *const msg_unknown_cx_x = "未知命令 C-x x %c";
-static const char *const msg_memory_limit = "内存预算超限";
+static const char *const msg_memory_limit = "打开文件总量超限";
+static const char *const msg_help = "文档：参见 shell 中的 `man emil`";
+static const char *const msg_read_only_locked = "只读: PID %d 持有建议锁";
+static const char *const msg_read_only_locked_unknown =
+	"只读: 其他进程持有建议锁";
+
+#elif defined(EMIL_LANG_ES)
+
+/* ESPAÑOL (Latinoamérica) */
+static const char *const msg_quit = "Salir";
+static const char *const msg_canceled = "Operación cancelada.";
+
+static const char *const msg_read_only = "El búfer es de solo lectura";
+static const char *const msg_writable = "El búfer ahora es editable";
+static const char *const msg_buffer_empty = "El búfer está vacío";
+static const char *const msg_beginning_of_buffer = "Inicio del búfer";
+static const char *const msg_end_of_buffer = "Fin del búfer";
+static const char *const msg_new_file = "%s (archivo nuevo)";
+static const char *const msg_find_file = "Abrir archivo: %s";
+static const char *const msg_find_file_read_only =
+	"Abrir archivo (solo lectura): %s";
+
+static const char *const msg_mark_set = "Marca establecida.";
+static const char *const msg_mark_cleared = "Marca desactivada";
+static const char *const msg_mark_invalid = "Marca inválida.";
+static const char *const msg_mark_popped = "Marca recuperada.";
+static const char *const msg_no_mark_set = "No hay marca en este búfer.";
+
+static const char *const msg_rectangle_on = "Modo rectángulo activado";
+static const char *const msg_rectangle_off = "Modo rectángulo desactivado";
+
+static const char *const msg_kill_ring_empty =
+	"El anillo de eliminación está vacío.";
+static const char *const msg_no_more_kill_entries =
+	"No hay más elementos en el anillo para pegar.";
+static const char *const msg_not_after_yank =
+	"El comando previo no fue un pegado";
+
+static const char *const msg_undo = "Deshacer.";
+static const char *const msg_redo = "Rehacer.";
+static const char *const msg_no_undo = "No hay más acciones para deshacer.";
+static const char *const msg_no_redo = "No hay más acciones para rehacer.";
+static const char *const msg_unpaired_undo_redo =
+	"Deshacer: %d, rehacer: %d sin correspondencia.";
+
+static const char *const msg_wrote_bytes = "Se escribieron %d bytes en %s";
+static const char *const msg_cant_open = "No se puede abrir el archivo: %s";
+static const char *const msg_save_aborted = "Guardado cancelado.";
+static const char *const msg_save_failed = "Error al guardar: %s";
+static const char *const msg_file_not_found = "Archivo no encontrado: %s";
+static const char *const msg_invalid_utf8 = "Error de validación UTF-8";
+static const char *const msg_binary_file =
+	"El archivo contiene bytes nulos (¿archivo binario?)";
+static const char *const msg_no_glob_match = "No hay archivos coincidentes: %s";
+
+/* Status bar RHS warning messages. Max 13 display columns (6 CJK chars). */
+static const char *const msg_file_locked = "[BLOQ %d]";
+static const char *const msg_file_changed_on_disk = "[ARCHIVO MOD]";
+static const char *const msg_memory_over_limit = "[MEM EXCED]";
+/*-------------------------------------------------------------*/
+
+static const char *const msg_lines_columns = "%d líneas, %d columnas";
+static const char *const msg_dir_not_supported =
+	"No se admite la edición de directorios.";
+static const char *const msg_inserted_lines =
+	"Se insertaron %d líneas desde %s";
+static const char *const msg_error_opening = "Error al abrir el archivo: %s";
+static const char *const msg_changed_dir = "Directorio cambiado";
+static const char *const msg_current_dir = "Directorio actual: %s";
+static const char *const msg_indeterminate_cd =
+	"cd: no se puede determinar el directorio actual";
+
+static const char *const msg_canceled_replace = "Reemplazo cancelado.";
+static const char *const msg_canceled_query_replace =
+	"Reemplazo interactivo cancelado.";
+static const char *const msg_replaced_n = "Se reemplazaron %d ocurrencias";
+static const char *const msg_regex_error = "Error de expresión regular: %s";
+static const char *const msg_regex_compile =
+	"No se pudo compilar la expresión regular: %s";
+static const char *const msg_no_match = "Sin coincidencias para %s";
+static const char *const msg_no_match_bracket = "[Sin coincidencias]";
+
+static const char *const msg_nothing_to_complete =
+	"No hay nada que completar aquí.";
+static const char *const msg_possible_completions =
+	"Posibles completaciones (%d):";
+static const char *const msg_complete_not_unique = "[completado, no único]";
+
+static const char *const msg_indent_tabs =
+	"Indentación configurada a tabulaciones";
+static const char *const msg_indent_spaces =
+	"Indentación configurada a %i espacios";
+
+static const char *const msg_cannot_transpose =
+	"No se puede transponer en esta posición";
+
+static const char *const msg_no_other_windows =
+	"No hay otras ventanas para seleccionar";
+static const char *const msg_no_windows_delete =
+	"No hay otras ventanas para eliminar";
+static const char *const msg_cant_kill_last_window =
+	"No se puede cerrar la última ventana";
+
+static const char *const msg_switched_to = "Cambiado al búfer %s";
+static const char *const msg_no_buffer_named =
+	"No existe un búfer llamado '%s'";
+static const char *const msg_no_buffer_switch =
+	"No hay búfer disponible para cambiar";
+static const char *const msg_buffer_switch_canceled =
+	"Cambio de búfer cancelado";
+
+static const char *const msg_recording = "Grabando macro...";
+static const char *const msg_already_recording = "Ya se está grabando";
+static const char *const msg_not_recording = "No se está grabando";
+static const char *const msg_macro_recorded = "Macro grabada (%d teclas)";
+static const char *const msg_no_macro = "No hay macro grabada";
+static const char *const msg_macro_depth =
+	"Se excedió la profundidad de recursión de macros";
+static const char *const msg_macro_blocked =
+	"No disponible durante la ejecución de macros";
+
+static const char *const msg_shell_canceled = "Comando de shell cancelado.";
+static const char *const msg_shell_read_bytes = "Se leyeron %d bytes";
+static const char *const msg_shell_exit_status =
+	"El comando de shell finalizó con estado %d";
+static const char *const msg_shell_disabled =
+	"Integración con shell deshabilitada en compilación";
+
+static const char *const msg_register_empty = "El registro %s está vacío.";
+static const char *const msg_no_command = "Comando no encontrado";
+
+static const char *const msg_trailing_removed =
+	"Se eliminaron %d caracteres finales";
+static const char *const msg_no_change = "Sin cambios.";
+
+static const char *const msg_unknown_ctrl = "Comando desconocido C-%c";
+static const char *const msg_unknown_cx = "Comando desconocido C-x %c";
+static const char *const msg_unknown_cx_ctrl = "Comando desconocido C-x C-%c";
+static const char *const msg_unknown_meta = "Comando desconocido M-%s";
+
+static const char *const msg_unsaved_quit =
+	"Hay cambios sin guardar. ¿Desea salir? (y o n)";
+static const char *const msg_buffer_modified_kill =
+	"El búfer %s tiene cambios; ¿cerrar de todas formas? (y o n)";
+
+static const char *const msg_no_piped_input =
+	"stdin: no hay entrada por tubería";
+static const char *const msg_no_symbol_at_point =
+	"No hay símbolo en la posición actual";
+static const char *const msg_tag_not_found = "Etiqueta no encontrada: %s";
+static const char *const msg_tag = "Etiqueta: %s";
+static const char *const msg_tag_stack_empty =
+	"La pila de etiquetas está vacía";
+static const char *const msg_no_file_extension = "Sin extensión de archivo";
+static const char *const msg_no_ext_mapping =
+	"No hay correspondencia cabecera/implementación para %s";
+static const char *const msg_no_ext_file =
+	"No existe archivo correspondiente: %s";
+static const char *const msg_buffer_without_file =
+	"El búfer no está asociado a un archivo";
+static const char *const msg_diff_buffer_matches_file =
+	"El búfer coincide con el archivo";
+static const char *const msg_diff_cannot_create_temp =
+	"Diff falló: no se pudo crear archivo temporal";
+static const char *const msg_diff_cannot_write =
+	"Diff falló: error de escritura";
+static const char *const msg_diff_cannot_subprocess =
+	"Diff falló: no se pudo crear subproceso";
+static const char *const msg_diff_no_differences = "No hay diferencias";
+static const char *const msg_diff_failed = "Diff falló (estado de salida %d)";
+static const char *const msg_unknown_cx_x = "Comando desconocido C-x x %c";
+static const char *const msg_memory_limit =
+	"Se excedió el límite de archivos abiertos";
+static const char *const msg_help =
+	"Documentación: consulte `man emil` en la terminal.";
+static const char *const msg_read_only_locked =
+	"Solo lectura: bloqueo por PID %d";
+static const char *const msg_read_only_locked_unknown =
+	"Solo lectura: bloqueo por otro proceso";
 
 #else
 
@@ -150,8 +336,9 @@ static const char *const msg_writable = "Buffer set to writable";
 static const char *const msg_buffer_empty = "Buffer is empty";
 static const char *const msg_beginning_of_buffer = "Beginning of buffer";
 static const char *const msg_end_of_buffer = "End of buffer";
-static const char *const msg_new_file = "(New file)";
+static const char *const msg_new_file = "%s (New file)";
 static const char *const msg_find_file = "Find File: %s";
+static const char *const msg_find_file_read_only = "Find File Read Only: %s";
 
 static const char *const msg_mark_set = "Mark set.";
 static const char *const msg_mark_cleared = "Mark deactivated";
@@ -183,8 +370,13 @@ static const char *const msg_invalid_utf8 = "Failed UTF-8 validation";
 static const char *const msg_binary_file =
 	"File contains null bytes (binary file?)";
 static const char *const msg_no_glob_match = "No matching files: %s";
-static const char *const msg_file_locked = "[FILE LOCKED BY PID %d]";
-static const char *const msg_file_changed_on_disk = "[FILE CHANGED ON DISK]";
+
+/* Status bar RHS warning messages. Max 13 display columns (6 CJK chars). */
+static const char *const msg_file_locked = "[LOCK %d]";
+static const char *const msg_file_changed_on_disk = "[FILE MOD]";
+static const char *const msg_memory_over_limit = "[MEM OVER!]";
+/*------------------------------------------------------------*/
+
 static const char *const msg_lines_columns = "%d lines, %d columns";
 static const char *const msg_dir_not_supported =
 	"Directory editing not supported.";
@@ -234,7 +426,8 @@ static const char *const msg_shell_canceled = "Canceled shell command.";
 static const char *const msg_shell_read_bytes = "Read %d bytes";
 static const char *const msg_shell_exit_status =
 	"Shell command exited with status %d";
-static const char *const msg_shell_disabled = "Shell integration disabled";
+static const char *const msg_shell_disabled =
+	"Shell integration disabled at build time.";
 
 static const char *const msg_register_empty = "Register %s is empty.";
 static const char *const msg_no_command = "No command found";
@@ -245,12 +438,13 @@ static const char *const msg_no_change = "No change.";
 
 static const char *const msg_unknown_ctrl = "Unknown command C-%c";
 static const char *const msg_unknown_cx = "Unknown command C-x %c";
+static const char *const msg_unknown_cx_ctrl = "Unknown command C-x C-%c";
 static const char *const msg_unknown_meta = "Unknown command M-%s";
 
 static const char *const msg_unsaved_quit =
 	"There are unsaved changes. Really quit? (y or n)";
 static const char *const msg_buffer_modified_kill =
-	"Buffer %.20s modified; kill anyway? (y or n)";
+	"Buffer %s modified; kill anyway? (y or n)";
 
 static const char *const msg_no_piped_input = "stdin: no piped input";
 static const char *const msg_no_symbol_at_point = "No symbol at point";
@@ -270,8 +464,13 @@ static const char *const msg_diff_cannot_subprocess =
 static const char *const msg_diff_no_differences = "No differences";
 static const char *const msg_diff_failed = "Diff failed (exit status %d)";
 static const char *const msg_unknown_cx_x = "Unknown command C-x x %c";
-static const char *const msg_memory_limit = "Memory budget exceeded";
-
+static const char *const msg_memory_limit = "Open-file limit exceeded";
+static const char *const msg_help =
+	"Documentation: see `man emil` (in your shell).";
+static const char *const msg_read_only_locked =
+	"Read only: advisory lock by PID %d";
+static const char *const msg_read_only_locked_unknown =
+	"Read only: advisory lock by another process";
 #endif
 
 #endif /* EMIL_MESSAGE_H */

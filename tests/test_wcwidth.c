@@ -94,12 +94,16 @@ void test_next_screen_x_multibyte(void) {
 
 void test_string_width_mixed(void) {
 	/* "A一B" = 1 + 2 + 1 = 4 columns */
-	uint8_t mixed[] = "A\xE4\xB8\x80" "B";
+	uint8_t mixed[] = "A\xE4\xB8\x80"
+			  "B";
 	TEST_ASSERT_EQUAL_INT(4, stringWidth(mixed));
 }
 
-void setUp(void) {}
-void tearDown(void) {}
+void setUp(void) {
+}
+void tearDown(void) {
+	cleanupTestEditor();
+}
 
 int main(void) {
 	TEST_BEGIN();

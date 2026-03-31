@@ -132,7 +132,6 @@ void test_rows_to_string(void) {
 	TEST_ASSERT(memcmp(str, "Hello\nWorld\n\n", 13) == 0);
 
 	free(str);
-	destroyBuffer(buf);
 }
 
 void test_open_temp_file(void) {
@@ -150,7 +149,6 @@ void test_open_temp_file(void) {
 	TEST_ASSERT_EQUAL_STRING("Line two", (char *)buf->row[1].chars);
 	TEST_ASSERT_EQUAL_STRING("Line three", (char *)buf->row[2].chars);
 
-	destroyBuffer(buf);
 	unlink(tmpname);
 }
 
@@ -165,7 +163,6 @@ void test_open_empty_file(void) {
 	TEST_ASSERT_EQUAL_INT(0, rc);
 	TEST_ASSERT_EQUAL_INT(0, buf->numrows);
 
-	destroyBuffer(buf);
 	unlink(tmpname);
 }
 
@@ -183,7 +180,6 @@ void test_utf8_valid_file(void) {
 	TEST_ASSERT_EQUAL_INT(0, rc);
 	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
 
-	destroyBuffer(buf);
 	unlink(tmpname);
 }
 
@@ -198,7 +194,6 @@ void test_utf8_invalid_continuation(void) {
 	int rc = editorOpen(buf, tmpname);
 	TEST_ASSERT_EQUAL_INT(-1, rc);
 
-	destroyBuffer(buf);
 	unlink(tmpname);
 }
 
@@ -213,7 +208,6 @@ void test_utf8_overlong_rejected(void) {
 	int rc = editorOpen(buf, tmpname);
 	TEST_ASSERT_EQUAL_INT(-1, rc);
 
-	destroyBuffer(buf);
 	unlink(tmpname);
 }
 
@@ -221,7 +215,8 @@ void test_utf8_null_byte_rejected(void) {
 	char tmpname[] = "/tmp/emil_test_XXXXXX";
 	int fd = mkstemp(tmpname);
 	TEST_ASSERT(fd >= 0);
-	const char data[] = "AB\x00" "CD\n";
+	const char data[] = "AB\x00"
+			    "CD\n";
 	write(fd, data, 6);
 	close(fd);
 
@@ -229,7 +224,6 @@ void test_utf8_null_byte_rejected(void) {
 	int rc = editorOpen(buf, tmpname);
 	TEST_ASSERT_EQUAL_INT(-1, rc);
 
-	destroyBuffer(buf);
 	unlink(tmpname);
 }
 
@@ -244,12 +238,15 @@ void test_utf8_truncated_multibyte(void) {
 	int rc = editorOpen(buf, tmpname);
 	TEST_ASSERT_EQUAL_INT(-1, rc);
 
-	destroyBuffer(buf);
 	unlink(tmpname);
 }
 
-void setUp(void) { initTestEditor(); }
-void tearDown(void) {}
+void setUp(void) {
+	initTestEditor();
+}
+void tearDown(void) {
+	cleanupTestEditor();
+}
 
 int main(void) {
 	TEST_BEGIN();

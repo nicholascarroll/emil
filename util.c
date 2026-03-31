@@ -1,6 +1,10 @@
 #include "util.h"
 #include "emil.h"
+#include "fileio.h"
+#include "message.h"
+#include "undo.h"
 #include <errno.h>
+#include <limits.h>
 #include <string.h>
 #include <unistd.h>
 #include <pwd.h>
@@ -8,19 +12,43 @@
 
 extern struct config E;
 
-int trackAlloc(size_t n) {
-	if (n > (size_t)EMIL_MAX_TOTAL_BYTES ||
-	    E.tracked_bytes > (size_t)EMIL_MAX_TOTAL_BYTES - n)
-		return 0;
-	E.tracked_bytes += n;
-	return 1;
+int rejectIfReadOnly(struct buffer *buf) {
+	if (buf->read_only) {
+		setStatusMessage(msg_read_only);
+		return 1;
+	}
+	return 0;
 }
 
-void trackFree(size_t n) {
-	if (n > E.tracked_bytes)
-		E.tracked_bytes = 0;
-	else
-		E.tracked_bytes -= n;
+size_t totalBufferBytes(void) {
+	size_t total = 0;
+	for (struct buffer *b = E.headbuf; b; b = b->next)
+		for (int i = 0; i < b->numrows; i++)
+			total += b->row[i].size;
+	return total;
+}
+
+static size_t undoChainBytes(struct undo *u) {
+	size_t total = 0;
+	for (; u; u = u->prev)
+		total += u->datalen;
+	return total;
+}
+
+size_t totalUndoBytes(void) {
+	size_t total = 0;
+	for (struct buffer *b = E.headbuf; b; b = b->next)
+		total += undoChainBytes(b->undo) + undoChainBytes(b->redo);
+	return total;
+}
+
+size_t totalBudgetBytes(void) {
+	return totalBufferBytes() + totalUndoBytes();
+}
+
+void recheckMemoryBudget(void) {
+	E.memory_over_limit =
+		(totalBudgetBytes() > (size_t)EMIL_BYTES_BUDGET) ? 1 : 0;
 }
 
 void *xmalloc(size_t size) {
@@ -173,4 +201,83 @@ int isWordBoundary(uint8_t c) {
 	       !('0' <= c && c <= '9') && /* And numbers */
 	       ((c < '$') ||		  /* ctrl chars & some punctuation */
 		(c > '%')); /* Rest of ascii outside $% & other ranges */
+}
+
+/* Expand a leading "~" or "~/" to $HOME.  Returns a new string
+ * (caller frees).  If no expansion is needed, returns xstrdup(path). */
+char *expandTilde(const char *path) {
+	if (path[0] != '~')
+		return xstrdup(path);
+	if (path[1] != '\0' && path[1] != '/')
+		return xstrdup(path);
+
+	const char *home = getenv("HOME");
+	if (!home)
+		return xstrdup(path);
+
+	size_t hlen = strlen(home);
+	size_t tlen = strlen(path + 1);
+	char *out = xmalloc(hlen + tlen + 1);
+	memcpy(out, home, hlen);
+	memcpy(out + hlen, path + 1, tlen + 1);
+	return out;
+}
+
+/* If path starts with $HOME, replace that prefix with "~".
+ * Returns a new string (caller frees). */
+char *collapseHome(const char *path) {
+	if (path[0] != '/')
+		return xstrdup(path);
+
+	const char *home = getenv("HOME");
+	if (!home || home[0] != '/')
+		return xstrdup(path);
+
+	size_t hlen = strlen(home);
+	while (hlen > 1 && home[hlen - 1] == '/')
+		hlen--;
+
+	if (strncmp(path, home, hlen) != 0)
+		return xstrdup(path);
+	if (path[hlen] != '\0' && path[hlen] != '/')
+		return xstrdup(path);
+
+	size_t tlen = strlen(path + hlen);
+	char *out = xmalloc(1 + tlen + 1);
+	out[0] = '~';
+	memcpy(out + 1, path + hlen, tlen + 1);
+	return out;
+}
+
+/* Resolve a path to absolute form for comparison purposes.
+ * Normalizes . and .. segments.  Does NOT resolve symlinks.
+ * Returns a new string; caller frees. */
+char *absolutePath(const char *path) {
+	if (!path || !*path)
+		return xstrdup("");
+
+	if (path[0] == '/') {
+		char *out = xstrdup(path);
+		cleanPath(out);
+		return out;
+	}
+
+	if (path[0] == '~' && (path[1] == '\0' || path[1] == '/')) {
+		char *out = expandTilde(path);
+		cleanPath(out);
+		return out;
+	}
+
+	char cwd[PATH_MAX];
+	if (getcwd(cwd, sizeof(cwd)) == NULL)
+		return xstrdup(path);
+
+	size_t clen = strlen(cwd);
+	size_t plen = strlen(path);
+	char *out = xmalloc(clen + 1 + plen + 1);
+	memcpy(out, cwd, clen);
+	out[clen] = '/';
+	memcpy(out + clen + 1, path, plen + 1);
+	cleanPath(out);
+	return out;
 }

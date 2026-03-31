@@ -77,6 +77,7 @@ enum command_t {
 	/* Editing */
 	CMD_NEWLINE,
 	CMD_BACKSPACE,
+	CMD_HELP,
 	CMD_DELETE,
 	CMD_UNICODE,
 	CMD_UNICODE_ERROR,
@@ -115,6 +116,7 @@ enum command_t {
 	CMD_KILL_BUFFER,
 	CMD_INSERT_FILE,
 	CMD_FIND_FILE,
+	CMD_FIND_FILE_READ_ONLY,
 	CMD_TOGGLE_READ_ONLY,
 	CMD_REDO,
 	/* Region, registers, rectangles */

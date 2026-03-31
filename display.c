@@ -654,50 +654,80 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
 	}
 }
 
-void drawStatusBar(struct window *win, struct abuf *ab, int line) {
-	char buf[32];
-	snprintf(buf, sizeof(buf), CSI "%d;%dH", line, 1);
-	abAppend(ab, buf, strlen(buf));
+/* Truncate a UTF-8 string to fit within `max_cols` display columns,
+ * writing the result into `out` (which must have room for the result
+ * plus a NUL).  Handles multi-byte UTF-8 and wide (CJK, emoji)
+ * characters via stringWidth's per-character width logic.
+ *
+ * Returns the number of display columns written.  The output may be
+ * shorter than max_cols if the next character would straddle the
+ * boundary (e.g. a 2-column CJK glyph with only 1 column left). */
+static int truncateToCols(char *out, size_t out_cap, const char *in,
+			  int max_cols) {
+	int cols = 0;
+	size_t oi = 0;
+	const uint8_t *p = (const uint8_t *)in;
+	while (*p && oi + 1 < out_cap) {
+		int w = charInStringWidth(p, 0);
+		if (cols + w > max_cols)
+			break;
+		int n = utf8_nBytes(*p);
+		if (n <= 0)
+			n = 1;
+		if (oi + (size_t)n + 1 > out_cap)
+			break;
+		memcpy(out + oi, p, n);
+		oi += n;
+		p += n;
+		cols += w;
+	}
+	out[oi] = '\0';
+	return cols;
+}
 
-	struct buffer *bufr = win->buf;
-	abAppend(ab, "\x1b[7m", 4);
+/* Status bar block renderers.  Each writes its content into a
+ * caller-supplied buffer and returns the byte length written.
+ * The BLOCK constant (15 columns) governs the fixed-width mid
+ * and right blocks; the left block gets whatever remains. */
 
-	int total = E.screencols;
-	int focused = win->focused;
-	char fc = focused ? ' ' : '-';
-	const char *sep = focused ? "  " : "--";
-	const char *prefix = focused ? "" : "";
-	int prefix_len = strlen(prefix);
+static const int STATUS_BLOCK = 15;
 
-	/* Prepare content */
+/* Left block: display name + flags (e.g. "file.c **%").
+ * name_width is the column budget for the name portion. */
+static int statusLeft(const struct buffer *bufr, char *out, int cap,
+		      int name_width) {
 	const char *dname =
 		bufr->display_name ?
 			bufr->display_name :
 			(bufr->filename ? bufr->filename : "*scratch*");
 	int dlen = strlen(dname);
-	const char *bname = strrchr(dname, '/');
-	bname = bname ? bname + 1 : dname;
-	int bname_len = strlen(bname);
-
-	/* Minimum name width: must show full basename (plus 3 for "..."
-	 * if display_name has a path prefix), or disambiguation length,
-	 * whichever is larger. */
-	int has_path = (dlen > bname_len);
-	int min_name = has_path ? bname_len + 3 : bname_len;
-	if (bufr->min_name_len > min_name)
-		min_name = bufr->min_name_len;
-	if (min_name > dlen)
-		min_name = dlen;
 
 	char flags[8];
-	const char *mod_flag = bufr->external_mod ? "!" : "";
-	snprintf(flags, sizeof(flags), "%c%c%c%s", bufr->dirty ? '*' : '-',
-		 bufr->dirty ? '*' : '-', bufr->read_only ? '%' : ' ',
-		 mod_flag);
-	int flags_len = strlen(flags);
+	snprintf(flags, sizeof(flags), "%c%c%c", bufr->dirty ? '*' : '-',
+		 bufr->dirty ? '*' : '-', bufr->read_only ? '%' : ' ');
 
-	int ry = focused ? bufr->cy + 1 : win->cy + 1;
-	int rx = focused ? bufr->cx : win->cx;
+	/* Left-truncate name with "..." to fit name_width. */
+	const char *show_name = dname;
+	char trunc[256];
+	if (dlen > name_width) {
+		int tail = name_width - 3;
+		if (tail < 1)
+			tail = 1;
+		snprintf(trunc, sizeof(trunc), "...%s", dname + dlen - tail);
+		show_name = trunc;
+	}
+
+	return snprintf(out, cap, "%s %s", show_name, flags);
+}
+
+/* Middle block: line:col + position indicator, padded to STATUS_BLOCK.
+ * Returns byte count written (always STATUS_BLOCK on success). */
+static int statusMid(const struct window *win, char *out, char fc) {
+	struct buffer *bufr = win->buf;
+	const char *sep = win->focused ? "  " : "--";
+
+	int ry = win->focused ? bufr->cy + 1 : win->cy + 1;
+	int rx = win->focused ? bufr->cx : win->cx;
 	char linecol[24];
 	int linecol_len =
 		snprintf(linecol, sizeof(linecol), "%s%d:%d", sep, ry, rx);
@@ -715,6 +745,82 @@ void drawStatusBar(struct window *win, struct abuf *ab, int line) {
 		snprintf(pos, sizeof(pos), "%2d%%",
 			 (win->rowoff * 100) / bufr->numrows);
 
+	int lc = linecol_len < STATUS_BLOCK ? linecol_len : STATUS_BLOCK;
+	int pos_len = strlen(pos);
+	int gap = STATUS_BLOCK - lc - pos_len;
+	int oi = 0;
+
+	memcpy(out, linecol, lc);
+	oi = lc;
+	if (gap > 0) {
+		memset(out + oi, fc, gap);
+		oi += gap;
+	}
+	if (oi + pos_len <= STATUS_BLOCK) {
+		memcpy(out + oi, pos, pos_len);
+		oi += pos_len;
+	}
+	while (oi < STATUS_BLOCK)
+		out[oi++] = fc;
+	return oi;
+}
+
+/* Right block: warning or mode indicator, right-aligned, padded to
+ * STATUS_BLOCK.  Returns values via *out_bytes and *out_cols because
+ * multi-byte UTF-8 warnings make byte length diverge from column
+ * count.
+ *
+ * Precedence (highest first):
+ *   1. [MEMORY OVER!]  — editor-wide
+ *   2. [DISK CHANGED]  — this buffer's file
+ *   3. [LOCK PID N]    — held by another process
+ *   4. (Macro)/(Wrap)  — informational mode indicators */
+static void statusRight(const struct window *win, char *out, int *out_bytes,
+			int *out_cols, char fc) {
+	struct buffer *bufr = win->buf;
+	const char *sep = win->focused ? "  " : "--";
+	const int CONTENT = STATUS_BLOCK - 2;
+
+	/* Determine warning text (if any) */
+	char warn_buf[64];
+	const char *warn = NULL;
+	if (E.memory_over_limit) {
+		snprintf(warn_buf, sizeof(warn_buf), "%s",
+			 msg_memory_over_limit);
+		warn = warn_buf;
+	} else if (bufr->external_mod) {
+		snprintf(warn_buf, sizeof(warn_buf), "%s",
+			 msg_file_changed_on_disk);
+		warn = warn_buf;
+	} else if (bufr->lock_blocked_pid != 0) {
+		snprintf(warn_buf, sizeof(warn_buf), msg_file_locked,
+			 bufr->lock_blocked_pid);
+		warn = warn_buf;
+	}
+
+	if (warn) {
+		char tmp[64];
+		int content_cols =
+			truncateToCols(tmp, sizeof(tmp), warn, CONTENT);
+		int tmp_bytes = (int)strlen(tmp);
+		int left_pad = CONTENT - content_cols;
+		if (left_pad < 0)
+			left_pad = 0;
+		int sep_len = (int)strlen(sep);
+		if (sep_len + left_pad + tmp_bytes + 1 > 64) {
+			tmp_bytes = 64 - sep_len - left_pad - 1;
+			if (tmp_bytes < 0)
+				tmp_bytes = 0;
+		}
+		memcpy(out, sep, sep_len);
+		memset(out + sep_len, fc, left_pad);
+		memcpy(out + sep_len + left_pad, tmp, tmp_bytes);
+		*out_bytes = sep_len + left_pad + tmp_bytes;
+		*out_cols = STATUS_BLOCK;
+		return;
+	}
+
+	/* Mode indicators (no warning active) */
 	const char *paren = NULL;
 	if (E.recording && bufr->word_wrap)
 		paren = "(Macro Wrap)";
@@ -723,104 +829,103 @@ void drawStatusBar(struct window *win, struct abuf *ab, int line) {
 	else if (bufr->word_wrap)
 		paren = "(Wrap)";
 
-	/* Layout: three 15-char blocks.
-	 *   Block 1 (LHS): prefix + name + space + flags
-	 *   Block 2 (mid): linecol + pos indicator
-	 *   Block 3 (RHS): parenthetical
-	 *
-	 * Block 1 gets at least min_name chars for the name.
-	 * Blocks 2 and 3 are each added only if a full 15 chars
-	 * remain after securing the name. Leftover width goes
-	 * back to the name. */
-	const int BLOCK = 15;
-	int name_need = prefix_len + 1 + flags_len + min_name;
-	int remain = total - name_need;
-
-	int have_mid = (remain >= BLOCK);
-	if (have_mid)
-		remain -= BLOCK;
-
-	int have_rhs = (remain >= BLOCK);
-	if (have_rhs)
-		remain -= BLOCK;
-
-	int name_width = min_name + (remain > 0 ? remain : 0);
-	/* Clamp so the name never pushes Block 1 past total width. */
-	int max_name = total - prefix_len - 1 - flags_len;
-	if (max_name < 1)
-		max_name = 1;
-	if (name_width > max_name)
-		name_width = max_name;
-
-	/* Truncate display name to fit name_width.
-	 * Left-truncate with "...", keeping the basename end. */
-	const char *show_name = dname;
-	char trunc[256];
-	if (dlen > name_width) {
-		int tail = name_width - 3;
-		if (tail < 1)
-			tail = 1;
-		snprintf(trunc, sizeof(trunc), "...%s", dname + dlen - tail);
-		show_name = trunc;
+	if (paren) {
+		int clen = snprintf(out, 64, "%s%s", sep, paren);
+		int pad = STATUS_BLOCK - clen;
+		if (pad > 0) {
+			memmove(out + pad, out, clen);
+			memset(out, fc, pad);
+		}
+		*out_bytes = STATUS_BLOCK;
+		*out_cols = STATUS_BLOCK;
+		return;
 	}
 
-	/* Block 1: LHS */
-	char left[512];
-	int left_len = snprintf(left, sizeof(left), "%s%s %s", prefix,
-				show_name, flags);
+	/* Empty: fill with fc */
+	memset(out, fc, STATUS_BLOCK);
+	*out_bytes = STATUS_BLOCK;
+	*out_cols = STATUS_BLOCK;
+}
 
-	/* Block 2: linecol (left) + pos (right), padded to BLOCK */
-	char mid[16];
-	int mid_len = 0;
-	if (have_mid) {
-		int lc = linecol_len < BLOCK ? linecol_len : BLOCK;
-		int pos_len = strlen(pos);
-		int gap = BLOCK - lc - pos_len;
-
-		memcpy(mid, linecol, lc);
-		mid_len = lc;
-		if (gap > 0) {
-			memset(mid + mid_len, fc, gap);
-			mid_len += gap;
-		}
-		if (mid_len + pos_len <= BLOCK) {
-			memcpy(mid + mid_len, pos, pos_len);
-			mid_len += pos_len;
-		}
-		while (mid_len < BLOCK)
-			mid[mid_len++] = fc;
-	}
-
-	/* Block 3: paren right-aligned, padded to BLOCK */
-	char rhs[16];
-	int rhs_len = 0;
-	if (have_rhs) {
-		if (paren) {
-			int clen =
-				snprintf(rhs, sizeof(rhs), "%s%s", sep, paren);
-			int pad = BLOCK - clen;
-			if (pad > 0) {
-				memmove(rhs + pad, rhs, clen);
-				memset(rhs, fc, pad);
-			}
-			rhs_len = BLOCK;
-		} else {
-			memset(rhs, fc, BLOCK);
-			rhs_len = BLOCK;
-		}
-	}
-
-	/* Write: LHS + fill + mid + RHS */
+/* Join the three status blocks into the abuf with fill padding. */
+static void joinStatusBlocks(struct abuf *ab, const char *left, int left_len,
+			     const char *mid, int mid_len, const char *rhs,
+			     int rhs_bytes, int rhs_cols, int total, char fc) {
 	abAppend(ab, left, left_len);
 
-	int gap = total - left_len - mid_len - rhs_len;
+	int gap = total - left_len - mid_len - rhs_cols;
 	while (gap-- > 0)
 		abAppend(ab, &fc, 1);
 
 	if (mid_len > 0)
 		abAppend(ab, mid, mid_len);
-	if (rhs_len > 0)
-		abAppend(ab, rhs, rhs_len);
+	if (rhs_bytes > 0)
+		abAppend(ab, rhs, rhs_bytes);
+}
+
+void drawStatusBar(struct window *win, struct abuf *ab, int line) {
+	char buf[32];
+	snprintf(buf, sizeof(buf), CSI "%d;%dH", line, 1);
+	abAppend(ab, buf, strlen(buf));
+
+	struct buffer *bufr = win->buf;
+	abAppend(ab, "\x1b[7m", 4);
+
+	int total = E.screencols;
+	int focused = win->focused;
+	char fc = focused ? ' ' : '-';
+
+	/* Compute name width budget */
+	const char *dname =
+		bufr->display_name ?
+			bufr->display_name :
+			(bufr->filename ? bufr->filename : "*scratch*");
+	int dlen = strlen(dname);
+	const char *bname = strrchr(dname, '/');
+	bname = bname ? bname + 1 : dname;
+	int bname_len = strlen(bname);
+
+	int has_path = (dlen > bname_len);
+	int min_name = has_path ? bname_len + 3 : bname_len;
+	if (bufr->min_name_len > min_name)
+		min_name = bufr->min_name_len;
+	if (min_name > dlen)
+		min_name = dlen;
+
+	int flags_len = 3; /* always "XY " where X,Y are dirty/ro chars */
+	int name_need = 1 + flags_len + min_name; /* space + flags + name */
+	int remain = total - name_need;
+
+	int have_mid = (remain >= STATUS_BLOCK);
+	if (have_mid)
+		remain -= STATUS_BLOCK;
+	int have_rhs = (remain >= STATUS_BLOCK);
+	if (have_rhs)
+		remain -= STATUS_BLOCK;
+
+	int name_width = min_name + (remain > 0 ? remain : 0);
+	int max_name = total - 1 - flags_len;
+	if (max_name < 1)
+		max_name = 1;
+	if (name_width > max_name)
+		name_width = max_name;
+
+	/* Render blocks */
+	char left[512];
+	int left_len = statusLeft(bufr, left, sizeof(left), name_width);
+
+	char mid[16];
+	int mid_len = 0;
+	if (have_mid)
+		mid_len = statusMid(win, mid, fc);
+
+	char rhs[64];
+	int rhs_bytes = 0, rhs_cols = 0;
+	if (have_rhs)
+		statusRight(win, rhs, &rhs_bytes, &rhs_cols, fc);
+
+	joinStatusBlocks(ab, left, left_len, mid, mid_len, rhs, rhs_bytes,
+			 rhs_cols, total, fc);
 
 	abAppend(ab, "\x1b[m" CRLF, 5);
 }
@@ -1075,3 +1180,6 @@ void editorVersion(void) {
 	setStatusMessage("emil " EMIL_VERSION);
 }
 
+void help(void) {
+	setStatusMessage(msg_help);
+}

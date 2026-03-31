@@ -250,12 +250,15 @@ void jumpToRegister(void) {
 		struct buffer *buf = E.buf;
 		buf->cx = E.registers[reg].data.point.cx;
 		buf->cy = E.registers[reg].data.point.cy;
-		if (buf->cy >= buf->numrows)
-			buf->cy = buf->numrows - 1;
-		if (buf->cy < 0)
+		if (buf->numrows == 0) {
+			buf->cx = 0;
 			buf->cy = 0;
-		if (buf->cx > buf->row[buf->cy].size)
-			buf->cx = buf->row[buf->cy].size;
+		} else {
+			if (buf->cy >= buf->numrows)
+				buf->cy = buf->numrows - 1;
+			if (buf->cx > buf->row[buf->cy].size)
+				buf->cx = buf->row[buf->cy].size;
+		}
 		break;
 	}
 }

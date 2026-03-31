@@ -93,47 +93,38 @@ uint8_t *editorPrompt(struct buffer *bufr, const uint8_t *prompt,
 
 				/* Check if this is a file prompt and the path is a directory */
 				struct stat st;
-				if (t == PROMPT_FILES &&
-				    stat(effective_path, &st) == 0) {
-					if (S_ISDIR(st.st_mode)) {
-						/* User hit Enter on a directory.
-						 * Replace minibuffer with the directory path,
-						 * append / if needed, and trigger completion. */
-						int elen =
-							strlen(effective_path);
+				char *stat_path = expandTilde(effective_path);
+				int is_dir = (t == PROMPT_FILES &&
+					      stat(stat_path, &st) == 0 &&
+					      S_ISDIR(st.st_mode));
+				free(stat_path);
+				if (is_dir) {
+					/* User hit Enter on a directory.
+					 * Replace minibuffer with the directory path,
+					 * append / if needed, and trigger completion. */
+					int elen = strlen(effective_path);
 
-						/* Replace minibuffer content with effective path */
-						if (effective_path !=
-						    current_text) {
-							while (E.minibuf->numrows >
-							       0)
-								delRow(E.minibuf,
-								       0);
-							insertRow(
-								E.minibuf, 0,
-								effective_path,
-								elen);
-							E.minibuf->cx = elen;
-							E.minibuf->cy = 0;
-							resetCompletionState(
-								cs);
-						}
-
-						if (elen > 0 &&
-						    effective_path[elen - 1] !=
-							    '/') {
-							E.minibuf->cx =
-								E.minibuf
-									->row[0]
-									.size;
-							insertChar(E.minibuf,
-								   '/', 1);
-						}
-
-						handleMinibufferCompletion(
-							E.minibuf, t);
-						break; /* Do NOT return; keep the user in the prompt */
+					/* Replace minibuffer content with effective path */
+					if (effective_path != current_text) {
+						while (E.minibuf->numrows > 0)
+							delRow(E.minibuf, 0);
+						insertRow(E.minibuf, 0,
+							  effective_path, elen);
+						E.minibuf->cx = elen;
+						E.minibuf->cy = 0;
+						resetCompletionState(cs);
 					}
+
+					if (elen > 0 &&
+					    effective_path[elen - 1] != '/') {
+						E.minibuf->cx =
+							E.minibuf->row[0].size;
+						insertChar(E.minibuf, '/', 1);
+					}
+
+					handleMinibufferCompletion(E.minibuf,
+								   t);
+					break; /* Do NOT return; keep the user in the prompt */
 				}
 
 				/* PROMPT_DIR: strip trailing slash before returning */
@@ -166,8 +157,7 @@ uint8_t *editorPrompt(struct buffer *bufr, const uint8_t *prompt,
 
 		case '\t':
 			if (t == PROMPT_FILES || t == PROMPT_DIR ||
-			    t == PROMPT_COMMAND || t == PROMPT_BUFFER ||
-			    t == PROMPT_SEARCH) {
+			    t == PROMPT_COMMAND || t == PROMPT_BUFFER) {
 				handleMinibufferCompletion(E.minibuf, t);
 			} else {
 				insertChar(E.minibuf, '\t', 1);
@@ -234,16 +224,10 @@ uint8_t *editorPrompt(struct buffer *bufr, const uint8_t *prompt,
 		case KEY_META('n'): {
 			/* If completions are visible, cycle selection
 			 * instead of history. */
+			int down = (c == KEY_ARROW_DOWN || c == KEY_META('n'));
 			if (E.minibuf->completion_state.matches &&
 			    E.minibuf->completion_state.n_matches > 0) {
-				cycleCompletion(E.minibuf,
-						c == KEY_META('p') ? 1 : -1);
-				cycleCompletion(
-					E.minibuf,
-					c == KEY_META('n') ||
-							c == KEY_ARROW_DOWN ?
-						1 :
-						-1);
+				cycleCompletion(E.minibuf, down ? 1 : -1);
 				break;
 			}
 
@@ -268,7 +252,7 @@ uint8_t *editorPrompt(struct buffer *bufr, const uint8_t *prompt,
 			}
 
 			if (hist && hist->count > 0) {
-				if (c == KEY_META('p') || c == KEY_ARROW_UP) {
+				if (!down) {
 					if (history_pos == -1) {
 						history_pos = hist->count - 1;
 					} else if (history_pos > 0) {
@@ -311,21 +295,25 @@ uint8_t *editorPrompt(struct buffer *bufr, const uint8_t *prompt,
 			break;
 		}
 
-		default:
-			if (E.minibuf->completion_state.last_completed_text !=
-			    NULL) {
+		default: {
+			/* C-p / C-n move the cursor inside the minibuffer;
+			 * they should NOT destroy visible completions. */
+			int cmd_peek = resolveBinding(c);
+			int is_cursor_move = (cmd_peek == CMD_PREV_LINE ||
+					      cmd_peek == CMD_NEXT_LINE);
+
+			if (!is_cursor_move &&
+			    E.minibuf->completion_state.last_completed_text !=
+				    NULL) {
 				resetCompletionState(
 					&E.minibuf->completion_state);
 			}
 
-			/* Resolve key → command before dispatching */
+			/* Dispatch */
 			if (c >= ' ' && c < KEY_ARROW_LEFT)
 				E.self_insert_key = c;
-			{
-				int cmd = resolveBinding(c);
-				if (cmd != CMD_NONE)
-					processKeypress(cmd);
-			}
+			if (cmd_peek != CMD_NONE)
+				processKeypress(cmd_peek);
 
 			/* Ensure single line */
 			if (E.minibuf->numrows > 1) {
@@ -355,6 +343,7 @@ uint8_t *editorPrompt(struct buffer *bufr, const uint8_t *prompt,
 				E.minibuf->cy = 0;
 				free(joined);
 			}
+		}
 		}
 
 		if (callback) {
@@ -400,7 +389,7 @@ done:
 
 	E.buf = E.edbuf;
 
-	setStatusMessage("");
+	clearStatusMessage();
 
 	return result;
 }

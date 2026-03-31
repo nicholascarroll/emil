@@ -1,12 +1,13 @@
 #include "base64.h"
 #include <stdlib.h>
+#include "util.h"
 
 static const char b64table[] =
 	"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 char *base64_encode(const uint8_t *src, size_t srclen) {
 	size_t outlen = 4 * ((srclen + 2) / 3);
-	char *out = malloc(outlen + 1);
+	char *out = xmalloc(outlen + 1);
 	if (out == NULL)
 		return NULL;
 

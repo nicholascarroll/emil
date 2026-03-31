@@ -12,8 +12,8 @@
 
 #define EMIL_TAB_STOP 8
 
-#ifndef EMIL_MAX_TOTAL_BYTES
-#define EMIL_MAX_TOTAL_BYTES (1024 * 1024 * 1024)
+#ifndef EMIL_BYTES_BUDGET
+#define EMIL_BYTES_BUDGET (1024 * 1024 * 1024)
 #endif
 
 #ifndef EMIL_VERSION
@@ -45,7 +45,7 @@ enum promptType {
 
 /* Type policy:
  * Positions (cx, cy, markx, marky) — int, signed for sentinels
- * Sizes (erow.size, abuf.len) — int, bounded by EMIL_MAX_TOTAL_BYTES
+ * Sizes (erow.size, abuf.len) — int, bounded by EMIL_BYTES_BUDGET
  * Accumulations to malloc — size_t (e.g. rowsToString totlen)  */
 
 typedef struct erow {
@@ -115,8 +115,12 @@ struct buffer {
 	/* Only used for equality comparison with stat().st_mtime.
 	 * Safe across the 2038 boundary.  Do NOT do arithmetic on
 	 * this field. */
-	time_t open_mtime; /* st_mtime at open/save, 0 if unset */
-	int external_mod;  /* 1 if file changed on disk since open/save */
+	time_t open_mtime;    /* st_mtime at open/save, 0 if unset */
+	size_t file_size;     /* st_size at open, for open-file budget */
+	int external_mod;     /* 1 if file changed on disk since open/save */
+	int lock_blocked_pid; /* PID holding the lock we couldn't acquire,
+	                       * or -1 if held by unknown process, or 0
+	                       * if we are not blocked */
 	int internal_mod;
 	erow *row;
 	char *filename;
@@ -247,7 +251,9 @@ struct config {
 	struct history kill_history;
 	int kill_ring_pos;	/* Current position in kill ring for M-y */
 	int self_insert_key;	/* Stashed key for CMD_SELF_INSERT */
-	size_t tracked_bytes;	/* Total tracked memory usage */
+	int memory_over_limit;	/* 1 if totalBudgetBytes has exceeded
+	                         * EMIL_BYTES_BUDGET; cleared when the
+	                         * budget drops back below the limit */
 	struct abuf render_buf; /* Persistent screen-render buffer */
 };
 
@@ -257,7 +263,7 @@ uint8_t *editorPrompt(struct buffer *bufr, const uint8_t *prompt,
 		      enum promptType t,
 		      void (*callback)(struct buffer *, uint8_t *, int));
 void updateBuffer(struct buffer *buf);
-void insertNewlineRaw(void);
+void splitLineAtPoint(void);
 void insertNewline(int count);
 void insertChar(struct buffer *bufr, int c, int count);
 int editorOpen(struct buffer *bufr, char *filename);

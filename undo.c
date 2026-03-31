@@ -45,7 +45,7 @@ void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
 		memcpy(&row->chars[startx], data, datalen);
 		row->size += datalen;
 		row->cached_width = -1;
-		buf->dirty = 1;
+		markBufferDirty(buf);
 		invalidateScreenCache(buf);
 		adjustAllPoints(buf, startx, starty, startx + datalen, starty,
 				0);
@@ -114,7 +114,7 @@ void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
 				  combined_len);
 			free(combined);
 			free(suffix);
-			buf->dirty = 1;
+			markBufferDirty(buf);
 			invalidateScreenCache(buf);
 			adjustAllPoints(buf, startx, starty, ins_endx, ins_endy,
 					0);
@@ -135,16 +135,16 @@ void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
 		insertRow(buf, insert_at, "", 0);
 	}
 	free(suffix);
-	buf->dirty = 1;
+	markBufferDirty(buf);
 	invalidateScreenCache(buf);
 	adjustAllPoints(buf, startx, starty, ins_endx, ins_endy, 0);
 }
 
 /* Bulk-delete text from (startx, starty) to (endx, endy).
  * Uses direct memmove/memcpy and delRow — no character-at-a-time
- * primitives.  Does NOT record undo. */
-static void bulkDelete(struct buffer *buf, int startx, int starty, int endx,
-		       int endy) {
+ * primitives.  Does NOT record undo.  Calls adjustAllPoints. */
+void bulkDelete(struct buffer *buf, int startx, int starty, int endx,
+		int endy) {
 	if (buf->numrows == 0 || starty >= buf->numrows)
 		return;
 
@@ -158,7 +158,7 @@ static void bulkDelete(struct buffer *buf, int startx, int starty, int endx,
 			row->size - endx + 1); /* +1 for NUL */
 		row->size -= endx - startx;
 		row->cached_width = -1;
-		buf->dirty = 1;
+		markBufferDirty(buf);
 		invalidateScreenCache(buf);
 	} else {
 		/* Multi-row deletion:
@@ -184,16 +184,48 @@ static void bulkDelete(struct buffer *buf, int startx, int starty, int endx,
 		first->chars[first->size] = '\0';
 		first->cached_width = -1;
 		delRow(buf, starty + 1);
-		buf->dirty = 1;
+		markBufferDirty(buf);
 		invalidateScreenCache(buf);
 	}
 }
 
-void doUndo(struct buffer *buf, int count) {
-	if (buf->read_only) {
-		setStatusMessage(msg_read_only);
-		return;
+/* Apply one undo or redo step: replay the mutation and move the node
+ * between the two lists.  Called only from doUndo/doRedo. */
+static void undoStep(struct buffer *buf, int redo) {
+	struct undo **src = redo ? &buf->redo : &buf->undo;
+	struct undo **dst = redo ? &buf->undo : &buf->redo;
+	struct undo *node = *src;
+	int is_delete = redo ? node->delete : !node->delete;
+
+	if (is_delete) {
+		bulkDelete(buf, node->startx, node->starty, node->endx,
+			   node->endy);
+		buf->cx = node->startx;
+		buf->cy = node->starty;
+	} else {
+		bulkInsert(buf, node->startx, node->starty, node->data,
+			   node->datalen);
+		buf->cx = node->endx;
+		buf->cy = node->endy;
 	}
+
+	updateBuffer(buf);
+
+	/* Move node from src-list head to dst-list head */
+	struct undo *prev_dst = *dst;
+	*dst = node;
+	*src = node->prev;
+	node->prev = prev_dst;
+
+	if (redo)
+		buf->undo_count++;
+	else
+		buf->undo_count--;
+}
+
+void doUndo(struct buffer *buf, int count) {
+	if (rejectIfReadOnly(buf))
+		return;
 
 	buf->mark_active = 0;
 
@@ -202,36 +234,12 @@ void doUndo(struct buffer *buf, int count) {
 		if (buf->undo == NULL) {
 			setStatusMessage(msg_no_undo);
 			if (!buf->undo_pruned && !buf->internal_mod) {
-				buf->dirty = 0;
+				markBufferClean(buf);
 			}
 			return;
 		}
 		int paired = buf->undo->paired;
-
-		if (buf->undo->delete) {
-			/* Re-insert deleted text using bulk operations.
-			 * Data is in forward order (matching original
-			 * file text). */
-			bulkInsert(buf, buf->undo->startx, buf->undo->starty,
-				   buf->undo->data, buf->undo->datalen);
-			buf->cx = buf->undo->endx;
-			buf->cy = buf->undo->endy;
-		} else {
-			/* Delete the previously inserted text using
-			 * bulk operations. */
-			bulkDelete(buf, buf->undo->startx, buf->undo->starty,
-				   buf->undo->endx, buf->undo->endy);
-			buf->cx = buf->undo->startx;
-			buf->cy = buf->undo->starty;
-		}
-
-		updateBuffer(buf);
-
-		struct undo *orig = buf->redo;
-		buf->redo = buf->undo;
-		buf->undo = buf->undo->prev;
-		buf->redo->prev = orig;
-		buf->undo_count--;
+		undoStep(buf, 0);
 		setStatusMessage(msg_undo);
 
 		if (paired) {
@@ -258,10 +266,8 @@ void debugUnpair(void) {
 #endif
 
 void doRedo(struct buffer *buf, int count) {
-	if (buf->read_only) {
-		setStatusMessage(msg_read_only);
+	if (rejectIfReadOnly(buf))
 		return;
-	}
 
 	buf->mark_active = 0;
 
@@ -271,29 +277,8 @@ void doRedo(struct buffer *buf, int count) {
 			setStatusMessage(msg_no_redo);
 			return;
 		}
-
-		if (buf->redo->delete) {
-			/* Re-delete text using bulk operations. */
-			bulkDelete(buf, buf->redo->startx, buf->redo->starty,
-				   buf->redo->endx, buf->redo->endy);
-			buf->cx = buf->redo->startx;
-			buf->cy = buf->redo->starty;
-		} else {
-			/* Re-insert text using bulk operations.
-			 * Data is in forward order. */
-			bulkInsert(buf, buf->redo->startx, buf->redo->starty,
-				   buf->redo->data, buf->redo->datalen);
-			buf->cx = buf->redo->endx;
-			buf->cy = buf->redo->endy;
-		}
-
-		updateBuffer(buf);
-
-		struct undo *orig = buf->undo;
-		buf->undo = buf->redo;
-		buf->redo = buf->redo->prev;
-		buf->undo->prev = orig;
-		buf->undo_count++;
+		undoStep(buf, 1);
+		setStatusMessage(msg_redo);
 
 		if (buf->redo != NULL && buf->redo->paired) {
 			doRedo(buf, 1);
@@ -315,8 +300,16 @@ struct undo *newUndo(void) {
 	ret->datasize = 22;
 	ret->data = xmalloc(ret->datasize);
 	ret->data[0] = 0;
-	trackAlloc((size_t)ret->datasize);
 	return ret;
+}
+
+/* Replace an undo record's data buffer with a new allocation of
+ * 'newsize' bytes.  Callers must fill in the new data themselves
+ * after this returns. */
+void undoReplaceData(struct undo *u, int newsize) {
+	free(u->data);
+	u->datasize = newsize;
+	u->data = xmalloc(u->datasize);
 }
 
 static void freeUndos(struct undo *first);
@@ -348,7 +341,6 @@ static void freeUndos(struct undo *first) {
 	struct undo *prev;
 
 	while (cur != NULL) {
-		trackFree((size_t)cur->datasize);
 		free(cur->data);
 		prev = cur;
 		cur = prev->prev;

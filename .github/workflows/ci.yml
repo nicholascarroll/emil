@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ main ]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     strategy:
@@ -41,30 +45,186 @@ jobs:
     
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Build with AddressSanitizer + UndefinedBehaviorSanitizer (${{ matrix.compiler }})
-      run: make clean && make CC=${{ matrix.compiler }} CFLAGS="-fsanitize=address,undefined -g -O1 -fno-omit-frame-pointer" LDFLAGS="-fsanitize=address,undefined"
-    
-    - name: Test with sanitizers
-      run: |
-        echo "Testing emil with sanitizers enabled..."
-        ./emil --version
-        echo "Running unit tests with sanitizers..."
-        make test
+    - name: Build and test with sanitizers
+      run: make sanitize
 
   security:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v4
-    
+    - uses: actions/checkout@v4    
     - name: CodeQL Analysis
       uses: github/codeql-action/init@v3
       with:
-        languages: cpp
-    
+        languages: cpp    
     - name: Build for analysis
-      run: make
-    
+      run: make    
     - name: Run CodeQL
       uses: github/codeql-action/analyze@v3
+
+  msys2:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          msystem: MSYS
+          install: >-
+            msys2-devel msys2-runtime-devel gcc make
+            diffutils
+      - name: Build and Test
+        run: |
+          make
+          make test
+
+
+  openindiana:
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+        - name: Build and Test on OpenIndiana
+          uses: vmactions/openindiana-vm@v1
+          with:
+            prepare: |
+              pkg install --accept developer/gcc-14 developer/build/make
+              
+            run: |
+              export PATH="/usr/bin:/usr/gnu/bin:$PATH"
+              ln -s /usr/bin/gcc-14 /usr/bin/cc
+              export CFLAGS="-D_XOPEN_SOURCE=600 -D__EXTENSIONS__ -std=c99"
+              
+              echo "--- Building Emil ---"
+              make CC=gcc-14 CFLAGS="$CFLAGS"
+              
+              echo "--- Running Tests ---"
+              make CC=gcc-14 CFLAGS="$CFLAGS" test
+
+  netbsd:
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+        - name: Build on NetBSD
+          uses: vmactions/netbsd-vm@v1
+          with:
+            run: |
+              make CC=cc
+              make test  
+  haiku:
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+        - name: Build on Haiku
+          uses: vmactions/haiku-vm@v1
+          with:
+            prepare: pkgman install -y gcc make
+            run: |
+              make CC=gcc
+              make test
+  
+  alpine_musl:
+      runs-on: ubuntu-latest
+      container: alpine:latest
+      steps:
+        - name: Install dependencies
+          run: apk add --no-cache build-base git
+        - uses: actions/checkout@v4
+        - name: Build and Test
+          run: |
+            make CC=gcc
+            cat /etc/os-release 2>/dev/null | grep ^PRETTY_NAME=
+            ldd --version 2>&1 | head -n1
+            make test
+
+  riscv-native:
+    runs-on: ubuntu-24.04-riscv   # ← Install RISE RISC-V Runners GitHub App first!
+    
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Emil Natively (RISC-V 64-bit)
+        run: |
+          make clean
+          make CC=gcc CFLAGS="-O2 -g"
+      - name: Run Native Tests
+        run: |
+          echo "Running on native RISC-V: $(uname -m)"
+          ./emil --version
+          make test
+
+  powerpc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and Test on PowerPC (ppc64le)
+        uses: uraimo/run-on-arch-action@v3
+        with:
+          arch: ppc64le
+          distro: ubuntu24.04
+          githubToken: ${{ github.token }}   # for image caching
+          install: |
+            apt-get update -y
+            apt-get install -y gcc make
+          run: |
+            make CC=gcc
+            make test
+
+  s390x:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and Test on IBM Z (s390x Big-Endian)
+        uses: uraimo/run-on-arch-action@v3
+        with:
+          arch: s390x
+          distro: ubuntu24.04
+          githubToken: ${{ github.token }}  
+          install: |
+            apt-get update -y
+            apt-get install -y gcc make
+          run: |
+            make CC=gcc
+            make test
+
+  freebsd:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and Test on FreeBSD
+        uses: vmactions/freebsd-vm@v1
+        with:
+          prepare: |
+            pkg install -y gcc gmake git
+          run: |
+            export CC=gcc
+            export CFLAGS="-O2 -pipe -std=c99 -Wall -Wextra -Wpedantic -D_DEFAULT_SOURCE -D_BSD_SOURCE"
+            echo "--- Building Emil on FreeBSD ---"
+            gmake CC=$CC CFLAGS="$CFLAGS"
+            echo "--- Running Tests ---"
+            gmake CC=$CC CFLAGS="$CFLAGS" test
+
+  y2038:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Y2038 — build and test on 32-bit ARM (armv7 Debian Bullseye)
+        uses: uraimo/run-on-arch-action@v3
+        with:
+          arch: armv7
+          distro: bullseye
+          githubToken: ${{ github.token }}
+          install: |
+            apt-get update -y
+            apt-get install -y gcc make
+          run: |
+            echo "--- Confirm this platform has 32-bit time_t ---"
+            cc -std=c99 -Wall -Wextra -Wpedantic -o confirm_y2038_bug tests/confirm_y2038_bug.c
+            ./confirm_y2038_bug
+
+            echo ""
+            echo "--- Building Emil ---"
+            make CC=gcc
+            echo "--- Running Tests ---"
+            make test

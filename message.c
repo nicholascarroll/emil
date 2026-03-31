@@ -12,3 +12,8 @@ void setStatusMessage(const char *fmt, ...) {
 	va_end(ap);
 	E.statusmsg_show = 1;
 }
+
+void clearStatusMessage(void) {
+	E.statusmsg[0] = '\0';
+	E.statusmsg_show = 0;
+}

@@ -1,34 +1,130 @@
 #!/bin/sh
-# Test suite for emil — (fat binary)
+set -u
 
-echo "Running tests..."
+CC=${CC:-cc}
+CFLAGS=${CFLAGS:-""}
+LDFLAGS=${LDFLAGS:-""}
+
+echo "run_tests.sh: Received CC=$CC"
+echo "run_tests.sh: Running tests on $(uname -s) $(uname -m)"
 echo ""
 
-# Binary exists and runs
-./emil --version > /dev/null || {
-    echo "✗ Binary does not run"
-    exit 1
-}
-echo "✓ Binary runs"
 
-# Version consistency
-if [ "$BINARY_VERSION" = "$MAKEFILE_VERSION" ]; then
-    echo "✓ Version consistency"
-elif echo "$BINARY_VERSION" | grep -q "$MAKEFILE_VERSION"; then
-    echo "✓ Version consistency (Dev build)"
-else
-    echo "✗ Version mismatch"
+# Check for missing newlines
+for file in ./*.c ./*.h; do
+    if [ -n "$(tail -c 1 "$file")" ]; then
+        echo "✗ Missing newlines in source files"
+        exit 1
+    fi
+done
+
+
+# Did the build produce a binary?
+if [ ! -f "./emil" ]; then
+    echo "✗ BUILD FAILURE: Binary 'emil' not found."
     exit 1
 fi
 
+# Can it run? Also note the version
+VERSION_OUTPUT=$(./emil --version 2>&1)
+rc=$?
+
+if [ $rc -ne 0 ]; then
+    echo "✗ Binary failed to run (Exit Code $rc)"
+    exit 1
+fi
+echo "✓ Binary runs"
+
+BINARY_VERSION=$(echo "$VERSION_OUTPUT" | awk '/emil/ {print $2}')
+MAKEFILE_VERSION=$(awk -F'=' '/^VERSION/ {gsub(/[ \t]/, "", $2); print $2}' Makefile)
+
+# Version numbering consistency verification
+if [ "$BINARY_VERSION" = "$MAKEFILE_VERSION" ]; then
+    echo "✓ Version numbering consistency verified"
+elif echo "$BINARY_VERSION" | grep -q "$MAKEFILE_VERSION"; then
+    echo "✓ Version numbering consistency verified (Dev build)"
+else
+    echo "✗ Version numbering mismatch: Binary ($BINARY_VERSION) vs Makefile ($MAKEFILE_VERSION)"
+    exit 1
+fi
+
+# ===== Source-level invariant checks =====
+#
+# These grep the editor source (not tests/) for patterns that must
+# not appear.  Catches mistakes before they reach a runtime test.
+
+INVARIANT_FAIL=0
+
+# Mutation-layer invariant: bulkInsert, bulkDelete, pushUndo, and
+# newUndo must not appear outside the permitted files.
+# Filter out comment lines (/* ... */, // ..., and * continuation lines).
+# The grep output has "file.c:NNN:<content>" format, so comment markers
+# appear after the second colon.
+MUTATION_HITS=$(grep -nE '\b(bulkInsert|bulkDelete|pushUndo|newUndo)\b' *.c 2>/dev/null \
+    | grep -v '^mutate\.c:' \
+    | grep -v '^undo\.c:' \
+    | grep -v '^buffer\.c:' \
+    | grep -vE ':[0-9]+:.*(/\*|//|^[^:]+:[0-9]+:[[:space:]]*\*)' \
+    | grep -vE ':[0-9]+:[[:space:]]*\*')
+if [ -n "$MUTATION_HITS" ]; then
+    echo "✗ Mutation-layer invariant violation:"
+    echo "$MUTATION_HITS" | sed 's/^/    /'
+    INVARIANT_FAIL=1
+else
+    echo "✓ Mutation-layer invariant"
+fi
+
+# Banned unsafe functions: strcpy, strcat, sprintf, gets, malloc, realloc, calloc
+# Use emil_strlcpy/emil_strlcat/snprintf/fgets, xmalloc, xrealloc, xcalloc instead.
+# Also getline is not portable; use emil_getline
+# All these are defined in util.h
+UNSAFE_HITS=$(grep -nE '\b(strcpy|strlcpy|strcat|strlcat|sprintf|gets|getline|malloc|realloc)\s*\(' *.c 2>/dev/null \
+    | grep -v '^util.c:' \
+    | grep -v 'emil_strlcpy' \
+    | grep -v 'emil_strlcat' \
+    | grep -v 'snprintf' \
+    | grep -v 'fgets' \
+    | grep -v 'emil_getline' \
+    | grep -v 'xmalloc' \
+    | grep -v 'xrealloc' \
+    | grep -v 'xcalloc')
+if [ -n "$UNSAFE_HITS" ]; then
+    echo "✗ Banned unsafe function call:"
+    echo "$UNSAFE_HITS" | sed 's/^/    /'
+    INVARIANT_FAIL=1
+else
+    echo "✓ No banned unsafe functions"
+fi
+
+if [ "$INVARIANT_FAIL" -ne 0 ]; then
+    echo ""
+    echo "Source invariant check failed — fix before proceeding."
+    exit 1
+fi
+
+
+# Y2038 safety: emil uses time_t only for mtime equality comparison.
+# Ban libc functions that interpret time_t values, since they break
+# on 32-bit platforms after 2038-01-19.  Arithmetic and ordering on
+# time_t are also unsafe but require semantic analysis to detect;
+# those are caught by code review.
+Y2038_BANNED="localtime|gmtime|mktime|strftime|difftime|ctime|asctime"
+y2038_hits=$(grep -rn -E "\b($Y2038_BANNED)\b" *.c *.h 2>/dev/null | grep -v "^tests/" || true)
+if [ -n "$y2038_hits" ]; then
+    echo "✗ Y2038 safety violation: banned time function found in source"
+    echo "$y2038_hits" | sed 's/^/    /'
+    exit 1
+fi
+echo "✓ Y2038 safe"
+
+echo ""
 
 # ===== Unit test suites (fat binary) =====
 #
 # Each test binary links every .o except main.o and terminal.o.
 # stubs.o provides E, page_overlap, and no-op terminal functions.
 
-PASS=0
-FAIL=0
+ANY_FAIL=0
 
 # Detect sanitizer build
 SANITIZER_FLAGS=""
@@ -37,10 +133,12 @@ if nm unicode.o 2>/dev/null | grep -q "__asan_"; then
     SANITIZER_FLAGS="-fsanitize=address,undefined"
 fi
 
-CFLAGS="-std=c99 -Wall -Wextra -Wpedantic -Wno-pointer-sign -Wno-unused-function -D_DEFAULT_SOURCE -D_BSD_SOURCE -I."
+# Use the CFLAGS from the Makefile (passed via environment) and add
+# test-specific flags. 
 
 # Build stubs.o (replaces main.o + terminal.o)
-cc $CFLAGS $SANITIZER_FLAGS -c tests/stubs.c -o tests/stubs.o 2>&1 || {
+TEST_CFLAGS="$CFLAGS -Wno-unused-function -I."
+$CC $TEST_CFLAGS $SANITIZER_FLAGS -c tests/stubs.c -o tests/stubs.o 2>&1 || {
     echo "✗ Failed to compile stubs.c"
     exit 1
 }
@@ -49,20 +147,21 @@ cc $CFLAGS $SANITIZER_FLAGS -c tests/stubs.c -o tests/stubs.o 2>&1 || {
 TEST_OBJECTS="wcwidth.o unicode.o buffer.o region.o undo.o transform.o \
     find.o pipe.o register.o fileio.o display.o message.o keymap.o \
     edit.o prompt.o util.o completion.o history.o base64.o abuf.o \
-    window.o clang.o adjust.o tests/stubs.o"
+    window.o clang.o adjust.o mutate.o wrap.o motion.o dbuf.o \
+    emil_subprocess.o tests/stubs.o"
 
 echo "Unit tests:"
 
-for suite in unicode wcwidth buffer undo edit fileio relpath visual_line utf8_validate rect_undo transform; do
+for suite in unicode wcwidth buffer undo edit fileio relpath visual_line utf8_validate rect_undo transform subprocess shell adjust history abuf tilde keymap kill_ring insert_file status_bar; do
     src="tests/test_${suite}.c"
     bin="tests/test_${suite}"
     printf "  %-12s " "$suite"
 
-    # Compile
-    if ! cc $CFLAGS $SANITIZER_FLAGS -o "$bin" "$src" $TEST_OBJECTS 2>/dev/null; then
+    # Compile and link (use TEST_CFLAGS for the test source, LDFLAGS for linking)
+    if ! $CC $TEST_CFLAGS $SANITIZER_FLAGS -o "$bin" "$src" $TEST_OBJECTS $LDFLAGS 2>/dev/null; then
         echo "BUILD FAIL"
-        cc $CFLAGS $SANITIZER_FLAGS -o "$bin" "$src" $TEST_OBJECTS 2>&1 | tail -5
-        FAIL=$((FAIL+1))
+        $CC $TEST_CFLAGS $SANITIZER_FLAGS -o "$bin" "$src" $TEST_OBJECTS $LDFLAGS 2>&1 | tail -5
+        ANY_FAIL=1
         continue
     fi
 
@@ -71,18 +170,23 @@ for suite in unicode wcwidth buffer undo edit fileio relpath visual_line utf8_va
     rc=$?
 
     if [ $rc -gt 128 ]; then
-        sig=$((rc - 128))
-        echo "CRASH (signal $sig)"
-        FAIL=$((FAIL+1))
+        echo "CRASH (signal $((rc - 128)))"
+        echo "$output" | grep -E ">>|run_shell|run_command|write_temp" | head -n 5 | sed 's/^/    /'
+        ANY_FAIL=1
     elif echo "$output" | grep -q "FAIL"; then
-        total=$(echo "$output" | awk '/Tests/{print $1; exit}')
-        echo "FAIL ($total tests)"
-        echo "$output" | grep "FAIL" | grep -v "^FAIL$" | head -3 | sed 's/^/    /'
-        FAIL=$((FAIL+1))
+        # Defect 1 Fix: No test count on failure
+        echo "FAIL" 
+        echo "$output" | grep "FAIL:" | head -n 3 | sed 's/^/    /'
+        ANY_FAIL=1
+    elif [ $rc -ne 0 ]; then
+        echo "FAIL (Sanitizer/Error - Exit Code $rc)"
+        # REMOVED 'head -n 5' to show the full report
+        echo "$output" | grep -iE "runtime error|AddressSanitizer|LEAK|ERROR" -A 5 2>/dev/null | head -20 | sed 's/^/    /'
+        ANY_FAIL=1
     else
+        # Success is the only place we report the test count
         total=$(echo "$output" | awk '/Tests/{print $1; exit}')
         echo "PASS ($total tests)"
-        PASS=$((PASS+1))
     fi
 
     rm -f "$bin"
@@ -90,12 +194,16 @@ done
 
 rm -f tests/stubs.o
 
-echo ""
-echo "Suites: $((PASS+FAIL))  Passed: $PASS  Failed: $FAIL"
 
-if [ "$FAIL" -gt 0 ]; then
+# Print the last line of the report
+echo ""
+echo "-------------------------------------------------------"
+
+if [ "$ANY_FAIL" -ne 0 ]; then
+    echo "TEST STATUS: FAILED"
     exit 1
 else
-    echo ""
-    echo "All tests passed"
+    echo "TEST STATUS: ALL PASSED"
+    exit 0
 fi
+

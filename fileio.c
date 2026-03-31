@@ -1,10 +1,13 @@
 #include "fileio.h"
 #include "buffer.h"
+#include "dbuf.h"
 #include "display.h"
 #include "emil.h"
 #include "keymap.h"
 #include "message.h"
+#include "mutate.h"
 #include "prompt.h"
+#include "terminal.h"
 #include "undo.h"
 #include "unicode.h"
 #include "unused.h"
@@ -29,11 +32,32 @@ extern void die(const char *s);
 
 /*** file locking ***/
 
+/* Probe whether an advisory lock is held on a file without acquiring one.
+ * Returns 0 if no lock is held, PID if locked , -1 if unknown
+ * or -2 on error (file doesn't exist, can't open, etc.). */
+int probeLock(const char *filename) {
+	int fd = open(filename, O_RDONLY);
+	if (fd < 0)
+		return -2;
+
+	struct flock query;
+	memset(&query, 0, sizeof(query));
+	query.l_type = F_WRLCK;
+	query.l_whence = SEEK_SET;
+	query.l_start = 0;
+	query.l_len = 0;
+	int pid = 0;
+	if (fcntl(fd, F_GETLK, &query) == 0 && query.l_type != F_UNLCK) {
+		pid = (int)query.l_pid;
+	}
+	close(fd);
+	return pid;
+}
+
 /* Try to acquire an advisory write lock on a file.
  * Returns 0 on success (lock acquired), -1 if already locked (sets
  * status message with the blocking PID), or -2 on error.
  * On success, bufr->lock_fd is set and must be released later. */
-
 int lockFile(struct buffer *bufr, const char *filename) {
 	/* Try O_RDWR first (needed for F_WRLCK per POSIX).
 	 * Fall back to O_RDONLY + F_RDLCK if the file isn't writable. */
@@ -67,7 +91,8 @@ int lockFile(struct buffer *bufr, const char *filename) {
 		return 0;
 	}
 
-	/* Lock failed — find out who holds it */
+	/* Lock failed — find out who holds it, record on the buffer for
+	 * the persistent status-bar warning. */
 	if (errno == EACCES || errno == EAGAIN) {
 		struct flock query;
 		memset(&query, 0, sizeof(query));
@@ -78,9 +103,9 @@ int lockFile(struct buffer *bufr, const char *filename) {
 
 		if (fcntl(fd, F_GETLK, &query) == 0 &&
 		    query.l_type != F_UNLCK) {
-			setStatusMessage(msg_file_locked, (int)query.l_pid);
+			bufr->lock_blocked_pid = (int)query.l_pid;
 		} else {
-			setStatusMessage(msg_file_locked, 0);
+			bufr->lock_blocked_pid = -1; /* unknown holder */
 		}
 	}
 
@@ -88,7 +113,17 @@ int lockFile(struct buffer *bufr, const char *filename) {
 	return -1;
 }
 
-/* Release the advisory lock held by this buffer. */
+/* Release the advisory lock held by this buffer.
+ *
+ * Does NOT clear external_mod: that flag is a latch indicating
+ * "disk content has diverged from what we loaded," and its only
+ * legitimate exits are save (user chose to clobber) and revert
+ * (user chose the disk copy).  Releasing a lock — which happens on
+ * clean→dirty transitions via markBufferClean, on saveAs, and on
+ * buffer destruction — says nothing about whether the buffer still
+ * reflects disk.  In particular, undo-to-clean triggers
+ * markBufferClean → releaseLock, and clearing external_mod there
+ * would silently dismiss a warning the user hasn't resolved. */
 
 void releaseLock(struct buffer *bufr) {
 	if (bufr->lock_fd >= 0) {
@@ -96,25 +131,69 @@ void releaseLock(struct buffer *bufr) {
 		bufr->lock_fd = -1;
 	}
 	bufr->open_mtime = 0;
-	bufr->external_mod = 0;
+	bufr->lock_blocked_pid = 0;
 }
 
-/* Check whether the underlying file has been modified externally.
- * Called periodically (e.g. from refreshScreen).  Sets bufr->external_mod
- * and fires a one-time status message. */
+/* Check whether the underlying file has been modified externally,
+ * and opportunistically clear a stale lock_blocked_pid warning if
+ * the blocking process has since released the lock.
+ *
+ * Called periodically (from refreshScreen) on the focused buffer.
+ *
+ * Two independent jobs, both cheap:
+ *
+ *   1. Set bufr->external_mod if mtime has drifted since open/save.
+ *      One-shot — returns early if the flag is already set, so the
+ *      stat() cost is paid at most once per file until save/revert.
+ *
+ *   2. Re-probe the advisory lock when we know we have a stale
+ *      warning to clear: the buffer is dirty, we previously tried
+ *      and failed to acquire the lock (lock_blocked_pid != 0), and
+ *      we still don't hold it (lock_fd < 0).  markBufferDirty
+ *      short-circuits once dirty is set, so without this re-probe
+ *      the warning would persist forever after the blocking process
+ *      exits.  The probe runs at most one open+fcntl+close per
+ *      refresh, and only in the exact state where the warning is
+ *      potentially stale — zero extra syscalls in the common case
+ *      where we either hold the lock or nobody else wants it.
+ *
+ *      Job 2 is gated on !external_mod: if the blocking process
+ *      saved changes before releasing the lock, Job 1 will have
+ *      already set external_mod from the mtime drift, and we
+ *      deliberately don't acquire a lock we'd use to overwrite
+ *      those changes.  This mirrors markBufferDirty's own refusal
+ *      to lock when external_mod is set.  The stale lock_blocked_pid
+ *      remains on the buffer but is shadowed in the status bar by
+ *      the higher-precedence [FILE CHANGED ON DISK] warning (see
+ *      display.c precedence order). */
 
 void checkFileModified(void) {
-	if (E.buf->filename == NULL || E.buf->open_mtime == 0)
+	if (E.buf->filename == NULL)
 		return;
-	if (E.buf->external_mod)
-		return; /* already flagged */
 
-	struct stat st;
-	if (stat(E.buf->filename, &st) == 0) {
-		if (st.st_mtime != E.buf->open_mtime) {
-			E.buf->external_mod = 1;
-			setStatusMessage(msg_file_changed_on_disk);
+	/* Job 1: mtime check. */
+	if (E.buf->open_mtime != 0 && !E.buf->external_mod) {
+		char *iopath = expandTilde(E.buf->filename);
+		struct stat st;
+		if (stat(iopath, &st) == 0) {
+			if (st.st_mtime != E.buf->open_mtime)
+				E.buf->external_mod = 1;
 		}
+		free(iopath);
+	}
+
+	/* Job 2: stale-lock re-probe. */
+	if (E.buf->dirty && E.buf->lock_blocked_pid != 0 &&
+	    E.buf->lock_fd < 0 && !E.buf->external_mod) {
+		char *iopath = expandTilde(E.buf->filename);
+		if (lockFile(E.buf, iopath) == 0) {
+			/* Acquired — warning clears. */
+			E.buf->lock_blocked_pid = 0;
+		}
+		/* On failure lockFile has already refreshed
+		 * lock_blocked_pid to reflect the current holder
+		 * (possibly a different process from before). */
+		free(iopath);
 	}
 }
 
@@ -178,30 +257,38 @@ static int fileContainsNullBytes(FILE *fp) {
 
 int editorOpen(struct buffer *bufr, char *filename) {
 	free(bufr->filename);
-	bufr->filename = xstrdup(filename);
+	bufr->filename = collapseHome(filename);
 
-	FILE *fp = fopen(filename, "r");
+	/* Resolve to an OS-usable path for all I/O in this function */
+	char *iopath = expandTilde(bufr->filename);
+
+	FILE *fp = fopen(iopath, "r");
 	if (!fp) {
 		if (errno == ENOENT) {
 			setStatusMessage(msg_new_file, bufr->filename);
+			free(iopath);
 			return 0;
 		}
 		setStatusMessage(msg_cant_open, strerror(errno));
 		free(bufr->filename);
 		bufr->filename = NULL;
+		free(iopath);
 		return -1;
 	}
 
-	/* Check file size against remaining memory budget */
+	/* Check file size against budget (hard limit) */
 	{
 		struct stat st;
 		if (fstat(fileno(fp), &st) == 0 && S_ISREG(st.st_mode)) {
-			if ((size_t)st.st_size + E.tracked_bytes >
-			    (size_t)EMIL_MAX_TOTAL_BYTES) {
+			bufr->file_size = (size_t)st.st_size;
+			if (totalBudgetBytes() + bufr->file_size >
+			    (size_t)EMIL_BYTES_BUDGET) {
 				fclose(fp);
 				setStatusMessage(msg_memory_limit);
 				free(bufr->filename);
 				bufr->filename = NULL;
+				bufr->file_size = 0;
+				free(iopath);
 				return -1;
 			}
 		}
@@ -214,6 +301,7 @@ int editorOpen(struct buffer *bufr, char *filename) {
 		setStatusMessage(msg_binary_file);
 		free(bufr->filename);
 		bufr->filename = NULL;
+		free(iopath);
 		return -1;
 	}
 
@@ -225,7 +313,7 @@ int editorOpen(struct buffer *bufr, char *filename) {
 		while (linelen > 0 &&
 		       (line[linelen - 1] == '\n' || line[linelen - 1] == '\r'))
 			linelen--;
-		insertRow(bufr, bufr->numrows, line, linelen);
+		appendRowRaw(bufr, line, linelen);
 	}
 
 	/* Get the display length of the longest column */
@@ -239,9 +327,7 @@ int editorOpen(struct buffer *bufr, char *filename) {
 	free(line);
 	fclose(fp);
 
-	/* Guard against pathological files with billions of tiny lines.
-	 * numrows is int; keep it well below INT_MAX to avoid overflow
-	 * in row-index arithmetic elsewhere. */
+	/* Guard against pathological files with billions of tiny lines. */
 	if (bufr->numrows > INT_MAX / 2) {
 		for (int i = 0; i < bufr->numrows; i++)
 			freeRow(&bufr->row[i]);
@@ -252,12 +338,12 @@ int editorOpen(struct buffer *bufr, char *filename) {
 		free(bufr->filename);
 		bufr->filename = NULL;
 		setStatusMessage("File has too many lines");
+		free(iopath);
 		return -1;
 	}
 
 	/* Validate UTF-8 encoding of the loaded content */
 	if (!checkUTF8Validity(bufr)) {
-		/* Clean up: free rows and the row array itself */
 		for (int i = 0; i < bufr->numrows; i++) {
 			freeRow(&bufr->row[i]);
 		}
@@ -268,23 +354,38 @@ int editorOpen(struct buffer *bufr, char *filename) {
 		free(bufr->filename);
 		bufr->filename = NULL;
 		setStatusMessage(msg_invalid_utf8);
+		free(iopath);
 		return -1;
 	}
 
-	bufr->dirty = 0;
-	/* If the file is not writable by us, mark buffer read-only */
-	if (access(filename, W_OK) != 0) {
+	/* The load used appendRowRaw which deliberately does not dirty
+	 * the buffer or invalidate per-row; invalidate the screen cache
+	 * once here now that all rows are in place.  The buffer is
+	 * already clean (newBuffer initialized it that way, and the
+	 * load did not touch dirty state), so no markBufferClean is
+	 * needed. */
+	invalidateScreenCache(bufr);
+
+	if (access(iopath, W_OK) != 0) {
 		bufr->read_only = 1;
 	}
 
-	/* Try to acquire advisory lock */
-	int lock_result = lockFile(bufr, filename);
-	if (lock_result == -1) {
-		/* File is locked by another process — open read-only */
-		bufr->read_only = 1;
-	} else if (lock_result == 0) {
-		/* Lock acquired — mtime already recorded by lockFile */
+	/* Record mtime for external-modification detection.  The lock
+	 * used to be acquired here as a side effect; under the "lock only
+	 * while dirty" policy (issue #49), the lock is deferred until the
+	 * buffer is actually modified — see markBufferDirty(). */
+	{
+		struct stat st;
+		if (stat(iopath, &st) == 0)
+			bufr->open_mtime = st.st_mtime;
 	}
+
+	/* Probe for an advisory lock held by another process.  If one
+	 * is found, open the buffer read-only so the user doesn't
+	 * accidentally collide with the other editor instance. */
+	int lock_pid = probeLock(iopath);
+
+	free(iopath);
 
 	computeDisplayNames();
 
@@ -301,7 +402,15 @@ int editorOpen(struct buffer *bufr, char *filename) {
 		}
 	}
 
-	setStatusMessage(msg_lines_columns, bufr->numrows, max_width);
+	if (lock_pid != 0) {
+		bufr->read_only = 1;
+		if (lock_pid > 0)
+			setStatusMessage(msg_read_only_locked, lock_pid);
+		else
+			setStatusMessage(msg_read_only_locked_unknown);
+	} else {
+		setStatusMessage(msg_lines_columns, bufr->numrows, max_width);
+	}
 	return 0;
 }
 
@@ -344,64 +453,36 @@ void revert(void) {
 		new->cx = new->row[new->cy].size;
 	}
 	destroyBuffer(buf);
+	recheckMemoryBudget();
 }
 
-void save(void) {
-	/* Not allowed during macro record/playback */
-	if (E.recording || E.playback) {
-		setStatusMessage(msg_macro_blocked);
-		return;
-	}
-	if (E.buf->filename == NULL) {
-		E.buf->filename = (char *)editorPrompt(
-			E.buf, (uint8_t *)"Save as: %s", PROMPT_FILES, NULL);
-		if (E.buf->filename == NULL) {
-			setStatusMessage(msg_save_aborted);
-			return;
-		}
-		E.buf->special_buffer = 0;
-		computeDisplayNames();
-	}
-
-	size_t len;
-	char *buf = rowsToString(E.buf, &len);
-
-	/* Build temp filename: <filename>.tmpXXXXXX */
+static int writeAtomic(const char *iopath, const char *buf, size_t len) {
 	char tmpname[PATH_MAX];
-	snprintf(tmpname, sizeof(tmpname), "%s.tmpXXXXXX", E.buf->filename);
+	snprintf(tmpname, sizeof(tmpname), "%s.tmpXXXXXX", iopath);
 
 	int fd = mkstemp(tmpname);
-	if (fd == -1) {
-		free(buf);
-		setStatusMessage(msg_save_failed, strerror(errno));
-		return;
-	}
+	if (fd == -1)
+		return -1;
 
-	/* Preserve permissions if file already exists */
 	struct stat st;
-	if (stat(E.buf->filename, &st) == 0) {
+	if (stat(iopath, &st) == 0)
 		fchmod(fd, st.st_mode);
-	}
 
-	/* Write buffer fully, handling partial writes and EINTR */
 	size_t total = 0;
 	while (total < len) {
 		ssize_t n = write(fd, buf + total, len - total);
 		if (n < 0) {
 			if (errno == EINTR)
-				continue; // interrupted, try again
+				continue;
 			close(fd);
 			unlink(tmpname);
-			free(buf);
-			setStatusMessage(msg_save_failed, strerror(errno));
-			return;
-		} else if (n == 0) {
-			// shouldn't happen for regular files, treat as error
+			return -1;
+		}
+		if (n == 0) {
 			close(fd);
 			unlink(tmpname);
-			free(buf);
-			setStatusMessage(msg_save_failed);
-			return;
+			errno = EIO;
+			return -1;
 		}
 		total += (size_t)n;
 	}
@@ -409,25 +490,130 @@ void save(void) {
 	if (fsync(fd) == -1) {
 		close(fd);
 		unlink(tmpname);
-		free(buf);
-		setStatusMessage(msg_save_failed, strerror(errno));
-		return;
+		return -1;
 	}
 
-	close(fd);
-
-	if (rename(tmpname, E.buf->filename) == -1) {
+	if (close(fd) == -1) {
 		unlink(tmpname);
-		free(buf);
-		setStatusMessage(msg_save_failed, strerror(errno));
+		return -1;
+	}
+
+	if (rename(tmpname, iopath) == -1) {
+		unlink(tmpname);
+		return -1;
+	}
+
+	return 0;
+}
+
+static int writeDirect(const char *iopath, const char *buf, size_t len) {
+	int fd = open(iopath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	if (fd == -1)
+		return -1;
+
+	size_t total = 0;
+	while (total < len) {
+		ssize_t n = write(fd, buf + total, len - total);
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			close(fd);
+			return -1;
+		}
+		if (n == 0) {
+			close(fd);
+			errno = EIO;
+			return -1;
+		}
+		total += (size_t)n;
+	}
+
+	if (fsync(fd) == -1) {
+		close(fd);
+		return -1;
+	}
+
+	return close(fd);
+}
+
+static int confirmOverwriteDirect(const char *msg) {
+	/* Suppress checkFileModified's "[FILE CHANGED ON DISK]" during
+	 * the prompt: refreshScreen() calls checkFileModified(), and a
+	 * failing writeAtomic() may have touched the file's mtime before
+	 * rolling back, which would print the stale-file warning on top
+	 * of our y/N prompt.  checkFileModified() no-ops when
+	 * open_mtime == 0, so zero it for the duration and restore
+	 * after. */
+	time_t saved_mtime = E.buf->open_mtime;
+	E.buf->open_mtime = 0;
+
+	setStatusMessage("%s", msg);
+	refreshScreen();
+
+	int c = readKey();
+
+	clearStatusMessage(); /* clear prompt */
+
+	E.buf->open_mtime = saved_mtime;
+
+	return (c == 'y' || c == 'Y');
+}
+
+void save(void) {
+	if (E.recording || E.playback) {
+		setStatusMessage(msg_macro_blocked);
 		return;
 	}
+
+	if (E.buf->filename == NULL) {
+		char *input = (char *)editorPrompt(
+			E.buf, (uint8_t *)"Save as: %s", PROMPT_FILES, NULL);
+		if (input == NULL) {
+			setStatusMessage(msg_save_aborted);
+			return;
+		}
+		E.buf->filename = collapseHome(input);
+		free(input);
+		E.buf->special_buffer = 0;
+		computeDisplayNames();
+	}
+
+	char *iopath = expandTilde(E.buf->filename);
+
+	size_t len;
+	char *buf = rowsToString(E.buf, &len);
+
+	/* Try atomic write first */
+	if (writeAtomic(iopath, buf, len) == -1) {
+		if (errno == ENOSPC) {
+			if (!confirmOverwriteDirect(
+				    "Atomic save failed (disk space). Overwrite directly? (y/N)")) {
+				free(buf);
+				free(iopath);
+				setStatusMessage(msg_save_aborted);
+				return;
+			}
+
+			if (writeDirect(iopath, buf, len) == -1) {
+				free(buf);
+				free(iopath);
+				setStatusMessage(msg_save_failed,
+						 strerror(errno));
+				return;
+			}
+
+		} else {
+			free(buf);
+			free(iopath);
+			setStatusMessage(msg_save_failed, strerror(errno));
+			return;
+		}
+	}
+	/* Success  */
 
 	free(buf);
-	E.buf->dirty = 0;
+	markBufferClean(E.buf);
 
-	/* Compact row buffers: shrink any over-allocated rows now that
-	 * the buffer is saved and editing pressure has settled. */
 	for (int i = 0; i < E.buf->numrows; i++) {
 		erow *row = &E.buf->row[i];
 		if (row->charcap > row->size + 1) {
@@ -436,25 +622,24 @@ void save(void) {
 		}
 	}
 
-	/* Update stored mtime after save */
 	struct stat save_st;
-	if (stat(E.buf->filename, &save_st) == 0)
+	if (stat(iopath, &save_st) == 0)
 		E.buf->open_mtime = save_st.st_mtime;
+
 	E.buf->external_mod = 0;
 	E.buf->internal_mod = 1;
 
-	/* If we didn't have a lock yet (new file), acquire one now */
-	if (E.buf->lock_fd < 0)
-		lockFile(E.buf, E.buf->filename);
-
-	/* TODO Interactive fallback to direct write if temp creation fails */
-	/* TODO: fsync parent dir after rename */
+	/* Lock is released on clean by markBufferClean above; reacquired
+	 * on the next clean→dirty transition. */
 
 	int n = snprintf(NULL, 0, msg_wrote_bytes, (int)len, E.buf->filename);
 	char *showName =
 		leftTruncate(E.buf->filename, nameFit(E.buf->filename, n));
 	setStatusMessage(msg_wrote_bytes, (int)len, showName);
 	free(showName);
+
+	free(iopath);
+	recheckMemoryBudget();
 }
 
 void saveAs(void) {
@@ -470,7 +655,8 @@ void saveAs(void) {
 		return;
 	}
 	free(E.buf->filename);
-	E.buf->filename = new_filename;
+	E.buf->filename = collapseHome(new_filename);
+	free(new_filename);
 	/* Release lock on the old file before saving to the new one */
 	releaseLock(E.buf);
 	computeDisplayNames();
@@ -511,14 +697,16 @@ static int hasGlobChars(const char *s) {
 	return 0;
 }
 
-void findFile(void) {
+void findFile(int read_only) {
 	/* Not allowed during macro record/playback */
 	if (E.recording || E.playback) {
 		setStatusMessage(msg_macro_blocked);
 		return;
 	}
-	uint8_t *prompt =
-		editorPrompt(E.buf, msg_find_file, PROMPT_FILES, NULL);
+
+	uint8_t *prompt = editorPrompt(
+		E.buf, read_only ? msg_find_file_read_only : msg_find_file,
+		PROMPT_FILES, NULL);
 
 	if (prompt == NULL) {
 		setStatusMessage(msg_canceled);
@@ -527,8 +715,11 @@ void findFile(void) {
 
 	/* If the input contains glob wildcards, expand and open all matches */
 	if (hasGlobChars((char *)prompt)) {
+		/* Expand ~ for glob — OS doesn't understand tilde */
+		char *glob_input = expandTilde((char *)prompt);
 		glob_t gl;
-		int rc = glob((char *)prompt, GLOB_MARK, NULL, &gl);
+		int rc = glob(glob_input, GLOB_MARK, NULL, &gl);
+		free(glob_input);
 		if (rc != 0 || gl.gl_pathc == 0) {
 			if (rc == 0)
 				globfree(&gl);
@@ -546,6 +737,10 @@ void findFile(void) {
 				continue;
 			struct buffer *buf = switchToFile(gl.gl_pathv[i]);
 			if (buf) {
+				if (read_only) {
+					buf->read_only = 1;
+					setStatusMessage(msg_read_only);
+				}
 				last = buf;
 				opened++;
 			}
@@ -565,59 +760,72 @@ void findFile(void) {
 	}
 
 	/* Safety net: if a directory path somehow gets through the prompt,
-	 * don't try to open it as a file. */
+	 * don't try to open it as a file. * TODO review with suspicion */
 	struct stat st;
-	if (stat((char *)prompt, &st) == 0 && S_ISDIR(st.st_mode)) {
+	char *stat_path = expandTilde((char *)prompt);
+	if (stat(stat_path, &st) == 0 && S_ISDIR(st.st_mode)) {
 		setStatusMessage(msg_dir_not_supported);
+		free(stat_path);
 		free(prompt);
 		return;
 	}
+	free(stat_path);
 
 	struct buffer *buf = switchToFile((char *)prompt);
 	computeDisplayNames();
 	free(prompt);
-	if (buf)
+	if (buf) {
+		if (read_only) {
+			buf->read_only = 1;
+			setStatusMessage(msg_read_only);
+		}
 		refreshScreen();
+	}
 }
 
-void insertFile(void) {
-	struct buffer *buf = E.buf;
-	uint8_t *filename =
-		editorPrompt(buf, "Insert file: %s", PROMPT_FILES, NULL);
-	if (filename == NULL) {
-		return;
-	}
+/* Body of insert-file, callable by tests without going through the
+ * minibuffer prompt.  See fileio.h for contract. */
+int insertFileAtPath(struct buffer *buf, const char *path,
+		     const char *display_name) {
+	if (display_name == NULL)
+		display_name = path;
 
-	/* Reject directories */
+	/* Reject directories and check file size against budget */
 	struct stat ist;
-	if (stat((char *)filename, &ist) == 0 && S_ISDIR(ist.st_mode)) {
-		setStatusMessage(msg_dir_not_supported);
-		free(filename);
-		return;
+	if (stat(path, &ist) == 0) {
+		if (S_ISDIR(ist.st_mode)) {
+			setStatusMessage(msg_dir_not_supported);
+			return 1;
+		}
+		if (S_ISREG(ist.st_mode) &&
+		    totalBudgetBytes() + (size_t)ist.st_size >
+			    (size_t)EMIL_BYTES_BUDGET) {
+			setStatusMessage(msg_memory_limit);
+			return 1;
+		}
 	}
 
-	FILE *fp = fopen((char *)filename, "r");
+	FILE *fp = fopen(path, "r");
 	if (!fp) {
 		if (errno == ENOENT) {
 			int n = snprintf(NULL, 0, msg_file_not_found,
-					 (char *)filename);
-			char *showName = leftTruncate(
-				(char *)filename, nameFit((char *)filename, n));
+					 display_name);
+			char *showName =
+				leftTruncate((char *)display_name,
+					     nameFit((char *)display_name, n));
 			setStatusMessage(msg_file_not_found, showName);
 			free(showName);
 		} else {
 			setStatusMessage(msg_error_opening, strerror(errno));
 		}
-		free(filename);
-		return;
+		return 1;
 	}
 
 	/* Pre-scan for null bytes */
 	if (fileContainsNullBytes(fp)) {
 		fclose(fp);
 		setStatusMessage(msg_binary_file);
-		free(filename);
-		return;
+		return 1;
 	}
 
 	/* Load into a temporary buffer so we can validate before
@@ -633,7 +841,7 @@ void insertFile(void) {
 				       line[linelen - 1] == '\r')) {
 			linelen--;
 		}
-		insertRow(tmpbuf, tmpbuf->numrows, line, linelen);
+		appendRowRaw(tmpbuf, line, linelen);
 	}
 
 	free(line);
@@ -643,36 +851,82 @@ void insertFile(void) {
 	if (!checkUTF8Validity(tmpbuf)) {
 		destroyBuffer(tmpbuf);
 		setStatusMessage(msg_invalid_utf8);
-		free(filename);
-		return;
+		return 1;
 	}
 
-	/* Now insert the validated content into the actual buffer */
-	int saved_cy = buf->cy;
-	int lines_inserted = 0;
-
-	for (int i = 0; i < tmpbuf->numrows; i++) {
-		insertRow(buf, saved_cy + lines_inserted,
-			  (char *)tmpbuf->row[i].chars, tmpbuf->row[i].size);
-		lines_inserted++;
-	}
-
-	destroyBuffer(tmpbuf);
+	int lines_inserted = tmpbuf->numrows;
 
 	if (lines_inserted > 0) {
+		/* Concatenate the validated rows into a single byte block
+		 * separated by newlines.
+		 *
+		 * Trailing newline policy:
+		 *   - If buf->cy addresses an existing row, we want that row's
+		 *     content to remain a separate row after the inserted
+		 *     block — matching the pre-refactor behaviour of
+		 *     insertRow-in-a-loop.  Adding a trailing '\n' causes
+		 *     bulkInsert's "save suffix / insert last fragment / emit
+		 *     suffix as new row" path to leave the existing content on
+		 *     its own row below the insertion.
+		 *   - If buf->cy == buf->numrows (past-end virtual row, empty
+		 *     buffer case), there's no suffix to preserve and a
+		 *     trailing '\n' would manufacture an extra empty row that
+		 *     wasn't there before.  Omit it.
+		 *
+		 * Insert position is (0, buf->cy) — start of the current row —
+		 * in both cases. */
+		int saved_cy = buf->cy;
+		int has_suffix_row = (saved_cy < buf->numrows);
+
+		struct dbuf d = DBUF_INIT;
+		for (int i = 0; i < tmpbuf->numrows; i++) {
+			if (i > 0)
+				dbuf_byte(&d, '\n');
+			dbuf_append(&d, tmpbuf->row[i].chars,
+				    tmpbuf->row[i].size);
+		}
+		if (has_suffix_row)
+			dbuf_byte(&d, '\n');
+
+		int byte_len;
+		uint8_t *bytes = dbuf_detach(&d, &byte_len);
+
+		int ex, ey;
+		mutateInsert(buf, 0, saved_cy, bytes, byte_len, &ex, &ey);
+		free(bytes);
+
+		/* Match the pre-refactor cursor landing: end of the last
+		 * inserted line. */
+		(void)ex;
+		(void)ey;
 		buf->cy = saved_cy + lines_inserted - 1;
 		buf->cx = buf->row[buf->cy].size;
 	}
 
+	destroyBuffer(tmpbuf);
+
 	int n = snprintf(NULL, 0, msg_inserted_lines, lines_inserted,
-			 (char *)filename);
-	char *showName =
-		leftTruncate((char *)filename, nameFit((char *)filename, n));
+			 display_name);
+	char *showName = leftTruncate((char *)display_name,
+				      nameFit((char *)display_name, n));
 	setStatusMessage(msg_inserted_lines, lines_inserted, showName);
 	free(showName);
-	free(filename);
 
-	buf->dirty++;
+	return 0;
+}
+
+void insertFile(void) {
+	struct buffer *buf = E.buf;
+	uint8_t *filename =
+		editorPrompt(buf, "Insert file: %s", PROMPT_FILES, NULL);
+	if (filename == NULL) {
+		return;
+	}
+
+	char *iopath = expandTilde((char *)filename);
+	(void)insertFileAtPath(buf, iopath, (const char *)filename);
+	free(iopath);
+	free(filename);
 }
 
 /* Compute the relative path from directory 'from' to directory 'to'.
@@ -736,7 +990,7 @@ char *relativePath(const char *from, const char *to) {
 /* Canonicalize an absolute path by resolving . and .. segments.
  * Does NOT resolve symlinks — purely string-level.
  * Modifies the string in place and returns it. */
-static char *cleanPath(char *path) {
+char *cleanPath(char *path) {
 	/* Stack of pointers to segment starts within path */
 	char *segs[256];
 	int depth = 0;
@@ -786,7 +1040,10 @@ static char *cleanPath(char *path) {
  * Used by changeDirectory and exposed for testing. */
 char *rebaseFilename(const char *filename, const char *old_cwd,
 		     const char *new_cwd) {
+	/* Absolute and ~-prefixed paths are location-independent */
 	if (filename[0] == '/')
+		return xstrdup(filename);
+	if (filename[0] == '~' && (filename[1] == '\0' || filename[1] == '/'))
 		return xstrdup(filename);
 
 	/* Absolutize against old cwd and clean up any .. segments */
@@ -830,11 +1087,14 @@ void changeDirectory(void) {
 		return;
 	}
 
-	if (chdir((char *)dir) != 0) {
+	char *iodir = expandTilde((char *)dir);
+	if (chdir(iodir) != 0) {
 		setStatusMessage("cd: %s: %s", (char *)dir, strerror(errno));
+		free(iodir);
 		free(dir);
 		return;
 	}
+	free(iodir);
 
 	char new_cwd[PATH_MAX];
 	if (getcwd(new_cwd, sizeof(new_cwd)) == NULL) {
@@ -861,4 +1121,76 @@ void changeDirectory(void) {
 
 	setStatusMessage(msg_current_dir, new_cwd);
 	free(dir);
+}
+
+/*** stdin loading ***/
+
+/*
+ * Read all available data from a file descriptor into a malloc'd buffer.
+ * Sets *out_len to the number of bytes read.  Returns NULL on allocation
+ * failure; returns an empty buffer (out_len == 0) if nothing was read.
+ */
+char *readAllFromFd(int fd, size_t *out_len) {
+	size_t cap = BUFSIZ;
+	size_t len = 0;
+	char *buf = xmalloc(cap);
+	ssize_t n;
+	while ((n = read(fd, buf + len, cap - len)) > 0) {
+		len += (size_t)n;
+		if (len >= cap) {
+			cap <<= 1;
+			buf = xrealloc(buf, cap);
+		}
+	}
+	*out_len = len;
+	return buf;
+}
+
+/*
+ * Load piped stdin data into a new editor buffer.  The data is split
+ * on newline boundaries and inserted row by row, matching the same
+ * approach used by editorOpen().  The buffer is named "*stdin*" and
+ * marked read-only.
+ *
+ * Returns the new buffer, or NULL if the data contains null bytes
+ * (which would indicate binary / non-UTF-8 content).
+ */
+struct buffer *loadStdinBuffer(const char *data, size_t len) {
+	/* Reject binary data: null bytes can't be represented */
+	if (memchr(data, '\0', len) != NULL) {
+		return NULL;
+	}
+
+	struct buffer *buf = newBuffer();
+	buf->filename = xstrdup("*stdin*");
+
+	size_t start = 0;
+	for (size_t i = 0; i < len; i++) {
+		if (data[i] == '\n') {
+			/* Strip trailing \r for DOS line endings */
+			size_t end = i;
+			if (end > start && data[end - 1] == '\r')
+				end--;
+			appendRowRaw(buf, (char *)&data[start],
+				     (int)(end - start));
+			start = i + 1;
+		}
+	}
+	/* Handle final line without trailing newline */
+	if (start < len) {
+		size_t end = len;
+		if (end > start && data[end - 1] == '\r')
+			end--;
+		appendRowRaw(buf, (char *)&data[start], (int)(end - start));
+	}
+
+	/* Stdin content is read-only: the *stdin* pseudo-file has no
+	 * disk backing to save to.  Mark it so after the load, not
+	 * before — the previous workaround set read_only up front to
+	 * make markBufferDirty short-circuit during load, which is no
+	 * longer needed now that appendRowRaw skips dirty semantics. */
+	buf->read_only = 1;
+	invalidateScreenCache(buf);
+	buf->word_wrap = 1;
+	return buf;
 }

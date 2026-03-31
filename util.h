@@ -20,11 +20,36 @@ ssize_t emil_getline(char **lineptr, size_t *n, FILE *stream);
 size_t emil_strlcpy(char *dst, const char *src, size_t dsize);
 size_t emil_strlcat(char *dst, const char *src, size_t dsize);
 
+/* Tilde / home-directory helpers */
+char *expandTilde(const char *path);  /* ~/foo → /home/u/foo; caller frees */
+char *collapseHome(const char *path); /* /home/u/foo → ~/foo; caller frees */
+char *absolutePath(const char *path); /* resolve to absolute; caller frees */
+
 /* Character classification */
 int isWordBoundary(uint8_t c);
 
-/* Memory budget tracking */
-int trackAlloc(size_t n);
-void trackFree(size_t n);
+/* Read-only guard: if buf is read-only, post "buffer read-only" to the
+ * status bar and return non-zero; otherwise return zero.  Callers that
+ * mutate the buffer should early-return when this returns non-zero:
+ *
+ *     if (rejectIfReadOnly(buf)) return;
+ *
+ * Exists to keep mutation entry points scannable — the intent of the
+ * function shows up on line 2, not after four lines of prelude. */
+struct buffer;
+int rejectIfReadOnly(struct buffer *buf);
+
+/* Memory budget: total bytes of text in all buffers + undo/redo data */
+size_t totalBufferBytes(void);
+size_t totalUndoBytes(void);
+size_t totalBudgetBytes(void);
+
+/* Set or clear E.memory_over_limit based on current budget.
+ * Call after operations that may shrink the budget (close buffer,
+ * revert-buffer, undo-chain truncation) and after operations that may grow
+ * it (add to kill ring, insert text).  Setting is latching — once
+ * set, the status-bar warning stays visible until the budget drops
+ * back below the limit. */
+void recheckMemoryBudget(void);
 
 #endif /* EMIL_UTIL_H */

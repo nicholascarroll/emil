@@ -15,9 +15,6 @@ It is designed to operate on VT100-compatible terminals and implements
 a subset of the operational conventions found in the
 .Em Emacs
 editor.
-.Pp
-This man page is the primary documentation for
-.Nm .
 .Sh OPTIONS
 .Bl -tag -width Ds
 .It +N
@@ -27,7 +24,7 @@ Display version information.
 .El
 .Sh CONCEPTS
 .Nm
-follows Emacs-style paradigms. Understanding these concepts is essential for effective use.
+follows Emacs-style paradigms.
 .Ss Buffers and Windows
 A
 .Sy buffer
@@ -165,8 +162,6 @@ Yank (paste) from kill ring.
 Yank pop: Cycle through previous kills after yanking.
 .It Cm C-k
 Kill to end of line.
-.It Cm C-u C-a
-Kill to beginning of line.
 .It Cm M-d
 Kill word forward.
 .It Cm M-DEL
@@ -197,8 +192,6 @@ Capitalize word.
 Upcase word.
 .It Cm M-l
 Downcase word.
-.It Cm C-h
-Delete previous character (Backspace).
 .It Cm DEL
 Delete character under cursor.
 .El
@@ -264,7 +257,6 @@ View contents of register
 .El
 .Ss Rectangles
 Rectangles operate on column-aligned regions spanning multiple lines.
-Rectangle mark mode must be toggled on before using rectangle commands.
 .Bl -tag -width Ds
 .It Cm C-x SPACE
 Toggle rectangle mode.
@@ -280,7 +272,7 @@ Open rectangle (insert whitespace).
 .Ss Macros
 Keyboard macros record a sequence of keystrokes for later playback.
 Macros cannot be viewed, edited, exported nor saved. 
-The commands Find File, Save File and shell commands cannot be executed by Macros.
+The commands Find File, Save File and shell commands cannot be executed by macros.
 .Bl -tag -width Ds
 .It Cm C-x (
 Start recording macro.
@@ -322,16 +314,14 @@ Show unsaved changes compared to file on disk.
 .It Cm M-x cd
 Change working directory (editor only).
 .El
-.Ss System Integration
+.Ss Source File Navigation
 .Bl -tag -width Ds
-.It Cm C-c
-Copy region to system clipboard (OSC 52).
 .It Cm M-.
 Jump to symbol definition (Ctags).
 .It Cm M-,
 Jump back from symbol definition.
-.It Cm M-x version
-Display editor version.
+.It Cm M-`
+Toggle header and body
 .El
 .Ss Named Commands
 The following commands are available via
@@ -353,7 +343,7 @@ Interactive search-and-replace.
 Replace using regular expressions.
 .It Cm replace-string
 Replace literal strings.
-.It Cm revert
+.It Cm revert-buffer
 Revert buffer from file on disk.
 .It Cm visual-line-mode
 Toggle line wrapping.
@@ -364,12 +354,8 @@ Display contents of a register.
 .El
 .Sh DEVIATIONS FROM EMACS
 .Nm
-aims for Emacs compatibility but differs in specific areas for shell integration and usability:
+aims for Emacs compatibility but has some differences in functionality: it uses POSIX regex and the following keybindings differ:
 .Bl -tag -width Ds
-.It Cm C-h
-In Emacs, this is the Help prefix. In
-.Nm ,
-it is bound to Backspace (Readline compatibility).
 .It Cm C-c
 In Emacs, this is the user defined keybinding prefix. In
 .Nm ,
@@ -399,9 +385,20 @@ writes the complete buffer to the associated file.
 The editor attempts an atomic write operation to prevent data corruption.
 If an atomic write is not possible, the user is prompted to overwrite the file directly.
 No automatic backup or "auto-save" files are generated.
+.Ss Advisory Locking
+While having unsaved edits to a file, 
+.Nm
+will keep an advisory lock on the file. If another instance of 
+.Nm
+begins to edit the file, it receives a warning. The lock does not prevent other processes from writing to the file.
 .Sh UNDO HISTORY
 .Nm
 maintains a linear undo history of up to 100 editing actions per buffer.
+.Sh MEMORY BUDGET
+.Nm
+tracks memory usage against a configurable limit (default 1 GB). This limit ('budget') counts the actual text content of all open buffers, kill ring and undo/redo data. Minor allocations like command history are not counted.
+When opening a file would exceed the budget, the operation is refused. A warning is shown in the status bar when a kill or yank operation pushes total usage over the budget.
+
 .Sh SEE ALSO
 .Xr emacs 1
 .Sh BUGS

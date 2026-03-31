@@ -6,16 +6,17 @@
 #include <stdlib.h>
 
 /* Helper: assert relativePath(from, to) == expected */
-#define ASSERT_RELPATH(from, to, expected) do { \
-	char *got = relativePath(from, to); \
-	if (strcmp(got, expected) != 0) { \
-		printf("  FAIL: %s:%d: relativePath(\"%s\", \"%s\")" \
-		       " => \"%s\" (expected \"%s\")\n", \
-		       __FILE__, __LINE__, from, to, got, expected); \
-		_current_test_failed = 1; \
-	} \
-	free(got); \
-} while (0)
+#define ASSERT_RELPATH(from, to, expected)                                   \
+	do {                                                                 \
+		char *got = relativePath(from, to);                          \
+		if (strcmp(got, expected) != 0) {                            \
+			printf("  FAIL: %s:%d: relativePath(\"%s\", \"%s\")" \
+			       " => \"%s\" (expected \"%s\")\n",             \
+			       __FILE__, __LINE__, from, to, got, expected); \
+			_current_test_failed = 1;                            \
+		}                                                            \
+		free(got);                                                   \
+	} while (0)
 
 /* ---- Same directory ---- */
 
@@ -116,17 +117,18 @@ void test_relpath_cd_to_sibling_project(void) {
 }
 
 /* Helper: assert rebaseFilename(fn, old, new) == expected */
-#define ASSERT_REBASE(fn, old_cwd, new_cwd, expected) do { \
-	char *got = rebaseFilename(fn, old_cwd, new_cwd); \
-	if (strcmp(got, expected) != 0) { \
-		printf("  FAIL: %s:%d: rebaseFilename(\"%s\", \"%s\", \"%s\")" \
-		       " => \"%s\" (expected \"%s\")\n", \
-		       __FILE__, __LINE__, fn, old_cwd, new_cwd, \
-		       got, expected); \
-		_current_test_failed = 1; \
-	} \
-	free(got); \
-} while (0)
+#define ASSERT_REBASE(fn, old_cwd, new_cwd, expected)                                  \
+	do {                                                                           \
+		char *got = rebaseFilename(fn, old_cwd, new_cwd);                      \
+		if (strcmp(got, expected) != 0) {                                      \
+			printf("  FAIL: %s:%d: rebaseFilename(\"%s\", \"%s\", \"%s\")" \
+			       " => \"%s\" (expected \"%s\")\n",                       \
+			       __FILE__, __LINE__, fn, old_cwd, new_cwd, got,          \
+			       expected);                                              \
+			_current_test_failed = 1;                                      \
+		}                                                                      \
+		free(got);                                                             \
+	} while (0)
 
 /* ---- rebaseFilename: basic cases ---- */
 
@@ -155,13 +157,11 @@ void test_rebase_absolute_unchanged(void) {
 /* ---- rebaseFilename: subdir filenames ---- */
 
 void test_rebase_subdir_file_cd_parent(void) {
-	ASSERT_REBASE("src/main.c", "/home/user", "/home",
-		      "user/src/main.c");
+	ASSERT_REBASE("src/main.c", "/home/user", "/home", "user/src/main.c");
 }
 
 void test_rebase_subdir_file_cd_child(void) {
-	ASSERT_REBASE("src/main.c", "/home/user", "/home/user/src",
-		      "main.c");
+	ASSERT_REBASE("src/main.c", "/home/user", "/home/user/src", "main.c");
 }
 
 void test_rebase_subdir_file_cd_sibling_dir(void) {
@@ -179,8 +179,8 @@ void test_rebase_double_cd(void) {
 
 	/* Now cd project/tests => /opt/project/tests
 	 * file should become ../README.md */
-	char *after_second = rebaseFilename(after_first, "/opt",
-					    "/opt/project/tests");
+	char *after_second =
+		rebaseFilename(after_first, "/opt", "/opt/project/tests");
 	TEST_ASSERT_EQUAL_STRING("../README.md", after_second);
 
 	free(after_first);
@@ -237,8 +237,12 @@ void test_rebase_double_cd_with_dotdot(void) {
 	free(r1);
 	free(r2);
 }
-void setUp(void) { initTestEditor(); }
-void tearDown(void) {}
+void setUp(void) {
+	initTestEditor();
+}
+void tearDown(void) {
+	cleanupTestEditor();
+}
 
 int main(void) {
 	TEST_BEGIN();

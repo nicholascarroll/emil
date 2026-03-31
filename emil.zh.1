@@ -14,9 +14,6 @@
 它专为在 VT100 兼容终端上运行而设计，并实现了
 .Em Emacs
 编辑器操作惯例的一个子集。
-.Pp
-本手册页是
-.Nm
 .Sh 选项
 .Bl -tag -width Ds
 .It +N
@@ -26,7 +23,7 @@
 .El
 .Sh 核心概念
 .Nm
-遵循 Emacs 风格的范式。理解这些概念对于有效使用至关重要。
+遵循 Emacs 风格的范式。
 .Ss 缓冲区与窗口
 .Sy 缓冲区
 是文件内容或尚未保存到任何文件的文本在内存中的表示。
@@ -163,8 +160,6 @@
 粘贴循环：粘贴后循环遍历之前的删除内容。
 .It Cm C-k
 剪切至行尾。
-.It Cm C-u C-a
-剪切至行首。
 .It Cm M-d
 向前剪切一个单词。
 .It Cm M-DEL
@@ -195,8 +190,6 @@ Zap to char：剪切至指定字符（包含该字符）。
 将单词转为大写。
 .It Cm M-l
 将单词转为小写。
-.It Cm C-h
-删除前一个字符（退格键）。
 .It Cm DEL
 删除光标下的字符。
 .El
@@ -264,7 +257,6 @@ Zap to char：剪切至指定字符（包含该字符）。
 .El
 .Ss 矩形区域（Rectangles）
 矩形操作针对跨越多行的列对齐区域。
-使用矩形命令前必须先启用矩形标记模式。
 .Bl -tag -width Ds
 .It Cm C-x SPACE
 切换矩形模式。
@@ -324,14 +316,10 @@ Zap to char：剪切至指定字符（包含该字符）。
 .El
 .Ss 系统集成
 .Bl -tag -width Ds
-.It Cm C-c
-复制选中区域到系统剪贴板（OSC 52）。
 .It Cm M-.
 跳转到符号定义处（Ctags）。
 .It Cm M-,
 从符号定义处跳回。
-.It Cm M-x version
-显示编辑器版本。
 .El
 .Ss 命名命令
 以下命令可通过
@@ -367,10 +355,6 @@ Zap to char：剪切至指定字符（包含该字符）。
 .Nm
 力求兼容 Emacs，但在 shell 集成和可用性方面存在特定差异：
 .Bl -tag -width Ds
-.It Cm C-h
-在 Emacs 中，这是帮助前缀键。在
-.Nm
-中，它绑定为退格键（Readline 兼容）。
 .It Cm C-c
 在 Emacs 中，这是用户自定义键绑定前缀。在
 .Nm
