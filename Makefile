@@ -81,7 +81,7 @@ clean:
 
 # Testing
 test: $(PROGNAME)
-	./tests/run_tests.sh
+	CC="$(CC)" ./tests/run_tests.sh
 
 check: test
 
