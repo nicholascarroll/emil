@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ main ]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     strategy:
@@ -68,3 +72,137 @@ jobs:
     
     - name: Run CodeQL
       uses: github/codeql-action/analyze@v3
+
+
+  # * TODO may want to reformat to align with the others
+  msys2:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          msystem: MSYS
+          install: msys2-devel msys2-runtime-devel gcc make
+      - name: Build and Test
+        run: |
+          make
+          make test
+
+
+  openindiana:
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+        - name: Build and Test on OpenIndiana
+          uses: vmactions/openindiana-vm@v1
+          with:
+            prepare: |
+              # Install GCC 14 and Make (Ignoring transient network warnings)
+              pkg install --accept developer/gcc-14 developer/build/make
+              
+            run: |
+              export PATH="/usr/bin:/usr/gnu/bin:$PATH"
+              
+              # Removed 'sudo' because the VM user is already privileged 
+              # and 'sudo' is not installed by default on this image.
+              ln -s /usr/bin/gcc-14 /usr/bin/cc
+              
+              export CFLAGS="-D_XOPEN_SOURCE=600 -D__EXTENSIONS__ -std=c99"
+              
+              echo "--- Building Emil ---"
+              make CC=gcc-14 CFLAGS="$CFLAGS"
+              
+              echo "--- Running Tests ---"
+              make CC=gcc-14 test
+
+  netbsd:
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+        - name: Build on NetBSD
+          uses: vmactions/netbsd-vm@v1
+          with:
+            # No pkg_add! Let's use the system's own tools.
+            run: |
+              make CC=cc
+              make test  
+  haiku:
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+        - name: Build on Haiku
+          uses: vmactions/haiku-vm@v1
+          with:
+            # Adding 'devel:libcheck' if you use a test framework, 
+            # otherwise gcc and make are fine.
+            prepare: pkgman install -y gcc make
+            run: |
+              make CC=gcc
+              make test
+  
+  alpine_musl:
+      runs-on: ubuntu-latest
+      container: alpine:latest
+      steps:
+        - name: Install dependencies
+          run: apk add --no-cache build-base git  # Git is needed for actions/checkout
+        - uses: actions/checkout@v4
+        - name: Build and Test
+          run: |
+            make CC=gcc
+            make test
+
+  riscv-native:
+    runs-on: ubuntu-24.04-riscv   # ← Install RISE RISC-V Runners GitHub App first!
+    
+    steps:
+      - uses: actions/checkout@v4
+  
+      - name: Build Emil Natively (RISC-V 64-bit)
+        run: |
+          make clean
+          make CC=gcc CFLAGS="-O2 -g"
+  
+      - name: Run Native Tests
+        run: |
+          echo "Running on native RISC-V: $(uname -m)"
+          ./emil --version
+          make test   # ← use the same test target as everywhere else
+
+  powerpc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and Test on PowerPC (ppc64le)
+        uses: uraimo/run-on-arch-action@v3   # ← updated to v3
+        with:
+          arch: ppc64le
+          distro: ubuntu24.04
+          githubToken: ${{ github.token }}   # ← critical for image caching
+          install: |
+            apt-get update -y
+            apt-get install -y gcc make
+          run: |
+            make CC=gcc
+            make test
+
+  s390x:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and Test on IBM Z (s390x Big-Endian)
+        uses: uraimo/run-on-arch-action@v3   # ← updated to v3
+        with:
+          arch: s390x
+          distro: ubuntu24.04
+          githubToken: ${{ github.token }}   # ← critical
+          install: |
+            apt-get update -y
+            apt-get install -y gcc make
+          run: |
+            make CC=gcc
+            make test

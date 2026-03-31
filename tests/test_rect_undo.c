@@ -12,6 +12,7 @@
 #include "region.h"
 #include <stdint.h>
 #include <string.h>
+#include "util.h"
 
 /* ----------------------------------------------------------------
  * Helpers
@@ -22,7 +23,7 @@ static char **snapshot_buffer(struct buffer *buf, int *nrows) {
 	*nrows = buf->numrows;
 	char **snap = calloc(buf->numrows, sizeof(char *));
 	for (int i = 0; i < buf->numrows; i++)
-		snap[i] = strdup((char *)buf->row[i].chars);
+		snap[i] = xstrdup((char *)buf->row[i].chars);
 	return snap;
 }
 
@@ -212,7 +213,7 @@ void test_yank_rect_basic_undo(void) {
 
 	/* Set up kill ring with a 2-wide, 3-tall rectangle: "XX" per row */
 	clearText(&E.kill);
-	E.kill.str = (uint8_t *)strdup("XXYYZZ");
+	E.kill.str = (uint8_t *)xstrdup("XXYYZZ");
 	E.kill.is_rectangle = 1;
 	E.kill.rect_width = 2;
 	E.kill.rect_height = 3;
@@ -238,7 +239,7 @@ void test_yank_rect_redo(void) {
 	struct buffer *buf = make_test_buffer_lines(lines, 3);
 
 	clearText(&E.kill);
-	E.kill.str = (uint8_t *)strdup("XXYYZZ");
+	E.kill.str = (uint8_t *)xstrdup("XXYYZZ");
 	E.kill.is_rectangle = 1;
 	E.kill.rect_width = 2;
 	E.kill.rect_height = 3;
@@ -268,7 +269,7 @@ void test_yank_rect_extra_lines_undo(void) {
 	char **snap = snapshot_buffer(buf, &snap_n);
 
 	clearText(&E.kill);
-	E.kill.str = (uint8_t *)strdup("XXYYZZWW");
+	E.kill.str = (uint8_t *)xstrdup("XXYYZZWW");
 	E.kill.is_rectangle = 1;
 	E.kill.rect_width = 2;
 	E.kill.rect_height = 4;
@@ -300,7 +301,7 @@ void test_yank_rect_into_short_rows_undo(void) {
 	char **snap = snapshot_buffer(buf, &snap_n);
 
 	clearText(&E.kill);
-	E.kill.str = (uint8_t *)strdup("XXYYZZ");
+	E.kill.str = (uint8_t *)xstrdup("XXYYZZ");
 	E.kill.is_rectangle = 1;
 	E.kill.rect_width = 2;
 	E.kill.rect_height = 3;
@@ -428,7 +429,7 @@ void test_multiple_rect_ops_undo_all(void) {
 
 	/* Second: yank some rectangle */
 	clearText(&E.kill);
-	E.kill.str = (uint8_t *)strdup("XXYYZZ");
+	E.kill.str = (uint8_t *)xstrdup("XXYYZZ");
 	E.kill.is_rectangle = 1;
 	E.kill.rect_width = 2;
 	E.kill.rect_height = 3;
