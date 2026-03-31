@@ -167,7 +167,6 @@ enum command_t {
 	CMD_SHELL_CMD,
 	CMD_KILL_LINE_BACKWARDS,
 	CMD_EXPAND,
-	CMD_EDITOR_STATUS,
 	/* Internal: unknown command — argument is the key */
 	CMD_UNKNOWN,
 };

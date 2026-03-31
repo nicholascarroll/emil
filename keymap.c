@@ -52,7 +52,6 @@ void setupCommands(void) {
 		{ "insert-file", insertFile },
 		{ "cd", changeDirectory },
 		{ "diff-buffer-with-file", diffBufferWithFile },
-		{ "editor-status", editorStatus },
 		{ "isearch-forward-regexp", regexFindWrapper },
 		{ "query-replace", queryReplace },
 		{ "replace-regexp", replaceRegex },

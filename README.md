@@ -207,7 +207,7 @@ Notes:
 
 `emil` can handle files up to its memory budget, which defaults to 1 GB.
 All buffer content, undo history, and clipboard data draw from a single
-pool. Use `M-x editor-status` to see current usage.
+pool. 
 
 The budget can be adjusted at build time:
 ```
