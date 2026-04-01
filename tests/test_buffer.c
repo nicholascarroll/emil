@@ -129,7 +129,8 @@ void test_chars_to_display_tab(void) {
 }
 
 void test_chars_to_display_control(void) {
-	struct buffer *buf = make_test_buffer("\x01" "A");
+	struct buffer *buf = make_test_buffer("\x01"
+					      "A");
 	TEST_ASSERT_EQUAL_INT(2, charsToDisplayColumn(&buf->row[0], 1));
 	TEST_ASSERT_EQUAL_INT(3, charsToDisplayColumn(&buf->row[0], 2));
 	destroyBuffer(buf);
@@ -137,7 +138,8 @@ void test_chars_to_display_control(void) {
 
 void test_chars_to_display_multibyte(void) {
 	/* "A¢B" — ¢ is 2 bytes, 1 column */
-	struct buffer *buf = make_test_buffer("A\xC2\xA2" "B");
+	struct buffer *buf = make_test_buffer("A\xC2\xA2"
+					      "B");
 	TEST_ASSERT_EQUAL_INT(1, charsToDisplayColumn(&buf->row[0], 1));
 	TEST_ASSERT_EQUAL_INT(2, charsToDisplayColumn(&buf->row[0], 3));
 	TEST_ASSERT_EQUAL_INT(3, charsToDisplayColumn(&buf->row[0], 4));
@@ -200,8 +202,8 @@ void test_invalidate_screen_cache(void) {
 void test_word_wrap_break(void) {
 	struct buffer *buf = make_test_buffer("hello world");
 	int break_col, break_byte;
-	int more = wordWrapBreak(&buf->row[0], 7, 0, 0,
-				 &break_col, &break_byte);
+	int more =
+		wordWrapBreak(&buf->row[0], 7, 0, 0, &break_col, &break_byte);
 	TEST_ASSERT_EQUAL_INT(1, more);
 	TEST_ASSERT_EQUAL_INT(6, break_col);
 	TEST_ASSERT_EQUAL_INT(6, break_byte);
@@ -217,8 +219,12 @@ void test_cursor_screen_line(void) {
 	destroyBuffer(buf);
 }
 
-void setUp(void) { initTestEditor(); }
-void tearDown(void) {}
+void setUp(void) {
+	initTestEditor();
+}
+void tearDown(void) {
+	cleanupTestEditor();
+}
 
 int main(void) {
 	TEST_BEGIN();

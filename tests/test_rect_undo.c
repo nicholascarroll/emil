@@ -27,8 +27,8 @@ static char **snapshot_buffer(struct buffer *buf, int *nrows) {
 	return snap;
 }
 
-static void assert_buffer_matches(struct buffer *buf, char **snap,
-				  int nrows, const char *label) {
+static void assert_buffer_matches(struct buffer *buf, char **snap, int nrows,
+				  const char *label) {
 	if (buf->numrows != nrows) {
 		printf("  FAIL (%s): row count %d vs expected %d\n", label,
 		       buf->numrows, nrows);
@@ -479,6 +479,7 @@ void setUp(void) {
 	initTestEditor();
 }
 void tearDown(void) {
+	cleanupTestEditor();
 }
 
 int main(void) {

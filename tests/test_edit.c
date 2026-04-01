@@ -246,8 +246,7 @@ void test_backward_para_to_start(void) {
 /* ---- Sentence movement ---- */
 
 void test_forward_sentence_simple(void) {
-	struct buffer *buf =
-		make_test_buffer("Hello world. Goodbye world.");
+	struct buffer *buf = make_test_buffer("Hello world. Goodbye world.");
 	buf->cx = 0;
 	buf->cy = 0;
 	E.buf = buf;
@@ -275,8 +274,7 @@ void test_forward_sentence_end_of_line(void) {
 }
 
 void test_backward_sentence_simple(void) {
-	struct buffer *buf =
-		make_test_buffer("Hello world. Goodbye world.");
+	struct buffer *buf = make_test_buffer("Hello world. Goodbye world.");
 	buf->cx = 27; /* end of line */
 	buf->cy = 0;
 	E.buf = buf;
@@ -301,8 +299,7 @@ void test_backward_sentence_to_beginning(void) {
 }
 
 void test_forward_sentence_with_closing_punct(void) {
-	struct buffer *buf =
-		make_test_buffer("He said \"hello.\" Then left.");
+	struct buffer *buf = make_test_buffer("He said \"hello.\" Then left.");
 	buf->cx = 0;
 	buf->cy = 0;
 	E.buf = buf;
@@ -441,6 +438,7 @@ void setUp(void) {
 	initTestEditor();
 }
 void tearDown(void) {
+	cleanupTestEditor();
 }
 
 int main(void) {

@@ -17,33 +17,44 @@
 /* E is defined in stubs.c (which replaces main.o) */
 extern struct config E;
 
-/* Set up a minimal but valid editor state. Call once at test start. */
-static void initTestEditor(void) {
-	memset(&E, 0, sizeof(E));
-	E.screencols = 80;
-	E.screenrows = 24;
-	E.kill = (struct text){0};
-	E.windows = malloc(sizeof(struct window *));
-	E.windows[0] = calloc(1, sizeof(struct window));
-	E.windows[0]->focused = 1;
-	E.nwindows = 1;
-	E.headbuf = NULL;
-	E.recording = 0;
-	E.macro.nkeys = 0;
-	E.macro.keys = NULL;
-	E.micro = 0;
-	E.playback = 0;
-	E.kill_ring_pos = -1;
-	E.macro_depth = 0;
-	memset(E.registers, 0, sizeof(E.registers));
-	setupCommands();
 
-	initHistory(&E.file_history);
-	initHistory(&E.command_history);
-	initHistory(&E.shell_history);
-	initHistory(&E.search_history);
-	initHistory(&E.kill_history);
+static void cleanupTestEditor(void) {
+    freeHistory(&E.file_history);
+    freeHistory(&E.command_history);
+    freeHistory(&E.shell_history);
+    freeHistory(&E.search_history);
+    freeHistory(&E.kill_history);
+
+    if (E.windows) {
+        if (E.windows[0]) free(E.windows[0]);
+        free(E.windows);
+        E.windows = NULL;
+    }
+
+    E.buf = NULL;
+    E.headbuf = NULL;
 }
+
+
+static void initTestEditor(void) {
+    if (E.windows == NULL) {
+        E.windows = malloc(sizeof(struct window *));
+        E.windows[0] = calloc(1, sizeof(struct window));
+    }
+    
+    E.screencols = 80;
+    E.screenrows = 24;
+    E.nwindows = 1;
+    E.windows[0]->focused = 1;
+
+    /* Initialize histories only if they haven't been */
+    initHistory(&E.file_history);
+    initHistory(&E.command_history);
+    initHistory(&E.shell_history);
+    initHistory(&E.search_history);
+    initHistory(&E.kill_history);
+}
+
 
 /* Create a buffer with one line of content and wire it into E. */
 static struct buffer *make_test_buffer(const char *line) {

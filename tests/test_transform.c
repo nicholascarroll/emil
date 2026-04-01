@@ -37,8 +37,11 @@ void test_upcase_ano(void) {
 
 void test_upcase_uber(void) {
 	/* über: ü(C3 BC) b e r → ÜBER: Ü(C3 9C) B E R */
-	uint8_t *r = transformerUpcase((uint8_t *)"\xc3\xbc" "ber");
-	TEST_ASSERT_EQUAL_STRING("\xc3\x9c" "BER", (char *)r);
+	uint8_t *r = transformerUpcase((uint8_t *)"\xc3\xbc"
+						  "ber");
+	TEST_ASSERT_EQUAL_STRING("\xc3\x9c"
+				 "BER",
+				 (char *)r);
 	free(r);
 }
 
@@ -71,8 +74,11 @@ void test_downcase_cafe(void) {
 }
 
 void test_downcase_uber(void) {
-	uint8_t *r = transformerDowncase((uint8_t *)"\xc3\x9c" "BER");
-	TEST_ASSERT_EQUAL_STRING("\xc3\xbc" "ber", (char *)r);
+	uint8_t *r = transformerDowncase((uint8_t *)"\xc3\x9c"
+						    "BER");
+	TEST_ASSERT_EQUAL_STRING("\xc3\xbc"
+				 "ber",
+				 (char *)r);
 	free(r);
 }
 
@@ -98,8 +104,11 @@ void test_capital_cafe(void) {
 
 void test_capital_uber(void) {
 	/* über → Über: ü at start should become Ü */
-	uint8_t *r = transformerCapitalCase((uint8_t *)"\xc3\xbc" "ber");
-	TEST_ASSERT_EQUAL_STRING("\xc3\x9c" "ber", (char *)r);
+	uint8_t *r = transformerCapitalCase((uint8_t *)"\xc3\xbc"
+						       "ber");
+	TEST_ASSERT_EQUAL_STRING("\xc3\x9c"
+				 "ber",
+				 (char *)r);
 	free(r);
 }
 
@@ -111,8 +120,8 @@ void test_capital_resume(void) {
 
 void test_capital_mixed_words(void) {
 	/* "hello café world" → "Hello Café World" */
-	uint8_t *r = transformerCapitalCase(
-		(uint8_t *)"hello caf\xc3\xa9 world");
+	uint8_t *r =
+		transformerCapitalCase((uint8_t *)"hello caf\xc3\xa9 world");
 	TEST_ASSERT_EQUAL_STRING("Hello Caf\xc3\xa9 World", (char *)r);
 	free(r);
 }
@@ -160,20 +169,30 @@ void test_downcase_amacron(void) {
 
 void test_upcase_multiply_sign(void) {
 	/* × (C3 97 = U+00D7) should pass through unchanged */
-	uint8_t *r = transformerUpcase((uint8_t *)"a\xc3\x97" "b");
-	TEST_ASSERT_EQUAL_STRING("A\xc3\x97" "B", (char *)r);
+	uint8_t *r = transformerUpcase((uint8_t *)"a\xc3\x97"
+						  "b");
+	TEST_ASSERT_EQUAL_STRING("A\xc3\x97"
+				 "B",
+				 (char *)r);
 	free(r);
 }
 
 void test_downcase_divide_sign(void) {
 	/* ÷ (C3 B7 = U+00F7) should pass through unchanged */
-	uint8_t *r = transformerDowncase((uint8_t *)"A\xc3\xb7" "B");
-	TEST_ASSERT_EQUAL_STRING("a\xc3\xb7" "b", (char *)r);
+	uint8_t *r = transformerDowncase((uint8_t *)"A\xc3\xb7"
+						    "B");
+	TEST_ASSERT_EQUAL_STRING("a\xc3\xb7"
+				 "b",
+				 (char *)r);
 	free(r);
 }
 
-void setUp(void) { initTestEditor(); }
-void tearDown(void) {}
+void setUp(void) {
+	initTestEditor();
+}
+void tearDown(void) {
+	cleanupTestEditor();
+}
 
 int main(void) {
 	TEST_BEGIN();

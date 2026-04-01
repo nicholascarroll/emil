@@ -110,8 +110,11 @@ void test_nbytes_all_ranges(void) {
 	TEST_ASSERT_EQUAL_INT(4, utf8_nBytes(0xF4));
 }
 
-void setUp(void) {}
-void tearDown(void) {}
+void setUp(void) {
+}
+void tearDown(void) {
+	cleanupTestEditor();
+}
 
 int main(void) {
 	TEST_BEGIN();

@@ -186,8 +186,12 @@ void test_undo_newline_insert(void) {
 	destroyBuffer(buf);
 }
 
-void setUp(void) { initTestEditor(); }
-void tearDown(void) {}
+void setUp(void) {
+	initTestEditor();
+}
+void tearDown(void) {
+	cleanupTestEditor();
+}
 
 int main(void) {
 	TEST_BEGIN();

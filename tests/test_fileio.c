@@ -221,7 +221,8 @@ void test_utf8_null_byte_rejected(void) {
 	char tmpname[] = "/tmp/emil_test_XXXXXX";
 	int fd = mkstemp(tmpname);
 	TEST_ASSERT(fd >= 0);
-	const char data[] = "AB\x00" "CD\n";
+	const char data[] = "AB\x00"
+			    "CD\n";
 	write(fd, data, 6);
 	close(fd);
 
@@ -248,8 +249,12 @@ void test_utf8_truncated_multibyte(void) {
 	unlink(tmpname);
 }
 
-void setUp(void) { initTestEditor(); }
-void tearDown(void) {}
+void setUp(void) {
+	initTestEditor();
+}
+void tearDown(void) {
+	cleanupTestEditor();
+}
 
 int main(void) {
 	TEST_BEGIN();

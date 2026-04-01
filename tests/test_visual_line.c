@@ -351,6 +351,7 @@ void setUp(void) {
 	initTestEditor();
 }
 void tearDown(void) {
+	cleanupTestEditor();
 }
 
 int main(void) {

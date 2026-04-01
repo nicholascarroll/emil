@@ -1,24 +1,36 @@
 #!/bin/sh
-set -eu
+set -u
 COMPILER=${CC:-cc}
-echo "Script: Received COMPILER=$COMPILER"
-echo "Script: Running tests on $(uname -s) $(uname -m)"
+echo "run_tests.sh: Received COMPILER=$COMPILER"
+echo "run_tests.sh: Running tests on $(uname -s) $(uname -m)"
 echo ""
 
-# Binary exists and runs
-./emil --version > /dev/null || {
-    echo "✗ Binary does not run"
+# Did the build produce a binary?
+if [ ! -f "./emil" ]; then
+    echo "✗ BUILD FAILURE: Binary 'emil' not found."
     exit 1
-}
+fi
+
+# Can it run? Also note the version
+VERSION_OUTPUT=$(./emil --version 2>&1)
+rc=$?
+
+if [ $rc -ne 0 ]; then
+    echo "✗ Binary failed to run (Exit Code $rc)"
+    exit 1
+fi
 echo "✓ Binary runs"
 
-# Version consistency
+BINARY_VERSION=$(echo "$VERSION_OUTPUT" | awk '/emil/ {print $2}')
+MAKEFILE_VERSION=$(awk -F'=' '/^VERSION/ {gsub(/[ \t]/, "", $2); print $2}' Makefile)
+
+# Version numbering consistency verification
 if [ "$BINARY_VERSION" = "$MAKEFILE_VERSION" ]; then
-    echo "✓ Version consistency"
+    echo "✓ Version numbering consistency verified"
 elif echo "$BINARY_VERSION" | grep -q "$MAKEFILE_VERSION"; then
-    echo "✓ Version consistency (Dev build)"
+    echo "✓ Version numbering consistency verified (Dev build)"
 else
-    echo "✗ Version mismatch"
+    echo "✗ Version numbering mismatch: Binary ($BINARY_VERSION) vs Makefile ($MAKEFILE_VERSION)"
     exit 1
 fi
 
@@ -28,8 +40,7 @@ fi
 # Each test binary links every .o except main.o and terminal.o.
 # stubs.o provides E, page_overlap, and no-op terminal functions.
 
-PASS=0
-FAIL=0
+ANY_FAIL=0
 
 # Detect sanitizer build
 SANITIZER_FLAGS=""
@@ -75,18 +86,22 @@ for suite in unicode wcwidth buffer undo edit fileio relpath visual_line utf8_va
     rc=$?
 
     if [ $rc -gt 128 ]; then
-        sig=$((rc - 128))
-        echo "CRASH (signal $sig)"
-        FAIL=$((FAIL+1))
+        echo "CRASH (signal $((rc - 128)))"
+        ANY_FAIL=1
     elif echo "$output" | grep -q "FAIL"; then
-        total=$(echo "$output" | awk '/Tests/{print $1; exit}')
-        echo "FAIL ($total tests)"
-        echo "$output" | grep "FAIL" | grep -v "^FAIL$" | head -3 | sed 's/^/    /'
-        FAIL=$((FAIL+1))
+        # Defect 1 Fix: No test count on failure
+        echo "FAIL" 
+        echo "$output" | grep "FAIL:" | head -n 3 | sed 's/^/    /'
+        ANY_FAIL=1
+    elif [ $rc -ne 0 ]; then
+        echo "FAIL (Sanitizer/Error - Exit Code $rc)"
+        # REMOVED 'head -n 5' to show the full report
+        echo "$output" | grep -iE "AddressSanitizer|LEAK|ERROR" -A 20 2>/dev/null | sed 's/^/    /'
+        ANY_FAIL=1
     else
+        # Success is the only place we report the test count
         total=$(echo "$output" | awk '/Tests/{print $1; exit}')
         echo "PASS ($total tests)"
-        PASS=$((PASS+1))
     fi
 
     rm -f "$bin"
@@ -94,12 +109,16 @@ done
 
 rm -f tests/stubs.o
 
-echo ""
-echo "Suites: $((PASS+FAIL))  Passed: $PASS  Failed: $FAIL"
 
-if [ "$FAIL" -gt 0 ]; then
+# Print the last line of the report
+echo ""
+echo "-------------------------------------------------------"
+
+if [ "$ANY_FAIL" -ne 0 ]; then
+    echo "TEST STATUS: FAILED"
     exit 1
 else
-    echo ""
-    echo "All tests passed"
+    echo "TEST STATUS: ALL PASSED"
+    exit 0
 fi
+
