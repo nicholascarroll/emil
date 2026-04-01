@@ -81,6 +81,8 @@ clean:
 
 # Testing
 test: $(PROGNAME)
+	@echo "Makefile: Launching tests with CC=$(CC)"
+	@uname -a
 	CC="$(CC)" ./tests/run_tests.sh
 
 check: test

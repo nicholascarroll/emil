@@ -1,7 +1,8 @@
 #!/bin/sh
-# Test suite for emil — (fat binary)
-
-echo "Running tests..."
+set -eu
+COMPILER=${CC:-cc}
+echo "Script: Received COMPILER=$COMPILER"
+echo "Script: Running tests on $(uname -s) $(uname -m)"
 echo ""
 
 # Binary exists and runs
@@ -64,7 +65,7 @@ for suite in unicode wcwidth buffer undo edit fileio relpath visual_line utf8_va
     # Compile
     if ! $COMPILER $CFLAGS $SANITIZER_FLAGS -o "$bin" "$src" $TEST_OBJECTS 2>/dev/null; then
         echo "BUILD FAIL"
-        cc $CFLAGS $SANITIZER_FLAGS -o "$bin" "$src" $TEST_OBJECTS 2>&1 | tail -5
+        $COMPILER $CFLAGS $SANITIZER_FLAGS -o "$bin" "$src" $TEST_OBJECTS 2>&1 | tail -5
         FAIL=$((FAIL+1))
         continue
     fi
