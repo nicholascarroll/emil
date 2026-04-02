@@ -1,6 +1,10 @@
 #!/bin/sh
 set -u
+
 COMPILER=${CC:-cc}
+CFLAGS=${CFLAGS:-""}
+LDFLAGS=${LDFLAGS:-""}
+
 echo "run_tests.sh: Received COMPILER=$COMPILER"
 echo "run_tests.sh: Running tests on $(uname -s) $(uname -m)"
 echo ""
@@ -53,7 +57,6 @@ CFLAGS="-std=c99 -Wall -Wextra -Wpedantic -Wno-pointer-sign -Wno-unused-function
 
 # Build stubs.o (replaces main.o + terminal.o)
 
-COMPILER=${CC:-cc} 
 
 $COMPILER $CFLAGS $SANITIZER_FLAGS -c tests/stubs.c -o tests/stubs.o 2>&1 || {
     echo "✗ Failed to compile stubs.c"
@@ -77,7 +80,7 @@ for suite in unicode wcwidth buffer undo edit fileio relpath visual_line utf8_va
     if ! $COMPILER $CFLAGS $SANITIZER_FLAGS -o "$bin" "$src" $TEST_OBJECTS 2>/dev/null; then
         echo "BUILD FAIL"
         $COMPILER $CFLAGS $SANITIZER_FLAGS -o "$bin" "$src" $TEST_OBJECTS 2>&1 | tail -5
-        FAIL=$((FAIL+1))
+        ANY_FAIL=$((FAIL+1))
         continue
     fi
 

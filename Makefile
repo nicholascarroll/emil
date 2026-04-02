@@ -83,7 +83,7 @@ clean:
 test: $(PROGNAME)
 	@echo "Makefile: Launching tests with CC=$(CC)"
 	@uname -a
-	CC="$(CC)" ./tests/run_tests.sh
+	CC="$(CC)" CFLAGS="$(ALL_CFLAGS)" LDFLAGS="$(LDFLAGS)" ./tests/run_tests.sh
 
 check: test
 
