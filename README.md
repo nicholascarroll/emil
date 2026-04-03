@@ -197,7 +197,7 @@ Notes:
    - Tested on Solaris, AIX, Linux, BSD, MSYS2
      macOS, Android. 
    - Tested with raw console and various terminal emulators
-   - Tested on RTEMS and NuttX
+   - Tested on MINIX, RTEMS and NuttX
    - Tested with IME and international keyboards
    - Included in Linux distribution repositories
 
