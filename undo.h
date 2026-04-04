@@ -12,6 +12,7 @@ void undoAppendUnicode(struct buffer *buf);
 void undoBackSpace(struct buffer *buf, uint8_t c);
 void undoDelChar(struct buffer *buf, erow *row);
 struct undo *newUndo(void);
+void undoReplaceData(struct undo *u, int newsize);
 void pushUndo(struct buffer *buf, struct undo *new);
 void clearRedos(struct buffer *buf);
 void clearUndosAndRedos(struct buffer *buf);

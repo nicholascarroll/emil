@@ -8,19 +8,18 @@
 
 extern struct config E;
 
-int trackAlloc(size_t n) {
-	if (n > (size_t)EMIL_MAX_TOTAL_BYTES ||
-	    E.tracked_bytes > (size_t)EMIL_MAX_TOTAL_BYTES - n)
-		return 0;
-	E.tracked_bytes += n;
-	return 1;
+size_t totalOpenBytes(void) {
+	size_t total = 0;
+	for (struct buffer *b = E.headbuf; b; b = b->next)
+		total += b->file_size;
+	return total;
 }
 
-void trackFree(size_t n) {
-	if (n > E.tracked_bytes)
-		E.tracked_bytes = 0;
-	else
-		E.tracked_bytes -= n;
+size_t totalKillBytes(void) {
+	size_t total = 0;
+	for (struct historyEntry *e = E.kill_history.head; e; e = e->next)
+		total += strlen(e->str);
+	return total;
 }
 
 void *xmalloc(size_t size) {

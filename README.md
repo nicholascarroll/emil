@@ -203,16 +203,17 @@ Notes:
 
 ---
 
-## File Size
+## Editing Large Files
 
-`emil` can handle files up to its memory budget, which defaults to 1 GB.
-All buffer content, undo history, and clipboard data draw from a single
-pool. 
+`emil` tracks the size of all open files and kill ring contents against
+a configurable limit (default 1 GB). Unsaved buffer growth, undo data, and
+minor allocations like command history are not counted against the
+limit.
 
-The budget can be adjusted at build time:
+The limit can be adjusted at build time:
+
 ```
-    make CFLAGS="-DEMIL_MAX_TOTAL_BYTES=8388608"
-
+    make CFLAGS="-DEMIL_MAX_OPEN_BYTES=8388608"
 ```
 
 ## Raw Console

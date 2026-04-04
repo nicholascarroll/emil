@@ -45,16 +45,8 @@ jobs:
     
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Build with AddressSanitizer + UndefinedBehaviorSanitizer (${{ matrix.compiler }})
-      run: make clean && make CC=${{ matrix.compiler }} CFLAGS="-fsanitize=address,undefined -g -O1 -fno-omit-frame-pointer" LDFLAGS="-fsanitize=address,undefined"
-    
-    - name: Test with sanitizers
-      run: |
-        echo "Testing emil with sanitizers enabled..."
-        ./emil --version
-        echo "Running unit tests with sanitizers..."
-        make test
+    - name: Build and test with sanitizers
+      run: make sanitize
 
   security:
     runs-on: ubuntu-latest

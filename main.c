@@ -278,9 +278,22 @@ int main(int argc, char *argv[]) {
 	E.headbuf = newBuffer();
 	E.buf = E.headbuf;
 
+
 	/* Load piped stdin data if present */
 	if (stdin_data != NULL) {
 		if (stdin_len > 0) {
+			/* Hard limit — no prompt for stdin */
+			if (stdin_len > (size_t)EMIL_MAX_OPEN_BYTES) {
+				free(stdin_data);
+				disableRawMode();
+				fprintf(stderr,
+					"stdin: data exceeds open-file "
+					"limit (%zuMB > %zuMB)\n",
+					stdin_len / (1024 * 1024),
+					(size_t)EMIL_MAX_OPEN_BYTES /
+						(1024 * 1024));
+				exit(1);
+			}
 			struct buffer *stdinBuf =
 				loadStdinBuffer(stdin_data, stdin_len);
 			if (stdinBuf == NULL) {
@@ -291,6 +304,7 @@ int main(int argc, char *argv[]) {
 					msg_invalid_utf8);
 				exit(1);
 			}
+			stdinBuf->file_size = stdin_len;
 			stdinBuf->next = E.headbuf;
 			E.headbuf = stdinBuf;
 			E.buf = stdinBuf;
@@ -325,7 +339,7 @@ int main(int argc, char *argv[]) {
 				disableRawMode();
 
 				fprintf(stderr, "%s: %s\n", argv[i],
-					msg_invalid_utf8);
+					E.statusmsg);
 				exit(1);
 			}
 
@@ -355,7 +369,8 @@ int main(int argc, char *argv[]) {
 	computeDisplayNames();
 
 #ifdef EMIL_DISABLE_SHELL
-	setStatusMessage(msg_shell_disabled);
+	if (!E.statusmsg_show)
+		setStatusMessage(msg_shell_disabled);
 #endif /* EMIL_DISABLE_SHELL */
 	setupHandlers();
 	signal(SIGPIPE, SIG_IGN);

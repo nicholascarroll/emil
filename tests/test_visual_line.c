@@ -128,7 +128,6 @@ void test_visual_move_down_within_row(void) {
 	/* Should move to sub-line 1, col 5 => byte 25 */
 	TEST_ASSERT_EQUAL_INT(0, b->cy); /* same logical row */
 	TEST_ASSERT_EQUAL_INT(25, b->cx);
-	destroyBuffer(b);
 }
 
 void test_visual_move_up_within_row(void) {
@@ -146,7 +145,6 @@ void test_visual_move_up_within_row(void) {
 	/* Should move to sub-line 0, col 5 => byte 5 */
 	TEST_ASSERT_EQUAL_INT(0, b->cy);
 	TEST_ASSERT_EQUAL_INT(5, b->cx);
-	destroyBuffer(b);
 }
 
 void test_visual_move_down_crosses_row(void) {
@@ -162,7 +160,6 @@ void test_visual_move_down_crosses_row(void) {
 	moveCursor(KEY_ARROW_DOWN, 1);
 	TEST_ASSERT_EQUAL_INT(1, b->cy);
 	TEST_ASSERT_EQUAL_INT(3, b->cx);
-	destroyBuffer(b);
 }
 
 void test_visual_move_up_crosses_row(void) {
@@ -182,7 +179,6 @@ void test_visual_move_up_crosses_row(void) {
 	/* Should go to row 0, last sub-line (1), col 3 => byte 23 */
 	TEST_ASSERT_EQUAL_INT(0, b->cy);
 	TEST_ASSERT_EQUAL_INT(23, b->cx);
-	destroyBuffer(b);
 }
 
 void test_visual_move_down_at_buffer_end(void) {
@@ -197,7 +193,6 @@ void test_visual_move_down_at_buffer_end(void) {
 	/* Should move to virtual line past EOF */
 	TEST_ASSERT_EQUAL_INT(1, b->cy);
 	TEST_ASSERT_EQUAL_INT(0, b->cx);
-	destroyBuffer(b);
 }
 
 void test_visual_move_up_at_buffer_start(void) {
@@ -212,7 +207,6 @@ void test_visual_move_up_at_buffer_start(void) {
 	/* Should stay put */
 	TEST_ASSERT_EQUAL_INT(0, b->cy);
 	TEST_ASSERT_EQUAL_INT(3, b->cx);
-	destroyBuffer(b);
 }
 
 /* ---- C-a / C-e visual line tests ---- */
@@ -232,7 +226,6 @@ void test_beginning_of_visual_line(void) {
 	/* Should go to start of sub-line 1 = byte 20 */
 	TEST_ASSERT_EQUAL_INT(0, b->cy);
 	TEST_ASSERT_EQUAL_INT(20, b->cx);
-	destroyBuffer(b);
 }
 
 void test_beginning_of_visual_line_first_subline(void) {
@@ -248,7 +241,6 @@ void test_beginning_of_visual_line_first_subline(void) {
 
 	beginningOfLine();
 	TEST_ASSERT_EQUAL_INT(0, b->cx); /* byte 0 */
-	destroyBuffer(b);
 }
 
 void test_end_of_visual_line(void) {
@@ -267,7 +259,6 @@ void test_end_of_visual_line(void) {
 	 * before the sub-line break at byte 20) */
 	TEST_ASSERT_EQUAL_INT(0, b->cy);
 	TEST_ASSERT_EQUAL_INT(19, b->cx);
-	destroyBuffer(b);
 }
 
 void test_end_of_visual_line_last_subline(void) {
@@ -285,7 +276,6 @@ void test_end_of_visual_line_last_subline(void) {
 	/* Should go to end of sub-line 1 = byte 40 = row->size */
 	TEST_ASSERT_EQUAL_INT(0, b->cy);
 	TEST_ASSERT_EQUAL_INT(40, b->cx);
-	destroyBuffer(b);
 }
 
 /* ---- C-a / C-e without wrap (regression) ---- */
@@ -298,7 +288,6 @@ void test_beginning_of_line_no_wrap(void) {
 
 	beginningOfLine();
 	TEST_ASSERT_EQUAL_INT(0, b->cx);
-	destroyBuffer(b);
 }
 
 void test_end_of_line_no_wrap(void) {
@@ -309,7 +298,6 @@ void test_end_of_line_no_wrap(void) {
 
 	endOfLine(0);
 	TEST_ASSERT_EQUAL_INT(13, b->cx);
-	destroyBuffer(b);
 }
 
 /* ---- C-k visual line kill ---- */
@@ -330,7 +318,6 @@ void test_kill_visual_line_mid_subline(void) {
 	 * Remaining: 5 'a' + 20 'a' from sub-line 1 = 25 'a' */
 	TEST_ASSERT_EQUAL_INT(25, b->row[0].size);
 	TEST_ASSERT_EQUAL_INT(5, b->cx);
-	destroyBuffer(b);
 }
 
 void test_kill_line_no_wrap(void) {
@@ -342,7 +329,6 @@ void test_kill_line_no_wrap(void) {
 	killLine(0);
 	/* Should kill from byte 5 to end of line */
 	TEST_ASSERT_EQUAL_STRING("Hello", row_str(b, 0));
-	destroyBuffer(b);
 }
 
 /* ---- Runner ---- */

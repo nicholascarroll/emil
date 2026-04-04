@@ -32,6 +32,10 @@ void addToKillRing(const char *text, int is_rect, int rect_width,
 	E.kill.is_rectangle = is_rect;
 	E.kill.rect_width = rect_width;
 	E.kill.rect_height = rect_height;
+
+	/* Warn if total tracked usage is getting large */
+	if (totalOpenBytes() + totalKillBytes() > (size_t)EMIL_MAX_OPEN_BYTES)
+		setStatusMessage(msg_kill_ring_large);
 }
 
 /* Save and restore the kill text around operations that temporarily
@@ -320,10 +324,8 @@ void deleteRange(int startx, int starty, int endx, int endy,
 	new->starty = starty;
 	new->endx = endx;
 	new->endy = endy;
-	free(new->data);
 	new->datalen = cpos;
-	new->datasize = cpos + 1;
-	new->data = xmalloc(new->datasize);
+	undoReplaceData(new, cpos + 1);
 	memcpy(new->data, collected, cpos);
 	new->data[cpos] = 0;
 	new->append = 0;
@@ -464,10 +466,8 @@ void yank(int count) {
 	struct undo *new = newUndo();
 	new->startx = E.buf->cx;
 	new->starty = E.buf->cy;
-	free(new->data);
 	new->datalen = killLen;
-	new->datasize = new->datalen + 1;
-	new->data = xmalloc(new->datasize);
+	undoReplaceData(new, new->datalen + 1);
 	emil_strlcpy(new->data, E.kill.str, new->datasize);
 	new->append = 0;
 
@@ -797,10 +797,8 @@ void stringRectangle(void) {
 	new->starty = E.buf->cy;
 	new->endx = E.buf->markx;
 	new->endy = E.buf->marky;
-	free(new->data);
 	new->datalen = strlen((char *)E.kill.str);
-	new->datasize = new->datalen + 1;
-	new->data = xmalloc(new->datasize);
+	undoReplaceData(new, new->datalen + 1);
 	for (int i = 0; i < new->datalen; i++) {
 		new->data[i] = E.kill.str[i];
 	}
@@ -815,15 +813,15 @@ void stringRectangle(void) {
 	new->starty = topy;
 	new->endx = botx + extra;
 	new->endy = boty;
-	free(new->data);
 	new->datalen = 0;
+	int replace_datasize;
 	if (extra > 0) {
-		new->datasize = strlen((char *)E.kill.str) +
-				(extra * ((boty - topy) + 1)) + 1;
+		replace_datasize = strlen((char *)E.kill.str) +
+				   (extra * ((boty - topy) + 1)) + 1;
 	} else {
-		new->datasize = strlen((char *)E.kill.str);
+		replace_datasize = strlen((char *)E.kill.str);
 	}
-	new->data = xmalloc(new->datasize);
+	undoReplaceData(new, replace_datasize);
 	new->data[0] = 0;
 	new->append = 0;
 	new->paired = 1;
@@ -1028,10 +1026,8 @@ void killRectangle(void) {
 	new->starty = E.buf->cy;
 	new->endx = E.buf->markx;
 	new->endy = E.buf->marky;
-	free(new->data);
 	new->datalen = strlen((char *)E.kill.str);
-	new->datasize = new->datalen + 1;
-	new->data = xmalloc(new->datasize);
+	undoReplaceData(new, new->datalen + 1);
 	for (int i = 0; i < new->datalen; i++) {
 		new->data[i] = E.kill.str[i];
 	}
@@ -1049,11 +1045,9 @@ void killRectangle(void) {
 	new->starty = topy;
 	new->endx = botx - rw;
 	new->endy = boty;
-	free(new->data);
 	int kill_len = strlen((char *)E.kill.str);
 	new->datalen = 0;
-	new->datasize = kill_len + 1;
-	new->data = xmalloc(new->datasize);
+	undoReplaceData(new, kill_len + 1);
 	new->data[0] = 0;
 	new->append = 0;
 	new->paired = 1;

@@ -22,7 +22,6 @@ void test_undo_insert_chars(void) {
 
 	doUndo(buf, 1);
 	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
-	destroyBuffer(buf);
 }
 
 void test_undo_then_redo(void) {
@@ -39,7 +38,6 @@ void test_undo_then_redo(void) {
 
 	doRedo(buf, 1);
 	TEST_ASSERT_EQUAL_STRING("ABCD", row_str(buf, 0));
-	destroyBuffer(buf);
 }
 
 void test_multiple_sequential_undos(void) {
@@ -61,7 +59,6 @@ void test_multiple_sequential_undos(void) {
 
 	doUndo(buf, 1);
 	TEST_ASSERT_EQUAL_STRING("A", row_str(buf, 0));
-	destroyBuffer(buf);
 }
 
 void test_undo_delete_chars(void) {
@@ -74,7 +71,6 @@ void test_undo_delete_chars(void) {
 
 	doUndo(buf, 1);
 	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
-	destroyBuffer(buf);
 }
 
 /* ---- Coalescing ---- */
@@ -99,7 +95,6 @@ void test_coalesce_consecutive_inserts(void) {
 	/* Should undo as a single record */
 	doUndo(buf, 1);
 	TEST_ASSERT_EQUAL_STRING("", row_str(buf, 0));
-	destroyBuffer(buf);
 }
 
 void test_backspace_coalescing(void) {
@@ -119,7 +114,6 @@ void test_backspace_coalescing(void) {
 
 	doUndo(buf, 1);
 	TEST_ASSERT_EQUAL_STRING("ABCD", row_str(buf, 0));
-	destroyBuffer(buf);
 }
 
 void test_forward_delete_coalescing(void) {
@@ -137,7 +131,6 @@ void test_forward_delete_coalescing(void) {
 
 	doUndo(buf, 1);
 	TEST_ASSERT_EQUAL_STRING("ABCD", row_str(buf, 0));
-	destroyBuffer(buf);
 }
 
 /* ---- Edge cases ---- */
@@ -146,7 +139,6 @@ void test_undo_empty_stack(void) {
 	struct buffer *buf = make_test_buffer("Hello");
 	doUndo(buf, 1);
 	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
-	destroyBuffer(buf);
 }
 
 void test_redo_cleared_after_new_edit(void) {
@@ -166,7 +158,6 @@ void test_redo_cleared_after_new_edit(void) {
 	buf->cx++;
 	TEST_ASSERT_NULL(buf->redo);
 	TEST_ASSERT_EQUAL_STRING("AC", row_str(buf, 0));
-	destroyBuffer(buf);
 }
 
 /* ---- Multi-line ---- */
@@ -183,7 +174,6 @@ void test_undo_newline_insert(void) {
 	doUndo(buf, 1);
 	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("HelloWorld", row_str(buf, 0));
-	destroyBuffer(buf);
 }
 
 void setUp(void) {

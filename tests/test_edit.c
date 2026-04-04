@@ -3,6 +3,7 @@
 #include "test.h"
 #include "test_harness.h"
 #include "edit.h"
+#include "keymap.h"
 #include <stdint.h>
 
 /* ---- Character insertion ---- */
@@ -13,7 +14,6 @@ void test_insert_char_beginning(void) {
 	insertChar(buf, 'A', 1);
 	TEST_ASSERT_EQUAL_STRING("ABCD", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_INT(1, buf->cx);
-	destroyBuffer(buf);
 }
 
 void test_insert_char_middle(void) {
@@ -21,7 +21,6 @@ void test_insert_char_middle(void) {
 	buf->cx = 1;
 	insertChar(buf, 'B', 1);
 	TEST_ASSERT_EQUAL_STRING("ABCD", row_str(buf, 0));
-	destroyBuffer(buf);
 }
 
 void test_insert_char_end(void) {
@@ -29,7 +28,6 @@ void test_insert_char_end(void) {
 	buf->cx = 3;
 	insertChar(buf, 'D', 1);
 	TEST_ASSERT_EQUAL_STRING("ABCD", row_str(buf, 0));
-	destroyBuffer(buf);
 }
 
 void test_insert_char_with_count(void) {
@@ -38,7 +36,6 @@ void test_insert_char_with_count(void) {
 	insertChar(buf, 'B', 3);
 	TEST_ASSERT_EQUAL_STRING("ABBBE", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_INT(4, buf->cx);
-	destroyBuffer(buf);
 }
 
 void test_insert_char_readonly(void) {
@@ -47,7 +44,6 @@ void test_insert_char_readonly(void) {
 	buf->cx = 0;
 	insertChar(buf, 'X', 1);
 	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
-	destroyBuffer(buf);
 }
 
 /* ---- Newlines ---- */
@@ -62,7 +58,6 @@ void test_insert_newline_splits(void) {
 	TEST_ASSERT_EQUAL_STRING("World", row_str(buf, 1));
 	TEST_ASSERT_EQUAL_INT(0, buf->cx);
 	TEST_ASSERT_EQUAL_INT(1, buf->cy);
-	destroyBuffer(buf);
 }
 
 void test_insert_newline_at_beginning(void) {
@@ -73,7 +68,6 @@ void test_insert_newline_at_beginning(void) {
 	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 1));
-	destroyBuffer(buf);
 }
 
 void test_insert_newline_at_end(void) {
@@ -84,7 +78,6 @@ void test_insert_newline_at_end(void) {
 	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_STRING("", row_str(buf, 1));
-	destroyBuffer(buf);
 }
 
 void test_insert_newline_and_indent(void) {
@@ -97,7 +90,6 @@ void test_insert_newline_and_indent(void) {
 	TEST_ASSERT(buf->row[1].size >= 4);
 	TEST_ASSERT(buf->row[1].chars[0] == ' ');
 	TEST_ASSERT(buf->row[1].chars[3] == ' ');
-	destroyBuffer(buf);
 }
 
 void test_open_line(void) {
@@ -108,7 +100,6 @@ void test_open_line(void) {
 	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 	TEST_ASSERT_EQUAL_INT(0, buf->cy);
 	TEST_ASSERT_EQUAL_INT(5, buf->cx);
-	destroyBuffer(buf);
 }
 
 /* ---- Deletion ---- */
@@ -119,7 +110,6 @@ void test_del_char_middle(void) {
 	E.buf = buf;
 	delChar(1);
 	TEST_ASSERT_EQUAL_STRING("ACD", row_str(buf, 0));
-	destroyBuffer(buf);
 }
 
 void test_del_char_joins_lines(void) {
@@ -131,7 +121,6 @@ void test_del_char_joins_lines(void) {
 	delChar(1);
 	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("HelloWorld", row_str(buf, 0));
-	destroyBuffer(buf);
 }
 
 void test_backspace_middle(void) {
@@ -141,7 +130,6 @@ void test_backspace_middle(void) {
 	backSpace(1);
 	TEST_ASSERT_EQUAL_STRING("ACD", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_INT(1, buf->cx);
-	destroyBuffer(buf);
 }
 
 void test_backspace_joins_lines(void) {
@@ -155,7 +143,6 @@ void test_backspace_joins_lines(void) {
 	TEST_ASSERT_EQUAL_STRING("HelloWorld", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_INT(5, buf->cx);
 	TEST_ASSERT_EQUAL_INT(0, buf->cy);
-	destroyBuffer(buf);
 }
 
 /* ---- Indentation ---- */
@@ -167,7 +154,6 @@ void test_indent_tab(void) {
 	E.buf = buf;
 	editorIndent(1);
 	TEST_ASSERT_EQUAL_STRING("\tHello", row_str(buf, 0));
-	destroyBuffer(buf);
 }
 
 void test_indent_spaces(void) {
@@ -177,7 +163,6 @@ void test_indent_spaces(void) {
 	E.buf = buf;
 	editorIndent(1);
 	TEST_ASSERT_EQUAL_STRING("    Hello", row_str(buf, 0));
-	destroyBuffer(buf);
 }
 
 void test_unindent(void) {
@@ -187,7 +172,6 @@ void test_unindent(void) {
 	E.buf = buf;
 	unindent(1);
 	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
-	destroyBuffer(buf);
 }
 
 /* ---- Paragraph boundary helpers ---- */
@@ -202,7 +186,6 @@ void test_forward_para_boundary(void) {
 	forwardParaBoundary(&cx, &cy);
 	TEST_ASSERT_EQUAL_INT(1, cy);
 	TEST_ASSERT_EQUAL_INT(0, cx);
-	destroyBuffer(buf);
 }
 
 void test_backward_para_boundary(void) {
@@ -215,7 +198,6 @@ void test_backward_para_boundary(void) {
 	backwardParaBoundary(&cx, &cy);
 	TEST_ASSERT_EQUAL_INT(1, cy);
 	TEST_ASSERT_EQUAL_INT(0, cx);
-	destroyBuffer(buf);
 }
 
 void test_forward_para_to_end(void) {
@@ -227,7 +209,6 @@ void test_forward_para_to_end(void) {
 	E.buf = buf;
 	forwardParaBoundary(&cx, &cy);
 	TEST_ASSERT_EQUAL_INT(1, cy); /* numrows */
-	destroyBuffer(buf);
 }
 
 void test_backward_para_to_start(void) {
@@ -240,7 +221,6 @@ void test_backward_para_to_start(void) {
 	backwardParaBoundary(&cx, &cy);
 	TEST_ASSERT_EQUAL_INT(0, cy);
 	TEST_ASSERT_EQUAL_INT(0, cx);
-	destroyBuffer(buf);
 }
 
 /* ---- Sentence movement ---- */
@@ -255,7 +235,6 @@ void test_forward_sentence_simple(void) {
 	/* Should land after "Hello world. " (pos 13) */
 	TEST_ASSERT_EQUAL_INT(13, cx);
 	TEST_ASSERT_EQUAL_INT(0, cy);
-	destroyBuffer(buf);
 }
 
 void test_forward_sentence_end_of_line(void) {
@@ -270,7 +249,6 @@ void test_forward_sentence_end_of_line(void) {
 	 * of next line */
 	TEST_ASSERT_EQUAL_INT(0, cx);
 	TEST_ASSERT_EQUAL_INT(1, cy);
-	destroyBuffer(buf);
 }
 
 void test_backward_sentence_simple(void) {
@@ -283,7 +261,6 @@ void test_backward_sentence_simple(void) {
 	/* Should land at start of "Goodbye" (pos 13) */
 	TEST_ASSERT_EQUAL_INT(13, cx);
 	TEST_ASSERT_EQUAL_INT(0, cy);
-	destroyBuffer(buf);
 }
 
 void test_backward_sentence_to_beginning(void) {
@@ -295,7 +272,6 @@ void test_backward_sentence_to_beginning(void) {
 	backwardSentenceStart(&cx, &cy);
 	TEST_ASSERT_EQUAL_INT(0, cx);
 	TEST_ASSERT_EQUAL_INT(0, cy);
-	destroyBuffer(buf);
 }
 
 void test_forward_sentence_with_closing_punct(void) {
@@ -308,7 +284,6 @@ void test_forward_sentence_with_closing_punct(void) {
 	/* Should skip past the closing quote: "hello.\" " — land at 'T' */
 	TEST_ASSERT_EQUAL_INT(17, cx);
 	TEST_ASSERT_EQUAL_INT(0, cy);
-	destroyBuffer(buf);
 }
 
 void test_forward_sentence_para_boundary(void) {
@@ -323,7 +298,6 @@ void test_forward_sentence_para_boundary(void) {
 	 * the first non-blank line after the blank */
 	TEST_ASSERT_EQUAL_INT(0, cx);
 	TEST_ASSERT_EQUAL_INT(2, cy);
-	destroyBuffer(buf);
 }
 
 /* ---- Kill sexp ---- */
@@ -335,7 +309,6 @@ void test_kill_sexp_parens(void) {
 	E.buf = buf;
 	killSexp(1);
 	TEST_ASSERT_EQUAL_STRING(" world", row_str(buf, 0));
-	destroyBuffer(buf);
 }
 
 void test_kill_sexp_word(void) {
@@ -345,7 +318,6 @@ void test_kill_sexp_word(void) {
 	E.buf = buf;
 	killSexp(1);
 	TEST_ASSERT_EQUAL_STRING(" world", row_str(buf, 0));
-	destroyBuffer(buf);
 }
 
 void test_kill_sexp_readonly(void) {
@@ -355,7 +327,6 @@ void test_kill_sexp_readonly(void) {
 	E.buf = buf;
 	killSexp(1);
 	TEST_ASSERT_EQUAL_STRING("(hello) world", row_str(buf, 0));
-	destroyBuffer(buf);
 }
 
 /* ---- Kill paragraph ---- */
@@ -373,7 +344,6 @@ void test_kill_paragraph(void) {
 	TEST_ASSERT_EQUAL_INT(0, buf->cy);
 	/* First remaining line should be the blank line */
 	TEST_ASSERT_EQUAL_STRING("", row_str(buf, 0));
-	destroyBuffer(buf);
 }
 
 void test_kill_paragraph_readonly(void) {
@@ -383,7 +353,6 @@ void test_kill_paragraph_readonly(void) {
 	E.buf = buf;
 	killParagraph(1);
 	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
-	destroyBuffer(buf);
 }
 
 /* ---- Mark paragraph ---- */
@@ -402,7 +371,6 @@ void test_mark_paragraph(void) {
 	TEST_ASSERT_EQUAL_INT(4, buf->marky);
 	TEST_ASSERT_EQUAL_INT(0, buf->markx);
 	TEST_ASSERT_EQUAL_INT(1, buf->mark_active);
-	destroyBuffer(buf);
 }
 
 /* ---- Zap to char ---- */
@@ -420,7 +388,6 @@ void test_editor_forward_para(void) {
 	E.buf = buf;
 	forwardPara(1);
 	TEST_ASSERT_EQUAL_INT(2, E.buf->cy);
-	destroyBuffer(buf);
 }
 
 void test_editor_back_para(void) {
@@ -431,7 +398,61 @@ void test_editor_back_para(void) {
 	E.buf = buf;
 	backPara(1);
 	TEST_ASSERT_EQUAL_INT(2, E.buf->cy);
-	destroyBuffer(buf);
+}
+
+/* ---- Edge case tests ---- */
+
+void test_insert_newline_empty_buffer(void) {
+	struct buffer *buf = make_test_buffer(NULL);
+	/* Start with one empty row, like a real empty file */
+	insertRow(buf, 0, "", 0);
+	clearUndosAndRedos(buf);
+	E.buf = buf;
+	buf->cx = 0;
+	buf->cy = 0;
+	insertNewline(1);
+	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
+	TEST_ASSERT_EQUAL_STRING("", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_STRING("", row_str(buf, 1));
+}
+
+void test_backspace_at_origin(void) {
+	struct buffer *buf = make_test_buffer("Hello");
+	E.buf = buf;
+	buf->cx = 0;
+	buf->cy = 0;
+	backSpace(1);
+	/* Should be a no-op */
+	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
+	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(0, buf->cx);
+	TEST_ASSERT_EQUAL_INT(0, buf->cy);
+}
+
+void test_del_char_at_end_of_last_line(void) {
+	struct buffer *buf = make_test_buffer("Hello");
+	E.buf = buf;
+	buf->cx = 5;
+	buf->cy = 0;
+	delChar(1);
+	/* Should be a no-op — nothing after the last char of the last line */
+	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
+	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
+}
+
+void test_move_cursor_empty_buffer(void) {
+	struct buffer *buf = make_test_buffer("");
+	E.buf = buf;
+	buf->cx = 0;
+	buf->cy = 0;
+	moveCursor(KEY_ARROW_UP, 1);
+	TEST_ASSERT_EQUAL_INT(0, buf->cy);
+	moveCursor(KEY_ARROW_DOWN, 1);
+	TEST_ASSERT_EQUAL_INT(0, buf->cy);
+	moveCursor(KEY_ARROW_LEFT, 1);
+	TEST_ASSERT_EQUAL_INT(0, buf->cx);
+	moveCursor(KEY_ARROW_RIGHT, 1);
+	TEST_ASSERT_EQUAL_INT(0, buf->cx);
 }
 
 void setUp(void) {
@@ -494,6 +515,12 @@ int main(void) {
 	/* Paragraph movement (refactored) */
 	RUN_TEST(test_editor_forward_para);
 	RUN_TEST(test_editor_back_para);
+
+	/* Edge cases */
+	RUN_TEST(test_insert_newline_empty_buffer);
+	RUN_TEST(test_backspace_at_origin);
+	RUN_TEST(test_del_char_at_end_of_last_line);
+	RUN_TEST(test_move_cursor_empty_buffer);
 
 	return TEST_END();
 }

@@ -23,8 +23,10 @@ size_t emil_strlcat(char *dst, const char *src, size_t dsize);
 /* Character classification */
 int isWordBoundary(uint8_t c);
 
-/* Memory budget tracking */
-int trackAlloc(size_t n);
-void trackFree(size_t n);
+/* Sum of file_size across all open buffers */
+size_t totalOpenBytes(void);
+
+/* Sum of string lengths across all kill ring entries */
+size_t totalKillBytes(void);
 
 #endif /* EMIL_UTIL_H */

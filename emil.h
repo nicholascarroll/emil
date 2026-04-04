@@ -12,8 +12,8 @@
 
 #define EMIL_TAB_STOP 8
 
-#ifndef EMIL_MAX_TOTAL_BYTES
-#define EMIL_MAX_TOTAL_BYTES (1024 * 1024 * 1024)
+#ifndef EMIL_MAX_OPEN_BYTES
+#define EMIL_MAX_OPEN_BYTES (1024 * 1024 * 1024)
 #endif
 
 #ifndef EMIL_VERSION
@@ -45,7 +45,7 @@ enum promptType {
 
 /* Type policy:
  * Positions (cx, cy, markx, marky) — int, signed for sentinels
- * Sizes (erow.size, abuf.len) — int, bounded by EMIL_MAX_TOTAL_BYTES
+ * Sizes (erow.size, abuf.len) — int, bounded by EMIL_MAX_OPEN_BYTES
  * Accumulations to malloc — size_t (e.g. rowsToString totlen)  */
 
 typedef struct erow {
@@ -116,6 +116,7 @@ struct buffer {
 	 * Safe across the 2038 boundary.  Do NOT do arithmetic on
 	 * this field. */
 	time_t open_mtime; /* st_mtime at open/save, 0 if unset */
+	size_t file_size;  /* st_size at open, for open-file budget */
 	int external_mod;  /* 1 if file changed on disk since open/save */
 	int internal_mod;
 	erow *row;
@@ -247,7 +248,6 @@ struct config {
 	struct history kill_history;
 	int kill_ring_pos;	/* Current position in kill ring for M-y */
 	int self_insert_key;	/* Stashed key for CMD_SELF_INSERT */
-	size_t tracked_bytes;	/* Total tracked memory usage */
 	struct abuf render_buf; /* Persistent screen-render buffer */
 };
 

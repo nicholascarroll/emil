@@ -53,12 +53,16 @@ if nm unicode.o 2>/dev/null | grep -q "__asan_"; then
     SANITIZER_FLAGS="-fsanitize=address,undefined"
 fi
 
-CFLAGS="-std=c99 -Wall -Wextra -Wpedantic -Wno-pointer-sign -Wno-unused-function -D_DEFAULT_SOURCE -D_BSD_SOURCE -I."
+# Use the CFLAGS from the Makefile (passed via environment) and add
+# test-specific flags.  Previously this line overwrote CFLAGS entirely,
+# which meant the test stubs.o and test binaries were compiled with
+# different flags than the main .o files — breaking sanitizer builds
+# and ignoring user-supplied defines like EMIL_MAX_OPEN_BYTES.
+TEST_CFLAGS="$CFLAGS -Wno-unused-function -I."
 
 # Build stubs.o (replaces main.o + terminal.o)
 
-
-$COMPILER $CFLAGS $SANITIZER_FLAGS -c tests/stubs.c -o tests/stubs.o 2>&1 || {
+$COMPILER $TEST_CFLAGS $SANITIZER_FLAGS -c tests/stubs.c -o tests/stubs.o 2>&1 || {
     echo "✗ Failed to compile stubs.c"
     exit 1
 }
@@ -71,16 +75,16 @@ TEST_OBJECTS="wcwidth.o unicode.o buffer.o region.o undo.o transform.o \
 
 echo "Unit tests:"
 
-for suite in unicode wcwidth buffer undo edit fileio relpath visual_line utf8_validate rect_undo transform; do
+for suite in unicode wcwidth buffer undo edit fileio relpath visual_line utf8_validate rect_undo transform subprocess adjust history abuf; do
     src="tests/test_${suite}.c"
     bin="tests/test_${suite}"
     printf "  %-12s " "$suite"
 
-    # Compile
-    if ! $COMPILER $CFLAGS $SANITIZER_FLAGS -o "$bin" "$src" $TEST_OBJECTS 2>/dev/null; then
+    # Compile and link (use TEST_CFLAGS for the test source, LDFLAGS for linking)
+    if ! $COMPILER $TEST_CFLAGS $SANITIZER_FLAGS -o "$bin" "$src" $TEST_OBJECTS $LDFLAGS 2>/dev/null; then
         echo "BUILD FAIL"
-        $COMPILER $CFLAGS $SANITIZER_FLAGS -o "$bin" "$src" $TEST_OBJECTS 2>&1 | tail -5
-        ANY_FAIL=$((FAIL+1))
+        $COMPILER $TEST_CFLAGS $SANITIZER_FLAGS -o "$bin" "$src" $TEST_OBJECTS $LDFLAGS 2>&1 | tail -5
+        ANY_FAIL=1
         continue
     fi
 
@@ -99,7 +103,7 @@ for suite in unicode wcwidth buffer undo edit fileio relpath visual_line utf8_va
     elif [ $rc -ne 0 ]; then
         echo "FAIL (Sanitizer/Error - Exit Code $rc)"
         # REMOVED 'head -n 5' to show the full report
-        echo "$output" | grep -iE "AddressSanitizer|LEAK|ERROR" -A 20 2>/dev/null | sed 's/^/    /'
+        echo "$output" | grep -iE "runtime error|AddressSanitizer|LEAK|ERROR" -A 5 2>/dev/null | head -20 | sed 's/^/    /'
         ANY_FAIL=1
     else
         # Success is the only place we report the test count

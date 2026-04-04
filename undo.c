@@ -315,8 +315,16 @@ struct undo *newUndo(void) {
 	ret->datasize = 22;
 	ret->data = xmalloc(ret->datasize);
 	ret->data[0] = 0;
-	trackAlloc((size_t)ret->datasize);
 	return ret;
+}
+
+/* Replace an undo record's data buffer with a new allocation of
+ * 'newsize' bytes.  Callers must fill in the new data themselves
+ * after this returns. */
+void undoReplaceData(struct undo *u, int newsize) {
+	free(u->data);
+	u->datasize = newsize;
+	u->data = xmalloc(u->datasize);
 }
 
 static void freeUndos(struct undo *first);
@@ -348,7 +356,6 @@ static void freeUndos(struct undo *first) {
 	struct undo *prev;
 
 	while (cur != NULL) {
-		trackFree((size_t)cur->datasize);
 		free(cur->data);
 		prev = cur;
 		cur = prev->prev;

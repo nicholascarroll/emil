@@ -13,6 +13,7 @@
 #include "util.h"
 #include "terminal.h"
 #include "window.h"
+#include <limits.h>
 
 extern struct config E;
 
@@ -328,11 +329,6 @@ void insertRow(struct buffer *bufr, int at, char *s, size_t len) {
 	if (at < 0 || at > bufr->numrows)
 		return;
 
-	if (!trackAlloc(len + 1)) {
-		setStatusMessage(msg_memory_limit);
-		return;
-	}
-
 	if (bufr->numrows >= bufr->rowcap) {
 		int new_cap = bufr->rowcap ? bufr->rowcap * 2 : 16;
 		bufr->row = xrealloc(bufr->row, sizeof(erow) * new_cap);
@@ -360,7 +356,6 @@ void insertRow(struct buffer *bufr, int at, char *s, size_t len) {
 }
 
 void freeRow(erow *row) {
-	trackFree(row->size + 1);
 	free(row->chars);
 }
 
@@ -431,7 +426,10 @@ void rowInsertUnicode(struct buffer *bufr, erow *row, int at) {
 }
 
 void rowAppendString(struct buffer *bufr, erow *row, char *s, size_t len) {
-	int needed = row->size + len + 1;
+	/* Guard against int overflow: row->size is int */
+	if (len > (size_t)(INT_MAX - row->size - 1))
+		return;
+	int needed = row->size + (int)len + 1;
 	if (needed > row->charcap) {
 		int new_cap = row->charcap < 16 ? 16 : row->charcap * 2;
 		if (new_cap < needed)

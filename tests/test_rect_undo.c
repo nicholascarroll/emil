@@ -82,7 +82,6 @@ void test_kill_rect_single_row_undo(void) {
 	assert_buffer_matches(buf, snap, snap_n, "kill_rect_single_undo");
 
 	free_snapshot(snap, snap_n);
-	destroyBuffer(buf);
 }
 
 void test_kill_rect_multi_row_undo(void) {
@@ -106,7 +105,6 @@ void test_kill_rect_multi_row_undo(void) {
 	assert_buffer_matches(buf, snap, snap_n, "kill_rect_multi_undo");
 
 	free_snapshot(snap, snap_n);
-	destroyBuffer(buf);
 }
 
 void test_kill_rect_multi_row_redo(void) {
@@ -128,7 +126,6 @@ void test_kill_rect_multi_row_redo(void) {
 	assert_buffer_matches(buf, kill_snap, kill_n, "kill_rect_redo");
 
 	free_snapshot(kill_snap, kill_n);
-	destroyBuffer(buf);
 }
 
 void test_kill_rect_short_rows_undo(void) {
@@ -149,7 +146,6 @@ void test_kill_rect_short_rows_undo(void) {
 	assert_buffer_matches(buf, snap, snap_n, "kill_rect_short_rows_undo");
 
 	free_snapshot(snap, snap_n);
-	destroyBuffer(buf);
 }
 
 void test_kill_rect_swapped_columns_undo(void) {
@@ -169,7 +165,6 @@ void test_kill_rect_swapped_columns_undo(void) {
 	assert_buffer_matches(buf, snap, snap_n, "kill_rect_swapped_cols_undo");
 
 	free_snapshot(snap, snap_n);
-	destroyBuffer(buf);
 }
 
 /* ----------------------------------------------------------------
@@ -197,7 +192,6 @@ void test_copy_rect_preserves_buffer(void) {
 	TEST_ASSERT_EQUAL_INT(3, E.kill.rect_height);
 
 	free_snapshot(snap, snap_n);
-	destroyBuffer(buf);
 }
 
 /* ----------------------------------------------------------------
@@ -231,7 +225,6 @@ void test_yank_rect_basic_undo(void) {
 	assert_buffer_matches(buf, snap, snap_n, "yank_rect_basic_undo");
 
 	free_snapshot(snap, snap_n);
-	destroyBuffer(buf);
 }
 
 void test_yank_rect_redo(void) {
@@ -256,7 +249,6 @@ void test_yank_rect_redo(void) {
 	assert_buffer_matches(buf, yank_snap, yank_n, "yank_rect_redo");
 
 	free_snapshot(yank_snap, yank_n);
-	destroyBuffer(buf);
 }
 
 void test_yank_rect_extra_lines_undo(void) {
@@ -287,7 +279,6 @@ void test_yank_rect_extra_lines_undo(void) {
 	assert_buffer_matches(buf, snap, snap_n, "yank_rect_extra_lines_undo");
 
 	free_snapshot(snap, snap_n);
-	destroyBuffer(buf);
 }
 
 void test_yank_rect_into_short_rows_undo(void) {
@@ -317,7 +308,6 @@ void test_yank_rect_into_short_rows_undo(void) {
 	assert_buffer_matches(buf, snap, snap_n, "yank_rect_short_rows_undo");
 
 	free_snapshot(snap, snap_n);
-	destroyBuffer(buf);
 }
 
 /* ----------------------------------------------------------------
@@ -337,7 +327,6 @@ void test_delete_range_single_line_undo(void) {
 	assert_buffer_matches(buf, snap, snap_n, "delete_range_single_undo");
 
 	free_snapshot(snap, snap_n);
-	destroyBuffer(buf);
 }
 
 void test_delete_range_multi_line_undo(void) {
@@ -354,7 +343,6 @@ void test_delete_range_multi_line_undo(void) {
 	assert_buffer_matches(buf, snap, snap_n, "delete_range_multi_undo");
 
 	free_snapshot(snap, snap_n);
-	destroyBuffer(buf);
 }
 
 /* ----------------------------------------------------------------
@@ -377,7 +365,6 @@ void test_kill_region_undo(void) {
 	assert_buffer_matches(buf, snap, snap_n, "kill_region_undo");
 
 	free_snapshot(snap, snap_n);
-	destroyBuffer(buf);
 }
 
 /* ----------------------------------------------------------------
@@ -406,7 +393,6 @@ void test_kill_then_yank_rect_round_trip(void) {
 	assert_buffer_matches(buf, snap, snap_n, "kill_yank_round_trip");
 
 	free_snapshot(snap, snap_n);
-	destroyBuffer(buf);
 }
 
 /* ----------------------------------------------------------------
@@ -445,7 +431,6 @@ void test_multiple_rect_ops_undo_all(void) {
 	assert_buffer_matches(buf, snap, snap_n, "multiple_rect_ops_undo");
 
 	free_snapshot(snap, snap_n);
-	destroyBuffer(buf);
 }
 
 /* ----------------------------------------------------------------
@@ -468,7 +453,6 @@ void test_kill_rect_zero_width(void) {
 	assert_buffer_matches(buf, snap, snap_n, "kill_rect_zero_width");
 
 	free_snapshot(snap, snap_n);
-	destroyBuffer(buf);
 }
 
 /* ----------------------------------------------------------------

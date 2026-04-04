@@ -5,6 +5,7 @@
 #include "keymap.h"
 #include "message.h"
 #include "prompt.h"
+#include "terminal.h"
 #include "undo.h"
 #include "unicode.h"
 #include "unused.h"
@@ -192,16 +193,19 @@ int editorOpen(struct buffer *bufr, char *filename) {
 		return -1;
 	}
 
-	/* Check file size against remaining memory budget */
+	/* Check file size against budget (hard limit) */
 	{
 		struct stat st;
 		if (fstat(fileno(fp), &st) == 0 && S_ISREG(st.st_mode)) {
-			if ((size_t)st.st_size + E.tracked_bytes >
-			    (size_t)EMIL_MAX_TOTAL_BYTES) {
+			bufr->file_size = (size_t)st.st_size;
+			if (totalOpenBytes() + totalKillBytes() +
+				    bufr->file_size >
+			    (size_t)EMIL_MAX_OPEN_BYTES) {
 				fclose(fp);
 				setStatusMessage(msg_memory_limit);
 				free(bufr->filename);
 				bufr->filename = NULL;
+				bufr->file_size = 0;
 				return -1;
 			}
 		}
@@ -301,7 +305,10 @@ int editorOpen(struct buffer *bufr, char *filename) {
 		}
 	}
 
-	setStatusMessage(msg_lines_columns, bufr->numrows, max_width);
+	if (lock_result != -1)
+		setStatusMessage(msg_lines_columns, bufr->numrows, max_width);
+	/* When locked, the lock message from lockFile() is more
+	 * important than lines/columns — leave it visible. */
 	return 0;
 }
 
@@ -592,6 +599,15 @@ void insertFile(void) {
 	struct stat ist;
 	if (stat((char *)filename, &ist) == 0 && S_ISDIR(ist.st_mode)) {
 		setStatusMessage(msg_dir_not_supported);
+		free(filename);
+		return;
+	}
+
+	/* Check file size against budget */
+	if (S_ISREG(ist.st_mode) &&
+	    totalOpenBytes() + totalKillBytes() + (size_t)ist.st_size >
+		    (size_t)EMIL_MAX_OPEN_BYTES) {
+		setStatusMessage(msg_memory_limit);
 		free(filename);
 		return;
 	}

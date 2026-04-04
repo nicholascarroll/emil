@@ -87,6 +87,11 @@ test: $(PROGNAME)
 
 check: test
 
+sanitize:
+	$(MAKE) clean
+	$(MAKE) CFLAGS="-g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer" \
+	        LDFLAGS="-fsanitize=address,undefined" test
+
 # Sorry Dave
 hal:
 	$(MAKE) format
@@ -143,4 +148,4 @@ help:
 	@echo "  format    Format code with clang-format"
 	@echo "  hal       HAL-9000 compliance"
 
-.PHONY: all install uninstall clean test check hal debug format android msys2 minimal solaris darwin help
+.PHONY: all install uninstall clean test check sanitize hal debug format android msys2 minimal solaris darwin help
