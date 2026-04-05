@@ -65,8 +65,8 @@ void setupHandlers(void) {
 #ifdef SIGWINCH
 	install_handler(SIGWINCH, sigwinchHandler, SA_RESTART);
 #endif
-	install_handler(SIGCONT, editorResume, SA_RESTART);
-	install_handler(SIGTSTP, editorSuspend, 0);
+	install_handler(SIGCONT, editorResume, 0);
+	install_handler(SIGTSTP, editorSuspend, SA_NODEFER);
 	install_handler(SIGTERM, handleSigterm, 0);
 	install_handler(SIGHUP, handleSighup, 0);
 }
@@ -320,6 +320,8 @@ int main(int argc, char *argv[]) {
 		refreshScreen();
 
 		int key = readKey();
+		if (key == -1)
+			continue; /* signal interrupted — recheck flags */
 		recordKey(key);
 
 		/* Stash printable key for self-insert */

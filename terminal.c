@@ -279,7 +279,9 @@ int readKey(void) {
 	int nread;
 	uint8_t c;
 	while ((nread = read(STDIN_FILENO, &c, 1)) != 1) {
-		if (nread == -1 && errno != EAGAIN && errno != EINTR)
+		if (nread == -1 && errno == EINTR)
+			return -1;
+		if (nread == -1 && errno != EAGAIN)
 			die("read");
 	}
 	if (c == 033) {
