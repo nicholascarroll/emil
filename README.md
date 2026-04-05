@@ -205,6 +205,8 @@ Notes:
 
 ## Editing Large Files
 
+`emil` is not designed for editing very large files. 
+ 
 `emil` tracks memory usage against a configurable limit (default 1 GB).
 The budget counts the actual text content of all open buffers plus all undo and redo data. Minor allocations like
 command history are not counted.
@@ -229,7 +231,7 @@ Each buffer is an array of logical lines (`erow`), where each line stores its ra
 
 Display widths are cached per-row and recomputed only when a row is edited. A cumulative screen-line cache maps logical rows to screen positions, enabling efficient scrolling when word wrap is active.
 
-On each frame, the renderer reads raw bytes from the buffer and emits terminal-ready sequences directly into a disposable append buffer. No intermediate render buffers exist. The append buffer is written to the terminal in a single `write()` call.
+On each frame, the renderer reads raw bytes from the buffer and emits terminal-ready sequences directly into an append buffer. No intermediate render buffers exist. The append buffer is written to the terminal in a single `write()` call.
 
 The rendering system uses only cursor positioning (CSI H), erase-to-end-of-line (CSI K), reverse video (CSI 7m / CSI 0m), and clear-below (CSI J). Scroll region manipulation and line insert/delete are not used by the core renderer; they are planned as optional render acceleration layer enabled by a run-time toggle.
 

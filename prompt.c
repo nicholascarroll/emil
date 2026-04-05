@@ -225,16 +225,10 @@ uint8_t *editorPrompt(struct buffer *bufr, const uint8_t *prompt,
 		case KEY_META('n'): {
 			/* If completions are visible, cycle selection
 			 * instead of history. */
+			int down = (c == KEY_ARROW_DOWN || c == KEY_META('n'));
 			if (E.minibuf->completion_state.matches &&
 			    E.minibuf->completion_state.n_matches > 0) {
-				cycleCompletion(E.minibuf,
-						c == KEY_META('p') ? 1 : -1);
-				cycleCompletion(
-					E.minibuf,
-					c == KEY_META('n') ||
-							c == KEY_ARROW_DOWN ?
-						1 :
-						-1);
+				cycleCompletion(E.minibuf, down ? 1 : -1);
 				break;
 			}
 
@@ -259,7 +253,7 @@ uint8_t *editorPrompt(struct buffer *bufr, const uint8_t *prompt,
 			}
 
 			if (hist && hist->count > 0) {
-				if (c == KEY_META('p') || c == KEY_ARROW_UP) {
+				if (!down) {
 					if (history_pos == -1) {
 						history_pos = hist->count - 1;
 					} else if (history_pos > 0) {
@@ -302,21 +296,25 @@ uint8_t *editorPrompt(struct buffer *bufr, const uint8_t *prompt,
 			break;
 		}
 
-		default:
-			if (E.minibuf->completion_state.last_completed_text !=
-			    NULL) {
+		default: {
+			/* C-p / C-n move the cursor inside the minibuffer;
+			 * they should NOT destroy visible completions. */
+			int cmd_peek = resolveBinding(c);
+			int is_cursor_move = (cmd_peek == CMD_PREV_LINE ||
+					      cmd_peek == CMD_NEXT_LINE);
+
+			if (!is_cursor_move &&
+			    E.minibuf->completion_state.last_completed_text !=
+				    NULL) {
 				resetCompletionState(
 					&E.minibuf->completion_state);
 			}
 
-			/* Resolve key → command before dispatching */
+			/* Dispatch */
 			if (c >= ' ' && c < KEY_ARROW_LEFT)
 				E.self_insert_key = c;
-			{
-				int cmd = resolveBinding(c);
-				if (cmd != CMD_NONE)
-					processKeypress(cmd);
-			}
+			if (cmd_peek != CMD_NONE)
+				processKeypress(cmd_peek);
 
 			/* Ensure single line */
 			if (E.minibuf->numrows > 1) {
@@ -346,6 +344,7 @@ uint8_t *editorPrompt(struct buffer *bufr, const uint8_t *prompt,
 				E.minibuf->cy = 0;
 				free(joined);
 			}
+		}
 		}
 
 		if (callback) {
