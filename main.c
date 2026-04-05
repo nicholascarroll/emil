@@ -195,6 +195,11 @@ int main(int argc, char *argv[]) {
 	enableRawMode();
 	initEditor();
 	atexit(editorCleanup);
+	setupHandlers();
+	signal(SIGPIPE, SIG_IGN);
+	signal(SIGUSR1, SIG_IGN);
+	signal(SIGUSR2, SIG_IGN);
+	signal(SIGALRM, SIG_IGN);
 
 	E.headbuf = newBuffer();
 	E.buf = E.headbuf;
@@ -292,11 +297,6 @@ int main(int argc, char *argv[]) {
 	if (!E.statusmsg_show)
 		setStatusMessage(msg_shell_disabled);
 #endif /* EMIL_DISABLE_SHELL */
-	setupHandlers();
-	signal(SIGPIPE, SIG_IGN);
-	signal(SIGUSR1, SIG_IGN);
-	signal(SIGUSR2, SIG_IGN);
-	signal(SIGALRM, SIG_IGN);
 	for (;;) {
 		if (got_sigterm || got_sighup) {
 			disableRawMode();
@@ -312,7 +312,7 @@ int main(int argc, char *argv[]) {
 			IGNORE_RETURN(write(STDOUT_FILENO, CSI "r", 3));
 			IGNORE_RETURN(write(STDOUT_FILENO, ESC "8", 2));
 			setupHandlers();
-			enableRawMode();
+			applyRawMode();
 			for (int i = 0; i < E.nwindows; i++)
 				E.windows[i]->height = 0;
 			resizeScreen(0);

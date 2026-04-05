@@ -127,14 +127,14 @@ void openShellDrawer(void) {
 	raise(SIGTSTP);
 }
 
-void enableRawMode(void) {
-	/* Saves the screen and switches to an alt screen */
+/*
+ * Apply raw-mode terminal settings without saving orig_termios.
+ * Used on resume (SIGCONT) where the original state is already saved.
+ */
+void applyRawMode(void) {
+	/* Switch to alternate screen */
 	if (write(STDOUT_FILENO, CSI "?1049h", 8) == -1)
-		die("enableRawMode write");
-
-	if (tcgetattr(STDIN_FILENO, &E.orig_termios) == -1)
-		die("tcgetattr");
-	atexit(disableRawMode);
+		die("applyRawMode write");
 
 	struct termios raw = E.orig_termios;
 	raw.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
@@ -144,7 +144,15 @@ void enableRawMode(void) {
 	raw.c_cc[VMIN] = 1;
 	raw.c_cc[VTIME] = 0;
 	if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1)
-		die("enableRawMode tcsetattr");
+		die("applyRawMode tcsetattr");
+}
+
+void enableRawMode(void) {
+	if (tcgetattr(STDIN_FILENO, &E.orig_termios) == -1)
+		die("tcgetattr");
+	atexit(disableRawMode);
+
+	applyRawMode();
 }
 
 int getCursorPosition(int *rows, int *cols) {
