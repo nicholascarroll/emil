@@ -93,47 +93,38 @@ uint8_t *editorPrompt(struct buffer *bufr, const uint8_t *prompt,
 
 				/* Check if this is a file prompt and the path is a directory */
 				struct stat st;
-				if (t == PROMPT_FILES &&
-				    stat(effective_path, &st) == 0) {
-					if (S_ISDIR(st.st_mode)) {
-						/* User hit Enter on a directory.
-						 * Replace minibuffer with the directory path,
-						 * append / if needed, and trigger completion. */
-						int elen =
-							strlen(effective_path);
+				char *stat_path = expandTilde(effective_path);
+				int is_dir = (t == PROMPT_FILES &&
+					      stat(stat_path, &st) == 0 &&
+					      S_ISDIR(st.st_mode));
+				free(stat_path);
+				if (is_dir) {
+					/* User hit Enter on a directory.
+					 * Replace minibuffer with the directory path,
+					 * append / if needed, and trigger completion. */
+					int elen = strlen(effective_path);
 
-						/* Replace minibuffer content with effective path */
-						if (effective_path !=
-						    current_text) {
-							while (E.minibuf->numrows >
-							       0)
-								delRow(E.minibuf,
-								       0);
-							insertRow(
-								E.minibuf, 0,
-								effective_path,
-								elen);
-							E.minibuf->cx = elen;
-							E.minibuf->cy = 0;
-							resetCompletionState(
-								cs);
-						}
-
-						if (elen > 0 &&
-						    effective_path[elen - 1] !=
-							    '/') {
-							E.minibuf->cx =
-								E.minibuf
-									->row[0]
-									.size;
-							insertChar(E.minibuf,
-								   '/', 1);
-						}
-
-						handleMinibufferCompletion(
-							E.minibuf, t);
-						break; /* Do NOT return; keep the user in the prompt */
+					/* Replace minibuffer content with effective path */
+					if (effective_path != current_text) {
+						while (E.minibuf->numrows > 0)
+							delRow(E.minibuf, 0);
+						insertRow(E.minibuf, 0,
+							  effective_path, elen);
+						E.minibuf->cx = elen;
+						E.minibuf->cy = 0;
+						resetCompletionState(cs);
 					}
+
+					if (elen > 0 &&
+					    effective_path[elen - 1] != '/') {
+						E.minibuf->cx =
+							E.minibuf->row[0].size;
+						insertChar(E.minibuf, '/', 1);
+					}
+
+					handleMinibufferCompletion(E.minibuf,
+								   t);
+					break; /* Do NOT return; keep the user in the prompt */
 				}
 
 				/* PROMPT_DIR: strip trailing slash before returning */

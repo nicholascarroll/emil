@@ -497,7 +497,10 @@ struct buffer *newBuffer(void) {
 	ret->read_only = 0;
 	ret->lock_fd = -1;
 	ret->open_mtime = 0;
+	ret->file_size = 0;
 	ret->external_mod = 0;
+	ret->internal_mod = 0;
+	ret->undo_pruned = 0;
 	return ret;
 }
 
@@ -531,10 +534,30 @@ void updateBuffer(struct buffer *buf) {
 }
 
 struct buffer *findBufferByName(const char *name) {
+	/* Literal match (fast path, covers special buffers) */
 	for (struct buffer *b = E.headbuf; b != NULL; b = b->next) {
 		if (b->filename && strcmp(b->filename, name) == 0)
 			return b;
 	}
+
+	/* For real file paths, compare absolute forms to avoid
+	 * duplicate buffers opened via different path forms. */
+	if (name[0] == '*')
+		return NULL;
+
+	char *abs_name = absolutePath(name);
+	for (struct buffer *b = E.headbuf; b != NULL; b = b->next) {
+		if (!b->filename || b->special_buffer)
+			continue;
+		char *abs_buf = absolutePath(b->filename);
+		int match = (strcmp(abs_buf, abs_name) == 0);
+		free(abs_buf);
+		if (match) {
+			free(abs_name);
+			return b;
+		}
+	}
+	free(abs_name);
 	return NULL;
 }
 
@@ -925,6 +948,25 @@ static char *middleTruncate(const char *full, const char *other,
 	return leftTruncate(mid, max_width);
 }
 
+/* Best display form of a filename.  For relative paths that resolve
+ * to somewhere under $HOME, use the ~ form if it's shorter.
+ * E.g. "../../home/me/foo.c" → "~/foo.c", but "src/main.c" stays.
+ * Returns a new string; caller frees. */
+static char *displayPath(const char *name) {
+	if (name[0] == '/' || name[0] == '~' || name[0] == '*')
+		return xstrdup(name);
+
+	char *abs = absolutePath(name);
+	char *tilded = collapseHome(abs);
+	free(abs);
+
+	if (tilded[0] == '~' && strlen(tilded) < strlen(name))
+		return tilded;
+
+	free(tilded);
+	return xstrdup(name);
+}
+
 /* Compute display_name and min_name_len for every buffer.
  *
  * Called on buffer open/close/rename and on terminal resize.
@@ -937,32 +979,40 @@ void computeDisplayNames(void) {
 	if (max_width < 4)
 		max_width = 4;
 
-	/* Pass 1: full name or left-truncated. */
+	/* Pass 1: best display form, then left-truncate to fit. */
 	for (struct buffer *b = E.headbuf; b != NULL; b = b->next) {
 		free(b->display_name);
 		const char *name = b->filename ? b->filename : "*scratch*";
-		b->display_name = leftTruncate(name, max_width);
+		char *dp = displayPath(name);
+		b->display_name = leftTruncate(dp, max_width);
+		free(dp);
 	}
 
 	/* Pass 2: disambiguate collisions via middle-truncate. */
 	for (struct buffer *a = E.headbuf; a != NULL; a = a->next) {
-		const char *a_full = a->filename ? a->filename : "*scratch*";
-		if (strcmp(a->display_name, a_full) == 0)
+		const char *a_raw = a->filename ? a->filename : "*scratch*";
+		char *a_full = displayPath(a_raw);
+		if (strcmp(a->display_name, a_full) == 0) {
+			free(a_full);
 			continue;
+		}
 
 		for (struct buffer *b = a->next; b != NULL; b = b->next) {
 			if (strcmp(a->display_name, b->display_name) != 0)
 				continue;
 
-			const char *b_full = b->filename ? b->filename :
-							   "*scratch*";
+			const char *b_raw = b->filename ? b->filename :
+							  "*scratch*";
+			char *b_full = displayPath(b_raw);
 			free(a->display_name);
 			a->display_name =
 				middleTruncate(a_full, b_full, max_width);
 			free(b->display_name);
 			b->display_name =
 				middleTruncate(b_full, a_full, max_width);
+			free(b_full);
 		}
+		free(a_full);
 	}
 
 	/* Pass 3: compute min_name_len for each buffer.

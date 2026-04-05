@@ -1,33 +1,20 @@
 #include "abuf.h"
 #include "buffer.h"
-#include "completion.h"
 #include "display.h"
 #include "emil.h"
 #include "fileio.h"
-#include "find.h"
 #include "history.h"
 #include "keymap.h"
 #include "message.h"
-#include "pipe.h"
-#include "region.h"
-#include "register.h"
 #include "terminal.h"
-#include "transform.h"
-#include "undo.h"
-#include "unicode.h"
-#include "unused.h"
 #include "util.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
-#include <stdarg.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/ioctl.h>
 #include <termios.h>
-#include <time.h>
 #include <unistd.h>
 
 const int page_overlap = 2;
@@ -166,72 +153,6 @@ void initEditor(void) {
 		die("getWindowSize");
 }
 
-/*
- * Read all available data from a file descriptor into a malloc'd buffer.
- * Sets *out_len to the number of bytes read.  Returns NULL on allocation
- * failure; returns an empty buffer (out_len == 0) if nothing was read.
- */
-static char *readAllFromFd(int fd, size_t *out_len) {
-	size_t cap = BUFSIZ;
-	size_t len = 0;
-	char *buf = xmalloc(cap);
-	ssize_t n;
-	while ((n = read(fd, buf + len, cap - len)) > 0) {
-		len += (size_t)n;
-		if (len >= cap) {
-			cap <<= 1;
-			buf = xrealloc(buf, cap);
-		}
-	}
-	*out_len = len;
-	return buf;
-}
-
-/*
- * Load piped stdin data into a new editor buffer.  The data is split
- * on newline boundaries and inserted row by row, matching the same
- * approach used by editorOpen().  The buffer is named "*stdin*" and
- * marked dirty so the user is prompted before discarding.
- *
- * Returns the new buffer, or NULL if the data contains null bytes
- * (which would indicate binary / non-UTF-8 content).
- */
-static struct buffer *loadStdinBuffer(const char *data, size_t len) {
-	/* Reject binary data: null bytes can't be represented */
-	if (memchr(data, '\0', len) != NULL) {
-		return NULL;
-	}
-
-	struct buffer *buf = newBuffer();
-	buf->filename = xstrdup("*stdin*");
-
-	size_t start = 0;
-	for (size_t i = 0; i < len; i++) {
-		if (data[i] == '\n') {
-			/* Strip trailing \r for DOS line endings */
-			size_t end = i;
-			if (end > start && data[end - 1] == '\r')
-				end--;
-			insertRow(buf, buf->numrows, (char *)&data[start],
-				  (int)(end - start));
-			start = i + 1;
-		}
-	}
-	/* Handle final line without trailing newline */
-	if (start < len) {
-		size_t end = len;
-		if (end > start && data[end - 1] == '\r')
-			end--;
-		insertRow(buf, buf->numrows, (char *)&data[start],
-			  (int)(end - start));
-	}
-
-	buf->dirty = 0;
-	buf->read_only = 1;
-	buf->word_wrap = 1;
-	return buf;
-}
-
 int main(int argc, char *argv[]) {
 	// Check for flags before entering raw mode
 	if (argc >= 2 && strncmp(argv[1], "--", 2) == 0) {
@@ -277,7 +198,6 @@ int main(int argc, char *argv[]) {
 
 	E.headbuf = newBuffer();
 	E.buf = E.headbuf;
-
 
 	/* Load piped stdin data if present */
 	if (stdin_data != NULL) {
@@ -415,9 +335,4 @@ int main(int argc, char *argv[]) {
 		if (cmd != CMD_NONE)
 			processKeypress(cmd);
 	}
-
-	/* cleanup */
-	clearText(&E.kill);
-
-	return 0;
 }

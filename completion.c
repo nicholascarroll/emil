@@ -129,8 +129,12 @@ static void getFileCompletions(const char *prefix,
 			result->n_matches = globlist.gl_pathc;
 
 			for (size_t i = 0; i < globlist.gl_pathc; i++) {
-				result->matches[i] =
-					xstrdup(globlist.gl_pathv[i]);
+				if (*prefix == '~')
+					result->matches[i] = collapseHome(
+						globlist.gl_pathv[i]);
+				else
+					result->matches[i] =
+						xstrdup(globlist.gl_pathv[i]);
 			}
 
 			result->common_prefix = findCommonPrefix(

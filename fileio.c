@@ -110,13 +110,15 @@ void checkFileModified(void) {
 	if (E.buf->external_mod)
 		return; /* already flagged */
 
+	char *iopath = expandTilde(E.buf->filename);
 	struct stat st;
-	if (stat(E.buf->filename, &st) == 0) {
+	if (stat(iopath, &st) == 0) {
 		if (st.st_mtime != E.buf->open_mtime) {
 			E.buf->external_mod = 1;
 			setStatusMessage(msg_file_changed_on_disk);
 		}
 	}
+	free(iopath);
 }
 
 /*** file i/o ***/
@@ -179,17 +181,22 @@ static int fileContainsNullBytes(FILE *fp) {
 
 int editorOpen(struct buffer *bufr, char *filename) {
 	free(bufr->filename);
-	bufr->filename = xstrdup(filename);
+	bufr->filename = collapseHome(filename);
 
-	FILE *fp = fopen(filename, "r");
+	/* Resolve to an OS-usable path for all I/O in this function */
+	char *iopath = expandTilde(bufr->filename);
+
+	FILE *fp = fopen(iopath, "r");
 	if (!fp) {
 		if (errno == ENOENT) {
 			setStatusMessage(msg_new_file, bufr->filename);
+			free(iopath);
 			return 0;
 		}
 		setStatusMessage(msg_cant_open, strerror(errno));
 		free(bufr->filename);
 		bufr->filename = NULL;
+		free(iopath);
 		return -1;
 	}
 
@@ -206,6 +213,7 @@ int editorOpen(struct buffer *bufr, char *filename) {
 				free(bufr->filename);
 				bufr->filename = NULL;
 				bufr->file_size = 0;
+				free(iopath);
 				return -1;
 			}
 		}
@@ -218,6 +226,7 @@ int editorOpen(struct buffer *bufr, char *filename) {
 		setStatusMessage(msg_binary_file);
 		free(bufr->filename);
 		bufr->filename = NULL;
+		free(iopath);
 		return -1;
 	}
 
@@ -243,9 +252,7 @@ int editorOpen(struct buffer *bufr, char *filename) {
 	free(line);
 	fclose(fp);
 
-	/* Guard against pathological files with billions of tiny lines.
-	 * numrows is int; keep it well below INT_MAX to avoid overflow
-	 * in row-index arithmetic elsewhere. */
+	/* Guard against pathological files with billions of tiny lines. */
 	if (bufr->numrows > INT_MAX / 2) {
 		for (int i = 0; i < bufr->numrows; i++)
 			freeRow(&bufr->row[i]);
@@ -256,12 +263,12 @@ int editorOpen(struct buffer *bufr, char *filename) {
 		free(bufr->filename);
 		bufr->filename = NULL;
 		setStatusMessage("File has too many lines");
+		free(iopath);
 		return -1;
 	}
 
 	/* Validate UTF-8 encoding of the loaded content */
 	if (!checkUTF8Validity(bufr)) {
-		/* Clean up: free rows and the row array itself */
 		for (int i = 0; i < bufr->numrows; i++) {
 			freeRow(&bufr->row[i]);
 		}
@@ -272,23 +279,21 @@ int editorOpen(struct buffer *bufr, char *filename) {
 		free(bufr->filename);
 		bufr->filename = NULL;
 		setStatusMessage(msg_invalid_utf8);
+		free(iopath);
 		return -1;
 	}
 
 	bufr->dirty = 0;
-	/* If the file is not writable by us, mark buffer read-only */
-	if (access(filename, W_OK) != 0) {
+	if (access(iopath, W_OK) != 0) {
 		bufr->read_only = 1;
 	}
 
-	/* Try to acquire advisory lock */
-	int lock_result = lockFile(bufr, filename);
+	int lock_result = lockFile(bufr, iopath);
 	if (lock_result == -1) {
-		/* File is locked by another process — open read-only */
 		bufr->read_only = 1;
-	} else if (lock_result == 0) {
-		/* Lock acquired — mtime already recorded by lockFile */
 	}
+
+	free(iopath);
 
 	computeDisplayNames();
 
@@ -307,8 +312,6 @@ int editorOpen(struct buffer *bufr, char *filename) {
 
 	if (lock_result != -1)
 		setStatusMessage(msg_lines_columns, bufr->numrows, max_width);
-	/* When locked, the lock message from lockFile() is more
-	 * important than lines/columns — leave it visible. */
 	return 0;
 }
 
@@ -360,33 +363,39 @@ void save(void) {
 		return;
 	}
 	if (E.buf->filename == NULL) {
-		E.buf->filename = (char *)editorPrompt(
+		char *input = (char *)editorPrompt(
 			E.buf, (uint8_t *)"Save as: %s", PROMPT_FILES, NULL);
-		if (E.buf->filename == NULL) {
+		if (input == NULL) {
 			setStatusMessage(msg_save_aborted);
 			return;
 		}
+		E.buf->filename = collapseHome(input);
+		free(input);
 		E.buf->special_buffer = 0;
 		computeDisplayNames();
 	}
 
+	/* Resolve to an OS-usable path for all I/O */
+	char *iopath = expandTilde(E.buf->filename);
+
 	size_t len;
 	char *buf = rowsToString(E.buf, &len);
 
-	/* Build temp filename: <filename>.tmpXXXXXX */
+	/* Build temp filename: <iopath>.tmpXXXXXX */
 	char tmpname[PATH_MAX];
-	snprintf(tmpname, sizeof(tmpname), "%s.tmpXXXXXX", E.buf->filename);
+	snprintf(tmpname, sizeof(tmpname), "%s.tmpXXXXXX", iopath);
 
 	int fd = mkstemp(tmpname);
 	if (fd == -1) {
 		free(buf);
+		free(iopath);
 		setStatusMessage(msg_save_failed, strerror(errno));
 		return;
 	}
 
 	/* Preserve permissions if file already exists */
 	struct stat st;
-	if (stat(E.buf->filename, &st) == 0) {
+	if (stat(iopath, &st) == 0) {
 		fchmod(fd, st.st_mode);
 	}
 
@@ -396,17 +405,18 @@ void save(void) {
 		ssize_t n = write(fd, buf + total, len - total);
 		if (n < 0) {
 			if (errno == EINTR)
-				continue; // interrupted, try again
+				continue;
 			close(fd);
 			unlink(tmpname);
 			free(buf);
+			free(iopath);
 			setStatusMessage(msg_save_failed, strerror(errno));
 			return;
 		} else if (n == 0) {
-			// shouldn't happen for regular files, treat as error
 			close(fd);
 			unlink(tmpname);
 			free(buf);
+			free(iopath);
 			setStatusMessage(msg_save_failed);
 			return;
 		}
@@ -417,15 +427,17 @@ void save(void) {
 		close(fd);
 		unlink(tmpname);
 		free(buf);
+		free(iopath);
 		setStatusMessage(msg_save_failed, strerror(errno));
 		return;
 	}
 
 	close(fd);
 
-	if (rename(tmpname, E.buf->filename) == -1) {
+	if (rename(tmpname, iopath) == -1) {
 		unlink(tmpname);
 		free(buf);
+		free(iopath);
 		setStatusMessage(msg_save_failed, strerror(errno));
 		return;
 	}
@@ -433,8 +445,6 @@ void save(void) {
 	free(buf);
 	E.buf->dirty = 0;
 
-	/* Compact row buffers: shrink any over-allocated rows now that
-	 * the buffer is saved and editing pressure has settled. */
 	for (int i = 0; i < E.buf->numrows; i++) {
 		erow *row = &E.buf->row[i];
 		if (row->charcap > row->size + 1) {
@@ -445,17 +455,15 @@ void save(void) {
 
 	/* Update stored mtime after save */
 	struct stat save_st;
-	if (stat(E.buf->filename, &save_st) == 0)
+	if (stat(iopath, &save_st) == 0)
 		E.buf->open_mtime = save_st.st_mtime;
 	E.buf->external_mod = 0;
 	E.buf->internal_mod = 1;
 
-	/* If we didn't have a lock yet (new file), acquire one now */
 	if (E.buf->lock_fd < 0)
-		lockFile(E.buf, E.buf->filename);
+		lockFile(E.buf, iopath);
 
-	/* TODO Interactive fallback to direct write if temp creation fails */
-	/* TODO: fsync parent dir after rename */
+	free(iopath);
 
 	int n = snprintf(NULL, 0, msg_wrote_bytes, (int)len, E.buf->filename);
 	char *showName =
@@ -477,7 +485,8 @@ void saveAs(void) {
 		return;
 	}
 	free(E.buf->filename);
-	E.buf->filename = new_filename;
+	E.buf->filename = collapseHome(new_filename);
+	free(new_filename);
 	/* Release lock on the old file before saving to the new one */
 	releaseLock(E.buf);
 	computeDisplayNames();
@@ -534,8 +543,11 @@ void findFile(void) {
 
 	/* If the input contains glob wildcards, expand and open all matches */
 	if (hasGlobChars((char *)prompt)) {
+		/* Expand ~ for glob — OS doesn't understand tilde */
+		char *glob_input = expandTilde((char *)prompt);
 		glob_t gl;
-		int rc = glob((char *)prompt, GLOB_MARK, NULL, &gl);
+		int rc = glob(glob_input, GLOB_MARK, NULL, &gl);
+		free(glob_input);
 		if (rc != 0 || gl.gl_pathc == 0) {
 			if (rc == 0)
 				globfree(&gl);
@@ -574,11 +586,14 @@ void findFile(void) {
 	/* Safety net: if a directory path somehow gets through the prompt,
 	 * don't try to open it as a file. */
 	struct stat st;
-	if (stat((char *)prompt, &st) == 0 && S_ISDIR(st.st_mode)) {
+	char *stat_path = expandTilde((char *)prompt);
+	if (stat(stat_path, &st) == 0 && S_ISDIR(st.st_mode)) {
 		setStatusMessage(msg_dir_not_supported);
+		free(stat_path);
 		free(prompt);
 		return;
 	}
+	free(stat_path);
 
 	struct buffer *buf = switchToFile((char *)prompt);
 	computeDisplayNames();
@@ -595,26 +610,32 @@ void insertFile(void) {
 		return;
 	}
 
-	/* Reject directories */
+	char *iopath = expandTilde((char *)filename);
+
+	/* Reject directories and check file size against budget */
 	struct stat ist;
-	if (stat((char *)filename, &ist) == 0 && S_ISDIR(ist.st_mode)) {
-		setStatusMessage(msg_dir_not_supported);
-		free(filename);
-		return;
+	if (stat(iopath, &ist) == 0) {
+		if (S_ISDIR(ist.st_mode)) {
+			setStatusMessage(msg_dir_not_supported);
+			free(iopath);
+			free(filename);
+			return;
+		}
+		if (S_ISREG(ist.st_mode) &&
+		    totalOpenBytes() + totalKillBytes() + (size_t)ist.st_size >
+			    (size_t)EMIL_MAX_OPEN_BYTES) {
+			setStatusMessage(msg_memory_limit);
+			free(iopath);
+			free(filename);
+			return;
+		}
 	}
 
-	/* Check file size against budget */
-	if (S_ISREG(ist.st_mode) &&
-	    totalOpenBytes() + totalKillBytes() + (size_t)ist.st_size >
-		    (size_t)EMIL_MAX_OPEN_BYTES) {
-		setStatusMessage(msg_memory_limit);
-		free(filename);
-		return;
-	}
-
-	FILE *fp = fopen((char *)filename, "r");
+	FILE *fp = fopen(iopath, "r");
+	free(iopath);
 	if (!fp) {
 		if (errno == ENOENT) {
+			/* Use filename (not iopath) for display */
 			int n = snprintf(NULL, 0, msg_file_not_found,
 					 (char *)filename);
 			char *showName = leftTruncate(
@@ -752,7 +773,7 @@ char *relativePath(const char *from, const char *to) {
 /* Canonicalize an absolute path by resolving . and .. segments.
  * Does NOT resolve symlinks — purely string-level.
  * Modifies the string in place and returns it. */
-static char *cleanPath(char *path) {
+char *cleanPath(char *path) {
 	/* Stack of pointers to segment starts within path */
 	char *segs[256];
 	int depth = 0;
@@ -802,7 +823,10 @@ static char *cleanPath(char *path) {
  * Used by changeDirectory and exposed for testing. */
 char *rebaseFilename(const char *filename, const char *old_cwd,
 		     const char *new_cwd) {
+	/* Absolute and ~-prefixed paths are location-independent */
 	if (filename[0] == '/')
+		return xstrdup(filename);
+	if (filename[0] == '~' && (filename[1] == '\0' || filename[1] == '/'))
 		return xstrdup(filename);
 
 	/* Absolutize against old cwd and clean up any .. segments */
@@ -846,11 +870,14 @@ void changeDirectory(void) {
 		return;
 	}
 
-	if (chdir((char *)dir) != 0) {
+	char *iodir = expandTilde((char *)dir);
+	if (chdir(iodir) != 0) {
 		setStatusMessage("cd: %s: %s", (char *)dir, strerror(errno));
+		free(iodir);
 		free(dir);
 		return;
 	}
+	free(iodir);
 
 	char new_cwd[PATH_MAX];
 	if (getcwd(new_cwd, sizeof(new_cwd)) == NULL) {
@@ -877,4 +904,72 @@ void changeDirectory(void) {
 
 	setStatusMessage(msg_current_dir, new_cwd);
 	free(dir);
+}
+
+/*** stdin loading ***/
+
+/*
+ * Read all available data from a file descriptor into a malloc'd buffer.
+ * Sets *out_len to the number of bytes read.  Returns NULL on allocation
+ * failure; returns an empty buffer (out_len == 0) if nothing was read.
+ */
+char *readAllFromFd(int fd, size_t *out_len) {
+	size_t cap = BUFSIZ;
+	size_t len = 0;
+	char *buf = xmalloc(cap);
+	ssize_t n;
+	while ((n = read(fd, buf + len, cap - len)) > 0) {
+		len += (size_t)n;
+		if (len >= cap) {
+			cap <<= 1;
+			buf = xrealloc(buf, cap);
+		}
+	}
+	*out_len = len;
+	return buf;
+}
+
+/*
+ * Load piped stdin data into a new editor buffer.  The data is split
+ * on newline boundaries and inserted row by row, matching the same
+ * approach used by editorOpen().  The buffer is named "*stdin*" and
+ * marked read-only.
+ *
+ * Returns the new buffer, or NULL if the data contains null bytes
+ * (which would indicate binary / non-UTF-8 content).
+ */
+struct buffer *loadStdinBuffer(const char *data, size_t len) {
+	/* Reject binary data: null bytes can't be represented */
+	if (memchr(data, '\0', len) != NULL) {
+		return NULL;
+	}
+
+	struct buffer *buf = newBuffer();
+	buf->filename = xstrdup("*stdin*");
+
+	size_t start = 0;
+	for (size_t i = 0; i < len; i++) {
+		if (data[i] == '\n') {
+			/* Strip trailing \r for DOS line endings */
+			size_t end = i;
+			if (end > start && data[end - 1] == '\r')
+				end--;
+			insertRow(buf, buf->numrows, (char *)&data[start],
+				  (int)(end - start));
+			start = i + 1;
+		}
+	}
+	/* Handle final line without trailing newline */
+	if (start < len) {
+		size_t end = len;
+		if (end > start && data[end - 1] == '\r')
+			end--;
+		insertRow(buf, buf->numrows, (char *)&data[start],
+			  (int)(end - start));
+	}
+
+	buf->dirty = 0;
+	buf->read_only = 1;
+	buf->word_wrap = 1;
+	return buf;
 }

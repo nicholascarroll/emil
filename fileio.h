@@ -23,6 +23,11 @@ void insertFile(void);
 void changeDirectory(void);
 
 char *relativePath(const char *from, const char *to);
+char *cleanPath(char *path);
 char *rebaseFilename(const char *filename, const char *old_cwd,
 		     const char *new_cwd);
+
+/* Stdin loading */
+char *readAllFromFd(int fd, size_t *out_len);
+struct buffer *loadStdinBuffer(const char *data, size_t len);
 #endif /* EMIL_FILEIO_H */

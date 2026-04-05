@@ -3,6 +3,18 @@
 
 #ifndef EMIL_DISABLE_SHELL
 
+/* Feature test macros must precede all system headers so that
+ * fileno, fdopen, kill etc. are declared on strict platforms
+ * (OpenIndiana / Solaris). */
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200112L
+#endif
+#ifdef __sun
+#ifndef __EXTENSIONS__
+#define __EXTENSIONS__ 1
+#endif
+#endif
+
 #include <fcntl.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -11,11 +23,6 @@
 #include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
-
-/* Define feature test macros for subprocess.h to get fdopen, fileno, kill */
-#ifndef _POSIX_C_SOURCE
-#define _POSIX_C_SOURCE 200112L
-#endif
 
 #include "buffer.h"
 #include "display.h"
@@ -110,6 +117,7 @@ uint8_t *editorPipe(int useRegion) {
 			E.buf->markx = -1;
 			E.buf->marky = -1;
 			free(cmd);
+			free(buf);
 			return NULL;
 		} else {
 			// 1. Extract the selected region
@@ -243,8 +251,8 @@ void diffBufferWithFile(void) {
 	free(bufstr);
 
 	/* Run diff directly, no shell — avoids filename quoting issues */
-	const char *command_line[5] = { "diff", "-u", bufr->filename, tmpname,
-					NULL };
+	char *iopath = expandTilde(bufr->filename);
+	const char *command_line[5] = { "diff", "-u", iopath, tmpname, NULL };
 	struct subprocess_s subprocess;
 	int result =
 		subprocess_create(command_line,
@@ -253,9 +261,11 @@ void diffBufferWithFile(void) {
 				  &subprocess);
 	if (result) {
 		unlink(tmpname);
+		free(iopath);
 		setStatusMessage(msg_diff_cannot_subprocess);
 		return;
 	}
+	free(iopath);
 
 	/* diff doesn't need stdin; just read stdout */
 	int sub_ret;

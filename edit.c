@@ -135,12 +135,13 @@ void insertNewlineAndIndent(int count) {
 
 	for (int j = 0; j < count; j++) {
 		insertNewline(1);
+		erow *prev = &E.buf->row[E.buf->cy - 1];
 		int i = 0;
-		uint8_t c = E.buf->row[E.buf->cy - 1].chars[i];
-		while (c == ' ' || c == CTRL('i')) {
-			undoAppendChar(E.buf, c);
-			insertChar(E.buf, c, 1);
-			c = E.buf->row[E.buf->cy - 1].chars[++i];
+		while (i < prev->size &&
+		       (prev->chars[i] == ' ' || prev->chars[i] == CTRL('i'))) {
+			undoAppendChar(E.buf, prev->chars[i]);
+			insertChar(E.buf, prev->chars[i], 1);
+			i++;
 		}
 	}
 }

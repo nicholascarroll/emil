@@ -1,11 +1,11 @@
 #!/bin/sh
 set -u
 
-COMPILER=${CC:-cc}
+CC=${CC:-cc}
 CFLAGS=${CFLAGS:-""}
 LDFLAGS=${LDFLAGS:-""}
 
-echo "run_tests.sh: Received COMPILER=$COMPILER"
+echo "run_tests.sh: Received CC=$CC"
 echo "run_tests.sh: Running tests on $(uname -s) $(uname -m)"
 echo ""
 
@@ -62,7 +62,7 @@ TEST_CFLAGS="$CFLAGS -Wno-unused-function -I."
 
 # Build stubs.o (replaces main.o + terminal.o)
 
-$COMPILER $TEST_CFLAGS $SANITIZER_FLAGS -c tests/stubs.c -o tests/stubs.o 2>&1 || {
+$CC $TEST_CFLAGS $SANITIZER_FLAGS -c tests/stubs.c -o tests/stubs.o 2>&1 || {
     echo "✗ Failed to compile stubs.c"
     exit 1
 }
@@ -75,15 +75,15 @@ TEST_OBJECTS="wcwidth.o unicode.o buffer.o region.o undo.o transform.o \
 
 echo "Unit tests:"
 
-for suite in unicode wcwidth buffer undo edit fileio relpath visual_line utf8_validate rect_undo transform subprocess adjust history abuf; do
+for suite in unicode wcwidth buffer undo edit fileio relpath visual_line utf8_validate rect_undo transform subprocess adjust history abuf tilde; do
     src="tests/test_${suite}.c"
     bin="tests/test_${suite}"
     printf "  %-12s " "$suite"
 
     # Compile and link (use TEST_CFLAGS for the test source, LDFLAGS for linking)
-    if ! $COMPILER $TEST_CFLAGS $SANITIZER_FLAGS -o "$bin" "$src" $TEST_OBJECTS $LDFLAGS 2>/dev/null; then
+    if ! $CC $TEST_CFLAGS $SANITIZER_FLAGS -o "$bin" "$src" $TEST_OBJECTS $LDFLAGS 2>/dev/null; then
         echo "BUILD FAIL"
-        $COMPILER $TEST_CFLAGS $SANITIZER_FLAGS -o "$bin" "$src" $TEST_OBJECTS $LDFLAGS 2>&1 | tail -5
+        $CC $TEST_CFLAGS $SANITIZER_FLAGS -o "$bin" "$src" $TEST_OBJECTS $LDFLAGS 2>&1 | tail -5
         ANY_FAIL=1
         continue
     fi

@@ -109,7 +109,7 @@ jobs:
               make CC=gcc-14 CFLAGS="$CFLAGS"
               
               echo "--- Running Tests ---"
-              make CC=gcc-14 test
+              make CC=gcc-14 CFLAGS="$CFLAGS" test
 
   netbsd:
       runs-on: ubuntu-latest
