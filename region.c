@@ -34,7 +34,7 @@ void addToKillRing(const char *text, int is_rect, int rect_width,
 	E.kill.rect_height = rect_height;
 
 	/* Warn if total tracked usage is getting large */
-	if (totalOpenBytes() + totalKillBytes() > (size_t)EMIL_MAX_OPEN_BYTES)
+	if (totalBudgetBytes() > (size_t)EMIL_MAX_OPEN_BYTES)
 		setStatusMessage(msg_kill_ring_large);
 }
 

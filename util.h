@@ -28,10 +28,9 @@ char *absolutePath(const char *path); /* resolve to absolute; caller frees */
 /* Character classification */
 int isWordBoundary(uint8_t c);
 
-/* Sum of file_size across all open buffers */
-size_t totalOpenBytes(void);
-
-/* Sum of string lengths across all kill ring entries */
-size_t totalKillBytes(void);
+/* Memory budget: total bytes of text in all buffers + undo/redo data */
+size_t totalBufferBytes(void);
+size_t totalUndoBytes(void);
+size_t totalBudgetBytes(void);
 
 #endif /* EMIL_UTIL_H */

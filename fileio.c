@@ -205,8 +205,7 @@ int editorOpen(struct buffer *bufr, char *filename) {
 		struct stat st;
 		if (fstat(fileno(fp), &st) == 0 && S_ISREG(st.st_mode)) {
 			bufr->file_size = (size_t)st.st_size;
-			if (totalOpenBytes() + totalKillBytes() +
-				    bufr->file_size >
+			if (totalBudgetBytes() + bufr->file_size >
 			    (size_t)EMIL_MAX_OPEN_BYTES) {
 				fclose(fp);
 				setStatusMessage(msg_memory_limit);
@@ -622,7 +621,7 @@ void insertFile(void) {
 			return;
 		}
 		if (S_ISREG(ist.st_mode) &&
-		    totalOpenBytes() + totalKillBytes() + (size_t)ist.st_size >
+		    totalBudgetBytes() + (size_t)ist.st_size >
 			    (size_t)EMIL_MAX_OPEN_BYTES) {
 			setStatusMessage(msg_memory_limit);
 			free(iopath);

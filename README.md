@@ -205,10 +205,14 @@ Notes:
 
 ## Editing Large Files
 
-`emil` tracks the size of all open files and kill ring contents against
-a configurable limit (default 1 GB). Unsaved buffer growth, undo data, and
-minor allocations like command history are not counted against the
-limit.
+`emil` tracks memory usage against a configurable limit (default 1 GB).
+The budget counts the actual text content of all open buffers (including
+unsaved edits) plus all undo and redo data. Minor allocations like
+command history are not counted.
+
+When a file open would exceed the budget, the operation is refused.
+A warning is shown in the status bar when a kill operation pushes total
+usage over the limit.
 
 The limit can be adjusted at build time:
 

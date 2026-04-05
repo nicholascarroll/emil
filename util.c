@@ -1,6 +1,7 @@
 #include "util.h"
 #include "emil.h"
 #include "fileio.h"
+#include "undo.h"
 #include <errno.h>
 #include <limits.h>
 #include <string.h>
@@ -10,18 +11,30 @@
 
 extern struct config E;
 
-size_t totalOpenBytes(void) {
+size_t totalBufferBytes(void) {
 	size_t total = 0;
 	for (struct buffer *b = E.headbuf; b; b = b->next)
-		total += b->file_size;
+		for (int i = 0; i < b->numrows; i++)
+			total += b->row[i].size;
 	return total;
 }
 
-size_t totalKillBytes(void) {
+static size_t undoChainBytes(struct undo *u) {
 	size_t total = 0;
-	for (struct historyEntry *e = E.kill_history.head; e; e = e->next)
-		total += strlen(e->str);
+	for (; u; u = u->prev)
+		total += u->datalen;
 	return total;
+}
+
+size_t totalUndoBytes(void) {
+	size_t total = 0;
+	for (struct buffer *b = E.headbuf; b; b = b->next)
+		total += undoChainBytes(b->undo) + undoChainBytes(b->redo);
+	return total;
+}
+
+size_t totalBudgetBytes(void) {
+	return totalBufferBytes() + totalUndoBytes();
 }
 
 void *xmalloc(size_t size) {
