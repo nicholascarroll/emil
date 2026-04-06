@@ -31,7 +31,7 @@
 #include "pipe.h"
 #include "prompt.h"
 #include "region.h"
-#include "subprocess.h"
+#include "emil_subprocess.h"
 #include "unicode.h"
 #include "util.h"
 #include <errno.h>
@@ -223,10 +223,23 @@ void diffBufferWithFile(void) {
 		return;
 	}
 
-	/* Write the current buffer contents to a temp file */
-	char tmpname[] = "/tmp/emil-diff-XXXXXX";
+	/* Write the current buffer contents to a temp file.
+	 * Use TMPDIR/TMP/TEMP for portability (MSYS2, etc). */
+	const char *td = getenv("TMPDIR");
+	if (!td || !*td)
+		td = getenv("TMP");
+	if (!td || !*td)
+		td = getenv("TEMP");
+	if (!td || !*td)
+		td = "/tmp";
+	size_t tdlen = strlen(td);
+	/* td + "/emil-diff-XXXXXX" + NUL */
+	char *tmpname = xmalloc(tdlen + 18);
+	memcpy(tmpname, td, tdlen);
+	memcpy(tmpname + tdlen, "/emil-diff-XXXXXX", 18); /* includes NUL */
 	int fd = mkstemp(tmpname);
 	if (fd == -1) {
+		free(tmpname);
 		setStatusMessage(msg_diff_cannot_create_temp);
 		return;
 	}
@@ -241,6 +254,7 @@ void diffBufferWithFile(void) {
 				continue;
 			close(fd);
 			unlink(tmpname);
+			free(tmpname);
 			free(bufstr);
 			setStatusMessage(msg_diff_cannot_write);
 			return;
@@ -261,6 +275,7 @@ void diffBufferWithFile(void) {
 				  &subprocess);
 	if (result) {
 		unlink(tmpname);
+		free(tmpname);
 		free(iopath);
 		setStatusMessage(msg_diff_cannot_subprocess);
 		return;
@@ -268,7 +283,7 @@ void diffBufferWithFile(void) {
 	free(iopath);
 
 	/* diff doesn't need stdin; just read stdout */
-	int sub_ret;
+	int sub_ret = -1;
 	subprocess_join(&subprocess, &sub_ret);
 
 	FILE *p_stdout = subprocess_stdout(&subprocess);
@@ -288,6 +303,7 @@ void diffBufferWithFile(void) {
 
 	subprocess_destroy(&subprocess);
 	unlink(tmpname);
+	free(tmpname);
 
 	/* diff returns 0 = identical, 1 = differences, 2 = error */
 	if (sub_ret == 0) {

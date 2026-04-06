@@ -8,12 +8,6 @@
 Written in standard C99, `emil` runs on any system providing a minimal POSIX.1-2001 interface (single-process subset) and a VT100-compatible terminal. It eschews common sources of complexity: scripting, plugins, configuration files, background network activity, or auto-save files. 
 
 
-## Status
-
-Feature complete, but **unstable**.
-
-Current work focuses on cleaning up the architecture, fixing bugs, and improving maintainability. Contributions that simplify internal structure, improve portability, or fix correctness issues are especially welcome.
-
 ## Functional Capabilities
 
 - Visual text selection
@@ -174,34 +168,6 @@ Notes:
 ### System Clipboard Integration
 `Ctrl-c` copies selected text to both the kill ring and the user's system clipboard when an OSC 52 enabled terminal client is used.
 
-—-
-
-## Roadmap
-
-1. **Version 0.1.0** [DONE] ✅
-   - From here on we use `emil` to code `emil`
-
-2. **Version 0.1.1 Feature complete** [DONE] ✅
-
-3. **Version 0.2.1 First Prerelease**  [DONE] ✅
-
-4. **Rendering optimizations**
-   Reduce bytes over wire with an optional render acceleration layer 
-   - enabled by a run-time toggle
-   - render hints sent by edit, move and scroll operations
-
-5. **Remove dependency on `subprocess.h`**
-   Internalize the code being used for pipe/exec/fork.
-
-6. **Version 1.0.0 Bug free and loving it**
-   - Tested on Solaris, AIX, Linux, BSD, MSYS2
-     macOS, Android. 
-   - Tested with raw console and various terminal emulators
-   - Tested on MINIX, RTEMS and NuttX
-   - Tested with IME and international keyboards
-   - Included in Linux distribution repositories
-
----
 
 ## Editing Large Files
 

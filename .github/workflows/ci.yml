@@ -78,7 +78,9 @@ jobs:
         with:
           update: true
           msystem: MSYS
-          install: msys2-devel msys2-runtime-devel gcc make
+          install: >-
+            msys2-devel msys2-runtime-devel gcc make
+            diffutils
       - name: Build and Test
         run: |
           make
@@ -146,6 +148,8 @@ jobs:
         - name: Build and Test
           run: |
             make CC=gcc
+            cat /etc/os-release 2>/dev/null | grep ^PRETTY_NAME=
+            ldd --version 2>&1 | head -n1
             make test
 
   riscv-native:
@@ -198,3 +202,22 @@ jobs:
           run: |
             make CC=gcc
             make test
+
+  freebsd:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and Test on FreeBSD
+        uses: vmactions/freebsd-vm@v1
+        with:
+          prepare: |
+            pkg install -y gcc gmake git
+          run: |
+            export CC=gcc
+            export CFLAGS="-O2 -pipe -std=c99 -Wall -Wextra -Wpedantic -D_DEFAULT_SOURCE -D_BSD_SOURCE"
+            
+            echo "--- Building Emil on FreeBSD ---"
+            gmake CC=$CC CFLAGS="$CFLAGS"
+            
+            echo "--- Running Tests ---"
+            gmake CC=$CC CFLAGS="$CFLAGS" test

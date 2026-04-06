@@ -448,6 +448,8 @@ void rowAppendString(struct buffer *bufr, erow *row, char *s, size_t len) {
 void rowDelChar(struct buffer *bufr, erow *row, int at) {
 	if (at < 0 || at >= row->size)
 		return;
+	/* at + size <= row->size is guaranteed: all input paths enforce
+	 * valid UTF-8, and all callers pass at on a character boundary. */
 	int size = utf8_nBytes(row->chars[at]);
 	memmove(&row->chars[at], &row->chars[at + size],
 		row->size - ((at + size) - 1));

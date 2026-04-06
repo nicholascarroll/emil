@@ -75,7 +75,7 @@ TEST_OBJECTS="wcwidth.o unicode.o buffer.o region.o undo.o transform.o \
 
 echo "Unit tests:"
 
-for suite in unicode wcwidth buffer undo edit fileio relpath visual_line utf8_validate rect_undo transform subprocess adjust history abuf tilde; do
+for suite in unicode wcwidth buffer undo edit fileio relpath visual_line utf8_validate rect_undo transform subprocess shell adjust history abuf tilde; do
     src="tests/test_${suite}.c"
     bin="tests/test_${suite}"
     printf "  %-12s " "$suite"
@@ -94,6 +94,7 @@ for suite in unicode wcwidth buffer undo edit fileio relpath visual_line utf8_va
 
     if [ $rc -gt 128 ]; then
         echo "CRASH (signal $((rc - 128)))"
+        echo "$output" | grep -E ">>|run_shell|run_command|write_temp" | head -n 5 | sed 's/^/    /'
         ANY_FAIL=1
     elif echo "$output" | grep -q "FAIL"; then
         # Defect 1 Fix: No test count on failure

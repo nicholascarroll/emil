@@ -17,6 +17,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 
 extern struct config E;
 
@@ -187,6 +188,8 @@ void unindent(int rept) {
 	}
 
 	/* Calculate size of unindent */
+	/* NB: trunc is bounded by the NUL terminator at chars[size],
+	 * which always mismatches indCh (' ' or '\t'). */
 	int trunc = 0;
 	for (int i = 0; i < rept; i++) {
 		for (int j = 0; j < indWidth; j++) {
@@ -1178,173 +1181,87 @@ void gotoLine(void) {
 
 /* Sentence movement */
 
-static int isSentenceEnd(uint8_t c) {
-	return c == '.' || c == '!' || c == '?';
+
+
+static int is_punct(char c) {
+    return c == '.' || c == '!' || c == '?';
 }
 
-static int isClosingPunct(uint8_t c) {
-	return c == ')' || c == ']' || c == '"' || c == '\'';
+/* Returns 1 if 'x' is the index of the Uppercase letter starting a sentence */
+int isSentenceBoundary(erow *row, int x) {
+    if (x < 2) return 0;
+    return is_punct(row->chars[x - 2]) && 
+           row->chars[x - 1] == ' ' && 
+           isupper((unsigned char)row->chars[x]);
 }
 
-/* Scan forward from (*cx, *cy) to the position just after the end of
- * the current sentence.  A sentence ends at . ! ? optionally followed
- * by closing punctuation, then followed by whitespace, newline, or
- * end-of-buffer.  A paragraph boundary (empty line) also ends a sentence.
- * Returns 0 on success (position updated), -1 at end-of-buffer. */
+
+
+/**
+ * Moves forward to the next sentence end.
+ * Boundary: The space after punctuation OR the end of the line.
+ */
 int forwardSentenceEnd(int *cx, int *cy) {
-	int px = *cx, py = *cy;
+    int start_x = *cx, start_y = *cy;
 
-	while (py < E.buf->numrows) {
-		erow *row = &E.buf->row[py];
+    for (int y = start_y; y < E.buf->numrows; y++) {
+        erow *row = &E.buf->row[y];
+        int x = (y == start_y) ? start_x : 0;
 
-		while (px < row->size) {
-			uint8_t c = row->chars[px];
-			if (isSentenceEnd(c)) {
-				/* Skip past optional closing punctuation */
-				int sx = px + 1;
-				while (sx < row->size &&
-				       isClosingPunct(row->chars[sx]))
-					sx++;
-				/* Sentence ends if followed by whitespace,
-				 * end-of-line, or end-of-buffer */
-				if (sx >= row->size || row->chars[sx] == ' ' ||
-				    row->chars[sx] == '\t') {
-					/* Land after the whitespace */
-					if (sx < row->size) {
-						/* Skip one whitespace char */
-						sx++;
-					} else if (py + 1 < E.buf->numrows) {
-						/* End of line — move to start
-						 * of next line */
-						py++;
-						sx = 0;
-					} else {
-						/* End of buffer */
-					}
-					*cx = sx;
-					*cy = py;
-					return 0;
-				}
-			}
-			px++;
-		}
+        for (; x < row->size; x++) {
+            // Check for [Punct][Space][Upper] pattern
+            if (is_punct(row->chars[x]) && isSentenceBoundary(row, x + 2)) {
+                int pot_x = x + 1; // Target is the space
+                if (y > start_y || pot_x > start_x) {
+                    *cx = pot_x; *cy = y;
+                    return 0;
+                }
+            }
+        }
 
-		/* Check for paragraph boundary (next line empty) */
-		if (py + 1 < E.buf->numrows &&
-		    isParaBoundary(&E.buf->row[py + 1])) {
-			/* Sentence ends at end of this line */
-			*cx = row->size;
-			*cy = py;
-			/* Advance past the blank line(s) to match Emacs
-			 * behavior: land on first non-blank line */
-			py++;
-			while (py < E.buf->numrows &&
-			       isParaBoundary(&E.buf->row[py]))
-				py++;
-			*cx = 0;
-			*cy = py < E.buf->numrows ? py : E.buf->numrows;
-			return 0;
-		}
-
-		py++;
-		px = 0;
-	}
-
-	/* Reached end of buffer */
-	*cx = 0;
-	*cy = E.buf->numrows;
-	return -1;
+        // Invariant: End of line is always a sentence boundary
+        if (y > start_y || row->size > start_x) {
+            *cx = row->size; *cy = y;
+            return 0;
+        }
+    }
+    return -1;
 }
 
-/* Scan backward from (*cx, *cy) to the beginning of the current sentence.
- * Returns 0 on success, -1 at beginning-of-buffer. */
+/**
+ * Moves backward to the nearest sentence start.
+ * Boundary: The Uppercase letter of a pattern OR the start of a line (index 0).
+ */
 int backwardSentenceStart(int *cx, int *cy) {
-	int px = *cx, py = *cy;
+    int start_x = *cx, start_y = *cy;
 
-	if (py >= E.buf->numrows) {
-		if (E.buf->numrows == 0)
-			return -1;
-		py = E.buf->numrows - 1;
-		px = E.buf->row[py].size;
-	}
+    for (int y = start_y; y >= 0; y--) {
+        erow *row = &E.buf->row[y];
+        
+        // Start from current x on the first line, otherwise start from the end
+        int x = (y == start_y) ? start_x : row->size;
 
-	/* Step back once to avoid detecting the current position */
-	if (!stepBackward(&px, &py))
-		return -1;
+        for (int i = x; i >= 0; i--) {
+            // Empty lines are boundaries
+            if (row->size == 0) {
+                if (y < start_y || 0 < start_x) {
+                    *cx = 0; *cy = y;
+                    return 0;
+                }
+            }
 
-	/* Skip whitespace/newlines backward */
-	while (1) {
-		uint8_t c = charAt(px, py);
-		if (c != ' ' && c != '\t' && c != '\n')
-			break;
-		if (!stepBackward(&px, &py)) {
-			*cx = 0;
-			*cy = 0;
-			return 0;
-		}
-	}
-
-	/* Skip closing punctuation and sentence terminators backward
-	 * so we don't re-detect the end of the sentence we're at. */
-	while (1) {
-		uint8_t c = charAt(px, py);
-		if (!isSentenceEnd(c) && !isClosingPunct(c))
-			break;
-		if (!stepBackward(&px, &py)) {
-			*cx = 0;
-			*cy = 0;
-			return 0;
-		}
-	}
-
-	/* Now scan backward to find the previous sentence end or
-	 * paragraph boundary, then position after it. */
-	while (1) {
-		/* Check for paragraph boundary — blank line means
-		 * sentence starts on the line after the blank */
-		if (py < E.buf->numrows && isParaBoundary(&E.buf->row[py])) {
-			/* Land on the first non-blank line after */
-			int ny = py;
-			while (ny < E.buf->numrows &&
-			       isParaBoundary(&E.buf->row[ny]))
-				ny++;
-			*cx = 0;
-			*cy = ny < E.buf->numrows ? ny : py;
-			return 0;
-		}
-
-		uint8_t c = charAt(px, py);
-		if (isSentenceEnd(c)) {
-			/* Found a sentence terminator — sentence starts
-			 * after this terminator plus any closing punct
-			 * and one whitespace char */
-			int sx = px, sy = py;
-			stepForward(&sx, &sy);
-			/* Skip closing punctuation */
-			while (sy < E.buf->numrows) {
-				uint8_t nc = charAt(sx, sy);
-				if (!isClosingPunct(nc))
-					break;
-				stepForward(&sx, &sy);
-			}
-			/* Skip one whitespace */
-			if (sy < E.buf->numrows) {
-				uint8_t nc = charAt(sx, sy);
-				if (nc == ' ' || nc == '\t' || nc == '\n')
-					stepForward(&sx, &sy);
-			}
-			*cx = sx;
-			*cy = sy;
-			return 0;
-		}
-
-		if (!stepBackward(&px, &py)) {
-			*cx = 0;
-			*cy = 0;
-			return 0;
-		}
-	}
+            // Pattern match or Start of Line (index 0)
+            if (i == 0 || isSentenceBoundary(row, i)) {
+                if (y < start_y || i < start_x) {
+                    *cx = i; *cy = y;
+                    return 0;
+                }
+            }
+        }
+    }
+    return -1;
 }
+
 
 void forwardSentence(int count) {
 	int times = count ? count : 1;

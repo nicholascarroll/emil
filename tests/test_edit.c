@@ -232,8 +232,8 @@ void test_forward_sentence_simple(void) {
 	E.buf = buf;
 	int cx = 0, cy = 0;
 	forwardSentenceEnd(&cx, &cy);
-	/* Should land after "Hello world. " (pos 13) */
-	TEST_ASSERT_EQUAL_INT(13, cx);
+	/* Land on the space after the period of first sentence */
+	TEST_ASSERT_EQUAL_INT(12, cx);  // "Hello world." → cursor after '.'
 	TEST_ASSERT_EQUAL_INT(0, cy);
 }
 
@@ -245,10 +245,34 @@ void test_forward_sentence_end_of_line(void) {
 	E.buf = buf;
 	int cx = 0, cy = 0;
 	forwardSentenceEnd(&cx, &cy);
-	/* Sentence ends at ".", followed by end-of-line, land at start
-	 * of next line */
-	TEST_ASSERT_EQUAL_INT(0, cx);
-	TEST_ASSERT_EQUAL_INT(1, cy);
+	/* Sentence ends at period at end-of-line — land just before newline */
+	TEST_ASSERT_EQUAL_INT(11, cx); // index of last character before newline
+	TEST_ASSERT_EQUAL_INT(0, cy);
+}
+
+void test_forward_sentence_with_closing_punct(void) {
+	struct buffer *buf = make_test_buffer("He said \"hello.\" Then left.");
+	buf->cx = 0;
+	buf->cy = 0;
+	E.buf = buf;
+	int cx = 0, cy = 0;
+	forwardSentenceEnd(&cx, &cy);
+	/* Land on space immediately after the period inside quotes */
+	TEST_ASSERT_EQUAL_INT(14, cx); // "hello.\" " → cursor on space after period
+	TEST_ASSERT_EQUAL_INT(0, cy);
+}
+
+void test_forward_sentence_para_boundary(void) {
+	const char *lines[] = { "First sentence", "", "Second sentence" };
+	struct buffer *buf = make_test_buffer_lines(lines, 3);
+	buf->cx = 0;
+	buf->cy = 0;
+	E.buf = buf;
+	int cx = 0, cy = 0;
+	forwardSentenceEnd(&cx, &cy);
+	/* Empty line ends sentence — cursor lands on last character before newline of empty line */
+	TEST_ASSERT_EQUAL_INT(0, cx); // empty line has size 0
+	TEST_ASSERT_EQUAL_INT(1, cy); // index of empty line
 }
 
 void test_backward_sentence_simple(void) {
@@ -258,7 +282,7 @@ void test_backward_sentence_simple(void) {
 	E.buf = buf;
 	int cx = 27, cy = 0;
 	backwardSentenceStart(&cx, &cy);
-	/* Should land at start of "Goodbye" (pos 13) */
+	/* Land at start of "Goodbye" (cursor before 'G') */
 	TEST_ASSERT_EQUAL_INT(13, cx);
 	TEST_ASSERT_EQUAL_INT(0, cy);
 }
@@ -270,9 +294,11 @@ void test_backward_sentence_to_beginning(void) {
 	E.buf = buf;
 	int cx = 5, cy = 0;
 	backwardSentenceStart(&cx, &cy);
+	/* Land at start of buffer */
 	TEST_ASSERT_EQUAL_INT(0, cx);
 	TEST_ASSERT_EQUAL_INT(0, cy);
 }
+
 
 void test_forward_sentence_with_closing_punct(void) {
 	struct buffer *buf = make_test_buffer("He said \"hello.\" Then left.");

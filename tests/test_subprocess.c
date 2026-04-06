@@ -16,7 +16,7 @@
 
 #ifndef EMIL_DISABLE_SHELL
 
-#include "subprocess.h"
+#include "emil_subprocess.h"
 #include <string.h>
 #include <stdlib.h>
 

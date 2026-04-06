@@ -940,7 +940,7 @@ void copyRectangle(void) {
 	int rh = (boty - topy) + 1;
 
 	clearText(&E.kill);
-	E.kill.str = xcalloc((rw * rh) + 1, 1);
+	E.kill.str = xcalloc((size_t)rw * rh + 1, 1);
 	E.kill.is_rectangle = 1;
 	E.kill.rect_width = rw;
 	E.kill.rect_height = rh;
@@ -1019,7 +1019,7 @@ void killRectangle(void) {
 	clearRedos(E.buf);
 
 	/* Temporary flat buffer for extracted rectangle columns */
-	uint8_t *rectBuf = xcalloc((rw * rh) + 1, 1);
+	uint8_t *rectBuf = xcalloc((size_t)rw * rh + 1, 1);
 
 	struct undo *new = newUndo();
 	new->startx = E.buf->cx;
@@ -1284,7 +1284,7 @@ void yankRectangle(void) {
 	ins_undo->endy = boty;
 	free(ins_undo->data);
 	ins_undo->datalen = 0;
-	ins_undo->datasize = del_datasize + (rw * rh) + 1;
+	ins_undo->datasize = del_datasize + (size_t)rw * rh + 1;
 	ins_undo->data = xmalloc(ins_undo->datasize);
 	ins_undo->data[0] = 0;
 	ins_undo->append = 0;
