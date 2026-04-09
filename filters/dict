@@ -1,5 +1,0 @@
-#!/bin/sh
-# edict: Look up the word provided via stdin
-word=$(cat)
-curl -s "dict://dict.org/d:${word}"
-

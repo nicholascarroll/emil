@@ -140,18 +140,7 @@ Below are common "recipes" using standard Unix utilities.
 | **Trim whitespace**    | `sed 's/[[:space:]]\+$//'` | `Ctrl-u Alt-\|`        |
 | **De-duplicate lines** | `awk '!seen[$0]++'`   | `Ctrl-u Alt-\|`             |
 
-More complex commands can be converted into shell scripts. For example: to add a dictionary lookup, create a file named `edict` in your `$PATH`:
-
-```bash
-#!/bin/sh
-# edict: Look up the word provided via stdin
-word=$(cat)
-curl -s "dict://dict.org/d:${word}"
-```
-
-Now, you can simply highlight a word in emil and type `Alt-| edict` to see the definition.
-
-If you have an OpenAI API account you can place the included shell script [gpt](filters/gpt) in your `$PATH` and use:
+More complex commands can be converted into shell scripts. For example, if you have an OpenAI API account you can place the included shell script [gpt](filters/gpt) in your `$PATH` and use:
 
 ```
 Ctrl-x h Alt-| gpt "translate to Spanish"
