@@ -1,11 +1,11 @@
 #include "edit.h"
-#include "adjust.h"
 #include "buffer.h"
 #include "display.h"
 #include "emil.h"
 #include "history.h"
 #include "keymap.h"
 #include "message.h"
+#include "mutate.h"
 #include "prompt.h"
 #include "region.h"
 #include "terminal.h"
@@ -203,34 +203,15 @@ UNINDENT_PERFORM:
 	if (trunc == 0)
 		return;
 
-	/* Create undo */
-	struct undo *new = newUndo();
-	new->startx = 0;
-	new->starty = E.buf->cy;
-	new->endx = trunc;
-	new->endy = E.buf->cy;
-	new->delete = 1;
-	new->append = 0;
-	pushUndo(E.buf, new);
-	if (new->datasize < trunc - 1) {
-		new->datasize = trunc + 1;
-		new->data = xrealloc(new->data, new->datasize);
-	}
-	memset(new->data, indCh, trunc);
-	new->data[trunc] = 0;
-	new->datalen = trunc;
+	/* Build old_text for mutateDelete */
+	uint8_t *old_text = xmalloc(trunc + 1);
+	memset(old_text, indCh, trunc);
+	old_text[trunc] = 0;
 
-	/* Perform row operation & dirty buffer */
-	memmove(&row->chars[0], &row->chars[trunc], row->size - trunc);
-	row->size -= trunc;
-	row->chars[row->size] = '\0';
+	mutateDelete(E.buf, 0, E.buf->cy, trunc, E.buf->cy, old_text, trunc);
+	free(old_text);
+
 	E.buf->cx -= trunc;
-	row->cached_width = -1;
-	invalidateScreenCache(E.buf);
-	E.buf->dirty = 1;
-
-	/* Adjust tracked points for this deletion */
-	adjustAllPoints(E.buf, 0, E.buf->cy, trunc, E.buf->cy, 1);
 }
 
 /* Character deletion */
@@ -1181,51 +1162,50 @@ void gotoLine(void) {
 
 /* Sentence movement */
 
-
-
 static int is_punct(char c) {
-    return c == '.' || c == '!' || c == '?';
+	return c == '.' || c == '!' || c == '?';
 }
 
 /* Returns 1 if 'x' is the index of the Uppercase letter starting a sentence */
 int isSentenceBoundary(erow *row, int x) {
-    if (x < 2) return 0;
-    return is_punct(row->chars[x - 2]) && 
-           row->chars[x - 1] == ' ' && 
-           isupper((unsigned char)row->chars[x]);
+	if (x < 2)
+		return 0;
+	return is_punct(row->chars[x - 2]) && row->chars[x - 1] == ' ' &&
+	       isupper((unsigned char)row->chars[x]);
 }
-
-
 
 /**
  * Moves forward to the next sentence end.
  * Boundary: The space after punctuation OR the end of the line.
  */
 int forwardSentenceEnd(int *cx, int *cy) {
-    int start_x = *cx, start_y = *cy;
+	int start_x = *cx, start_y = *cy;
 
-    for (int y = start_y; y < E.buf->numrows; y++) {
-        erow *row = &E.buf->row[y];
-        int x = (y == start_y) ? start_x : 0;
+	for (int y = start_y; y < E.buf->numrows; y++) {
+		erow *row = &E.buf->row[y];
+		int x = (y == start_y) ? start_x : 0;
 
-        for (; x < row->size; x++) {
-            // Check for [Punct][Space][Upper] pattern
-            if (is_punct(row->chars[x]) && isSentenceBoundary(row, x + 2)) {
-                int pot_x = x + 1; // Target is the space
-                if (y > start_y || pot_x > start_x) {
-                    *cx = pot_x; *cy = y;
-                    return 0;
-                }
-            }
-        }
+		for (; x < row->size; x++) {
+			// Check for [Punct][Space][Upper] pattern
+			if (is_punct(row->chars[x]) &&
+			    isSentenceBoundary(row, x + 2)) {
+				int pot_x = x + 1; // Target is the space
+				if (y > start_y || pot_x > start_x) {
+					*cx = pot_x;
+					*cy = y;
+					return 0;
+				}
+			}
+		}
 
-        // Invariant: End of line is always a sentence boundary
-        if (y > start_y || row->size > start_x) {
-            *cx = row->size; *cy = y;
-            return 0;
-        }
-    }
-    return -1;
+		// Invariant: End of line is always a sentence boundary
+		if (y > start_y || row->size > start_x) {
+			*cx = row->size;
+			*cy = y;
+			return 0;
+		}
+	}
+	return -1;
 }
 
 /**
@@ -1233,35 +1213,36 @@ int forwardSentenceEnd(int *cx, int *cy) {
  * Boundary: The Uppercase letter of a pattern OR the start of a line (index 0).
  */
 int backwardSentenceStart(int *cx, int *cy) {
-    int start_x = *cx, start_y = *cy;
+	int start_x = *cx, start_y = *cy;
 
-    for (int y = start_y; y >= 0; y--) {
-        erow *row = &E.buf->row[y];
-        
-        // Start from current x on the first line, otherwise start from the end
-        int x = (y == start_y) ? start_x : row->size;
+	for (int y = start_y; y >= 0; y--) {
+		erow *row = &E.buf->row[y];
 
-        for (int i = x; i >= 0; i--) {
-            // Empty lines are boundaries
-            if (row->size == 0) {
-                if (y < start_y || 0 < start_x) {
-                    *cx = 0; *cy = y;
-                    return 0;
-                }
-            }
+		// Start from current x on the first line, otherwise start from the end
+		int x = (y == start_y) ? start_x : row->size;
 
-            // Pattern match or Start of Line (index 0)
-            if (i == 0 || isSentenceBoundary(row, i)) {
-                if (y < start_y || i < start_x) {
-                    *cx = i; *cy = y;
-                    return 0;
-                }
-            }
-        }
-    }
-    return -1;
+		for (int i = x; i >= 0; i--) {
+			// Empty lines are boundaries
+			if (row->size == 0) {
+				if (y < start_y || 0 < start_x) {
+					*cx = 0;
+					*cy = y;
+					return 0;
+				}
+			}
+
+			// Pattern match or Start of Line (index 0)
+			if (i == 0 || isSentenceBoundary(row, i)) {
+				if (y < start_y || i < start_x) {
+					*cx = i;
+					*cy = y;
+					return 0;
+				}
+			}
+		}
+	}
+	return -1;
 }
-
 
 void forwardSentence(int count) {
 	int times = count ? count : 1;
@@ -1388,75 +1369,44 @@ void transposeSentences(void) {
 	int a_end_x = a_start_x, a_end_y = a_start_y;
 	forwardSentenceEnd(&a_end_x, &a_end_y);
 
-	/* Set region to span from A start to B end and use the
-	 * transpose-words transformer on the sentence boundaries.
-	 * Actually, we do a manual swap: extract both sentences,
-	 * delete the range, re-insert in swapped order. */
+	/* Collect the three segments: A, gap, B */
+	int a_len, gap_len, b_len;
+	uint8_t *a_text = collectRegionText(E.buf, a_start_x, a_start_y,
+					    a_end_x, a_end_y, &a_len);
+	uint8_t *gap_text = collectRegionText(E.buf, a_end_x, a_end_y, a_end_x,
+					      a_end_y, &gap_len);
+	/* gap is empty when A_end == B_start; the gap is actually
+	 * [a_end..b_start) but b_start == a_end in this code, so
+	 * the gap is implicitly zero.  We just concatenate B + A. */
+	(void)gap_len;
+	free(gap_text);
 
-	/* Extract sentence A text */
-	int a_len = 0;
-	char *a_text = NULL;
-	{
-		int sx = a_start_x, sy = a_start_y;
-		/* Calculate length */
-		int tx = sx, ty = sy;
-		while (ty < a_end_y || (ty == a_end_y && tx < a_end_x)) {
-			a_len++;
-			stepForward(&tx, &ty);
-		}
-		a_text = xmalloc(a_len + 1);
-		tx = sx;
-		ty = sy;
-		for (int i = 0; i < a_len; i++) {
-			a_text[i] = charAt(tx, ty);
-			stepForward(&tx, &ty);
-		}
-		a_text[a_len] = '\0';
-	}
+	uint8_t *b_text = collectRegionText(E.buf, a_end_x, a_end_y, b_end_x,
+					    b_end_y, &b_len);
 
-	/* Extract sentence B text */
-	int b_len = 0;
-	char *b_text = NULL;
-	{
-		int sx = a_end_x, sy = a_end_y;
-		int tx = sx, ty = sy;
-		while (ty < b_end_y || (ty == b_end_y && tx < b_end_x)) {
-			b_len++;
-			stepForward(&tx, &ty);
-		}
-		b_text = xmalloc(b_len + 1);
-		tx = sx;
-		ty = sy;
-		for (int i = 0; i < b_len; i++) {
-			b_text[i] = charAt(tx, ty);
-			stepForward(&tx, &ty);
-		}
-		b_text[b_len] = '\0';
-	}
+	/* Collect old text for entire range */
+	int old_len;
+	uint8_t *old_text = collectRegionText(E.buf, a_start_x, a_start_y,
+					      b_end_x, b_end_y, &old_len);
 
-	/* Delete the entire range from A start to B end */
-	deleteRange(a_start_x, a_start_y, b_end_x, b_end_y, 0);
+	/* Build replacement: B + A */
+	int repl_len = b_len + a_len;
+	uint8_t *repl = xmalloc(repl_len + 1);
+	memcpy(repl, b_text, b_len);
+	memcpy(repl + b_len, a_text, a_len);
+	repl[repl_len] = 0;
 
-	/* Insert B text then A text at the deletion point */
-	E.buf->cx = a_start_x;
-	E.buf->cy = a_start_y;
-	for (int i = 0; i < b_len; i++) {
-		if (b_text[i] == '\n') {
-			insertNewlineRaw();
-		} else {
-			insertChar(E.buf, (uint8_t)b_text[i], 1);
-		}
-	}
-	for (int i = 0; i < a_len; i++) {
-		if (a_text[i] == '\n') {
-			insertNewlineRaw();
-		} else {
-			insertChar(E.buf, (uint8_t)a_text[i], 1);
-		}
-	}
+	int ex, ey;
+	mutateReplace(E.buf, a_start_x, a_start_y, b_end_x, b_end_y, old_text,
+		      old_len, repl, repl_len, &ex, &ey);
+
+	E.buf->cx = ex;
+	E.buf->cy = ey;
 
 	free(a_text);
 	free(b_text);
+	free(old_text);
+	free(repl);
 }
 
 /* Zap to char (M-z) — kill from point up to and including the next

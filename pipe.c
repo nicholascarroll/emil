@@ -39,10 +39,10 @@
 extern struct config E;
 
 static uint8_t *cmd;
-static char *buf;
 
 static uint8_t *transformerPipeCmd(uint8_t *input) {
 	int bsiz = BUFSIZ + 1;
+	char *buf = xcalloc(1, bsiz);
 	/* Using sh -c lets us use pipes and stuff and takes care of quoting. */
 	const char *command_line[4] = { "/bin/sh", "-c", (char *)cmd, NULL };
 	struct subprocess_s subprocess;
@@ -52,6 +52,7 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 	if (result) {
 		setStatusMessage(
 			"Shell command failed: unable to create subprocess");
+		free(buf);
 		return NULL;
 	}
 	FILE *p_stdin = subprocess_stdin(&subprocess);
@@ -69,6 +70,8 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 	if (subprocess_join(&subprocess, &sub_ret) != 0) {
 		setStatusMessage(
 			"Shell command failed: error waiting for subprocess");
+		subprocess_destroy(&subprocess);
+		free(buf);
 		return NULL;
 	}
 
@@ -97,13 +100,12 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 		setStatusMessage(msg_shell_read_bytes, i);
 	}
 
-	/* Cleanup & return */
+	/* Cleanup & return — caller frees buf */
 	subprocess_destroy(&subprocess);
 	return (uint8_t *)buf;
 }
 
 uint8_t *editorPipe(int useRegion) {
-	buf = xcalloc(1, BUFSIZ + 1);
 	cmd = NULL;
 	cmd = editorPrompt(E.buf, (uint8_t *)"Shell: %s", PROMPT_BASIC, NULL);
 
@@ -117,14 +119,12 @@ uint8_t *editorPipe(int useRegion) {
 			E.buf->markx = -1;
 			E.buf->marky = -1;
 			free(cmd);
-			free(buf);
 			return NULL;
 		} else {
 			// 1. Extract the selected region
 			if (markInvalid()) {
 				setStatusMessage(msg_mark_invalid);
 				free(cmd);
-				free(buf);
 				return NULL;
 			}
 
@@ -143,7 +143,6 @@ uint8_t *editorPipe(int useRegion) {
 	}
 
 	free(cmd);
-	free(buf);
 	return NULL;
 }
 

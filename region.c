@@ -5,6 +5,7 @@
 #include "emil.h"
 #include "history.h"
 #include "message.h"
+#include "mutate.h"
 #include "prompt.h"
 #include "undo.h"
 #include "util.h"
@@ -226,23 +227,6 @@ static void normalizeRegion(void) {
 	clampToBuffer(E.buf, &E.buf->markx, &E.buf->marky);
 }
 
-/* Bounded append to undo data: append at most 'ncopy' bytes from 'src'
- * to the undo record, respecting both the source length and the
- * destination capacity.  Always NUL-terminates. */
-static void undoAppendBounded(struct undo *u, const uint8_t *src, int src_len,
-			      int ncopy) {
-	if (ncopy > src_len)
-		ncopy = src_len;
-	int dlen = strlen((char *)u->data);
-	int avail = u->datasize - dlen - 1;
-	if (ncopy > avail)
-		ncopy = avail;
-	if (ncopy > 0) {
-		memcpy(&u->data[dlen], src, ncopy);
-		u->data[dlen + ncopy] = 0;
-	}
-}
-
 /* Normalise rectangle columns so topx <= botx.  Also sets up
  * buf->cx, buf->cy, buf->markx, buf->marky for the rectangle. */
 static void normalizeRectCols(int *topx, int *topy, int *botx, int *boty) {
@@ -285,83 +269,19 @@ void deleteRange(int startx, int starty, int endx, int endy,
 	if (startx == endx && starty == endy)
 		return;
 
-	/* Collect text between (startx, starty) and (endx, endy) using
-	 * local variables — do NOT move buf->cx or buf->cy during
-	 * collection. */
-	int regionSize = 32;
-	uint8_t *collected = xmalloc(regionSize);
-	int cpos = 0;
-	int lx = startx;
-	int ly = starty;
-	while (!(ly == endy && lx == endx)) {
-		if (lx >= E.buf->row[ly].size) {
-			collected[cpos++] = '\n';
-			ly++;
-			lx = 0;
-		} else {
-			collected[cpos++] = E.buf->row[ly].chars[lx];
-			lx++;
-		}
-		if (cpos >= regionSize - 2) {
-			regionSize *= 2;
-			collected = xrealloc(collected, regionSize);
-		}
-	}
-	collected[cpos] = 0;
+	int old_len;
+	uint8_t *old_text =
+		collectRegionText(E.buf, startx, starty, endx, endy, &old_len);
 
 	/* Kill ring */
 	if (add_to_kill_ring) {
 		clearText(&E.kill);
-		E.kill.str = (uint8_t *)xstrdup((char *)collected);
-		addToKillRing((char *)collected, 0, 0, 0);
+		E.kill.str = (uint8_t *)xstrdup((char *)old_text);
+		addToKillRing((char *)old_text, 0, 0, 0);
 	}
 
-	/* Undo record */
-	clearRedos(E.buf);
-
-	struct undo *new = newUndo();
-	new->startx = startx;
-	new->starty = starty;
-	new->endx = endx;
-	new->endy = endy;
-	new->datalen = cpos;
-	undoReplaceData(new, cpos + 1);
-	memcpy(new->data, collected, cpos);
-	new->data[cpos] = 0;
-	new->append = 0;
-	new->delete = 1;
-	pushUndo(E.buf, new);
-
-	free(collected);
-
-	/* Adjust tracked points BEFORE the mutation while row structure
-	 * is still intact — matches the contract used by bulkDelete. */
-	adjustAllPoints(E.buf, startx, starty, endx, endy, 1);
-
-	/* Splice rows — same logic as the old killRegion */
-	struct erow *row = &E.buf->row[starty];
-	if (starty == endy) {
-		memmove(&row->chars[startx], &row->chars[endx],
-			row->size - endx);
-		row->size -= endx - startx;
-		row->chars[row->size] = 0;
-	} else {
-		for (int i = starty + 1; i < endy; i++) {
-			delRow(E.buf, starty + 1);
-		}
-		struct erow *last = &E.buf->row[starty + 1];
-		row->size = startx;
-		row->size += last->size - endx;
-		row->chars = xrealloc(row->chars, row->size + 1);
-		row->charcap = row->size + 1;
-		memcpy(&row->chars[startx], &last->chars[endx],
-		       last->size - endx);
-		row->chars[row->size] = '\0';
-		delRow(E.buf, starty + 1);
-	}
-
-	E.buf->dirty = 1;
-	updateBuffer(E.buf);
+	mutateDelete(E.buf, startx, starty, endx, endy, old_text, old_len);
+	free(old_text);
 
 	/* Set cursor to start of deleted range */
 	E.buf->cx = startx;
@@ -387,32 +307,13 @@ void copyRegion(void) {
 	int origMarkx = E.buf->markx;
 	int origMarky = E.buf->marky;
 	normalizeRegion();
+
+	int len;
+	uint8_t *text = collectRegionText(E.buf, E.buf->cx, E.buf->cy,
+					  E.buf->markx, E.buf->marky, &len);
 	clearText(&E.kill);
-	int regionSize = 32;
-	E.kill.str = xmalloc(regionSize);
-
-	int killpos = 0;
-	/* Use local variables for iteration — never touch buf->cx/cy */
-	int lx = E.buf->cx;
-	int ly = E.buf->cy;
-	while (!(ly == E.buf->marky && lx == E.buf->markx)) {
-		if (lx >= E.buf->row[ly].size) {
-			ly++;
-			lx = 0;
-			E.kill.str[killpos++] = '\n';
-		} else {
-			E.kill.str[killpos++] = E.buf->row[ly].chars[lx];
-			lx++;
-		}
-
-		if (killpos >= regionSize - 2) {
-			regionSize *= 2;
-			E.kill.str = xrealloc(E.kill.str, regionSize);
-		}
-	}
-	E.kill.str[killpos] = 0;
-
-	addToKillRing((char *)E.kill.str, 0, 0, 0);
+	E.kill.str = text;
+	addToKillRing((char *)text, 0, 0, 0);
 
 	E.buf->cx = origCx;
 	E.buf->cy = origCy;
@@ -461,40 +362,12 @@ void yank(int count) {
 
 	int killLen = strlen((char *)E.kill.str);
 
-	clearRedos(E.buf);
-
-	struct undo *new = newUndo();
-	new->startx = E.buf->cx;
-	new->starty = E.buf->cy;
-	new->datalen = killLen;
-	undoReplaceData(new, new->datalen + 1);
-	emil_strlcpy(new->data, E.kill.str, new->datasize);
-	new->append = 0;
-
-	/* Compute end position from the kill text */
-	int ex = E.buf->cx;
-	int ey = E.buf->cy;
-	for (int i = 0; i < killLen; i++) {
-		if (E.kill.str[i] == '\n') {
-			ey++;
-			ex = 0;
-		} else {
-			ex++;
-		}
-	}
-	new->endx = ex;
-	new->endy = ey;
-	pushUndo(E.buf, new);
-
-	/* bulkInsert handles the row manipulation and calls
-	 * adjustAllPoints internally. */
-	bulkInsert(E.buf, E.buf->cx, E.buf->cy, E.kill.str, killLen);
+	int ex, ey;
+	mutateInsert(E.buf, E.buf->cx, E.buf->cy, E.kill.str, killLen, &ex,
+		     &ey);
 
 	E.buf->cx = ex;
 	E.buf->cy = ey;
-
-	E.buf->dirty = 1;
-	updateBuffer(E.buf);
 
 	/* Set kill ring position so M-y continues from here */
 	if (count > 1) {
@@ -565,23 +438,22 @@ void transformRange(int startx, int starty, int endx, int endy,
 		endy = ty;
 	}
 
-	/* Set up mark/cursor for the kill/yank machinery */
-	E.buf->cx = startx;
-	E.buf->cy = starty;
-	E.buf->markx = endx;
-	E.buf->marky = endy;
+	int old_len;
+	uint8_t *old_text =
+		collectRegionText(E.buf, startx, starty, endx, endy, &old_len);
 
-	uint8_t *okill = saveKill();
-	killRegion();
+	uint8_t *transformed = transformer(old_text);
+	int repl_len = strlen((char *)transformed);
 
-	uint8_t *input = E.kill.str;
-	uint8_t *transformed = transformer(input);
-	free(E.kill.str);
-	E.kill.str = transformed;
-	yank(1);
-	E.buf->undo->paired = 1;
+	int ex, ey;
+	mutateReplace(E.buf, startx, starty, endx, endy, old_text, old_len,
+		      transformed, repl_len, &ex, &ey);
 
-	restoreKill(okill);
+	E.buf->cx = ex;
+	E.buf->cy = ey;
+
+	free(old_text);
+	free(transformed);
 }
 
 void transformRegion(uint8_t *(*transformer)(uint8_t *)) {
@@ -604,10 +476,10 @@ void replaceRegex(void) {
 	normalizeRegion();
 
 	const char *cancel = "Canceled regex-replace.";
-	int madeReplacements = 0;
+	struct buffer *buf = E.buf;
 
 	uint8_t *regex =
-		editorPrompt(E.buf, "Regex replace: %s", PROMPT_BASIC, NULL);
+		editorPrompt(buf, "Regex replace: %s", PROMPT_BASIC, NULL);
 	if (regex == NULL) {
 		setStatusMessage(cancel);
 		return;
@@ -617,7 +489,7 @@ void replaceRegex(void) {
 	snprintf(prompt, sizeof(prompt), "Regex replace %.35s with: %%s",
 		 regex);
 	uint8_t *repl =
-		editorPrompt(E.buf, (uint8_t *)prompt, PROMPT_BASIC, NULL);
+		editorPrompt(buf, (uint8_t *)prompt, PROMPT_BASIC, NULL);
 	if (repl == NULL) {
 		free(regex);
 		setStatusMessage(cancel);
@@ -625,9 +497,7 @@ void replaceRegex(void) {
 	}
 	int replen = strlen((char *)repl);
 
-	/* Compile the regex */
 	regex_t pattern;
-	regmatch_t matches[1];
 	int regcomp_result = regcomp(&pattern, (char *)regex, REG_EXTENDED);
 	if (regcomp_result != 0) {
 		char error_msg[256];
@@ -639,132 +509,89 @@ void replaceRegex(void) {
 		return;
 	}
 
-	uint8_t *okill = saveKill();
-	copyRegion();
+	/* Collect old region text */
+	int old_len;
+	uint8_t *old_text = collectRegionText(buf, buf->cx, buf->cy, buf->markx,
+					      buf->marky, &old_len);
 
-	/* This is a transformation, so create a delete undo. However, we're not
-	 * actually doing any deletion yet in this case. */
-	struct undo *new = newUndo();
-	new->startx = E.buf->cx;
-	new->starty = E.buf->cy;
-	new->endx = E.buf->markx;
-	new->endy = E.buf->marky;
-	new->datalen = strlen((char *)E.kill.str);
-	if (new->datasize < new->datalen + 1) {
-		new->datasize = new->datalen + 1;
-		new->data = xrealloc(new->data, new->datasize);
-	}
-	for (int i = 0; i < new->datalen; i++) {
-		new->data[i] = E.kill.str[i];
-	}
-	new->data[new->datalen] = 0;
-	new->append = 0;
-	new->delete = 1;
-	pushUndo(E.buf, new);
+	/* Build replacement text line by line */
+	int cap = old_len + 128;
+	uint8_t *out = xmalloc(cap);
+	int pos = 0;
+	int made = 0;
 
-	/* Create insert undo */
-	new = newUndo();
-	new->startx = E.buf->cx;
-	new->starty = E.buf->cy;
-	new->endy = E.buf->marky;
-	new->datalen = E.buf->undo->datalen;
-	if (new->datasize < new->datalen + 1) {
-		new->datasize = new->datalen + 1;
-		new->data = xrealloc(new->data, new->datasize);
-	}
-	new->append = 0;
-	new->delete = 0;
-	new->paired = 1;
-	pushUndo(E.buf, new);
+	for (int i = buf->cy; i <= buf->marky; i++) {
+		erow *row = &buf->row[i];
+		regmatch_t m[1];
+		int matched =
+			(regexec(&pattern, (char *)row->chars, 1, m, 0) == 0);
 
-	for (int i = E.buf->cy; i <= E.buf->marky; i++) {
-		struct erow *row = &E.buf->row[i];
-		int regexec_result =
-			regexec(&pattern, (char *)row->chars, 1, matches, 0);
-		int match_idx = (regexec_result == 0) ? matches[0].rm_so : -1;
-		int match_length = (regexec_result == 0) ? (matches[0].rm_eo -
-							    matches[0].rm_so) :
-							   0;
-		if (i != 0)
-			emil_strlcat((char *)new->data, "\n", new->datasize);
-		if (match_idx < 0) {
-			if (E.buf->cy == E.buf->marky) {
-				emil_strlcat((char *)new->data,
-					     (char *)&row->chars[E.buf->cx],
-					     new->datasize);
-			} else if (i == E.buf->cy) {
-				emil_strlcat((char *)new->data,
-					     (char *)&row->chars[E.buf->cx],
-					     new->datasize);
-			} else if (i == E.buf->marky) {
-				emil_strlcat((char *)new->data,
-					     (char *)row->chars, new->datasize);
-			} else {
-				emil_strlcat((char *)new->data,
-					     (char *)row->chars, new->datasize);
+		/* Region slice boundaries for this row */
+		int rstart = (i == buf->cy) ? buf->cx : 0;
+		int rend = (i == buf->marky) ? buf->markx : row->size;
+
+		/* Check match is within region bounds */
+		int do_replace = 0;
+		int mstart = 0, mlen = 0;
+		if (matched) {
+			mstart = m[0].rm_so;
+			mlen = m[0].rm_eo - m[0].rm_so;
+			if (mstart >= rstart && mstart + mlen <= rend)
+				do_replace = 1;
+		}
+
+		if (i > buf->cy) {
+			if (pos + 1 >= cap) {
+				cap *= 2;
+				out = xrealloc(out, cap);
 			}
-			continue;
-		} else if (i == E.buf->cy && match_idx < E.buf->cx) {
-			emil_strlcat((char *)new->data,
-				     (char *)&row->chars[E.buf->cx],
-				     new->datasize);
-			continue;
-		} else if (i == E.buf->marky &&
-			   match_idx + match_length > E.buf->markx) {
-			emil_strlcat((char *)new->data, (char *)row->chars,
-				     new->datasize);
-			continue;
+			out[pos++] = '\n';
 		}
-		madeReplacements++;
-		/* Replace row data */
-		row = &E.buf->row[i];
-		int extra = replen - match_length;
-		if (extra > 0) {
-			row->chars =
-				xrealloc(row->chars, row->size + 1 + extra);
-			new->datasize += extra;
-			new->data = xrealloc(new->data, new->datasize);
-		}
-		memmove(&row->chars[match_idx + replen],
-			&row->chars[match_idx + match_length],
-			row->size - (match_idx + match_length));
-		memcpy(&row->chars[match_idx], repl, replen);
-		row->size += extra;
-		row->chars[row->size] = 0;
-		if (E.buf->cy == E.buf->marky) {
-			E.buf->markx += extra;
-			emil_strlcat((char *)new->data,
-				     (char *)&row->chars[E.buf->cx],
-				     new->datasize);
-		} else if (i == E.buf->cy) {
-			emil_strlcat((char *)new->data,
-				     (char *)&row->chars[E.buf->cx],
-				     new->datasize);
-		} else if (i == E.buf->marky) {
-			E.buf->markx += extra;
-			emil_strlcat((char *)new->data, (char *)row->chars,
-				     new->datasize);
+
+		if (!do_replace) {
+			int n = rend - rstart;
+			while (pos + n + 1 >= cap) {
+				cap *= 2;
+				out = xrealloc(out, cap);
+			}
+			memcpy(&out[pos], &row->chars[rstart], n);
+			pos += n;
 		} else {
-			emil_strlcat((char *)new->data, (char *)row->chars,
-				     new->datasize);
+			made++;
+			int pre = mstart - rstart;
+			int post_src = mstart + mlen;
+			int post_n = rend - post_src;
+			int need = pre + replen + post_n;
+			while (pos + need + 1 >= cap) {
+				cap *= 2;
+				out = xrealloc(out, cap);
+			}
+			memcpy(&out[pos], &row->chars[rstart], pre);
+			pos += pre;
+			memcpy(&out[pos], repl, replen);
+			pos += replen;
+			memcpy(&out[pos], &row->chars[post_src], post_n);
+			pos += post_n;
 		}
 	}
-	/* Now take care of insert undo */
-	new->data[new->datasize - 1] = 0;
-	new->datalen = strlen((char *)new->data);
-	new->endx = E.buf->markx;
+	out[pos] = 0;
 
-	E.buf->cx = new->endx;
-	E.buf->cy = new->endy;
+	uint8_t *okill = saveKill();
 
-	updateBuffer(E.buf);
+	int ex, ey;
+	mutateReplace(buf, buf->cx, buf->cy, buf->markx, buf->marky, old_text,
+		      old_len, out, pos, &ex, &ey);
+
+	buf->cx = ex;
+	buf->cy = ey;
+
+	free(old_text);
+	free(out);
 	regfree(&pattern);
 	free(regex);
 	free(repl);
-
 	restoreKill(okill);
-
-	setStatusMessage(msg_replaced_n, madeReplacements);
+	setStatusMessage(msg_replaced_n, made);
 }
 
 void stringRectangle(void) {
@@ -779,152 +606,77 @@ void stringRectangle(void) {
 	}
 
 	uint8_t *okill = saveKill();
-
 	normalizeRegion();
 
+	struct buffer *buf = E.buf;
 	int slen = strlen((char *)string);
 	int topx, topy, botx, boty;
 	normalizeRectCols(&topx, &topy, &botx, &boty);
-	int rwidth = botx - topx;
-	int extra = slen - rwidth; /* new bytes per line */
 
-	copyRegion();
-	clearRedos(E.buf);
+	/* Use full-row region so replacement text captures all content */
+	int old_len;
+	int region_endx = buf->row[boty].size;
+	uint8_t *old_text =
+		collectRegionText(buf, 0, topy, region_endx, boty, &old_len);
 
-	/* This is mostly a normal kill-region type undo. */
-	struct undo *new = newUndo();
-	new->startx = E.buf->cx;
-	new->starty = E.buf->cy;
-	new->endx = E.buf->markx;
-	new->endy = E.buf->marky;
-	new->datalen = strlen((char *)E.kill.str);
-	undoReplaceData(new, new->datalen + 1);
-	for (int i = 0; i < new->datalen; i++) {
-		new->data[i] = E.kill.str[i];
-	}
-	new->data[new->datalen] = 0;
-	new->append = 0;
-	new->delete = 1;
-	pushUndo(E.buf, new);
+	/* Build replacement text: for each row, replace columns [topx..botx)
+	 * with 'string', padding short rows with spaces as needed. */
+	int nrows = boty - topy + 1;
+	int cap = old_len + nrows * (slen + 1) + 1;
+	uint8_t *out = xmalloc(cap);
+	int pos = 0;
 
-	/* Undo for a yank region */
-	new = newUndo();
-	new->startx = topx;
-	new->starty = topy;
-	new->endx = botx + extra;
-	new->endy = boty;
-	new->datalen = 0;
-	int replace_datasize;
-	if (extra > 0) {
-		replace_datasize = strlen((char *)E.kill.str) +
-				   (extra * ((boty - topy) + 1)) + 1;
-	} else {
-		replace_datasize = strlen((char *)E.kill.str);
-	}
-	undoReplaceData(new, replace_datasize);
-	new->data[0] = 0;
-	new->append = 0;
-	new->paired = 1;
-	pushUndo(E.buf, new);
+	for (int i = topy; i <= boty; i++) {
+		erow *row = &buf->row[i];
+		if (i > topy)
+			out[pos++] = '\n';
 
-	/*
-	 * We need to do the row modifying operation in three stages
-	 * because the undo data we need to copy is slightly different:
-	 * --RRRRXXX // Where - is don't copy,
-	 * XXRRRRXXX // R is the replacement string,
-	 * XXRRRR--- // and X is extra data.
-	 */
-	/* First, topy */
-	struct erow *row = &E.buf->row[topy];
-	if (row->size < botx) {
-		row->chars = xrealloc(row->chars, botx + 1);
-		row->charcap = botx + 1;
-		memset(&row->chars[row->size], ' ', botx - row->size);
-		row->size = botx;
-		/* Better safe than sorry */
-		new->datasize += row->size + 1;
-		new->data = xrealloc(new->data, new->datasize);
-	}
-	if (extra > 0) {
-		row->chars = xrealloc(row->chars, row->size + 1 + extra);
-		row->charcap = row->size + 1 + extra;
-	}
-	memmove(&row->chars[topx + slen], &row->chars[botx], row->size - botx);
-	memcpy(&row->chars[topx], string, slen);
-	row->size += extra;
-	row->chars[row->size] = 0;
-	/* Adjust for the column replacement: delete old range, insert new */
-	adjustAllPoints(E.buf, topx, topy, botx, topy, 1);
-	if (slen > 0)
-		adjustAllPoints(E.buf, topx, topy, topx + slen, topy, 0);
-	if (boty == topy) {
-		emil_strlcat((char *)new->data, (char *)string, new->datasize);
-	} else {
-		emil_strlcat((char *)new->data, (char *)&row->chars[topx],
-			     new->datasize);
-	}
-
-	for (int i = topy + 1; i < boty; i++) {
-		emil_strlcat((char *)new->data, "\n", new->datasize);
-		/* Next, middle lines */
-		row = &E.buf->row[i];
-		if (row->size < botx) {
-			row->chars = xrealloc(row->chars, botx + 1);
-			row->charcap = botx + 1;
-			memset(&row->chars[row->size], ' ', botx - row->size);
-			row->size = botx;
-			new->datasize += row->size + 1;
-			new->data = xrealloc(new->data, new->datasize);
+		/* Pre-rectangle portion [0..topx) */
+		if (topx > 0) {
+			int avail = row->size;
+			int n = topx;
+			int copy_n = (n < avail) ? n : avail;
+			while (pos + n + slen + row->size + 2 >= cap) {
+				cap *= 2;
+				out = xrealloc(out, cap);
+			}
+			if (copy_n > 0)
+				memcpy(&out[pos], row->chars, copy_n);
+			/* Pad if row shorter than topx */
+			int pad = n - copy_n;
+			if (pad > 0)
+				memset(&out[pos + copy_n], ' ', pad);
+			pos += n;
 		}
-		if (extra > 0) {
-			row->chars =
-				xrealloc(row->chars, row->size + 1 + extra);
-			row->charcap = row->size + 1 + extra;
-		}
-		memmove(&row->chars[topx + slen], &row->chars[botx],
-			row->size - botx);
-		memcpy(&row->chars[topx], string, slen);
-		row->size += extra;
-		row->chars[row->size] = 0;
-		adjustAllPoints(E.buf, topx, i, botx, i, 1);
-		if (slen > 0)
-			adjustAllPoints(E.buf, topx, i, topx + slen, i, 0);
-		emil_strlcat((char *)new->data, (char *)row->chars,
-			     new->datasize);
-	}
 
-	/* Finally, end line */
-	if (topy != boty) {
-		emil_strlcat((char *)new->data, "\n", new->datasize);
-		row = &E.buf->row[boty];
-		if (row->size < botx) {
-			row->chars = xrealloc(row->chars, botx + 1);
-			row->charcap = botx + 1;
-			memset(&row->chars[row->size], ' ', botx - row->size);
-			row->size = botx;
-			new->datasize += row->size + 1;
-			new->data = xrealloc(new->data, new->datasize);
+		/* The replacement string */
+		while (pos + slen + row->size + 2 >= cap) {
+			cap *= 2;
+			out = xrealloc(out, cap);
 		}
-		if (extra > 0) {
-			row->chars =
-				xrealloc(row->chars, row->size + 1 + extra);
-			row->charcap = row->size + 1 + extra;
-		}
-		memmove(&row->chars[topx + slen], &row->chars[botx],
-			row->size - botx);
-		memcpy(&row->chars[topx], string, slen);
-		row->size += extra;
-		row->chars[row->size] = 0;
-		adjustAllPoints(E.buf, topx, boty, botx, boty, 1);
-		if (slen > 0)
-			adjustAllPoints(E.buf, topx, boty, topx + slen, boty,
-					0);
-		undoAppendBounded(new, row->chars, row->size, botx + extra);
-	}
-	new->datalen = strlen((char *)new->data);
+		memcpy(&out[pos], string, slen);
+		pos += slen;
 
-	E.buf->dirty = 1;
-	updateBuffer(E.buf);
+		/* Post-rectangle portion [botx..row->size) */
+		int eff_botx = (botx > row->size) ? row->size : botx;
+		if (eff_botx < row->size) {
+			int n = row->size - eff_botx;
+			memcpy(&out[pos], &row->chars[eff_botx], n);
+			pos += n;
+		}
+	}
+	out[pos] = 0;
+
+	int ex, ey;
+	mutateReplace(buf, 0, topy, region_endx, boty, old_text, old_len, out,
+		      pos, &ex, &ey);
+
+	buf->cx = topx;
+	buf->cy = topy;
+
+	free(old_text);
+	free(out);
+	free(string);
 	clearMarkQuiet();
 	restoreKill(okill);
 }
@@ -945,55 +697,19 @@ void copyRectangle(void) {
 	E.kill.rect_width = rw;
 	E.kill.rect_height = rh;
 
-	/* First, topy */
-	int idx = 0;
-	struct erow *row = &E.buf->row[topy + idx];
-	if (row->size < botx) {
-		memset(&E.kill.str[idx * rw], ' ', rw);
-		if (row->size > botx - rw) {
-			strncpy((char *)&E.kill.str[idx * rw],
-				(char *)&row->chars[botx - rw],
-				row->size - (botx - rw));
-		}
-	} else {
-		strncpy((char *)&E.kill.str[idx * rw],
-			(char *)&row->chars[botx - rw], rw);
-	}
-	idx++;
-
-	while ((topy + idx) < boty) {
-		/* Middle lines */
-		row = &E.buf->row[topy + idx];
-
+	for (int idx = 0; idx < rh; idx++) {
+		struct erow *row = &E.buf->row[topy + idx];
 		if (row->size < botx) {
 			memset(&E.kill.str[idx * rw], ' ', rw);
-			if (row->size > botx - rw) {
-				strncpy((char *)&E.kill.str[idx * rw],
-					(char *)&row->chars[botx - rw],
-					row->size - (botx - rw));
+			if (row->size > topx) {
+				int avail = row->size - topx;
+				if (avail > rw)
+					avail = rw;
+				memcpy(&E.kill.str[idx * rw], &row->chars[topx],
+				       avail);
 			}
 		} else {
-			strncpy((char *)&E.kill.str[idx * rw],
-				(char *)&row->chars[botx - rw], rw);
-		}
-
-		idx++;
-	}
-
-	/* finally, end line */
-	if (topy != boty) {
-		row = &E.buf->row[topy + idx];
-
-		if (row->size < botx) {
-			memset(&E.kill.str[idx * rw], ' ', rw);
-			if (row->size > botx - rw) {
-				strncpy((char *)&E.kill.str[idx * rw],
-					(char *)&row->chars[botx - rw],
-					row->size - (botx - rw));
-			}
-		} else {
-			strncpy((char *)&E.kill.str[idx * rw],
-				(char *)&row->chars[botx - rw], rw);
+			memcpy(&E.kill.str[idx * rw], &row->chars[topx], rw);
 		}
 	}
 
@@ -1006,158 +722,77 @@ void killRectangle(void) {
 		return;
 	normalizeRegion();
 
-	/* Phase 1: copyRegion writes linear undo text into E.kill */
 	struct text saved = E.kill;
 	E.kill = (struct text){ 0 };
 
+	struct buffer *buf = E.buf;
 	int topx, topy, botx, boty;
 	normalizeRectCols(&topx, &topy, &botx, &boty);
 	int rw = botx - topx;
 	int rh = (boty - topy) + 1;
 
-	copyRegion();
-	clearRedos(E.buf);
+	/* Collect linear region text for undo */
+	int old_len;
+	/* Use full-row region so replacement text includes all content */
+	int region_endx = buf->row[boty].size;
+	uint8_t *old_text =
+		collectRegionText(buf, 0, topy, region_endx, boty, &old_len);
 
-	/* Temporary flat buffer for extracted rectangle columns */
+	/* Extract rectangle columns into flat buffer for kill ring */
 	uint8_t *rectBuf = xcalloc((size_t)rw * rh + 1, 1);
-
-	struct undo *new = newUndo();
-	new->startx = E.buf->cx;
-	new->starty = E.buf->cy;
-	new->endx = E.buf->markx;
-	new->endy = E.buf->marky;
-	new->datalen = strlen((char *)E.kill.str);
-	undoReplaceData(new, new->datalen + 1);
-	for (int i = 0; i < new->datalen; i++) {
-		new->data[i] = E.kill.str[i];
-	}
-	new->data[new->datalen] = 0;
-	new->append = 0;
-	new->delete = 1;
-	pushUndo(E.buf, new);
-
-	/* This is technically a transformation, so we need paired undos.
-	 * Use a safe upper bound for initial size — the linear region
-	 * text length is always sufficient since the residual content
-	 * after rectangle column removal is smaller. */
-	new = newUndo();
-	new->startx = topx;
-	new->starty = topy;
-	new->endx = botx - rw;
-	new->endy = boty;
-	int kill_len = strlen((char *)E.kill.str);
-	new->datalen = 0;
-	undoReplaceData(new, kill_len + 1);
-	new->data[0] = 0;
-	new->append = 0;
-	new->paired = 1;
-	pushUndo(E.buf, new);
-
-	/* First, topy */
-	int idx = 0;
-	struct erow *row = &E.buf->row[topy + idx];
-	if (row->size < botx) {
-		memset(&rectBuf[idx * rw], ' ', rw);
-		if (row->size > botx - rw) {
-			int old_size = row->size;
-			strncpy((char *)&rectBuf[idx * rw],
-				(char *)&row->chars[botx - rw],
-				row->size - (botx - rw));
-			row->size -= (row->size - (botx - rw));
-			row->chars[row->size] = 0;
-			adjustAllPoints(E.buf, topx, topy, old_size, topy, 1);
-			if (boty != topy) {
-				emil_strlcat((char *)new->data,
-					     (char *)&row->chars[botx - rw],
-					     new->datasize);
-			}
-		}
-	} else {
-		strncpy((char *)&rectBuf[idx * rw],
-			(char *)&row->chars[botx - rw], rw);
-		memcpy(&row->chars[topx], &row->chars[botx], row->size - botx);
-		row->size -= rw;
-		row->chars[row->size] = 0;
-		adjustAllPoints(E.buf, topx, topy, botx, topy, 1);
-		if (boty != topy) {
-			emil_strlcat((char *)new->data,
-				     (char *)&row->chars[topx], new->datasize);
-		}
-	}
-	idx++;
-
-	while ((topy + idx) < boty) {
-		/* Middle lines */
-		int cur_row = topy + idx;
-		emil_strlcat((char *)new->data, "\n", new->datasize);
-		row = &E.buf->row[cur_row];
-
+	for (int idx = 0; idx < rh; idx++) {
+		erow *row = &buf->row[topy + idx];
 		if (row->size < botx) {
 			memset(&rectBuf[idx * rw], ' ', rw);
-			if (row->size > botx - rw) {
-				int old_size = row->size;
-				strncpy((char *)&rectBuf[idx * rw],
-					(char *)&row->chars[botx - rw],
-					row->size - (botx - rw));
-				row->size -= (row->size - (botx - rw));
-				row->chars[row->size] = 0;
-				adjustAllPoints(E.buf, topx, cur_row, old_size,
-						cur_row, 1);
+			if (row->size > topx) {
+				int avail = row->size - topx;
+				if (avail > rw)
+					avail = rw;
+				memcpy(&rectBuf[idx * rw], &row->chars[topx],
+				       avail);
 			}
 		} else {
-			strncpy((char *)&rectBuf[idx * rw],
-				(char *)&row->chars[botx - rw], rw);
-			memcpy(&row->chars[topx], &row->chars[botx],
-			       row->size - botx);
-			row->size -= rw;
-			row->chars[row->size] = 0;
-			adjustAllPoints(E.buf, topx, cur_row, botx, cur_row, 1);
+			memcpy(&rectBuf[idx * rw], &row->chars[topx], rw);
 		}
-
-		emil_strlcat((char *)new->data, (char *)row->chars,
-			     new->datasize);
-		idx++;
 	}
 
-	/* Finally, end line */
-	if (topy != boty) {
-		int cur_row = topy + idx;
-		emil_strlcat((char *)new->data, "\n", new->datasize);
-		row = &E.buf->row[cur_row];
+	/* Build post-deletion text: each row with columns [topx..botx)
+	 * removed.  Full rows — matching the full-row region. */
+	int cap = old_len + rh + 1;
+	uint8_t *out = xmalloc(cap);
+	int pos = 0;
 
-		if (row->size < botx) {
-			memset(&rectBuf[idx * rw], ' ', rw);
-			if (row->size > botx - rw) {
-				int old_size = row->size;
-				strncpy((char *)&rectBuf[idx * rw],
-					(char *)&row->chars[botx - rw],
-					row->size - (botx - rw));
-				row->size -= (row->size - (botx - rw));
-				row->chars[row->size] = 0;
-				adjustAllPoints(E.buf, topx, cur_row, old_size,
-						cur_row, 1);
+	for (int i = topy; i <= boty; i++) {
+		erow *row = &buf->row[i];
+		if (i > topy)
+			out[pos++] = '\n';
+
+		/* Portion before rectangle */
+		if (topx > 0) {
+			int n = (topx > row->size) ? row->size : topx;
+			if (n > 0) {
+				memcpy(&out[pos], row->chars, n);
+				pos += n;
 			}
-		} else {
-			strncpy((char *)&rectBuf[idx * rw],
-				(char *)&row->chars[botx - rw], rw);
-			memcpy(&row->chars[topx], &row->chars[botx],
-			       row->size - botx);
-			row->size -= rw;
-			row->chars[row->size] = 0;
-			adjustAllPoints(E.buf, topx, cur_row, botx, cur_row, 1);
 		}
-
-		undoAppendBounded(new, row->chars, row->size, topx);
+		/* Portion after rectangle */
+		int eff_botx = (botx > row->size) ? row->size : botx;
+		if (eff_botx < row->size) {
+			int n = row->size - eff_botx;
+			memcpy(&out[pos], &row->chars[eff_botx], n);
+			pos += n;
+		}
 	}
-	new->datalen = strlen((char *)new->data);
+	out[pos] = 0;
 
-	E.buf->dirty = 1;
-	updateBuffer(E.buf);
-	clearMarkQuiet();
+	int ex, ey;
+	mutateReplace(buf, 0, topy, region_endx, boty, old_text, old_len, out,
+		      pos, &ex, &ey);
 
-	/* Phase 2: overwrite E.kill with rectangle data for the kill ring */
-	/* TODO: copyRegion could take an output parameter to eliminate
-	 * this two-phase use of E.kill */
+	buf->cx = topx;
+	buf->cy = topy;
+
+	/* Kill ring: rectangle data */
 	clearText(&E.kill);
 	E.kill.str = rectBuf;
 	E.kill.is_rectangle = 1;
@@ -1165,7 +800,9 @@ void killRectangle(void) {
 	E.kill.rect_height = rh;
 	addToKillRing((char *)E.kill.str, 1, rw, rh);
 
-	/* Restore the saved kill for non-rectangle use */
+	free(old_text);
+	free(out);
+	clearMarkQuiet();
 	clearText(&saved);
 }
 
@@ -1176,183 +813,143 @@ void yankRectangle(void) {
 	struct text saved = E.kill;
 	E.kill = (struct text){ 0 };
 
-	int topx, topy, botx, boty;
-	topx = E.buf->cx;
-	topy = E.buf->cy;
-	botx = topx;
-	boty = topy + rh - 1;
-	char *string = xcalloc(rw + 1, 1);
+	struct buffer *buf = E.buf;
+	int topx = buf->cx;
+	int topy = buf->cy;
+	int boty = topy + rh - 1;
 
-	/* Snapshot original row content BEFORE any mutation so that
-	 * the delete undo record captures the true pre-edit state.
-	 * This fixes: #16 (extra-line undo) and #17 (space-padding
-	 * undo) — both were caused by capturing undo data after the
-	 * buffer had been partially modified. */
-	int orig_numrows = E.buf->numrows;
-	int snap_count = (boty < orig_numrows) ? rh : orig_numrows - topy;
-	int *snap_sizes = xmalloc(snap_count * sizeof(int));
-	uint8_t **snap_chars = xmalloc(snap_count * sizeof(uint8_t *));
-	for (int i = 0; i < snap_count; i++) {
-		struct erow *r = &E.buf->row[topy + i];
-		snap_sizes[i] = r->size;
-		snap_chars[i] = xmalloc(r->size + 1);
-		memcpy(snap_chars[i], r->chars, r->size + 1);
-	}
-
-	/* Add extra rows if the rectangle extends past the buffer */
+	/* Extend buffer if rectangle goes past end */
 	int extralines = 0;
-	while (boty >= E.buf->numrows) {
-		insertRow(E.buf, E.buf->numrows, "", 0);
+	int orig_numrows = buf->numrows;
+	while (boty >= buf->numrows) {
+		insertRow(buf, buf->numrows, "", 0);
 		extralines++;
 	}
 
-	clearRedos(E.buf);
+	clearRedos(buf);
 
-	/* Undo record 1 (bottom of stack): extra-lines insert.
-	 * Records the newlines appended to extend the buffer. */
+	/* If we added rows, record a paired undo for the extension */
 	if (extralines) {
-		struct undo *u = newUndo();
-		u->starty = orig_numrows - 1;
-		u->startx = E.buf->row[u->starty].size;
-		u->endx = 0;
-		u->endy = E.buf->numrows - 1;
-		if (extralines >= u->datasize) {
-			u->datasize = extralines + 1;
-			u->data = xrealloc(u->data, u->datasize);
+		struct undo *ext = newUndo();
+		ext->starty = orig_numrows - 1;
+		ext->startx = buf->row[ext->starty].size;
+		ext->endx = 0;
+		ext->endy = buf->numrows - 1;
+		if (extralines >= ext->datasize) {
+			ext->datasize = extralines + 1;
+			ext->data = xrealloc(ext->data, ext->datasize);
 		}
-		memset(u->data, '\n', extralines);
-		u->data[extralines] = 0;
-		u->datalen = extralines;
-		u->append = 0;
-		u->delete = 0;
-		pushUndo(E.buf, u);
-
-		adjustAllPoints(E.buf, u->startx, u->starty, u->endx, u->endy,
-				0);
+		memset(ext->data, '\n', extralines);
+		ext->data[extralines] = 0;
+		ext->datalen = extralines;
+		ext->append = 0;
+		ext->delete = 0;
+		pushUndo(buf, ext);
+		adjustAllPoints(buf, ext->startx, ext->starty, ext->endx,
+				ext->endy, 0);
 	}
 
-	/* Undo record 2: delete — stores the original row content so
-	 * that undoing re-inserts the pre-edit text.  Built from the
-	 * snapshot taken before any mutation. */
-	int del_datasize = 32;
-	for (int i = 0; i < snap_count; i++)
-		del_datasize += snap_sizes[i] + 1;
-	uint8_t *del_data = xmalloc(del_datasize);
-	int del_pos = 0;
-	for (int i = 0; i < snap_count; i++) {
-		if (i > 0)
-			del_data[del_pos++] = '\n';
-		memcpy(&del_data[del_pos], snap_chars[i], snap_sizes[i]);
-		del_pos += snap_sizes[i];
-	}
-	/* For extra lines that didn't exist, add empty lines */
-	for (int i = snap_count; i < rh; i++)
-		del_data[del_pos++] = '\n';
-	del_data[del_pos] = 0;
+	/* Collect old text for the region [0,topy]..[eol,boty] */
+	int old_len;
+	uint8_t *old_text = collectRegionText(buf, 0, topy, buf->row[boty].size,
+					      boty, &old_len);
 
-	struct undo *del_undo = newUndo();
-	del_undo->startx = 0;
-	del_undo->starty = topy;
-	/* End position: end of the last original row, or end of last
-	 * extra line */
-	if (snap_count > 0) {
-		del_undo->endx = snap_sizes[snap_count - 1];
-		del_undo->endy = topy + snap_count - 1;
-	} else {
-		del_undo->endx = 0;
-		del_undo->endy = topy;
-	}
-	if (extralines) {
-		del_undo->endx = 0;
-		del_undo->endy = boty;
-	}
-	free(del_undo->data);
-	del_undo->data = del_data;
-	del_undo->datalen = del_pos;
-	del_undo->datasize = del_datasize;
-	del_undo->append = 0;
-	del_undo->delete = 1;
-	del_undo->paired = extralines ? 1 : 0;
-	pushUndo(E.buf, del_undo);
+	/* Build new text: for each row, insert rectangle slice at topx */
+	int cap = old_len + rw * rh + rh + 1;
+	uint8_t *out = xmalloc(cap);
+	int pos = 0;
+	char *slice = xcalloc(rw + 1, 1);
 
-	/* Undo record 3 (top of stack): insert — will be filled with
-	 * the post-mutation row content during the per-row loop. */
-	struct undo *ins_undo = newUndo();
-	ins_undo->startx = 0;
-	ins_undo->starty = topy;
-	ins_undo->endx = 0; /* updated after loop */
-	ins_undo->endy = boty;
-	free(ins_undo->data);
-	ins_undo->datalen = 0;
-	ins_undo->datasize = del_datasize + (size_t)rw * rh + 1;
-	ins_undo->data = xmalloc(ins_undo->datasize);
-	ins_undo->data[0] = 0;
-	ins_undo->append = 0;
-	ins_undo->paired = 1;
-	pushUndo(E.buf, ins_undo);
-
-	/* Free snapshot */
-	for (int i = 0; i < snap_count; i++)
-		free(snap_chars[i]);
-	free(snap_chars);
-	free(snap_sizes);
-
-	/* Per-row rectangle insertion */
 	for (int idx = 0; idx < rh; idx++) {
-		int cur_row = topy + idx;
-		struct erow *row = &E.buf->row[cur_row];
-
+		int cur = topy + idx;
+		erow *row = &buf->row[cur];
 		if (idx > 0)
-			emil_strlcat((char *)ins_undo->data, "\n",
-				     ins_undo->datasize);
+			out[pos++] = '\n';
 
-		strncpy(string, (char *)&saved.str[idx * rw], rw);
+		strncpy(slice, (char *)&saved.str[idx * rw], rw);
 
-		/* Pad row with spaces if shorter than insertion column */
-		if (row->size < botx) {
-			row->chars = xrealloc(row->chars, botx + 1);
-			row->charcap = botx + 1;
-			memset(&row->chars[row->size], ' ', botx - row->size);
-			row->size = botx;
-			ins_undo->datasize += row->size + 1;
-			ins_undo->data =
-				xrealloc(ins_undo->data, ins_undo->datasize);
+		/* Row content before topx (with space padding) */
+		int pre_len = (row->size < topx) ? row->size : topx;
+		while (pos + topx + rw + row->size + 2 >= cap) {
+			cap *= 2;
+			out = xrealloc(out, cap);
+		}
+		memcpy(&out[pos], row->chars, pre_len);
+		pos += pre_len;
+		int pad = topx - pre_len;
+		if (pad > 0) {
+			memset(&out[pos], ' ', pad);
+			pos += pad;
 		}
 
-		/* Make room and insert rectangle slice */
-		if (rw > 0) {
-			row->chars = xrealloc(row->chars, row->size + 1 + rw);
-			row->charcap = row->size + 1 + rw;
-		}
-		memmove(&row->chars[topx + rw], &row->chars[botx],
-			row->size - botx);
-		memcpy(&row->chars[topx], string, rw);
-		row->size += rw;
-		row->chars[row->size] = 0;
-		row->cached_width = -1;
+		/* Rectangle slice */
+		memcpy(&out[pos], slice, rw);
+		pos += rw;
 
-		if (rw > 0)
-			adjustAllPoints(E.buf, topx, cur_row, topx + rw,
-					cur_row, 0);
-
-		/* Append post-mutation row content to insert undo.
-		 * For the last row, use bounded append for the
-		 * partial-row undo convention. */
-		if (idx == rh - 1 && topy != boty) {
-			undoAppendBounded(ins_undo, row->chars, row->size,
-					  row->size);
-		} else {
-			emil_strlcat((char *)ins_undo->data, (char *)row->chars,
-				     ins_undo->datasize);
+		/* Remainder of row after topx */
+		if (pre_len == topx && topx < row->size) {
+			int tail = row->size - topx;
+			memcpy(&out[pos], &row->chars[topx], tail);
+			pos += tail;
 		}
 	}
-	ins_undo->datalen = strlen((char *)ins_undo->data);
-	ins_undo->endx = E.buf->row[boty].size;
+	out[pos] = 0;
+	free(slice);
 
-	free(string);
+	/* Undo record: delete old content (paired with extension if any) */
+	struct undo *del = newUndo();
+	del->startx = 0;
+	del->starty = topy;
+	del->endx = buf->row[boty].size;
+	del->endy = boty;
+	del->delete = 1;
+	del->append = 0;
+	del->paired = extralines ? 1 : 0;
+	undoReplaceData(del, old_len + 1);
+	memcpy(del->data, old_text, old_len);
+	del->data[old_len] = 0;
+	del->datalen = old_len;
+	pushUndo(buf, del);
 
-	E.buf->dirty = 1;
-	updateBuffer(E.buf);
+	/* Perform deletion */
+	bulkDelete(buf, 0, topy, buf->row[boty].size, boty);
+
+	/* Compute insert end position */
+	int iex = 0, iey = topy;
+	for (int i = 0; i < pos; i++) {
+		if (out[i] == '\n') {
+			iey++;
+			iex = 0;
+		} else {
+			iex++;
+		}
+	}
+
+	/* Undo record: insert new content */
+	struct undo *ins = newUndo();
+	ins->startx = 0;
+	ins->starty = topy;
+	ins->endx = iex;
+	ins->endy = iey;
+	ins->delete = 0;
+	ins->append = 0;
+	ins->paired = 1;
+	undoReplaceData(ins, pos + 1);
+	memcpy(ins->data, out, pos);
+	ins->data[pos] = 0;
+	ins->datalen = pos;
+	pushUndo(buf, ins);
+
+	/* Perform insertion */
+	bulkInsert(buf, 0, topy, out, pos);
+
+	buf->cx = topx;
+	buf->cy = topy;
+	buf->dirty = 1;
+	updateBuffer(buf);
+
+	free(old_text);
+	free(out);
 	clearMarkQuiet();
 	clearText(&E.kill);
 	E.kill = saved;

@@ -18,6 +18,7 @@ void clearRedos(struct buffer *buf);
 void clearUndosAndRedos(struct buffer *buf);
 void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
 		int datalen);
+void bulkDelete(struct buffer *buf, int startx, int starty, int endx, int endy);
 void undoSelfInsert(uint8_t c, int count);
 
 #ifdef EMIL_DEBUG_UNDO

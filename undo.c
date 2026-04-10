@@ -142,9 +142,9 @@ void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
 
 /* Bulk-delete text from (startx, starty) to (endx, endy).
  * Uses direct memmove/memcpy and delRow — no character-at-a-time
- * primitives.  Does NOT record undo. */
-static void bulkDelete(struct buffer *buf, int startx, int starty, int endx,
-		       int endy) {
+ * primitives.  Does NOT record undo.  Calls adjustAllPoints. */
+void bulkDelete(struct buffer *buf, int startx, int starty, int endx,
+		int endy) {
 	if (buf->numrows == 0 || starty >= buf->numrows)
 		return;
 

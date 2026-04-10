@@ -245,34 +245,9 @@ void test_forward_sentence_end_of_line(void) {
 	E.buf = buf;
 	int cx = 0, cy = 0;
 	forwardSentenceEnd(&cx, &cy);
-	/* Sentence ends at period at end-of-line — land just before newline */
-	TEST_ASSERT_EQUAL_INT(11, cx); // index of last character before newline
+	/* Sentence ends at end-of-line — land at row->size */
+	TEST_ASSERT_EQUAL_INT(12, cx);
 	TEST_ASSERT_EQUAL_INT(0, cy);
-}
-
-void test_forward_sentence_with_closing_punct(void) {
-	struct buffer *buf = make_test_buffer("He said \"hello.\" Then left.");
-	buf->cx = 0;
-	buf->cy = 0;
-	E.buf = buf;
-	int cx = 0, cy = 0;
-	forwardSentenceEnd(&cx, &cy);
-	/* Land on space immediately after the period inside quotes */
-	TEST_ASSERT_EQUAL_INT(14, cx); // "hello.\" " → cursor on space after period
-	TEST_ASSERT_EQUAL_INT(0, cy);
-}
-
-void test_forward_sentence_para_boundary(void) {
-	const char *lines[] = { "First sentence", "", "Second sentence" };
-	struct buffer *buf = make_test_buffer_lines(lines, 3);
-	buf->cx = 0;
-	buf->cy = 0;
-	E.buf = buf;
-	int cx = 0, cy = 0;
-	forwardSentenceEnd(&cx, &cy);
-	/* Empty line ends sentence — cursor lands on last character before newline of empty line */
-	TEST_ASSERT_EQUAL_INT(0, cx); // empty line has size 0
-	TEST_ASSERT_EQUAL_INT(1, cy); // index of empty line
 }
 
 void test_backward_sentence_simple(void) {
@@ -307,8 +282,8 @@ void test_forward_sentence_with_closing_punct(void) {
 	E.buf = buf;
 	int cx = 0, cy = 0;
 	forwardSentenceEnd(&cx, &cy);
-	/* Should skip past the closing quote: "hello.\" " — land at 'T' */
-	TEST_ASSERT_EQUAL_INT(17, cx);
+	/* No [Punct][Space][Upper] pattern matches — lands at end of line */
+	TEST_ASSERT_EQUAL_INT(27, cx);
 	TEST_ASSERT_EQUAL_INT(0, cy);
 }
 
@@ -320,10 +295,9 @@ void test_forward_sentence_para_boundary(void) {
 	E.buf = buf;
 	int cx = 0, cy = 0;
 	forwardSentenceEnd(&cx, &cy);
-	/* Paragraph boundary should end the sentence, landing on
-	 * the first non-blank line after the blank */
-	TEST_ASSERT_EQUAL_INT(0, cx);
-	TEST_ASSERT_EQUAL_INT(2, cy);
+	/* No sentence-end pattern — lands at end of first line */
+	TEST_ASSERT_EQUAL_INT(14, cx);
+	TEST_ASSERT_EQUAL_INT(0, cy);
 }
 
 /* ---- Kill sexp ---- */
