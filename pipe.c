@@ -25,6 +25,7 @@
 #include <unistd.h>
 
 #include "buffer.h"
+#include "dbuf.h"
 #include "display.h"
 #include "emil.h"
 #include "fileio.h"
@@ -41,8 +42,6 @@ extern struct config E;
 static uint8_t *cmd;
 
 static uint8_t *transformerPipeCmd(uint8_t *input) {
-	int bsiz = BUFSIZ + 1;
-	char *buf = xcalloc(1, bsiz);
 	/* Using sh -c lets us use pipes and stuff and takes care of quoting. */
 	const char *command_line[4] = { "/bin/sh", "-c", (char *)cmd, NULL };
 	struct subprocess_s subprocess;
@@ -52,7 +51,6 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 	if (result) {
 		setStatusMessage(
 			"Shell command failed: unable to create subprocess");
-		free(buf);
 		return NULL;
 	}
 	FILE *p_stdin = subprocess_stdin(&subprocess);
@@ -71,7 +69,6 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 		setStatusMessage(
 			"Shell command failed: error waiting for subprocess");
 		subprocess_destroy(&subprocess);
-		free(buf);
 		return NULL;
 	}
 
@@ -82,27 +79,21 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 	}
 
 	/* Read stdout of process into buffer */
+	struct dbuf d = DBUF_INIT;
 	int c = fgetc(p_stdout);
-	int i = 0;
 	while (c != EOF) {
-		buf[i++] = c;
-		buf[i] = 0;
-		if (i >= bsiz - 10) {
-			bsiz <<= 1;
-			char *newbuf = xrealloc(buf, bsiz);
-			buf = newbuf;
-		}
+		dbuf_byte(&d, (uint8_t)c);
 		c = fgetc(p_stdout);
 	}
 
 	/* Only show byte count if subprocess succeeded */
 	if (sub_ret == 0) {
-		setStatusMessage(msg_shell_read_bytes, i);
+		setStatusMessage(msg_shell_read_bytes, d.len);
 	}
 
-	/* Cleanup & return — caller frees buf */
+	/* Cleanup & return — caller frees result */
 	subprocess_destroy(&subprocess);
-	return (uint8_t *)buf;
+	return dbuf_detach(&d, NULL);
 }
 
 uint8_t *editorPipe(int useRegion) {
@@ -286,19 +277,14 @@ void diffBufferWithFile(void) {
 	subprocess_join(&subprocess, &sub_ret);
 
 	FILE *p_stdout = subprocess_stdout(&subprocess);
-	int bsiz = BUFSIZ + 1;
-	char *output = xcalloc(1, bsiz);
+	struct dbuf d = DBUF_INIT;
 	int c = fgetc(p_stdout);
-	int i = 0;
 	while (c != EOF) {
-		output[i++] = c;
-		output[i] = 0;
-		if (i >= bsiz - 10) {
-			bsiz <<= 1;
-			output = xrealloc(output, bsiz);
-		}
+		dbuf_byte(&d, (uint8_t)c);
 		c = fgetc(p_stdout);
 	}
+	int output_len;
+	char *output = (char *)dbuf_detach(&d, &output_len);
 
 	subprocess_destroy(&subprocess);
 	unlink(tmpname);
@@ -311,7 +297,7 @@ void diffBufferWithFile(void) {
 		return;
 	}
 
-	if (sub_ret >= 2 || i == 0) {
+	if (sub_ret >= 2 || output_len == 0) {
 		free(output);
 		setStatusMessage(msg_diff_failed, sub_ret);
 		return;
@@ -325,9 +311,9 @@ void diffBufferWithFile(void) {
 
 	size_t rowStart = 0;
 	size_t rowLen = 0;
-	size_t outputLen = (size_t)i;
-	for (size_t j = 0; j < outputLen; j++) {
-		if (output[j] == '\n' || j == outputLen - 1) {
+	size_t outLen = (size_t)output_len;
+	for (size_t j = 0; j < outLen; j++) {
+		if (output[j] == '\n' || j == outLen - 1) {
 			insertRow(diffBuf, diffBuf->numrows, &output[rowStart],
 				  rowLen);
 			rowStart = j + 1;

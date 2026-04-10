@@ -1,5 +1,6 @@
 #include "mutate.h"
 #include "buffer.h"
+#include "dbuf.h"
 #include "undo.h"
 #include "util.h"
 #include <stdint.h>
@@ -8,9 +9,7 @@
 
 uint8_t *collectRegionText(struct buffer *buf, int startx, int starty, int endx,
 			   int endy, int *out_len) {
-	int cap = 64;
-	uint8_t *out = xmalloc(cap);
-	int pos = 0;
+	struct dbuf d = DBUF_INIT;
 	int lx = startx;
 	int ly = starty;
 
@@ -19,25 +18,15 @@ uint8_t *collectRegionText(struct buffer *buf, int startx, int starty, int endx,
 		if (ly > endy || ly >= buf->numrows)
 			break;
 		if (lx >= buf->row[ly].size) {
-			if (pos + 2 >= cap) {
-				cap *= 2;
-				out = xrealloc(out, cap);
-			}
-			out[pos++] = '\n';
+			dbuf_byte(&d, '\n');
 			ly++;
 			lx = 0;
 		} else {
-			if (pos + 2 >= cap) {
-				cap *= 2;
-				out = xrealloc(out, cap);
-			}
-			out[pos++] = buf->row[ly].chars[lx];
+			dbuf_byte(&d, buf->row[ly].chars[lx]);
 			lx++;
 		}
 	}
-	out[pos] = 0;
-	*out_len = pos;
-	return out;
+	return dbuf_detach(&d, out_len);
 }
 
 /* Compute the end position after inserting 'len' bytes of 'text'

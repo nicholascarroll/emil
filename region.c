@@ -1,6 +1,7 @@
 #include "region.h"
 #include "adjust.h"
 #include "buffer.h"
+#include "dbuf.h"
 #include "display.h"
 #include "emil.h"
 #include "history.h"
@@ -515,9 +516,7 @@ void replaceRegex(void) {
 					      buf->marky, &old_len);
 
 	/* Build replacement text line by line */
-	int cap = old_len + 128;
-	uint8_t *out = xmalloc(cap);
-	int pos = 0;
+	struct dbuf d = DBUF_INIT;
 	int made = 0;
 
 	for (int i = buf->cy; i <= buf->marky; i++) {
@@ -540,47 +539,29 @@ void replaceRegex(void) {
 				do_replace = 1;
 		}
 
-		if (i > buf->cy) {
-			if (pos + 1 >= cap) {
-				cap *= 2;
-				out = xrealloc(out, cap);
-			}
-			out[pos++] = '\n';
-		}
+		if (i > buf->cy)
+			dbuf_byte(&d, '\n');
 
 		if (!do_replace) {
-			int n = rend - rstart;
-			while (pos + n + 1 >= cap) {
-				cap *= 2;
-				out = xrealloc(out, cap);
-			}
-			memcpy(&out[pos], &row->chars[rstart], n);
-			pos += n;
+			dbuf_append(&d, &row->chars[rstart], rend - rstart);
 		} else {
 			made++;
 			int pre = mstart - rstart;
 			int post_src = mstart + mlen;
 			int post_n = rend - post_src;
-			int need = pre + replen + post_n;
-			while (pos + need + 1 >= cap) {
-				cap *= 2;
-				out = xrealloc(out, cap);
-			}
-			memcpy(&out[pos], &row->chars[rstart], pre);
-			pos += pre;
-			memcpy(&out[pos], repl, replen);
-			pos += replen;
-			memcpy(&out[pos], &row->chars[post_src], post_n);
-			pos += post_n;
+			dbuf_append(&d, &row->chars[rstart], pre);
+			dbuf_append(&d, repl, replen);
+			dbuf_append(&d, &row->chars[post_src], post_n);
 		}
 	}
-	out[pos] = 0;
+	int out_len;
+	uint8_t *out = dbuf_detach(&d, &out_len);
 
 	uint8_t *okill = saveKill();
 
 	int ex, ey;
 	mutateReplace(buf, buf->cx, buf->cy, buf->markx, buf->marky, old_text,
-		      old_len, out, pos, &ex, &ey);
+		      old_len, out, out_len, &ex, &ey);
 
 	buf->cx = ex;
 	buf->cy = ey;
@@ -621,55 +602,40 @@ void stringRectangle(void) {
 
 	/* Build replacement text: for each row, replace columns [topx..botx)
 	 * with 'string', padding short rows with spaces as needed. */
-	int nrows = boty - topy + 1;
-	int cap = old_len + nrows * (slen + 1) + 1;
-	uint8_t *out = xmalloc(cap);
-	int pos = 0;
+	struct dbuf d = DBUF_INIT;
 
 	for (int i = topy; i <= boty; i++) {
 		erow *row = &buf->row[i];
 		if (i > topy)
-			out[pos++] = '\n';
+			dbuf_byte(&d, '\n');
 
 		/* Pre-rectangle portion [0..topx) */
 		if (topx > 0) {
 			int avail = row->size;
-			int n = topx;
-			int copy_n = (n < avail) ? n : avail;
-			while (pos + n + slen + row->size + 2 >= cap) {
-				cap *= 2;
-				out = xrealloc(out, cap);
-			}
+			int copy_n = (topx < avail) ? topx : avail;
 			if (copy_n > 0)
-				memcpy(&out[pos], row->chars, copy_n);
+				dbuf_append(&d, row->chars, copy_n);
 			/* Pad if row shorter than topx */
-			int pad = n - copy_n;
+			int pad = topx - copy_n;
 			if (pad > 0)
-				memset(&out[pos + copy_n], ' ', pad);
-			pos += n;
+				dbuf_pad(&d, ' ', pad);
 		}
 
 		/* The replacement string */
-		while (pos + slen + row->size + 2 >= cap) {
-			cap *= 2;
-			out = xrealloc(out, cap);
-		}
-		memcpy(&out[pos], string, slen);
-		pos += slen;
+		dbuf_append(&d, string, slen);
 
 		/* Post-rectangle portion [botx..row->size) */
 		int eff_botx = (botx > row->size) ? row->size : botx;
-		if (eff_botx < row->size) {
-			int n = row->size - eff_botx;
-			memcpy(&out[pos], &row->chars[eff_botx], n);
-			pos += n;
-		}
+		if (eff_botx < row->size)
+			dbuf_append(&d, &row->chars[eff_botx],
+				    row->size - eff_botx);
 	}
-	out[pos] = 0;
+	int out_len;
+	uint8_t *out = dbuf_detach(&d, &out_len);
 
 	int ex, ey;
 	mutateReplace(buf, 0, topy, region_endx, boty, old_text, old_len, out,
-		      pos, &ex, &ey);
+		      out_len, &ex, &ey);
 
 	buf->cx = topx;
 	buf->cy = topy;
@@ -758,36 +724,31 @@ void killRectangle(void) {
 
 	/* Build post-deletion text: each row with columns [topx..botx)
 	 * removed.  Full rows — matching the full-row region. */
-	int cap = old_len + rh + 1;
-	uint8_t *out = xmalloc(cap);
-	int pos = 0;
+	struct dbuf d = DBUF_INIT;
 
 	for (int i = topy; i <= boty; i++) {
 		erow *row = &buf->row[i];
 		if (i > topy)
-			out[pos++] = '\n';
+			dbuf_byte(&d, '\n');
 
 		/* Portion before rectangle */
 		if (topx > 0) {
 			int n = (topx > row->size) ? row->size : topx;
-			if (n > 0) {
-				memcpy(&out[pos], row->chars, n);
-				pos += n;
-			}
+			if (n > 0)
+				dbuf_append(&d, row->chars, n);
 		}
 		/* Portion after rectangle */
 		int eff_botx = (botx > row->size) ? row->size : botx;
-		if (eff_botx < row->size) {
-			int n = row->size - eff_botx;
-			memcpy(&out[pos], &row->chars[eff_botx], n);
-			pos += n;
-		}
+		if (eff_botx < row->size)
+			dbuf_append(&d, &row->chars[eff_botx],
+				    row->size - eff_botx);
 	}
-	out[pos] = 0;
+	int out_len;
+	uint8_t *out = dbuf_detach(&d, &out_len);
 
 	int ex, ey;
 	mutateReplace(buf, 0, topy, region_endx, boty, old_text, old_len, out,
-		      pos, &ex, &ey);
+		      out_len, &ex, &ey);
 
 	buf->cx = topx;
 	buf->cy = topy;
@@ -855,45 +816,33 @@ void yankRectangle(void) {
 					      boty, &old_len);
 
 	/* Build new text: for each row, insert rectangle slice at topx */
-	int cap = old_len + rw * rh + rh + 1;
-	uint8_t *out = xmalloc(cap);
-	int pos = 0;
+	struct dbuf d = DBUF_INIT;
 	char *slice = xcalloc(rw + 1, 1);
 
 	for (int idx = 0; idx < rh; idx++) {
 		int cur = topy + idx;
 		erow *row = &buf->row[cur];
 		if (idx > 0)
-			out[pos++] = '\n';
+			dbuf_byte(&d, '\n');
 
 		strncpy(slice, (char *)&saved.str[idx * rw], rw);
 
 		/* Row content before topx (with space padding) */
 		int pre_len = (row->size < topx) ? row->size : topx;
-		while (pos + topx + rw + row->size + 2 >= cap) {
-			cap *= 2;
-			out = xrealloc(out, cap);
-		}
-		memcpy(&out[pos], row->chars, pre_len);
-		pos += pre_len;
+		dbuf_append(&d, row->chars, pre_len);
 		int pad = topx - pre_len;
-		if (pad > 0) {
-			memset(&out[pos], ' ', pad);
-			pos += pad;
-		}
+		if (pad > 0)
+			dbuf_pad(&d, ' ', pad);
 
 		/* Rectangle slice */
-		memcpy(&out[pos], slice, rw);
-		pos += rw;
+		dbuf_append(&d, (uint8_t *)slice, rw);
 
 		/* Remainder of row after topx */
-		if (pre_len == topx && topx < row->size) {
-			int tail = row->size - topx;
-			memcpy(&out[pos], &row->chars[topx], tail);
-			pos += tail;
-		}
+		if (pre_len == topx && topx < row->size)
+			dbuf_append(&d, &row->chars[topx], row->size - topx);
 	}
-	out[pos] = 0;
+	int pos;
+	uint8_t *out = dbuf_detach(&d, &pos);
 	free(slice);
 
 	/* Undo record: delete old content (paired with extension if any) */
