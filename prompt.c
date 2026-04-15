@@ -157,8 +157,7 @@ uint8_t *editorPrompt(struct buffer *bufr, const uint8_t *prompt,
 
 		case '\t':
 			if (t == PROMPT_FILES || t == PROMPT_DIR ||
-			    t == PROMPT_COMMAND || t == PROMPT_BUFFER ||
-			    t == PROMPT_SEARCH) {
+			    t == PROMPT_COMMAND || t == PROMPT_BUFFER) {
 				handleMinibufferCompletion(E.minibuf, t);
 			} else {
 				insertChar(E.minibuf, '\t', 1);
