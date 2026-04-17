@@ -683,8 +683,11 @@ static int is_punct(char c) {
 int isSentenceBoundary(erow *row, int x) {
 	if (x < 2)
 		return 0;
-	return is_punct(row->chars[x - 2]) && row->chars[x - 1] == ' ' &&
-	       isupper((unsigned char)row->chars[x]);
+	return (is_punct(row->chars[x - 2]) && row->chars[x - 1] == ' ' &&
+		isupper((unsigned char)row->chars[x])) ||
+	       (is_punct(row->chars[x - 3]) && row->chars[x - 2] == ' ' &&
+		row->chars[x - 1] == ' ' &&
+		isupper((unsigned char)row->chars[x]));
 }
 
 /**
@@ -701,7 +704,8 @@ int forwardSentenceEnd(int *cx, int *cy) {
 		for (; x < row->size; x++) {
 			// Check for [Punct][Space][Upper] pattern
 			if (is_punct(row->chars[x]) &&
-			    isSentenceBoundary(row, x + 2)) {
+			    (isSentenceBoundary(row, x + 2) ||
+			     isSentenceBoundary(row, x + 3))) {
 				int pot_x = x + 1; // Target is the space
 				if (y > start_y || pot_x > start_x) {
 					*cx = pot_x;

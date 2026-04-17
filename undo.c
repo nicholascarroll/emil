@@ -45,7 +45,7 @@ void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
 		memcpy(&row->chars[startx], data, datalen);
 		row->size += datalen;
 		row->cached_width = -1;
-		buf->dirty = 1;
+		markBufferDirty(buf);
 		invalidateScreenCache(buf);
 		adjustAllPoints(buf, startx, starty, startx + datalen, starty,
 				0);
@@ -114,7 +114,7 @@ void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
 				  combined_len);
 			free(combined);
 			free(suffix);
-			buf->dirty = 1;
+			markBufferDirty(buf);
 			invalidateScreenCache(buf);
 			adjustAllPoints(buf, startx, starty, ins_endx, ins_endy,
 					0);
@@ -135,7 +135,7 @@ void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
 		insertRow(buf, insert_at, "", 0);
 	}
 	free(suffix);
-	buf->dirty = 1;
+	markBufferDirty(buf);
 	invalidateScreenCache(buf);
 	adjustAllPoints(buf, startx, starty, ins_endx, ins_endy, 0);
 }
@@ -158,7 +158,7 @@ void bulkDelete(struct buffer *buf, int startx, int starty, int endx,
 			row->size - endx + 1); /* +1 for NUL */
 		row->size -= endx - startx;
 		row->cached_width = -1;
-		buf->dirty = 1;
+		markBufferDirty(buf);
 		invalidateScreenCache(buf);
 	} else {
 		/* Multi-row deletion:
@@ -184,7 +184,7 @@ void bulkDelete(struct buffer *buf, int startx, int starty, int endx,
 		first->chars[first->size] = '\0';
 		first->cached_width = -1;
 		delRow(buf, starty + 1);
-		buf->dirty = 1;
+		markBufferDirty(buf);
 		invalidateScreenCache(buf);
 	}
 }
@@ -202,7 +202,7 @@ void doUndo(struct buffer *buf, int count) {
 		if (buf->undo == NULL) {
 			setStatusMessage(msg_no_undo);
 			if (!buf->undo_pruned && !buf->internal_mod) {
-				buf->dirty = 0;
+				markBufferClean(buf);
 			}
 			return;
 		}

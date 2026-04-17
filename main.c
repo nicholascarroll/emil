@@ -290,6 +290,7 @@ int main(int argc, char *argv[]) {
 	E.minibuf->single_line = 1;
 	E.minibuf->word_wrap = 0;
 	E.minibuf->filename = xstrdup("*minibuffer*");
+	E.minibuf->special_buffer = 1;
 	E.edbuf = E.buf;
 	computeDisplayNames();
 

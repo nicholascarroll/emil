@@ -894,7 +894,7 @@ void yankRectangle(void) {
 
 	buf->cx = topx;
 	buf->cy = topy;
-	buf->dirty = 1;
+	markBufferDirty(buf);
 	updateBuffer(buf);
 
 	free(old_text);

@@ -27,4 +27,12 @@ void closeSpecialBuffer(const char *name);
 char *leftTruncate(const char *s, int max_width);
 int nameFit(const char *name, int formatted_len);
 
+/* Dirty-state transitions.  markBufferDirty acquires the advisory
+ * file lock on the clean→dirty edge; markBufferClean releases it on
+ * the dirty→clean edge.  Both are idempotent: calling markBufferDirty
+ * on an already-dirty buffer, or markBufferClean on an already-clean
+ * buffer, is a no-op. */
+void markBufferDirty(struct buffer *buf);
+void markBufferClean(struct buffer *buf);
+
 #endif

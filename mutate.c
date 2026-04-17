@@ -100,7 +100,7 @@ void mutateReplace(struct buffer *buf, int startx, int starty, int endx,
 		bulkInsert(buf, startx, starty, repl, repl_len);
 	}
 
-	buf->dirty = 1;
+	markBufferDirty(buf);
 	updateBuffer(buf);
 
 	if (out_endx)

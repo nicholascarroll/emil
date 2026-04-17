@@ -71,7 +71,8 @@ $CC $TEST_CFLAGS $SANITIZER_FLAGS -c tests/stubs.c -o tests/stubs.o 2>&1 || {
 TEST_OBJECTS="wcwidth.o unicode.o buffer.o region.o undo.o transform.o \
     find.o pipe.o register.o fileio.o display.o message.o keymap.o \
     edit.o prompt.o util.o completion.o history.o base64.o abuf.o \
-    window.o clang.o adjust.o mutate.o wrap.o motion.o dbuf.o tests/stubs.o"
+    window.o clang.o adjust.o mutate.o wrap.o motion.o dbuf.o \
+    emil_subprocess.o tests/stubs.o"
 
 echo "Unit tests:"
 

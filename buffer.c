@@ -18,6 +18,38 @@
 
 extern struct config E;
 
+/* Dirty-state transitions.  Editing the content mutates many places,
+ * so they all route through these two helpers rather than touching
+ * buf->dirty directly.  The advisory file lock tracks the dirty
+ * state: we hold the lock while the buffer has unsaved changes, and
+ * release it the moment the buffer matches what's on disk.
+ *
+ * Special / nameless  buffer  never get locked.  Lock-acquisition
+ * failures during editing are tolerated: we honour the user's edit
+ * (the buffer is already modified by the time we're called) and
+ * leave whatever status message lockFile posted in place. */
+
+void markBufferDirty(struct buffer *buf) {
+	if (buf->dirty)
+		return;
+	buf->dirty = 1;
+	if (buf->filename == NULL || buf->special_buffer || buf->read_only)
+		return;
+	if (buf->lock_fd >= 0)
+		return; /* already locked (e.g. from previous session) */
+	char *iopath = expandTilde(buf->filename);
+	(void)lockFile(buf, iopath);
+	free(iopath);
+}
+
+void markBufferClean(struct buffer *buf) {
+	if (!buf->dirty)
+		return;
+	buf->dirty = 0;
+	if (buf->lock_fd >= 0)
+		releaseLock(buf);
+}
+
 void insertRow(struct buffer *bufr, int at, char *s, size_t len) {
 	if (at < 0 || at > bufr->numrows)
 		return;
@@ -44,7 +76,7 @@ void insertRow(struct buffer *bufr, int at, char *s, size_t len) {
 	bufr->row[at].cached_width = -1;
 
 	bufr->numrows++;
-	bufr->dirty = 1;
+	markBufferDirty(bufr);
 	invalidateScreenCache(bufr);
 }
 
@@ -69,7 +101,7 @@ void delRow(struct buffer *bufr, int at) {
 			sizeof(erow) * (bufr->numrows - at - 1));
 		bufr->numrows--;
 	}
-	bufr->dirty = 1;
+	markBufferDirty(bufr);
 	invalidateScreenCache(bufr);
 }
 
@@ -88,7 +120,7 @@ void rowInsertChar(struct buffer *bufr, erow *row, int at, int c) {
 	memmove(&row->chars[at + 1], &row->chars[at], row->size - at + 1);
 	row->size++;
 	row->chars[at] = c;
-	bufr->dirty = 1;
+	markBufferDirty(bufr);
 	row->cached_width = -1;
 	invalidateScreenCache(bufr);
 }
@@ -114,7 +146,7 @@ void rowInsertUnicode(struct buffer *bufr, erow *row, int at) {
 	row->size += E.nunicode;
 	memcpy(&row->chars[at], E.unicode, E.nunicode);
 	row->cached_width = -1;
-	bufr->dirty = 1;
+	markBufferDirty(bufr);
 	invalidateScreenCache(bufr);
 }
 
@@ -134,7 +166,7 @@ void rowAppendString(struct buffer *bufr, erow *row, char *s, size_t len) {
 	row->size += len;
 	row->chars[row->size] = '\0';
 	row->cached_width = -1;
-	bufr->dirty = 1;
+	markBufferDirty(bufr);
 	invalidateScreenCache(bufr);
 }
 
@@ -148,7 +180,7 @@ void rowDelChar(struct buffer *bufr, erow *row, int at) {
 		row->size - ((at + size) - 1));
 	row->size -= size;
 	row->cached_width = -1;
-	bufr->dirty = 1;
+	markBufferDirty(bufr);
 	invalidateScreenCache(bufr);
 }
 

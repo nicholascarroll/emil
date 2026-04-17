@@ -154,9 +154,18 @@ void pipeCmd(int useRegion) {
 			return;
 		}
 
-		struct buffer *newBuf = newBuffer();
-		newBuf->filename = xstrdup("*Shell Output*");
-		newBuf->special_buffer = 1;
+		struct buffer *shellBuf =
+			findOrCreateSpecialBuffer("*Shell Output*");
+
+		/* Singleton buffer — clear any content left over from a
+		 * previous shell invocation and reset cursor/mark so stale
+		 * positions don't dangle past the new content. */
+		clearBuffer(shellBuf);
+		shellBuf->cx = 0;
+		shellBuf->cy = 0;
+		shellBuf->markx = -1;
+		shellBuf->marky = -1;
+		shellBuf->mark_active = 0;
 
 		// Use a temporary buffer to build each row
 		size_t rowStart = 0;
@@ -164,7 +173,7 @@ void pipeCmd(int useRegion) {
 
 		for (size_t i = 0; i < outputLen; i++) {
 			if (pipeOutput[i] == '\n') {
-				insertRow(newBuf, newBuf->numrows,
+				insertRow(shellBuf, shellBuf->numrows,
 					  (char *)&pipeOutput[rowStart],
 					  rowLen);
 				rowStart = i + 1;
@@ -172,28 +181,38 @@ void pipeCmd(int useRegion) {
 			} else {
 				rowLen++;
 				if (i == outputLen - 1) {
-					insertRow(newBuf, newBuf->numrows,
+					insertRow(shellBuf, shellBuf->numrows,
 						  (char *)&pipeOutput[rowStart],
 						  rowLen);
 				}
 			}
 		}
 
-		// Link the new buffer and update focus
-		if (E.headbuf == NULL) {
-			E.headbuf = newBuf;
-		} else {
-			struct buffer *temp = E.headbuf;
-			while (temp->next != NULL) {
-				temp = temp->next;
-			}
-			temp->next = newBuf;
-		}
-		E.buf = newBuf;
+		updateBuffer(shellBuf);
 
-		// Update the focused window
-		int idx = windowFocusedIdx();
-		E.windows[idx]->buf = E.buf;
+		/* Route the shell output to a window.  If a window is
+		 * already showing *Shell Output*, move focus there instead
+		 * of hijacking the current window.  Otherwise, swap the
+		 * current window's buffer to shellBuf (original behaviour). */
+		int existing = findBufferWindow(shellBuf);
+		if (existing >= 0) {
+			int curIdx = windowFocusedIdx();
+			if (existing != curIdx) {
+				/* Save the current window's view state
+				 * before moving focus. */
+				struct window *cur = E.windows[curIdx];
+				cur->cx = cur->buf->cx;
+				cur->cy = cur->buf->cy;
+				cur->focused = 0;
+				E.windows[existing]->focused = 1;
+			}
+			E.buf = shellBuf;
+			synchronizeBufferCursor(shellBuf, E.windows[existing]);
+		} else {
+			int idx = windowFocusedIdx();
+			E.windows[idx]->buf = shellBuf;
+			E.buf = shellBuf;
+		}
 		refreshScreen();
 
 		free(pipeOutput);
@@ -303,10 +322,17 @@ void diffBufferWithFile(void) {
 		return;
 	}
 
-	/* Create a *Diff* buffer with the output */
-	struct buffer *diffBuf = newBuffer();
-	diffBuf->filename = xstrdup("*Diff*");
-	diffBuf->special_buffer = 1;
+	struct buffer *diffBuf = findOrCreateSpecialBuffer("*Diff*");
+
+	/* Singleton buffer — clear any content left over from a
+	 * previous diff and reset cursor/mark so stale positions
+	 * don't dangle past the new content. */
+	clearBuffer(diffBuf);
+	diffBuf->cx = 0;
+	diffBuf->cy = 0;
+	diffBuf->markx = -1;
+	diffBuf->marky = -1;
+	diffBuf->mark_active = 0;
 	diffBuf->read_only = 1;
 
 	size_t rowStart = 0;
@@ -323,20 +349,29 @@ void diffBufferWithFile(void) {
 		}
 	}
 
-	/* Link the new buffer into the buffer list */
-	if (E.headbuf == NULL) {
-		E.headbuf = diffBuf;
-	} else {
-		struct buffer *temp = E.headbuf;
-		while (temp->next != NULL) {
-			temp = temp->next;
-		}
-		temp->next = diffBuf;
-	}
-	E.buf = diffBuf;
+	updateBuffer(diffBuf);
 
-	int idx = windowFocusedIdx();
-	E.windows[idx]->buf = E.buf;
+	/* Route the diff output to a window.  If a window is already
+	 * showing *Diff*, move focus there instead of hijacking the
+	 * current window.  Otherwise, swap the current window's
+	 * buffer to diffBuf. */
+	int existing = findBufferWindow(diffBuf);
+	if (existing >= 0) {
+		int curIdx = windowFocusedIdx();
+		if (existing != curIdx) {
+			struct window *cur = E.windows[curIdx];
+			cur->cx = cur->buf->cx;
+			cur->cy = cur->buf->cy;
+			cur->focused = 0;
+			E.windows[existing]->focused = 1;
+		}
+		E.buf = diffBuf;
+		synchronizeBufferCursor(diffBuf, E.windows[existing]);
+	} else {
+		int idx = windowFocusedIdx();
+		E.windows[idx]->buf = diffBuf;
+		E.buf = diffBuf;
+	}
 	refreshScreen();
 
 	free(output);

@@ -282,14 +282,19 @@ int editorOpen(struct buffer *bufr, char *filename) {
 		return -1;
 	}
 
-	bufr->dirty = 0;
+	markBufferClean(bufr);
 	if (access(iopath, W_OK) != 0) {
 		bufr->read_only = 1;
 	}
 
-	int lock_result = lockFile(bufr, iopath);
-	if (lock_result == -1) {
-		bufr->read_only = 1;
+	/* Record mtime for external-modification detection.  The lock
+	 * used to be acquired here as a side effect; under the "lock only
+	 * while dirty" policy (issue #49), the lock is deferred until the
+	 * buffer is actually modified — see markBufferDirty(). */
+	{
+		struct stat st;
+		if (stat(iopath, &st) == 0)
+			bufr->open_mtime = st.st_mtime;
 	}
 
 	free(iopath);
@@ -309,8 +314,7 @@ int editorOpen(struct buffer *bufr, char *filename) {
 		}
 	}
 
-	if (lock_result != -1)
-		setStatusMessage(msg_lines_columns, bufr->numrows, max_width);
+	setStatusMessage(msg_lines_columns, bufr->numrows, max_width);
 	return 0;
 }
 
@@ -355,12 +359,115 @@ void revert(void) {
 	destroyBuffer(buf);
 }
 
+static int writeAtomic(const char *iopath, const char *buf, size_t len) {
+	char tmpname[PATH_MAX];
+	snprintf(tmpname, sizeof(tmpname), "%s.tmpXXXXXX", iopath);
+
+	int fd = mkstemp(tmpname);
+	if (fd == -1)
+		return -1;
+
+	struct stat st;
+	if (stat(iopath, &st) == 0)
+		fchmod(fd, st.st_mode);
+
+	size_t total = 0;
+	while (total < len) {
+		ssize_t n = write(fd, buf + total, len - total);
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			close(fd);
+			unlink(tmpname);
+			return -1;
+		}
+		if (n == 0) {
+			close(fd);
+			unlink(tmpname);
+			errno = EIO;
+			return -1;
+		}
+		total += (size_t)n;
+	}
+
+	if (fsync(fd) == -1) {
+		close(fd);
+		unlink(tmpname);
+		return -1;
+	}
+
+	if (close(fd) == -1) {
+		unlink(tmpname);
+		return -1;
+	}
+
+	if (rename(tmpname, iopath) == -1) {
+		unlink(tmpname);
+		return -1;
+	}
+
+	return 0;
+}
+
+static int writeDirect(const char *iopath, const char *buf, size_t len) {
+	int fd = open(iopath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	if (fd == -1)
+		return -1;
+
+	size_t total = 0;
+	while (total < len) {
+		ssize_t n = write(fd, buf + total, len - total);
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			close(fd);
+			return -1;
+		}
+		if (n == 0) {
+			close(fd);
+			errno = EIO;
+			return -1;
+		}
+		total += (size_t)n;
+	}
+
+	if (fsync(fd) == -1) {
+		close(fd);
+		return -1;
+	}
+
+	return close(fd);
+}
+
+static int confirmOverwriteDirect(const char *msg) {
+	/* Suppress checkFileModified's "[FILE CHANGED ON DISK]" during
+	 * the prompt: refreshScreen() calls checkFileModified(), and a
+	 * failing writeAtomic() may have touched the file's mtime before
+	 * rolling back, which would print the stale-file warning on top
+	 * of our y/N prompt.  checkFileModified() no-ops when
+	 * open_mtime == 0, so zero it for the duration and restore
+	 * after. */
+	time_t saved_mtime = E.buf->open_mtime;
+	E.buf->open_mtime = 0;
+
+	setStatusMessage(msg);
+	refreshScreen();
+
+	int c = readKey();
+
+	setStatusMessage(""); /* clear prompt */
+
+	E.buf->open_mtime = saved_mtime;
+
+	return (c == 'y' || c == 'Y');
+}
+
 void save(void) {
-	/* Not allowed during macro record/playback */
 	if (E.recording || E.playback) {
 		setStatusMessage(msg_macro_blocked);
 		return;
 	}
+
 	if (E.buf->filename == NULL) {
 		char *input = (char *)editorPrompt(
 			E.buf, (uint8_t *)"Save as: %s", PROMPT_FILES, NULL);
@@ -374,75 +481,41 @@ void save(void) {
 		computeDisplayNames();
 	}
 
-	/* Resolve to an OS-usable path for all I/O */
 	char *iopath = expandTilde(E.buf->filename);
 
 	size_t len;
 	char *buf = rowsToString(E.buf, &len);
 
-	/* Build temp filename: <iopath>.tmpXXXXXX */
-	char tmpname[PATH_MAX];
-	snprintf(tmpname, sizeof(tmpname), "%s.tmpXXXXXX", iopath);
+	/* Try atomic write first */
+	if (writeAtomic(iopath, buf, len) == -1) {
+		if (errno == ENOSPC) {
+			if (!confirmOverwriteDirect(
+				    "Atomic save failed (disk space). Overwrite directly? (y/N)")) {
+				free(buf);
+				free(iopath);
+				setStatusMessage(msg_save_aborted);
+				return;
+			}
 
-	int fd = mkstemp(tmpname);
-	if (fd == -1) {
-		free(buf);
-		free(iopath);
-		setStatusMessage(msg_save_failed, strerror(errno));
-		return;
-	}
+			if (writeDirect(iopath, buf, len) == -1) {
+				free(buf);
+				free(iopath);
+				setStatusMessage(msg_save_failed,
+						 strerror(errno));
+				return;
+			}
 
-	/* Preserve permissions if file already exists */
-	struct stat st;
-	if (stat(iopath, &st) == 0) {
-		fchmod(fd, st.st_mode);
-	}
-
-	/* Write buffer fully, handling partial writes and EINTR */
-	size_t total = 0;
-	while (total < len) {
-		ssize_t n = write(fd, buf + total, len - total);
-		if (n < 0) {
-			if (errno == EINTR)
-				continue;
-			close(fd);
-			unlink(tmpname);
+		} else {
 			free(buf);
 			free(iopath);
 			setStatusMessage(msg_save_failed, strerror(errno));
 			return;
-		} else if (n == 0) {
-			close(fd);
-			unlink(tmpname);
-			free(buf);
-			free(iopath);
-			setStatusMessage(msg_save_failed);
-			return;
 		}
-		total += (size_t)n;
 	}
-
-	if (fsync(fd) == -1) {
-		close(fd);
-		unlink(tmpname);
-		free(buf);
-		free(iopath);
-		setStatusMessage(msg_save_failed, strerror(errno));
-		return;
-	}
-
-	close(fd);
-
-	if (rename(tmpname, iopath) == -1) {
-		unlink(tmpname);
-		free(buf);
-		free(iopath);
-		setStatusMessage(msg_save_failed, strerror(errno));
-		return;
-	}
+	/* Success  */
 
 	free(buf);
-	E.buf->dirty = 0;
+	markBufferClean(E.buf);
 
 	for (int i = 0; i < E.buf->numrows; i++) {
 		erow *row = &E.buf->row[i];
@@ -452,23 +525,23 @@ void save(void) {
 		}
 	}
 
-	/* Update stored mtime after save */
 	struct stat save_st;
 	if (stat(iopath, &save_st) == 0)
 		E.buf->open_mtime = save_st.st_mtime;
+
 	E.buf->external_mod = 0;
 	E.buf->internal_mod = 1;
 
-	if (E.buf->lock_fd < 0)
-		lockFile(E.buf, iopath);
-
-	free(iopath);
+	/* Lock is released on clean by markBufferClean above; reacquired
+	 * on the next clean→dirty transition. */
 
 	int n = snprintf(NULL, 0, msg_wrote_bytes, (int)len, E.buf->filename);
 	char *showName =
 		leftTruncate(E.buf->filename, nameFit(E.buf->filename, n));
 	setStatusMessage(msg_wrote_bytes, (int)len, showName);
 	free(showName);
+
+	free(iopath);
 }
 
 void saveAs(void) {
@@ -708,7 +781,7 @@ void insertFile(void) {
 	free(showName);
 	free(filename);
 
-	buf->dirty++;
+	markBufferDirty(buf);
 }
 
 /* Compute the relative path from directory 'from' to directory 'to'.
@@ -945,6 +1018,10 @@ struct buffer *loadStdinBuffer(const char *data, size_t len) {
 
 	struct buffer *buf = newBuffer();
 	buf->filename = xstrdup("*stdin*");
+	/* Set read_only before loading so markBufferDirty (called from
+	 * insertRow) short-circuits and doesn't attempt to lock a file
+	 * named "*stdin*" in the cwd. */
+	buf->read_only = 1;
 
 	size_t start = 0;
 	for (size_t i = 0; i < len; i++) {
@@ -967,8 +1044,7 @@ struct buffer *loadStdinBuffer(const char *data, size_t len) {
 			  (int)(end - start));
 	}
 
-	buf->dirty = 0;
-	buf->read_only = 1;
+	markBufferClean(buf);
 	buf->word_wrap = 1;
 	return buf;
 }
