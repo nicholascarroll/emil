@@ -193,8 +193,6 @@ Zap to char：剪切至指定字符（包含该字符）。
 将单词转为大写。
 .It Cm M-l
 将单词转为小写。
-.It Cm C-h
-删除前一个字符（退格键）。
 .It Cm DEL
 删除光标下的字符。
 .El
@@ -365,10 +363,6 @@ Zap to char：剪切至指定字符（包含该字符）。
 .Nm
 力求兼容 Emacs，但在 shell 集成和可用性方面存在特定差异：
 .Bl -tag -width Ds
-.It Cm C-h
-在 Emacs 中，这是帮助前缀键。在
-.Nm
-中，它绑定为退格键（Readline 兼容）。
 .It Cm C-c
 在 Emacs 中，这是用户自定义键绑定前缀。在
 .Nm

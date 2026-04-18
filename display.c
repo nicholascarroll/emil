@@ -1181,3 +1181,7 @@ void toggleVisualLineMode(void) {
 void editorVersion(void) {
 	setStatusMessage("emil " EMIL_VERSION);
 }
+
+void help(void) {
+	setStatusMessage(msg_help);
+}

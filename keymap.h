@@ -77,6 +77,7 @@ enum command_t {
 	/* Editing */
 	CMD_NEWLINE,
 	CMD_BACKSPACE,
+	CMD_HELP,
 	CMD_DELETE,
 	CMD_UNICODE,
 	CMD_UNICODE_ERROR,

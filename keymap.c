@@ -468,7 +468,7 @@ int resolveBinding(int key) {
 	case CTRL('g'):
 		return CMD_CANCEL;
 	case CTRL('h'):
-		return CMD_BACKSPACE;
+		return CMD_HELP;
 	case CTRL('j'):
 		return CMD_NEWLINE_INDENT;
 	case CTRL('k'):
@@ -623,6 +623,9 @@ static int dispatchEdit(int c, int uarg) {
 		return 1;
 	case CMD_BACKSPACE:
 		backSpace(uarg);
+		return 1;
+	case CMD_HELP:
+		help();
 		return 1;
 	case CMD_DELETE:
 		delChar(uarg);

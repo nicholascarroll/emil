@@ -151,6 +151,7 @@ static const char *const msg_diff_no_differences = "无差异";
 static const char *const msg_diff_failed = "Diff 失败 (退出状态 %d)";
 static const char *const msg_unknown_cx_x = "未知命令 C-x x %c";
 static const char *const msg_memory_limit = "打开文件总量超限";
+static const char *const msg_help = "文档：参见 shell 中的 `man emil`";
 
 #else
 
@@ -297,6 +298,8 @@ static const char *const msg_diff_no_differences = "No differences";
 static const char *const msg_diff_failed = "Diff failed (exit status %d)";
 static const char *const msg_unknown_cx_x = "Unknown command C-x x %c";
 static const char *const msg_memory_limit = "Open-file limit exceeded";
+static const char *const msg_help =
+	"Documentation: see `man emil` (in your shell).";
 
 #endif
 
