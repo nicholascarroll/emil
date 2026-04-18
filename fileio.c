@@ -68,7 +68,8 @@ int lockFile(struct buffer *bufr, const char *filename) {
 		return 0;
 	}
 
-	/* Lock failed — find out who holds it */
+	/* Lock failed — find out who holds it, record on the buffer for
+	 * the persistent status-bar warning. */
 	if (errno == EACCES || errno == EAGAIN) {
 		struct flock query;
 		memset(&query, 0, sizeof(query));
@@ -79,9 +80,9 @@ int lockFile(struct buffer *bufr, const char *filename) {
 
 		if (fcntl(fd, F_GETLK, &query) == 0 &&
 		    query.l_type != F_UNLCK) {
-			setStatusMessage(msg_file_locked, (int)query.l_pid);
+			bufr->lock_blocked_pid = (int)query.l_pid;
 		} else {
-			setStatusMessage(msg_file_locked, 0);
+			bufr->lock_blocked_pid = -1; /* unknown holder */
 		}
 	}
 
@@ -98,11 +99,14 @@ void releaseLock(struct buffer *bufr) {
 	}
 	bufr->open_mtime = 0;
 	bufr->external_mod = 0;
+	bufr->lock_blocked_pid = 0;
 }
 
 /* Check whether the underlying file has been modified externally.
- * Called periodically (e.g. from refreshScreen).  Sets bufr->external_mod
- * and fires a one-time status message. */
+ * Called periodically (from refreshScreen).  Sets bufr->external_mod
+ * which drives the persistent status-bar warning.  One-shot: returns
+ * immediately if the flag is already set, so the stat() cost is paid
+ * at most once per file until the user saves or reverts. */
 
 void checkFileModified(void) {
 	if (E.buf->filename == NULL || E.buf->open_mtime == 0)
@@ -113,10 +117,8 @@ void checkFileModified(void) {
 	char *iopath = expandTilde(E.buf->filename);
 	struct stat st;
 	if (stat(iopath, &st) == 0) {
-		if (st.st_mtime != E.buf->open_mtime) {
+		if (st.st_mtime != E.buf->open_mtime)
 			E.buf->external_mod = 1;
-			setStatusMessage(msg_file_changed_on_disk);
-		}
 	}
 	free(iopath);
 }
@@ -237,7 +239,7 @@ int editorOpen(struct buffer *bufr, char *filename) {
 		while (linelen > 0 &&
 		       (line[linelen - 1] == '\n' || line[linelen - 1] == '\r'))
 			linelen--;
-		insertRow(bufr, bufr->numrows, line, linelen);
+		appendRowRaw(bufr, line, linelen);
 	}
 
 	/* Get the display length of the longest column */
@@ -282,7 +284,14 @@ int editorOpen(struct buffer *bufr, char *filename) {
 		return -1;
 	}
 
-	markBufferClean(bufr);
+	/* The load used appendRowRaw which deliberately does not dirty
+	 * the buffer or invalidate per-row; invalidate the screen cache
+	 * once here now that all rows are in place.  The buffer is
+	 * already clean (newBuffer initialized it that way, and the
+	 * load did not touch dirty state), so no markBufferClean is
+	 * needed. */
+	invalidateScreenCache(bufr);
+
 	if (access(iopath, W_OK) != 0) {
 		bufr->read_only = 1;
 	}
@@ -357,6 +366,7 @@ void revert(void) {
 		new->cx = new->row[new->cy].size;
 	}
 	destroyBuffer(buf);
+	recheckMemoryBudget();
 }
 
 static int writeAtomic(const char *iopath, const char *buf, size_t len) {
@@ -542,6 +552,7 @@ void save(void) {
 	free(showName);
 
 	free(iopath);
+	recheckMemoryBudget();
 }
 
 void saveAs(void) {
@@ -742,7 +753,7 @@ void insertFile(void) {
 				       line[linelen - 1] == '\r')) {
 			linelen--;
 		}
-		insertRow(tmpbuf, tmpbuf->numrows, line, linelen);
+		appendRowRaw(tmpbuf, line, linelen);
 	}
 
 	free(line);
@@ -1018,10 +1029,6 @@ struct buffer *loadStdinBuffer(const char *data, size_t len) {
 
 	struct buffer *buf = newBuffer();
 	buf->filename = xstrdup("*stdin*");
-	/* Set read_only before loading so markBufferDirty (called from
-	 * insertRow) short-circuits and doesn't attempt to lock a file
-	 * named "*stdin*" in the cwd. */
-	buf->read_only = 1;
 
 	size_t start = 0;
 	for (size_t i = 0; i < len; i++) {
@@ -1030,8 +1037,8 @@ struct buffer *loadStdinBuffer(const char *data, size_t len) {
 			size_t end = i;
 			if (end > start && data[end - 1] == '\r')
 				end--;
-			insertRow(buf, buf->numrows, (char *)&data[start],
-				  (int)(end - start));
+			appendRowRaw(buf, (char *)&data[start],
+				     (int)(end - start));
 			start = i + 1;
 		}
 	}
@@ -1040,11 +1047,16 @@ struct buffer *loadStdinBuffer(const char *data, size_t len) {
 		size_t end = len;
 		if (end > start && data[end - 1] == '\r')
 			end--;
-		insertRow(buf, buf->numrows, (char *)&data[start],
-			  (int)(end - start));
+		appendRowRaw(buf, (char *)&data[start], (int)(end - start));
 	}
 
-	markBufferClean(buf);
+	/* Stdin content is read-only: the *stdin* pseudo-file has no
+	 * disk backing to save to.  Mark it so after the load, not
+	 * before — the previous workaround set read_only up front to
+	 * make markBufferDirty short-circuit during load, which is no
+	 * longer needed now that appendRowRaw skips dirty semantics. */
+	buf->read_only = 1;
+	invalidateScreenCache(buf);
 	buf->word_wrap = 1;
 	return buf;
 }

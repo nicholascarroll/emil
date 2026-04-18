@@ -5,8 +5,7 @@
  * same code works on POSIX systems and on MSYS2/Cygwin where
  * posix_spawn maps to native CreateProcess.
  *
- * Isolated in its own translation unit so that platform-specific
- * issues — of which spawn/fork/exec semantics are a perennial source —
+ * Isolated in its own translation unit so that platform-specific issues
  * can be triaged and unit-tested independently of pipe.c's editor
  * integration.  See tests/test_subprocess.c.
  *

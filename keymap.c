@@ -56,7 +56,7 @@ void setupCommands(void) {
 		{ "query-replace", queryReplace },
 		{ "replace-regexp", replaceRegex },
 		{ "replace-string", replaceString },
-		{ "revert", revert },
+		{ "revert-buffer", revert },
 		{ "visual-line-mode", toggleVisualLineMode },
 		{ "version", editorVersion },
 		{ "view-register", viewRegister },

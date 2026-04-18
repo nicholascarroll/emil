@@ -37,8 +37,16 @@ void markBufferDirty(struct buffer *buf) {
 		return;
 	if (buf->lock_fd >= 0)
 		return; /* already locked (e.g. from previous session) */
+	if (buf->external_mod)
+		return; /* buffer no longer reflects on-disk content —
+		         * acquiring the lock now would let us silently
+		         * overwrite the other process's changes on save.
+		         * User must revert or save-as to resolve. */
 	char *iopath = expandTilde(buf->filename);
-	(void)lockFile(buf, iopath);
+	if (lockFile(buf, iopath) == 0) {
+		/* Lock acquired — clear any prior "blocked by PID" state. */
+		buf->lock_blocked_pid = 0;
+	}
 	free(iopath);
 }
 
@@ -48,6 +56,10 @@ void markBufferClean(struct buffer *buf) {
 	buf->dirty = 0;
 	if (buf->lock_fd >= 0)
 		releaseLock(buf);
+	/* If a previous acquire attempt set lock_blocked_pid, clear it
+	 * now: once clean, we aren't trying to hold the lock, so the
+	 * warning isn't meaningful.  The next edit will re-probe. */
+	buf->lock_blocked_pid = 0;
 }
 
 void insertRow(struct buffer *bufr, int at, char *s, size_t len) {
@@ -78,6 +90,34 @@ void insertRow(struct buffer *bufr, int at, char *s, size_t len) {
 	bufr->numrows++;
 	markBufferDirty(bufr);
 	invalidateScreenCache(bufr);
+}
+
+/* Append a row without side effects.  Used by load paths (editorOpen,
+ * the pending insertFile refactor) where the buffer is being populated
+ * from disk, not edited by the user: dirtying the buffer would be
+ * wrong (the content on disk matches the content in memory by
+ * definition) and would trigger the file-lock machinery, which is
+ * reserved for user edits.  Callers are responsible for invalidating
+ * the screen cache once, after the load finishes, rather than paying
+ * the O(N) cost per row. */
+void appendRowRaw(struct buffer *bufr, const char *s, size_t len) {
+	if (bufr->numrows >= bufr->rowcap) {
+		int new_cap = bufr->rowcap ? bufr->rowcap * 2 : 16;
+		bufr->row = xrealloc(bufr->row, sizeof(erow) * new_cap);
+		memset(&bufr->row[bufr->rowcap], 0,
+		       sizeof(erow) * (new_cap - bufr->rowcap));
+		bufr->rowcap = new_cap;
+	}
+
+	int at = bufr->numrows;
+	bufr->row[at].size = len;
+	bufr->row[at].chars = xmalloc(len + 1);
+	bufr->row[at].charcap = len + 1;
+	memcpy(bufr->row[at].chars, s, len);
+	bufr->row[at].chars[len] = '\0';
+	bufr->row[at].cached_width = -1;
+
+	bufr->numrows++;
 }
 
 void freeRow(erow *row) {
@@ -226,6 +266,7 @@ struct buffer *newBuffer(void) {
 	ret->open_mtime = 0;
 	ret->file_size = 0;
 	ret->external_mod = 0;
+	ret->lock_blocked_pid = 0;
 	ret->internal_mod = 0;
 	ret->undo_pruned = 0;
 	return ret;
@@ -546,6 +587,11 @@ void killBuffer(void) {
 
 	destroyBuffer(bufr);
 	computeDisplayNames();
+
+	/* The closed buffer's text and undo chains are gone; the memory
+	 * budget may have dropped back under the limit.  Recheck so the
+	 * [MEMORY OVER!] warning clears when appropriate. */
+	recheckMemoryBudget();
 }
 
 /* Basename helper: returns pointer into path after the last '/'. */

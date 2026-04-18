@@ -654,6 +654,37 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
 	}
 }
 
+/* Truncate a UTF-8 string to fit within `max_cols` display columns,
+ * writing the result into `out` (which must have room for the result
+ * plus a NUL).  Handles multi-byte UTF-8 and wide (CJK, emoji)
+ * characters via stringWidth's per-character width logic.
+ *
+ * Returns the number of display columns written.  The output may be
+ * shorter than max_cols if the next character would straddle the
+ * boundary (e.g. a 2-column CJK glyph with only 1 column left). */
+static int truncateToCols(char *out, size_t out_cap, const char *in,
+			  int max_cols) {
+	int cols = 0;
+	size_t oi = 0;
+	const uint8_t *p = (const uint8_t *)in;
+	while (*p && oi + 1 < out_cap) {
+		int w = charInStringWidth(p, 0);
+		if (cols + w > max_cols)
+			break;
+		int n = utf8_nBytes(*p);
+		if (n <= 0)
+			n = 1;
+		if (oi + (size_t)n + 1 > out_cap)
+			break;
+		memcpy(out + oi, p, n);
+		oi += n;
+		p += n;
+		cols += w;
+	}
+	out[oi] = '\0';
+	return cols;
+}
+
 void drawStatusBar(struct window *win, struct abuf *ab, int line) {
 	char buf[32];
 	snprintf(buf, sizeof(buf), CSI "%d;%dH", line, 1);
@@ -690,10 +721,11 @@ void drawStatusBar(struct window *win, struct abuf *ab, int line) {
 		min_name = dlen;
 
 	char flags[8];
-	const char *mod_flag = bufr->external_mod ? "!" : "";
-	snprintf(flags, sizeof(flags), "%c%c%c%s", bufr->dirty ? '*' : '-',
-		 bufr->dirty ? '*' : '-', bufr->read_only ? '%' : ' ',
-		 mod_flag);
+	/* The external-modification state is now shown as a persistent
+	 * warning in the RHS block ([DISK CHANGED]); no "!" suffix on
+	 * the filename flags. */
+	snprintf(flags, sizeof(flags), "%c%c%c", bufr->dirty ? '*' : '-',
+		 bufr->dirty ? '*' : '-', bufr->read_only ? '%' : ' ');
 	int flags_len = strlen(flags);
 
 	int ry = focused ? bufr->cy + 1 : win->cy + 1;
@@ -715,8 +747,40 @@ void drawStatusBar(struct window *win, struct abuf *ab, int line) {
 		snprintf(pos, sizeof(pos), "%2d%%",
 			 (win->rowoff * 100) / bufr->numrows);
 
+	/* RHS block content selection.  Precedence (highest first):
+	 *   1. [MEMORY OVER!]  — editor-wide, threatens every buffer
+	 *   2. [DISK CHANGED]  — this buffer's file, risk of data loss
+	 *   3. [LOCK PID N]    — this buffer's file held by another
+	 *   4. (Macro)/(Wrap)  — informational mode indicators
+	 *
+	 * The first three are persistent and stay until the underlying
+	 * condition is cleared (close a buffer, save/revert, edit
+	 * successfully re-acquires the lock).  If a warning is active
+	 * it preempts the parenthetical indicators entirely.
+	 *
+	 * Formatted into warn_buf, then truncated to BLOCK columns by
+	 * truncateToCols below since the formatted PID in the lock
+	 * message may push past 15 columns. */
+	char warn_buf[64];
+	const char *warn = NULL;
+	if (E.memory_over_limit) {
+		snprintf(warn_buf, sizeof(warn_buf), "%s",
+			 msg_memory_over_limit);
+		warn = warn_buf;
+	} else if (bufr->external_mod) {
+		snprintf(warn_buf, sizeof(warn_buf), "%s",
+			 msg_file_changed_on_disk);
+		warn = warn_buf;
+	} else if (bufr->lock_blocked_pid != 0) {
+		snprintf(warn_buf, sizeof(warn_buf), msg_file_locked,
+			 bufr->lock_blocked_pid);
+		warn = warn_buf;
+	}
+
 	const char *paren = NULL;
-	if (E.recording && bufr->word_wrap)
+	if (warn) {
+		/* Warning takes the whole RHS block, no paren */
+	} else if (E.recording && bufr->word_wrap)
 		paren = "(Macro Wrap)";
 	else if (E.recording)
 		paren = "(Macro)";
@@ -791,11 +855,48 @@ void drawStatusBar(struct window *win, struct abuf *ab, int line) {
 			mid[mid_len++] = fc;
 	}
 
-	/* Block 3: paren right-aligned, padded to BLOCK */
-	char rhs[16];
-	int rhs_len = 0;
+	/* Block 3: warning or paren, right-aligned, padded to BLOCK.
+	 *
+	 * The block is 15 columns total.  The leftmost 2 are a visual
+	 * gutter (sep) matching the paren layout, leaving 13 columns
+	 * for the warning/paren content itself.  Warnings can contain
+	 * multi-byte UTF-8 (Chinese build) and may exceed 13 display
+	 * columns after PID substitution; truncateToCols enforces the
+	 * cap.  Byte length and column count diverge for multi-byte
+	 * content, so rhs_bytes and rhs_cols are tracked separately.
+	 *
+	 * The paren path is ASCII-only by construction, so its byte
+	 * count equals its column count and the legacy logic still
+	 * applies. */
+	const int CONTENT = BLOCK - 2; /* 13: sep takes the left 2 cols */
+	char rhs[64]; /* up to ~13 cols of 4-byte UTF-8, plus sep and NUL */
+	int rhs_bytes = 0;
+	int rhs_cols = 0;
 	if (have_rhs) {
-		if (paren) {
+		if (warn) {
+			char tmp[64];
+			int content_cols =
+				truncateToCols(tmp, sizeof(tmp), warn, CONTENT);
+			int tmp_bytes = (int)strlen(tmp);
+			int left_pad = CONTENT - content_cols;
+			if (left_pad < 0)
+				left_pad = 0;
+			int sep_len = (int)strlen(sep);
+			/* Layout: [sep][left_pad fill][content] */
+			if (sep_len + left_pad + tmp_bytes + 1 >
+			    (int)sizeof(rhs)) {
+				/* defensive: should not happen for CONTENT=13 */
+				tmp_bytes = (int)sizeof(rhs) - sep_len -
+					    left_pad - 1;
+				if (tmp_bytes < 0)
+					tmp_bytes = 0;
+			}
+			memcpy(rhs, sep, sep_len);
+			memset(rhs + sep_len, fc, left_pad);
+			memcpy(rhs + sep_len + left_pad, tmp, tmp_bytes);
+			rhs_bytes = sep_len + left_pad + tmp_bytes;
+			rhs_cols = BLOCK;
+		} else if (paren) {
 			int clen =
 				snprintf(rhs, sizeof(rhs), "%s%s", sep, paren);
 			int pad = BLOCK - clen;
@@ -803,24 +904,30 @@ void drawStatusBar(struct window *win, struct abuf *ab, int line) {
 				memmove(rhs + pad, rhs, clen);
 				memset(rhs, fc, pad);
 			}
-			rhs_len = BLOCK;
+			rhs_bytes = BLOCK;
+			rhs_cols = BLOCK;
 		} else {
 			memset(rhs, fc, BLOCK);
-			rhs_len = BLOCK;
+			rhs_bytes = BLOCK;
+			rhs_cols = BLOCK;
 		}
 	}
 
-	/* Write: LHS + fill + mid + RHS */
+	/* Write: LHS + fill + mid + RHS.
+	 * The gap calculation uses display columns, so when the RHS is
+	 * a multi-byte warning, we compare bytes for left/mid but cols
+	 * for rhs.  Since LHS and mid are ASCII here, their byte count
+	 * equals their column count, which keeps the math consistent. */
 	abAppend(ab, left, left_len);
 
-	int gap = total - left_len - mid_len - rhs_len;
+	int gap = total - left_len - mid_len - rhs_cols;
 	while (gap-- > 0)
 		abAppend(ab, &fc, 1);
 
 	if (mid_len > 0)
 		abAppend(ab, mid, mid_len);
-	if (rhs_len > 0)
-		abAppend(ab, rhs, rhs_len);
+	if (rhs_bytes > 0)
+		abAppend(ab, rhs, rhs_bytes);
 
 	abAppend(ab, "\x1b[m" CRLF, 5);
 }

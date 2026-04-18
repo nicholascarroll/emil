@@ -37,6 +37,11 @@ size_t totalBudgetBytes(void) {
 	return totalBufferBytes() + totalUndoBytes();
 }
 
+void recheckMemoryBudget(void) {
+	E.memory_over_limit =
+		(totalBudgetBytes() > (size_t)EMIL_MAX_OPEN_BYTES) ? 1 : 0;
+}
+
 void *xmalloc(size_t size) {
 	void *ptr = malloc(size);
 	if (!ptr && size != 0) {

@@ -35,9 +35,10 @@ void addToKillRing(const char *text, int is_rect, int rect_width,
 	E.kill.rect_width = rect_width;
 	E.kill.rect_height = rect_height;
 
-	/* Warn if total tracked usage is getting large */
-	if (totalBudgetBytes() > (size_t)EMIL_MAX_OPEN_BYTES)
-		setStatusMessage(msg_kill_ring_large);
+	/* Recheck the memory budget; sets E.memory_over_limit if the
+	 * kill ring has pushed us over.  The status bar reads this
+	 * flag and displays the persistent [MEMORY OVER!] warning. */
+	recheckMemoryBudget();
 }
 
 /* Save and restore the kill text around operations that temporarily

@@ -55,8 +55,21 @@ static const char *const msg_invalid_utf8 = "UTF-8 验证失败";
 static const char *const msg_binary_file = "文件包含空字节（二进制文件？）";
 static const char *const msg_no_glob_match = "没有匹配的文件: %s";
 
-static const char *const msg_file_locked = "[文件被 PID %d 锁定]";
-static const char *const msg_file_changed_on_disk = "[文件已被外部修改]";
+/*
+ * Status-bar RHS warning messages.
+ *
+ * IMPORTANT: These three strings must fit within 13 display columns
+ * once formatted.  The status bar's right-hand segment is 15 columns
+ * wide with the leftmost 2 reserved as a gutter, so 13 columns are
+ * available for content.  The renderer truncates at 13 display
+ * columns regardless — but overflow means useful content (like the
+ * PID) gets cut off.  Chinese glyphs are 2 columns each, so the
+ * budget is roughly 6 CJK characters plus a few ASCII.
+ */
+static const char *const msg_file_locked = "[%d 锁定]";
+static const char *const msg_file_changed_on_disk = "[文件已修改]";
+static const char *const msg_memory_over_limit = "[内存超限!]";
+/*-------------------------------------------------------------*/
 static const char *const msg_lines_columns = "%d 行，%d 列";
 static const char *const msg_dir_not_supported = "不支持编辑目录。";
 static const char *const msg_inserted_lines = "从 %s 插入了 %d 行";
@@ -138,7 +151,6 @@ static const char *const msg_diff_no_differences = "无差异";
 static const char *const msg_diff_failed = "Diff 失败 (退出状态 %d)";
 static const char *const msg_unknown_cx_x = "未知命令 C-x x %c";
 static const char *const msg_memory_limit = "打开文件总量超限";
-static const char *const msg_kill_ring_large = "注意：内存使用量较大";
 
 #else
 
@@ -184,8 +196,21 @@ static const char *const msg_invalid_utf8 = "Failed UTF-8 validation";
 static const char *const msg_binary_file =
 	"File contains null bytes (binary file?)";
 static const char *const msg_no_glob_match = "No matching files: %s";
-static const char *const msg_file_locked = "[FILE LOCKED BY PID %d]";
-static const char *const msg_file_changed_on_disk = "[FILE CHANGED ON DISK]";
+/*
+ * Status-bar RHS warning messages.
+ *
+ * The status bar's right-hand segment is 15 columns, but the first
+ * 2 are reserved as a visual gutter (sep), leaving 13 display
+ * columns for actual content.  The renderer truncates at 13 if the
+ * formatted string is longer — so PIDs are placed early in
+ * msg_file_locked to keep the PID visible when large values would
+ * otherwise push the closing bracket off the end.
+ */
+static const char *const msg_file_locked = "[LOCK %d]";
+static const char *const msg_file_changed_on_disk = "[DISK CHG!]";
+static const char *const msg_memory_over_limit = "[MEM OVER!]";
+/*------------------------------------------------------------*/
+
 static const char *const msg_lines_columns = "%d lines, %d columns";
 static const char *const msg_dir_not_supported =
 	"Directory editing not supported.";
@@ -272,7 +297,6 @@ static const char *const msg_diff_no_differences = "No differences";
 static const char *const msg_diff_failed = "Diff failed (exit status %d)";
 static const char *const msg_unknown_cx_x = "Unknown command C-x x %c";
 static const char *const msg_memory_limit = "Open-file limit exceeded";
-static const char *const msg_kill_ring_large = "Warning: memory usage is large";
 
 #endif
 

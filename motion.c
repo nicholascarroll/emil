@@ -679,15 +679,30 @@ static int is_punct(char c) {
 	return c == '.' || c == '!' || c == '?';
 }
 
-/* Returns 1 if 'x' is the index of the Uppercase letter starting a sentence */
+/* Returns 1 if 'x' is the index of the Uppercase letter starting a
+ * sentence.  Recognises two patterns preceding the uppercase letter:
+ *
+ *   [Punct][Space][Upper]        — needs chars[x-2..x], x >= 2
+ *   [Punct][Space][Space][Upper] — needs chars[x-3..x], x >= 3
+ *
+ * Callers in forwardSentenceEnd pass x+2 and x+3 speculatively, which
+ * may be at or past row->size; guard the upper end too.  The function
+ * must return 0 (not fault) for any out-of-range x. */
 int isSentenceBoundary(erow *row, int x) {
-	if (x < 2)
+	if (x < 2 || x >= row->size)
 		return 0;
-	return (is_punct(row->chars[x - 2]) && row->chars[x - 1] == ' ' &&
-		isupper((unsigned char)row->chars[x])) ||
-	       (is_punct(row->chars[x - 3]) && row->chars[x - 2] == ' ' &&
-		row->chars[x - 1] == ' ' &&
-		isupper((unsigned char)row->chars[x]));
+
+	/* Short pattern: [Punct][Space][Upper] */
+	if (is_punct(row->chars[x - 2]) && row->chars[x - 1] == ' ' &&
+	    isupper((unsigned char)row->chars[x]))
+		return 1;
+
+	/* Long pattern: [Punct][Space][Space][Upper] — needs 3 bytes back */
+	if (x >= 3 && is_punct(row->chars[x - 3]) && row->chars[x - 2] == ' ' &&
+	    row->chars[x - 1] == ' ' && isupper((unsigned char)row->chars[x]))
+		return 1;
+
+	return 0;
 }
 
 /**

@@ -3,6 +3,7 @@
 #include "emil.h"
 #include "wrap.h"
 void insertRow(struct buffer *bufr, int at, char *s, size_t len);
+void appendRowRaw(struct buffer *bufr, const char *s, size_t len);
 void freeRow(erow *row);
 void delRow(struct buffer *bufr, int at);
 void rowInsertChar(struct buffer *bufr, erow *row, int at, int c);

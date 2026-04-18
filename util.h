@@ -33,4 +33,12 @@ size_t totalBufferBytes(void);
 size_t totalUndoBytes(void);
 size_t totalBudgetBytes(void);
 
+/* Set or clear E.memory_over_limit based on current budget.
+ * Call after operations that may shrink the budget (close buffer,
+ * revert-buffer, undo-chain truncation) and after operations that may grow
+ * it (add to kill ring, insert text).  Setting is latching — once
+ * set, the status-bar warning stays visible until the budget drops
+ * back below the limit. */
+void recheckMemoryBudget(void);
+
 #endif /* EMIL_UTIL_H */

@@ -115,9 +115,12 @@ struct buffer {
 	/* Only used for equality comparison with stat().st_mtime.
 	 * Safe across the 2038 boundary.  Do NOT do arithmetic on
 	 * this field. */
-	time_t open_mtime; /* st_mtime at open/save, 0 if unset */
-	size_t file_size;  /* st_size at open, for open-file budget */
-	int external_mod;  /* 1 if file changed on disk since open/save */
+	time_t open_mtime;    /* st_mtime at open/save, 0 if unset */
+	size_t file_size;     /* st_size at open, for open-file budget */
+	int external_mod;     /* 1 if file changed on disk since open/save */
+	int lock_blocked_pid; /* PID holding the lock we couldn't acquire,
+	                       * or -1 if held by unknown process, or 0
+	                       * if we are not blocked */
 	int internal_mod;
 	erow *row;
 	char *filename;
@@ -248,6 +251,9 @@ struct config {
 	struct history kill_history;
 	int kill_ring_pos;	/* Current position in kill ring for M-y */
 	int self_insert_key;	/* Stashed key for CMD_SELF_INSERT */
+	int memory_over_limit;	/* 1 if totalBudgetBytes has exceeded
+	                         * EMIL_MAX_OPEN_BYTES; cleared when the
+	                         * budget drops back below the limit */
 	struct abuf render_buf; /* Persistent screen-render buffer */
 };
 
