@@ -90,7 +90,17 @@ int lockFile(struct buffer *bufr, const char *filename) {
 	return -1;
 }
 
-/* Release the advisory lock held by this buffer. */
+/* Release the advisory lock held by this buffer.
+ *
+ * Does NOT clear external_mod: that flag is a latch indicating
+ * "disk content has diverged from what we loaded," and its only
+ * legitimate exits are save (user chose to clobber) and revert
+ * (user chose the disk copy).  Releasing a lock — which happens on
+ * clean→dirty transitions via markBufferClean, on saveAs, and on
+ * buffer destruction — says nothing about whether the buffer still
+ * reflects disk.  In particular, undo-to-clean triggers
+ * markBufferClean → releaseLock, and clearing external_mod there
+ * would silently dismiss a warning the user hasn't resolved. */
 
 void releaseLock(struct buffer *bufr) {
 	if (bufr->lock_fd >= 0) {
@@ -98,29 +108,70 @@ void releaseLock(struct buffer *bufr) {
 		bufr->lock_fd = -1;
 	}
 	bufr->open_mtime = 0;
-	bufr->external_mod = 0;
 	bufr->lock_blocked_pid = 0;
 }
 
-/* Check whether the underlying file has been modified externally.
- * Called periodically (from refreshScreen).  Sets bufr->external_mod
- * which drives the persistent status-bar warning.  One-shot: returns
- * immediately if the flag is already set, so the stat() cost is paid
- * at most once per file until the user saves or reverts. */
+/* Check whether the underlying file has been modified externally,
+ * and opportunistically clear a stale lock_blocked_pid warning if
+ * the blocking process has since released the lock.
+ *
+ * Called periodically (from refreshScreen) on the focused buffer.
+ *
+ * Two independent jobs, both cheap:
+ *
+ *   1. Set bufr->external_mod if mtime has drifted since open/save.
+ *      One-shot — returns early if the flag is already set, so the
+ *      stat() cost is paid at most once per file until save/revert.
+ *
+ *   2. Re-probe the advisory lock when we know we have a stale
+ *      warning to clear: the buffer is dirty, we previously tried
+ *      and failed to acquire the lock (lock_blocked_pid != 0), and
+ *      we still don't hold it (lock_fd < 0).  markBufferDirty
+ *      short-circuits once dirty is set, so without this re-probe
+ *      the warning would persist forever after the blocking process
+ *      exits.  The probe runs at most one open+fcntl+close per
+ *      refresh, and only in the exact state where the warning is
+ *      potentially stale — zero extra syscalls in the common case
+ *      where we either hold the lock or nobody else wants it.
+ *
+ *      Job 2 is gated on !external_mod: if the blocking process
+ *      saved changes before releasing the lock, Job 1 will have
+ *      already set external_mod from the mtime drift, and we
+ *      deliberately don't acquire a lock we'd use to overwrite
+ *      those changes.  This mirrors markBufferDirty's own refusal
+ *      to lock when external_mod is set.  The stale lock_blocked_pid
+ *      remains on the buffer but is shadowed in the status bar by
+ *      the higher-precedence [FILE CHANGED ON DISK] warning (see
+ *      display.c precedence order). */
 
 void checkFileModified(void) {
-	if (E.buf->filename == NULL || E.buf->open_mtime == 0)
+	if (E.buf->filename == NULL)
 		return;
-	if (E.buf->external_mod)
-		return; /* already flagged */
 
-	char *iopath = expandTilde(E.buf->filename);
-	struct stat st;
-	if (stat(iopath, &st) == 0) {
-		if (st.st_mtime != E.buf->open_mtime)
-			E.buf->external_mod = 1;
+	/* Job 1: mtime check. */
+	if (E.buf->open_mtime != 0 && !E.buf->external_mod) {
+		char *iopath = expandTilde(E.buf->filename);
+		struct stat st;
+		if (stat(iopath, &st) == 0) {
+			if (st.st_mtime != E.buf->open_mtime)
+				E.buf->external_mod = 1;
+		}
+		free(iopath);
 	}
-	free(iopath);
+
+	/* Job 2: stale-lock re-probe. */
+	if (E.buf->dirty && E.buf->lock_blocked_pid != 0 &&
+	    E.buf->lock_fd < 0 && !E.buf->external_mod) {
+		char *iopath = expandTilde(E.buf->filename);
+		if (lockFile(E.buf, iopath) == 0) {
+			/* Acquired — warning clears. */
+			E.buf->lock_blocked_pid = 0;
+		}
+		/* On failure lockFile has already refreshed
+		 * lock_blocked_pid to reflect the current holder
+		 * (possibly a different process from before). */
+		free(iopath);
+	}
 }
 
 /*** file i/o ***/

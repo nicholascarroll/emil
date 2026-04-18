@@ -278,6 +278,128 @@ void test_lock_blocked_cleared_on_successful_acquire(void) {
 	free(path);
 }
 
+/* Regression test: external_mod is a latch.  Once set, it must
+ * only be cleared by save (user clobbers) or revert (user takes
+ * disk version).  In particular, undo-to-clean triggers
+ * markBufferClean → releaseLock, which previously also cleared
+ * external_mod as a side effect.  That was a bug: the user hadn't
+ * resolved the on-disk divergence, they just undid their edits.
+ * The warning must persist. */
+
+void test_external_mod_persists_through_undo_to_clean(void) {
+	char *path = make_temp_file("original\n");
+	TEST_ASSERT_NOT_NULL(path);
+
+	struct buffer *b = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, editorOpen(b, path));
+
+	/* User dirties the buffer — acquires lock. */
+	markBufferDirty(b);
+	TEST_ASSERT_TRUE(b->dirty);
+	TEST_ASSERT_TRUE(b->lock_fd >= 0);
+
+	/* File changes on disk (external edit that ignored our lock). */
+	bump_mtime(path, 2);
+
+	/* Refresh notices the drift. */
+	checkFileModified();
+	TEST_ASSERT_TRUE(b->external_mod);
+
+	/* User undoes all their edits back to clean.  This calls
+	 * markBufferClean → releaseLock.  external_mod must survive. */
+	markBufferClean(b);
+	TEST_ASSERT_FALSE(b->dirty);
+	TEST_ASSERT_EQUAL_INT(-1, b->lock_fd);
+	TEST_ASSERT_TRUE(b->external_mod); /* the flag is a latch */
+
+	unlink(path);
+	free(path);
+}
+
+/* Regression test for the "stale PID" defect: when the buffer is
+ * dirty and another process held the lock, markBufferDirty
+ * short-circuits on subsequent edits, so a manual clean/dirty cycle
+ * as above is not a real-world recovery path.  checkFileModified
+ * must re-probe the lock on every refresh while lock_blocked_pid
+ * is set but lock_fd is not, and clear the warning when the holder
+ * releases.  Without this the status bar shows a stale PID forever. */
+
+void test_checkFileModified_reacquires_stale_lock(void) {
+	char *path = make_temp_file("shared\n");
+	TEST_ASSERT_NOT_NULL(path);
+
+	int release_fd, ready_fd;
+	pid_t child = fork_lock_holder(path, &release_fd, &ready_fd);
+	TEST_ASSERT(child > 0);
+	char rbuf;
+	TEST_ASSERT_EQUAL_INT(1, read(ready_fd, &rbuf, 1));
+
+	struct buffer *b = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, editorOpen(b, path));
+
+	/* User's first edit — lock acquisition fails, PID recorded. */
+	markBufferDirty(b);
+	TEST_ASSERT_TRUE(b->dirty);
+	TEST_ASSERT_EQUAL_INT(-1, b->lock_fd);
+	TEST_ASSERT_EQUAL_INT((int)child, b->lock_blocked_pid);
+
+	/* User keeps typing.  markBufferDirty short-circuits, so the
+	 * warning state is unchanged. */
+	markBufferDirty(b);
+	TEST_ASSERT_EQUAL_INT(-1, b->lock_fd);
+	TEST_ASSERT_EQUAL_INT((int)child, b->lock_blocked_pid);
+
+	/* Blocking process exits — lock is released at the OS level,
+	 * but our buffer state hasn't observed that yet. */
+	release_and_reap(child, release_fd, ready_fd);
+	TEST_ASSERT_EQUAL_INT((int)child, b->lock_blocked_pid);
+
+	/* refreshScreen tick: checkFileModified re-probes, acquires
+	 * the now-available lock, and clears the warning. */
+	checkFileModified();
+	TEST_ASSERT_TRUE(b->lock_fd >= 0);
+	TEST_ASSERT_EQUAL_INT(0, b->lock_blocked_pid);
+	TEST_ASSERT_FALSE(b->external_mod); /* no on-disk change */
+
+	unlink(path);
+	free(path);
+}
+
+/* If the blocking process modified and saved the file before
+ * releasing the lock, mtime drift fires external_mod first, which
+ * deliberately suppresses the lock re-probe: acquiring the lock
+ * now would let us silently clobber the other process's save.
+ * lock_blocked_pid remains set but is shadowed in the status bar
+ * by the higher-precedence [FILE CHANGED ON DISK] warning. */
+
+void test_checkFileModified_does_not_reacquire_if_file_changed(void) {
+	char *path = make_temp_file("shared\n");
+	TEST_ASSERT_NOT_NULL(path);
+
+	int release_fd, ready_fd;
+	pid_t child = fork_lock_holder(path, &release_fd, &ready_fd);
+	TEST_ASSERT(child > 0);
+	char rbuf;
+	TEST_ASSERT_EQUAL_INT(1, read(ready_fd, &rbuf, 1));
+
+	struct buffer *b = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, editorOpen(b, path));
+	markBufferDirty(b);
+	TEST_ASSERT_EQUAL_INT((int)child, b->lock_blocked_pid);
+
+	/* Simulate the blocking process saving before exiting. */
+	release_and_reap(child, release_fd, ready_fd);
+	bump_mtime(path, 2);
+
+	checkFileModified();
+	TEST_ASSERT_TRUE(b->external_mod);
+	TEST_ASSERT_EQUAL_INT(-1, b->lock_fd); /* did NOT acquire */
+	TEST_ASSERT_EQUAL_INT((int)child, b->lock_blocked_pid); /* unchanged */
+
+	unlink(path);
+	free(path);
+}
+
 /* ---- memory_over_limit ---- */
 
 void test_memory_flag_initially_clear(void) {
@@ -323,6 +445,9 @@ int main(void) {
 
 	RUN_TEST(test_lock_blocked_set_when_other_process_holds_lock);
 	RUN_TEST(test_lock_blocked_cleared_on_successful_acquire);
+	RUN_TEST(test_external_mod_persists_through_undo_to_clean);
+	RUN_TEST(test_checkFileModified_reacquires_stale_lock);
+	RUN_TEST(test_checkFileModified_does_not_reacquire_if_file_changed);
 
 	RUN_TEST(test_memory_flag_initially_clear);
 	RUN_TEST(test_memory_flag_clears_when_budget_under_limit);
