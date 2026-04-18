@@ -380,6 +380,8 @@ void yank(int count) {
 		E.kill_ring_pos =
 			E.kill_history.count > 0 ? E.kill_history.count - 1 : 0;
 	}
+
+	recheckMemoryBudget();
 }
 
 void yankPop(void) {
@@ -903,4 +905,6 @@ void yankRectangle(void) {
 	clearMarkQuiet();
 	clearText(&E.kill);
 	E.kill = saved;
+
+	recheckMemoryBudget();
 }
