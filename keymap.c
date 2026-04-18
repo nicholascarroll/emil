@@ -258,6 +258,8 @@ int resolveBinding(int key) {
 			return CMD_TOGGLE_READ_ONLY;
 		case CTRL('f'):
 			return CMD_FIND_FILE;
+		case CTRL('r'):
+			return CMD_FIND_FILE_READ_ONLY;
 		case CTRL('_'):
 			return CMD_REDO;
 		case CTRL('x'):
@@ -335,7 +337,8 @@ int resolveBinding(int key) {
 			return CMD_NONE;
 		default:
 			if (key < ' ') {
-				setStatusMessage(msg_unknown_cx, key + '`');
+				setStatusMessage(msg_unknown_cx_ctrl,
+						 key + '`');
 			} else {
 				setStatusMessage(msg_unknown_cx, key);
 			}
@@ -781,7 +784,10 @@ static int dispatchBuffer(int c, int uarg) {
 		insertFile();
 		return 1;
 	case CMD_FIND_FILE:
-		findFile();
+		findFile(0);
+		return 1;
+	case CMD_FIND_FILE_READ_ONLY:
+		findFile(1);
 		return 1;
 	case CMD_TOGGLE_READ_ONLY:
 		E.buf->read_only = !E.buf->read_only;

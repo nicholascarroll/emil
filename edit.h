@@ -9,7 +9,7 @@ void insertChar(struct buffer *bufr, int c, int count);
 void insertUnicode(int count);
 
 /* Line operations */
-void insertNewlineRaw(void);
+void splitLineAtPoint(void);
 void insertNewline(int count);
 void openLine(int count);
 void insertNewlineAndIndent(int count);

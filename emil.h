@@ -263,7 +263,7 @@ uint8_t *editorPrompt(struct buffer *bufr, const uint8_t *prompt,
 		      enum promptType t,
 		      void (*callback)(struct buffer *, uint8_t *, int));
 void updateBuffer(struct buffer *buf);
-void insertNewlineRaw(void);
+void splitLineAtPoint(void);
 void insertNewline(int count);
 void insertChar(struct buffer *bufr, int c, int count);
 int editorOpen(struct buffer *bufr, char *filename);

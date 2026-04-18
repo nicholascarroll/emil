@@ -30,11 +30,32 @@ extern void die(const char *s);
 
 /*** file locking ***/
 
+/* Probe whether an advisory lock is held on a file without acquiring one.
+ * Returns 0 if no lock is held, PID if locked , -1 if unknown
+ * or -2 on error (file doesn't exist, can't open, etc.). */
+int probeLock(const char *filename) {
+	int fd = open(filename, O_RDONLY);
+	if (fd < 0)
+		return -2;
+
+	struct flock query;
+	memset(&query, 0, sizeof(query));
+	query.l_type = F_WRLCK;
+	query.l_whence = SEEK_SET;
+	query.l_start = 0;
+	query.l_len = 0;
+	int pid = 0;
+	if (fcntl(fd, F_GETLK, &query) == 0 && query.l_type != F_UNLCK) {
+		pid = (int)query.l_pid;
+	}
+	close(fd);
+	return pid;
+}
+
 /* Try to acquire an advisory write lock on a file.
  * Returns 0 on success (lock acquired), -1 if already locked (sets
  * status message with the blocking PID), or -2 on error.
  * On success, bufr->lock_fd is set and must be released later. */
-
 int lockFile(struct buffer *bufr, const char *filename) {
 	/* Try O_RDWR first (needed for F_WRLCK per POSIX).
 	 * Fall back to O_RDONLY + F_RDLCK if the file isn't writable. */
@@ -357,6 +378,11 @@ int editorOpen(struct buffer *bufr, char *filename) {
 			bufr->open_mtime = st.st_mtime;
 	}
 
+	/* Probe for an advisory lock held by another process.  If one
+	 * is found, open the buffer read-only so the user doesn't
+	 * accidentally collide with the other editor instance. */
+	int lock_pid = probeLock(iopath);
+
 	free(iopath);
 
 	computeDisplayNames();
@@ -374,7 +400,15 @@ int editorOpen(struct buffer *bufr, char *filename) {
 		}
 	}
 
-	setStatusMessage(msg_lines_columns, bufr->numrows, max_width);
+	if (lock_pid != 0) {
+		bufr->read_only = 1;
+		if (lock_pid > 0)
+			setStatusMessage(msg_read_only_locked, lock_pid);
+		else
+			setStatusMessage(msg_read_only_locked_unknown);
+	} else {
+		setStatusMessage(msg_lines_columns, bufr->numrows, max_width);
+	}
 	return 0;
 }
 
@@ -661,14 +695,16 @@ static int hasGlobChars(const char *s) {
 	return 0;
 }
 
-void findFile(void) {
+void findFile(int read_only) {
 	/* Not allowed during macro record/playback */
 	if (E.recording || E.playback) {
 		setStatusMessage(msg_macro_blocked);
 		return;
 	}
-	uint8_t *prompt =
-		editorPrompt(E.buf, msg_find_file, PROMPT_FILES, NULL);
+
+	uint8_t *prompt = editorPrompt(
+		E.buf, read_only ? msg_find_file_read_only : msg_find_file,
+		PROMPT_FILES, NULL);
 
 	if (prompt == NULL) {
 		setStatusMessage(msg_canceled);
@@ -699,6 +735,10 @@ void findFile(void) {
 				continue;
 			struct buffer *buf = switchToFile(gl.gl_pathv[i]);
 			if (buf) {
+				if (read_only) {
+					buf->read_only = 1;
+					setStatusMessage(msg_read_only);
+				}
 				last = buf;
 				opened++;
 			}
@@ -718,7 +758,7 @@ void findFile(void) {
 	}
 
 	/* Safety net: if a directory path somehow gets through the prompt,
-	 * don't try to open it as a file. */
+	 * don't try to open it as a file. * TODO review with suspicion */
 	struct stat st;
 	char *stat_path = expandTilde((char *)prompt);
 	if (stat(stat_path, &st) == 0 && S_ISDIR(st.st_mode)) {
@@ -732,8 +772,13 @@ void findFile(void) {
 	struct buffer *buf = switchToFile((char *)prompt);
 	computeDisplayNames();
 	free(prompt);
-	if (buf)
+	if (buf) {
+		if (read_only) {
+			buf->read_only = 1;
+			setStatusMessage(msg_read_only);
+		}
 		refreshScreen();
+	}
 }
 
 void insertFile(void) {

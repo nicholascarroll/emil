@@ -24,6 +24,7 @@ static const char *const msg_beginning_of_buffer = "缓冲区开头";
 static const char *const msg_end_of_buffer = "缓冲区末尾";
 static const char *const msg_new_file = "（新文件）";
 static const char *const msg_find_file = "查找文件: %s";
+static const char *const msg_find_file_read_only = "查找文件: %s"; // * TODO
 
 static const char *const msg_mark_set = "标记已设置。";
 static const char *const msg_mark_cleared = "标记已清除";
@@ -125,6 +126,7 @@ static const char *const msg_no_change = "无变化。";
 
 static const char *const msg_unknown_ctrl = "未知命令 C-%c";
 static const char *const msg_unknown_cx = "未知命令 C-x %c";
+static const char *const msg_unknown_cx_ctrl = "未知命令 C-x C-%c";
 static const char *const msg_unknown_meta = "未知命令 M-%s";
 
 static const char *const msg_unsaved_quit =
@@ -152,6 +154,9 @@ static const char *const msg_diff_failed = "Diff 失败 (退出状态 %d)";
 static const char *const msg_unknown_cx_x = "未知命令 C-x x %c";
 static const char *const msg_memory_limit = "打开文件总量超限";
 static const char *const msg_help = "文档：参见 shell 中的 `man emil`";
+static const char *const msg_read_only_locked = "只读: PID %d 持有建议锁";
+static const char *const msg_read_only_locked_unknown =
+	"只读: 其他进程持有建议锁";
 
 #else
 
@@ -166,6 +171,7 @@ static const char *const msg_beginning_of_buffer = "Beginning of buffer";
 static const char *const msg_end_of_buffer = "End of buffer";
 static const char *const msg_new_file = "(New file)";
 static const char *const msg_find_file = "Find File: %s";
+static const char *const msg_find_file_read_only = "Find File Read Only: %s";
 
 static const char *const msg_mark_set = "Mark set.";
 static const char *const msg_mark_cleared = "Mark deactivated";
@@ -261,7 +267,8 @@ static const char *const msg_shell_canceled = "Canceled shell command.";
 static const char *const msg_shell_read_bytes = "Read %d bytes";
 static const char *const msg_shell_exit_status =
 	"Shell command exited with status %d";
-static const char *const msg_shell_disabled = "Shell integration disabled";
+static const char *const msg_shell_disabled =
+	"Shell integration disabled at build time.";
 
 static const char *const msg_register_empty = "Register %s is empty.";
 static const char *const msg_no_command = "No command found";
@@ -272,6 +279,7 @@ static const char *const msg_no_change = "No change.";
 
 static const char *const msg_unknown_ctrl = "Unknown command C-%c";
 static const char *const msg_unknown_cx = "Unknown command C-x %c";
+static const char *const msg_unknown_cx_ctrl = "Unknown command C-x C-%c";
 static const char *const msg_unknown_meta = "Unknown command M-%s";
 
 static const char *const msg_unsaved_quit =
@@ -300,7 +308,10 @@ static const char *const msg_unknown_cx_x = "Unknown command C-x x %c";
 static const char *const msg_memory_limit = "Open-file limit exceeded";
 static const char *const msg_help =
 	"Documentation: see `man emil` (in your shell).";
-
+static const char *const msg_read_only_locked =
+	"Read only: advisory lock by PID %d";
+static const char *const msg_read_only_locked_unknown =
+	"Read only: advisory lock by another process";
 #endif
 
 #endif /* EMIL_MESSAGE_H */

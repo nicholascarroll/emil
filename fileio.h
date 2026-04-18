@@ -7,6 +7,7 @@ struct buffer;
 struct config;
 
 /* File locking */
+int probeLock(const char *filename);
 int lockFile(struct buffer *bufr, const char *filename);
 void releaseLock(struct buffer *bufr);
 void checkFileModified(void);
@@ -17,7 +18,7 @@ int editorOpen(struct buffer *bufr, char *filename);
 void save(void);
 void saveAs(void);
 void revert(void);
-void findFile(void);
+void findFile(int read_only);
 struct buffer *switchToFile(const char *filename);
 void insertFile(void);
 void changeDirectory(void);

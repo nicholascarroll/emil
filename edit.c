@@ -81,7 +81,7 @@ cancel:
 	setStatusMessage(msg_indent_spaces, indent);
 }
 
-void insertNewlineRaw(void) {
+void splitLineAtPoint(void) {
 	if (E.buf->read_only) {
 		setStatusMessage(msg_read_only);
 		return;
@@ -114,7 +114,7 @@ void insertNewline(int count) {
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
 		undoAppendChar(E.buf, '\n');
-		insertNewlineRaw();
+		splitLineAtPoint();
 	}
 }
 

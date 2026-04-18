@@ -98,7 +98,6 @@ set bind-tty-special-chars off
 "\C-w": kill-region
 "\ew": copy-region-as-kill 
 ```
-In `emil`, as in Readline,  `Ctrl-h` deletes the previous character, whereas in `emacs` it is the help prefix key.
 
 
 ### Shell Integration

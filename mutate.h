@@ -4,6 +4,15 @@
 #include "emil.h"
 #include <stdint.h>
 
+/* WHEN TO USE mutate.h:
+ * Use mutate.h for:
+ *  - user-initiated range edits to a user-editable buffer that should be undoable and dirty the buffer
+ * Use buffer.c primitives directly for:
+ *  - file loading 
+ *  - minibuffer/special/popup buffer population
+ *  - inside the undo engine
+*/
+
 /* Collect buffer text from [startx,starty] to [endx,endy] into a
  * newly allocated NUL-terminated buffer.  Sets *out_len to the byte
  * count (excluding NUL).  Caller frees.

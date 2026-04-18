@@ -107,8 +107,6 @@ set bind-tty-special-chars off
 "\ew": copy-region-as-kill 
 ```
 
-在 `emil` 与 Readline 中，`Ctrl-h` 删除前一字符；而在 `emacs` 中它是帮助前缀键。
-
 
 ### Shell 集成
 

@@ -232,16 +232,13 @@ void test_lock_blocked_set_when_other_process_holds_lock(void) {
 	char buf;
 	TEST_ASSERT_EQUAL_INT(1, read(ready_fd, &buf, 1));
 
+	/* editorOpen now probes the lock and sets lock_blocked_pid
+	 * and read_only when another process holds the lock (#58). */
 	struct buffer *b = make_test_buffer(NULL);
 	TEST_ASSERT_EQUAL_INT(0, editorOpen(b, path));
-	TEST_ASSERT_EQUAL_INT(0, b->lock_blocked_pid);
-
-	/* First edit attempt — lockFile fails, F_GETLK reveals the
-	 * child PID, lock_blocked_pid is set to that PID. */
-	markBufferDirty(b);
-	TEST_ASSERT_TRUE(b->dirty);
-	TEST_ASSERT_EQUAL_INT(-1, b->lock_fd);
 	TEST_ASSERT_EQUAL_INT((int)child, b->lock_blocked_pid);
+	TEST_ASSERT_TRUE(b->read_only);
+	TEST_ASSERT_EQUAL_INT(-1, b->lock_fd);
 
 	release_and_reap(child, release_fd, ready_fd);
 	unlink(path);
@@ -260,16 +257,15 @@ void test_lock_blocked_cleared_on_successful_acquire(void) {
 
 	struct buffer *b = make_test_buffer(NULL);
 	TEST_ASSERT_EQUAL_INT(0, editorOpen(b, path));
-	markBufferDirty(b);
+	TEST_ASSERT_TRUE(b->read_only);
 	TEST_ASSERT(b->lock_blocked_pid != 0);
 
 	/* Child releases the lock. */
 	release_and_reap(child, release_fd, ready_fd);
 
-	/* Buffer is still dirty; markBufferDirty short-circuits.
-	 * Simulate a save (clean transition) then a fresh edit — that
-	 * triggers a new acquire attempt, which now succeeds. */
-	markBufferClean(b);
+	/* User toggles writable (C-x C-q), then edits — the fresh
+	 * markBufferDirty triggers a lock acquire, which now succeeds. */
+	b->read_only = 0;
 	markBufferDirty(b);
 	TEST_ASSERT_TRUE(b->lock_fd >= 0);
 	TEST_ASSERT_EQUAL_INT(0, b->lock_blocked_pid);
