@@ -309,6 +309,8 @@ int resolveBinding(int key) {
 			return CMD_KILL_LINE_BACKWARDS;
 		case '=':
 			return CMD_WHAT_CURSOR;
+		case ',':
+			return CMD_COPY_CLIPBOARD_ONLY;
 		case 'x':
 			/* C-x x sub-prefix — read another key */
 			{
@@ -847,6 +849,15 @@ static int dispatchRegion(int c, int uarg) {
 			copyRegion();
 			deactivateMark();
 			copyToClipboard(E.kill.str);
+		} else {
+			setStatusMessage(
+				"Copying rectangle to OSC 52 not supported!");
+		}
+		return 1;
+	case CMD_COPY_CLIPBOARD_ONLY:
+		if (!E.buf->rectangle_mode) {
+			// * TODO		copyToClipboard();
+			deactivateMark();
 		} else {
 			setStatusMessage(
 				"Copying rectangle to OSC 52 not supported!");
