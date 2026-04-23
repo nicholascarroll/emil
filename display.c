@@ -1014,6 +1014,28 @@ void refreshScreen(void) {
 
 	int focusedIdx = windowFocusedIdx();
 
+	/* Auto-size minibuffer to fit the current status message.
+	 * Layout matches drawMinibuffer(): the first line shares space
+	 * with prefix_display, continuation lines get full width. */
+	int needed_mb = 1;
+	if (E.statusmsg_show && E.statusmsg[0] && E.screencols > 0) {
+		int msglen = strlen(E.statusmsg);
+		int prefix_len = strlen(E.prefix_display);
+		int first_line = E.screencols - prefix_len;
+		if (first_line < 1)
+			first_line = 1;
+		if (msglen > first_line)
+			needed_mb = 1 + (msglen - first_line + E.screencols -
+					 1) / E.screencols;
+		if (needed_mb > 5)
+			needed_mb = 5;
+	}
+	if (needed_mb != minibuffer_height) {
+		minibuffer_height = needed_mb;
+		for (int i = 0; i < E.nwindows; i++)
+			E.windows[i]->height = 0;
+	}
+
 	int cumulative_height = 0;
 	int total_height = E.screenrows - minibuffer_height -
 			   (statusbar_height * E.nwindows);
@@ -1178,6 +1200,12 @@ void toggleVisualLineMode(void) {
 
 void editorVersion(void) {
 	setStatusMessage("emil " EMIL_VERSION);
+}
+
+void showMemoryBudget(void) {
+	size_t used = totalBudgetBytes();
+	size_t limit = (size_t)EMIL_BYTES_BUDGET;
+	setStatusMessage("Memory: %zu / %zu bytes", used, limit);
 }
 
 void help(void) {

@@ -2,13 +2,14 @@
 #define EMIL_BUFFER_H
 #include "emil.h"
 #include "wrap.h"
-void insertRow(struct buffer *bufr, int at, char *s, size_t len);
-void appendRowRaw(struct buffer *bufr, const char *s, size_t len);
+void insertRow(struct buffer *bufr, int at, const uint8_t *s, size_t len);
+void appendRowRaw(struct buffer *bufr, const uint8_t *s, size_t len);
 void freeRow(erow *row);
 void delRow(struct buffer *bufr, int at);
 void rowInsertChar(struct buffer *bufr, erow *row, int at, int c);
 void rowInsertUnicode(struct buffer *bufr, erow *row, int at);
-void rowAppendString(struct buffer *bufr, erow *row, char *s, size_t len);
+void rowAppendString(struct buffer *bufr, erow *row, const uint8_t *s,
+		     size_t len);
 void rowDelChar(struct buffer *bufr, erow *row, int at);
 struct buffer *newBuffer(void);
 void destroyBuffer(struct buffer *buf);

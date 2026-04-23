@@ -35,7 +35,7 @@ void insertChar(struct buffer *bufr, int c, int count) {
 
 	for (int i = 0; i < count; i++) {
 		if (bufr->cy == bufr->numrows) {
-			insertRow(bufr, bufr->numrows, "", 0);
+			insertRow(bufr, bufr->numrows, (const uint8_t *)"", 0);
 		}
 		rowInsertChar(bufr, &bufr->row[bufr->cy], bufr->cx, c);
 		bufr->cx++;
@@ -48,7 +48,8 @@ void insertUnicode(int count) {
 	for (int i = 0; i < times; i++) {
 		undoAppendUnicode(E.buf);
 		if (E.buf->cy == E.buf->numrows) {
-			insertRow(E.buf, E.buf->numrows, "", 0);
+			insertRow(E.buf, E.buf->numrows, (const uint8_t *)"",
+				  0);
 		}
 		rowInsertUnicode(E.buf, &E.buf->row[E.buf->cy], E.buf->cx);
 		E.buf->cx += E.nunicode;
@@ -84,7 +85,7 @@ void splitLineAtPoint(void) {
 		return;
 
 	if (E.buf->cx == 0) {
-		insertRow(E.buf, E.buf->cy, "", 0);
+		insertRow(E.buf, E.buf->cy, (const uint8_t *)"", 0);
 	} else {
 		erow *row = &E.buf->row[E.buf->cy];
 		insertRow(E.buf, E.buf->cy + 1, &row->chars[E.buf->cx],

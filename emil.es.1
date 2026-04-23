@@ -32,17 +32,16 @@ Una
 .Sy ventana
 es un área de edición sobre un búfer.
 Múltiples ventanas pueden mostrar el mismo búfer o búferes distintos simultáneamente.
-.Ss El Anillo de Marcas (Mark Ring)
+.Ss El Historial de Marcas (Mark Ring)
 La
 .Sy marca
 define un extremo de una región seleccionada (el otro extremo es el cursor).
 .Nm
-mantiene un anillo con las últimas 8 posiciones de marca. Al establecer la marca, se inserta la posición actual en el anillo. Estas posiciones pueden recuperarse posteriormente.
-.Ss El Anillo de Eliminación (Kill Ring)
-El texto eliminado o copiado se almacena en el
-.Sy anillo de eliminación
-(historial de portapapeles).
-La operación de pegado (yank) recupera texto del anillo de eliminación e lo inserta en el búfer. Los pegados sucesivos permiten rotar a través de elementos eliminados anteriormente.
+mantiene un historial con las últimas 8 posiciones de marca. Al establecer la marca, se inserta la posición actual en el historial. Estas posiciones pueden recuperarse posteriormente.
+.Ss El Historial de Cortes (Kill Ring)
+El texto cortado o copiado se almacena en el
+.Sy historial de cortes
+La operación de pegado (yank) recupera texto del historal de cortes y lo inserta en el búfer. Los pegados sucesivos permiten rotar a través de elementos cortados anteriormente.
 .Ss Argumento Universal
 El comando
 .Cm C-u
@@ -152,13 +151,13 @@ Rehacer.
 .It Cm C-w
 Eliminar (cortar) región o rectángulo.
 .It Cm M-w
-Copiar región o rectángulo al anillo de eliminación.
+Copiar región o rectángulo al historial de cortes.
 .It Cm C-c
-Copiar región al portapapeles del sistema (OSC 52) y al anillo de eliminación.
+Copiar región al portapapeles del sistema (OSC 52) y al historial de cortes.
 .It Cm C-y
-Pegar (yank) desde el anillo de eliminación.
+Pegar (yank) desde el historial de cortes.
 .It Cm M-y
-Recuperar marca (Yank pop): Rotar por eliminaciones previas tras pegar.
+Recuperar marca (Yank pop): Rotar por texto cortado previas tras pegar.
 .It Cm C-k
 Eliminar hasta el final de la línea.
 .It Cm M-d
@@ -166,7 +165,7 @@ Eliminar palabra hacia adelante.
 .It Cm M-DEL
 Eliminar palabra hacia atrás.
 .It Cm M-z
-Borrar hasta carácter (Zap to char): Elimina hasta incluir un carácter dado.
+Cortar hast carácter (Zap to char): Cortar hasta incluir un carácter dado.
 .It Cm C-t
 Transponer caracteres.
 .It Cm M-t
@@ -180,7 +179,7 @@ Insertar salto de línea e indentar (coincidir con la línea anterior).
 .It Cm C-o
 Insertar salto de línea sin mover el cursor.
 .It Cm C-q
-Insertar el siguiente carácter literalmente (inserción citada).
+Insertar el siguiente carácter literalmente.
 .It Cm C-x C-l
 Convertir región a minúsculas.
 .It Cm C-x C-u
@@ -206,7 +205,7 @@ Una vez establecida una marca, mover el cursor cambia la extensión de la regió
 .It Cm C-SPC
 Establecer marca: Establece la marca en la posición del cursor.
 .It Cm C-u C-SPC
-Recuperar marca: Salta a la posición de marca anterior (Anillo de Marcas).
+Recuperar marca: Salta a la posición de marca anterior (Historial de Marcas).
 .It Cm C-x C-x
 Intercambiar las posiciones del cursor y la marca.
 .It Cm C-g
@@ -356,7 +355,7 @@ busca la compatibilidad con Emacs, pero presenta algunas diferencias en su funci
 .It Cm C-c
 En Emacs, este es el prefijo para atajos definidos por el usuario. En
 .Nm ,
-copia al portapapeles del sistema (OSC 52) así como al anillo de eliminación.
+copia al portapapeles del sistema (OSC 52) así como al historial de cortes.
 .It Cm C-x C-z
 En Emacs, esto suspende y limpia la pantalla. En
 .Nm ,
@@ -393,8 +392,8 @@ comienza a editar el archivo, recibirá una advertencia. El bloqueo no impide qu
 mantiene un historial de deshacer lineal de hasta 100 acciones de edición por búfer.
 .Sh PRESUPUESTO DE MEMORIA
 .Nm
-monitorea el uso de memoria frente a un límite configurable (por defecto 1 GB). Este límite ("presupuesto") contabiliza el contenido de texto real de todos los búferes abiertos, el anillo de eliminación y los datos de deshacer/rehacer. Las asignaciones menores, como el historial de comandos, no se contabilizan.
-Cuando la apertura de un archivo exceda el presupuesto, la operación será rechazada. Se mostrará una advertencia en la barra de estado cuando una operación de eliminación o pegado impulse el uso total por encima del presupuesto.
+monitorea el uso de memoria frente a un límite configurable (por defecto 1 GB). Este límite ("presupuesto") contabiliza el contenido de texto real de todos los búferes abiertos, el historial de cortes y los datos de deshacer/rehacer. Las asignaciones menores, como el historial de comandos, no se contabilizan.
+Cuando la apertura de un archivo exceda el presupuesto, la operación será rechazada. Se mostrará una advertencia en la barra de estado cuando una operación de cortado o pegado impulse el uso total por encima del presupuesto.
 
 .Sh VÉASE TAMBIÉN
 .Xr emacs 1

@@ -139,7 +139,7 @@ void mutateExtendRows(struct buffer *buf, int from_row, int n_rows) {
 
 	/* Append n empty rows at end of buffer. */
 	for (int i = 0; i < n_rows; i++)
-		insertRow(buf, buf->numrows, "", 0);
+		insertRow(buf, buf->numrows, (const uint8_t *)"", 0);
 
 	/* Build a pure-insert undo record matching the shape yankRectangle
 	 * hand-built before this helper existed:

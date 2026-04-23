@@ -141,42 +141,44 @@ void destroyOtherWindows(void) {
 	resizeScreen(0);
 }
 
-void showPopupBuffer(struct buffer *buf) {
-	int win_idx = findBufferWindow(buf);
-	if (win_idx >= 0)
-		return; /* already visible */
-
-	int new_idx = E.nwindows;
-	createWindow();
-	E.windows[new_idx]->buf = buf;
-	E.windows[new_idx]->focused = 0;
-
-	/* Keep focus on the original window */
-	for (int i = 0; i < E.nwindows; i++)
-		E.windows[i]->focused = (i == 0);
-
-	/* Size the popup: content height + padding */
+/* Resize windows so that the popup at win_idx fits its content while
+ * the remaining windows share the leftover space fairly. */
+static void sizePopupWindow(int win_idx) {
 	extern int minibuffer_height;
 	extern const int statusbar_height;
-	int popup_height = buf->numrows + 2;
+
+	struct buffer *buf = E.windows[win_idx]->buf;
 	int total_height = E.screenrows - minibuffer_height -
 			   (statusbar_height * E.nwindows);
 	int non_popup = E.nwindows - 1;
-	int min_others = non_popup * 3;
-	int max_popup = total_height - min_others;
+
+	int popup_height = buf->numrows + 2;
+	int max_popup = total_height - non_popup * 3;
 	if (popup_height > max_popup)
 		popup_height = max_popup;
 	if (popup_height < 3)
 		popup_height = 3;
 
 	int remaining = total_height - popup_height;
-	int per_win = remaining / non_popup;
+	int per_win = non_popup > 0 ? remaining / non_popup : remaining;
 
-	win_idx = findBufferWindow(buf);
-	for (int i = 0; i < E.nwindows; i++) {
-		if (i == win_idx)
-			E.windows[i]->height = popup_height;
-		else
-			E.windows[i]->height = per_win;
+	for (int i = 0; i < E.nwindows; i++)
+		E.windows[i]->height = (i == win_idx) ? popup_height : per_win;
+}
+
+void showPopupBuffer(struct buffer *buf) {
+	int win_idx = findBufferWindow(buf);
+	if (win_idx < 0) {
+		/* First time: create the window and keep focus
+		 * on the original (first) window. */
+		win_idx = E.nwindows;
+		createWindow();
+		E.windows[win_idx]->buf = buf;
+		E.windows[win_idx]->focused = 0;
+		for (int i = 0; i < E.nwindows; i++)
+			E.windows[i]->focused = (i == 0);
 	}
+
+	/* Always resize to match the current content. */
+	sizePopupWindow(win_idx);
 }

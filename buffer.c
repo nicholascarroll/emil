@@ -46,6 +46,8 @@ void markBufferDirty(struct buffer *buf) {
 	if (lockFile(buf, iopath) == 0) {
 		/* Lock acquired — clear any prior "blocked by PID" state. */
 		buf->lock_blocked_pid = 0;
+	} else if (buf->lock_blocked_pid != 0) {
+		setStatusMessage(msg_warn_lock_blocked, buf->lock_blocked_pid);
 	}
 	free(iopath);
 }
@@ -62,7 +64,7 @@ void markBufferClean(struct buffer *buf) {
 	buf->lock_blocked_pid = 0;
 }
 
-void insertRow(struct buffer *bufr, int at, char *s, size_t len) {
+void insertRow(struct buffer *bufr, int at, const uint8_t *s, size_t len) {
 	if (at < 0 || at > bufr->numrows)
 		return;
 
@@ -103,7 +105,7 @@ void insertRow(struct buffer *bufr, int at, char *s, size_t len) {
  * Not used by `insertFile` — inserting a file into an open buffer IS
  * a user edit, so it goes through the mutation layer (mutateInsert)
  * which dirties the buffer and records undo. */
-void appendRowRaw(struct buffer *bufr, const char *s, size_t len) {
+void appendRowRaw(struct buffer *bufr, const uint8_t *s, size_t len) {
 	if (bufr->numrows >= bufr->rowcap) {
 		int new_cap = bufr->rowcap ? bufr->rowcap * 2 : 16;
 		bufr->row = xrealloc(bufr->row, sizeof(erow) * new_cap);
@@ -189,7 +191,8 @@ void rowInsertUnicode(struct buffer *bufr, erow *row, int at) {
 	invalidateScreenCache(bufr);
 }
 
-void rowAppendString(struct buffer *bufr, erow *row, char *s, size_t len) {
+void rowAppendString(struct buffer *bufr, erow *row, const uint8_t *s,
+		     size_t len) {
 	/* Guard against int overflow: row->size is int */
 	if (len > (size_t)(INT_MAX - row->size - 1))
 		return;
@@ -403,8 +406,7 @@ void switchToNamedBuffer(void) {
 		snprintf(prompt, sizeof(prompt), "Switch to buffer: %%s");
 	}
 
-	uint8_t *buffer_name =
-		editorPrompt(E.buf, (uint8_t *)prompt, PROMPT_BUFFER, NULL);
+	uint8_t *buffer_name = editorPrompt(E.buf, prompt, PROMPT_BUFFER, NULL);
 
 	if (buffer_name == NULL) {
 		setStatusMessage(msg_buffer_switch_canceled);
@@ -471,6 +473,7 @@ void switchToNamedBuffer(void) {
 
 	E.lastVisitedBuffer = E.buf;
 	E.buf = targetBuffer;
+	resetFileCheckThrottle();
 
 	const char *full = E.buf->filename ? E.buf->filename : "*scratch*";
 	int n = snprintf(NULL, 0, msg_switched_to, full);
@@ -497,6 +500,7 @@ void previousBuffer(void) {
 			E.windows[i]->buf = E.buf;
 		}
 	}
+	resetFileCheckThrottle();
 }
 
 void nextBuffer(void) {
@@ -519,6 +523,7 @@ void nextBuffer(void) {
 			E.windows[i]->buf = E.buf;
 		}
 	}
+	resetFileCheckThrottle();
 }
 
 void killBuffer(void) {
@@ -583,6 +588,7 @@ void killBuffer(void) {
 	}
 
 	destroyBuffer(bufr);
+	resetFileCheckThrottle();
 	computeDisplayNames();
 
 	/* The closed buffer's text and undo chains are gone; the memory

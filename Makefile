@@ -13,7 +13,7 @@ MAN_SUBDIR = .
 CC = cc
 
 # Enable BSD and POSIX features portably
-DEFAULT_CFLAGS = -std=c99 -Wall -Wextra -Wpedantic -Wno-pointer-sign -D_DEFAULT_SOURCE -D_BSD_SOURCE -O2
+DEFAULT_CFLAGS = -std=c99 -Wall -Wextra -Wpedantic -D_DEFAULT_SOURCE -D_BSD_SOURCE -O2
 
 # The "User" overrides (blank by default)
 CFLAGS = 
@@ -31,7 +31,7 @@ DOCDIR = $(PREFIX)/share/doc/emil
 OBJECTS = main.o wcwidth.o unicode.o buffer.o region.o undo.o transform.o \
           find.o pipe.o register.o fileio.o terminal.o display.o message.o \
           keymap.o edit.o prompt.o util.o completion.o history.o base64.o \
-          abuf.o window.o clang.o adjust.o mutate.o wrap.o motion.o dbuf.o \
+          abuf.o window.o ctags.o adjust.o mutate.o wrap.o motion.o dbuf.o \
           emil_subprocess.o
 
 # Default target

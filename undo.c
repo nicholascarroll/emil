@@ -24,7 +24,7 @@ void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
 
 	/* Ensure the target row exists */
 	if (starty >= buf->numrows)
-		insertRow(buf, buf->numrows, "", 0);
+		insertRow(buf, buf->numrows, (const uint8_t *)"", 0);
 
 	/* Scan for newlines to decide single-line vs multi-line */
 	const uint8_t *first_nl = memchr(data, '\n', datalen);
@@ -110,8 +110,7 @@ void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
 				memcpy(&combined[last_frag_len], suffix,
 				       suffix_len);
 			combined[combined_len] = '\0';
-			insertRow(buf, insert_at, (char *)combined,
-				  combined_len);
+			insertRow(buf, insert_at, combined, combined_len);
 			free(combined);
 			free(suffix);
 			markBufferDirty(buf);
@@ -122,7 +121,7 @@ void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
 		}
 		/* Interior complete line */
 		int line_len = (int)(nl - p);
-		insertRow(buf, insert_at, (char *)p, line_len);
+		insertRow(buf, insert_at, p, line_len);
 		insert_at++;
 		p = nl + 1;
 	}
@@ -130,9 +129,9 @@ void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
 	/* If data ended with '\n', we still need to insert the suffix
 	 * as a new row */
 	if (suffix_len > 0) {
-		insertRow(buf, insert_at, (char *)suffix, suffix_len);
+		insertRow(buf, insert_at, suffix, suffix_len);
 	} else {
-		insertRow(buf, insert_at, "", 0);
+		insertRow(buf, insert_at, (const uint8_t *)"", 0);
 	}
 	free(suffix);
 	markBufferDirty(buf);

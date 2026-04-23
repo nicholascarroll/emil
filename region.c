@@ -484,8 +484,7 @@ void replaceRegex(void) {
 	char prompt[64];
 	snprintf(prompt, sizeof(prompt), "Regex replace %.35s with: %%s",
 		 regex);
-	uint8_t *repl =
-		editorPrompt(buf, (uint8_t *)prompt, PROMPT_BASIC, NULL);
+	uint8_t *repl = editorPrompt(buf, prompt, PROMPT_BASIC, NULL);
 	if (repl == NULL) {
 		free(regex);
 		setStatusMessage("%s", cancel);
@@ -574,8 +573,8 @@ void stringRectangle(void) {
 	if (markInvalid())
 		return;
 
-	uint8_t *string = editorPrompt(E.buf, (uint8_t *)"String rectangle: %s",
-				       PROMPT_BASIC, NULL);
+	uint8_t *string =
+		editorPrompt(E.buf, "String rectangle: %s", PROMPT_BASIC, NULL);
 	if (string == NULL) {
 		setStatusMessage(msg_canceled);
 		return;

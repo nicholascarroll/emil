@@ -249,17 +249,19 @@ struct config {
 	struct history shell_history;
 	struct history search_history;
 	struct history kill_history;
-	int kill_ring_pos;	/* Current position in kill ring for M-y */
-	int self_insert_key;	/* Stashed key for CMD_SELF_INSERT */
-	int memory_over_limit;	/* 1 if totalBudgetBytes has exceeded
+	int kill_ring_pos;     /* Current position in kill ring for M-y */
+	int self_insert_key;   /* Stashed key for CMD_SELF_INSERT */
+	int memory_over_limit; /* 1 if totalBudgetBytes has exceeded
 	                         * EMIL_BYTES_BUDGET; cleared when the
 	                         * budget drops back below the limit */
-	struct abuf render_buf; /* Persistent screen-render buffer */
+	struct timespec last_file_check; /* monotonic time of last
+	                                  * checkFileModified syscall */
+	struct abuf render_buf;		 /* Persistent screen-render buffer */
 };
 
 /*** prototypes ***/
 
-uint8_t *editorPrompt(struct buffer *bufr, const uint8_t *prompt,
+uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 		      enum promptType t,
 		      void (*callback)(struct buffer *, uint8_t *, int));
 void updateBuffer(struct buffer *buf);

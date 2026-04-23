@@ -98,7 +98,7 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 
 uint8_t *editorPipe(int useRegion) {
 	cmd = NULL;
-	cmd = editorPrompt(E.buf, (uint8_t *)"Shell: %s", PROMPT_BASIC, NULL);
+	cmd = editorPrompt(E.buf, "Shell: %s", PROMPT_BASIC, NULL);
 
 	if (cmd == NULL) {
 		setStatusMessage(msg_shell_canceled);
@@ -174,15 +174,14 @@ void pipeCmd(int useRegion) {
 		for (size_t i = 0; i < outputLen; i++) {
 			if (pipeOutput[i] == '\n') {
 				insertRow(shellBuf, shellBuf->numrows,
-					  (char *)&pipeOutput[rowStart],
-					  rowLen);
+					  &pipeOutput[rowStart], rowLen);
 				rowStart = i + 1;
 				rowLen = 0;
 			} else {
 				rowLen++;
 				if (i == outputLen - 1) {
 					insertRow(shellBuf, shellBuf->numrows,
-						  (char *)&pipeOutput[rowStart],
+						  &pipeOutput[rowStart],
 						  rowLen);
 				}
 			}
@@ -340,8 +339,8 @@ void diffBufferWithFile(void) {
 	size_t outLen = (size_t)output_len;
 	for (size_t j = 0; j < outLen; j++) {
 		if (output[j] == '\n' || j == outLen - 1) {
-			insertRow(diffBuf, diffBuf->numrows, &output[rowStart],
-				  rowLen);
+			insertRow(diffBuf, diffBuf->numrows,
+				  (const uint8_t *)&output[rowStart], rowLen);
 			rowStart = j + 1;
 			rowLen = 0;
 		} else {

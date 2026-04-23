@@ -52,9 +52,11 @@ pacman -S msys2-devel msys2-runtime-devel
 make && make install
 ```
 
-## Internationalization Support
+### Internationalization Support
 
-Application message and man page language can be set at build time. Default is English. Other languages supported are:
+`emil` edits UTF-8 text in any language. Application messages and the
+man page can additionally be set to a supported language at build time.
+Default is English. Other languages supported are:
 
 | Language                 | CFLAG        | Man Dir |
 | ------------------------ | ------------ |-------- |

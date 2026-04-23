@@ -136,11 +136,12 @@ static void showRegisterPreview(void) {
 			break;
 		}
 
-		insertRow(prev, prev->numrows, line, (int)strlen(line));
+		insertRow(prev, prev->numrows, (const uint8_t *)line,
+			  (int)strlen(line));
 	}
 
 	if (prev->numrows == 0)
-		insertRow(prev, 0, "(no registers set)", 18);
+		insertRow(prev, 0, (const uint8_t *)"(no registers set)", 18);
 
 	showPopupBuffer(prev);
 }
@@ -164,7 +165,7 @@ static void showRegisterOutput(int reg) {
 	switch (E.registers[reg].rtype) {
 	case REGISTER_NULL:
 		snprintf(header, sizeof(header), "Register %s is empty.", name);
-		insertRow(out, 0, header, (int)strlen(header));
+		insertRow(out, 0, (const uint8_t *)header, (int)strlen(header));
 		break;
 	case REGISTER_POINT: {
 		struct point *pt = &E.registers[reg].data.point;
@@ -181,7 +182,7 @@ static void showRegisterOutput(int reg) {
 				"Register %s contains the buffer position: buffer %s, line %d col %d",
 				name, fname, pt->cy + 1, pt->cx);
 		}
-		insertRow(out, 0, header, (int)strlen(header));
+		insertRow(out, 0, (const uint8_t *)header, (int)strlen(header));
 		break;
 	}
 	case REGISTER_TEXT:
@@ -192,7 +193,7 @@ static void showRegisterOutput(int reg) {
 			snprintf(header, sizeof(header),
 				 "Register %s contains the text:", name);
 		}
-		insertRow(out, 0, header, (int)strlen(header));
+		insertRow(out, 0, (const uint8_t *)header, (int)strlen(header));
 
 		/* Add the text content line by line */
 		{
@@ -203,13 +204,13 @@ static void showRegisterOutput(int reg) {
 				int len;
 				if (nl) {
 					len = (int)(nl - s);
-					insertRow(out, out->numrows, (char *)s,
-						  len);
+					insertRow(out, out->numrows,
+						  (const uint8_t *)s, len);
 					s = nl + 1;
 				} else {
 					len = (int)strlen(s);
-					insertRow(out, out->numrows, (char *)s,
-						  len);
+					insertRow(out, out->numrows,
+						  (const uint8_t *)s, len);
 					break;
 				}
 			}

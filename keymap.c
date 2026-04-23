@@ -1,7 +1,7 @@
 #include "keymap.h"
 #include "adjust.h"
 #include "buffer.h"
-#include "clang.h"
+#include "ctags.h"
 #include "completion.h"
 #include "display.h"
 #include "edit.h"
@@ -57,6 +57,7 @@ void setupCommands(void) {
 		{ "replace-regexp", replaceRegex },
 		{ "replace-string", replaceString },
 		{ "revert-buffer", revert },
+		{ "show-memory-budget", showMemoryBudget },
 		{ "visual-line-mode", toggleVisualLineMode },
 		{ "version", editorVersion },
 		{ "view-register", viewRegister },
@@ -1012,7 +1013,7 @@ static int dispatchMisc(int c, int uarg) {
 		uint8_t *cmd =
 			editorPrompt(E.buf, "cmd: %s", PROMPT_COMMAND, NULL);
 		if (cmd != NULL) {
-			runCommand(cmd);
+			runCommand((char *)cmd);
 			free(cmd);
 		}
 	}

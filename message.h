@@ -64,6 +64,11 @@ static const char *const msg_file_changed_on_disk = "[文件已修改]";
 static const char *const msg_memory_over_limit = "[内存超限!]";
 /*-------------------------------------------------------------*/
 
+/* Echo-area messages when persistent warnings first appear */
+static const char *const msg_warn_file_changed = "警告: %s 在磁盘上已被修改";
+static const char *const msg_warn_lock_blocked = "警告: PID %d 持有文件锁";
+static const char *const msg_warn_lock_acquired = "已获取文件锁";
+
 static const char *const msg_lines_columns = "%d 行，%d 列";
 static const char *const msg_dir_not_supported = "不支持编辑目录。";
 static const char *const msg_inserted_lines = "从 %s 插入了 %d 行";
@@ -177,9 +182,9 @@ static const char *const msg_rectangle_on = "Modo rectángulo activado";
 static const char *const msg_rectangle_off = "Modo rectángulo desactivado";
 
 static const char *const msg_kill_ring_empty =
-	"El anillo de eliminación está vacío.";
+	"El historial de cortes está vacío.";
 static const char *const msg_no_more_kill_entries =
-	"No hay más elementos en el anillo para pegar.";
+	"No hay más elementos en el historial de cortes.";
 static const char *const msg_not_after_yank =
 	"El comando previo no fue un pegado";
 
@@ -205,6 +210,14 @@ static const char *const msg_file_locked = "[BLOQ %d]";
 static const char *const msg_file_changed_on_disk = "[ARCHIVO MOD]";
 static const char *const msg_memory_over_limit = "[MEM EXCED]";
 /*-------------------------------------------------------------*/
+
+/* Echo-area messages when persistent warnings first appear */
+static const char *const msg_warn_file_changed =
+	"Advertencia: %s fue modificado en disco";
+static const char *const msg_warn_lock_blocked =
+	"Advertencia: PID %d tiene el bloqueo del archivo";
+static const char *const msg_warn_lock_acquired =
+	"Bloqueo de archivo adquirido";
 
 static const char *const msg_lines_columns = "%d líneas, %d columnas";
 static const char *const msg_dir_not_supported =
@@ -244,7 +257,7 @@ static const char *const msg_cannot_transpose =
 static const char *const msg_no_other_windows =
 	"No hay otras ventanas para seleccionar";
 static const char *const msg_no_windows_delete =
-	"No hay otras ventanas para eliminar";
+	"No hay otras ventanas para cerrar";
 static const char *const msg_cant_kill_last_window =
 	"No se puede cerrar la última ventana";
 
@@ -376,6 +389,12 @@ static const char *const msg_file_locked = "[LOCK %d]";
 static const char *const msg_file_changed_on_disk = "[FILE MOD]";
 static const char *const msg_memory_over_limit = "[MEM OVER!]";
 /*------------------------------------------------------------*/
+
+/* Echo-area messages when persistent warnings first appear */
+static const char *const msg_warn_file_changed = "Warning: %s modified on disk";
+static const char *const msg_warn_lock_blocked =
+	"Warning: file locked by PID %d";
+static const char *const msg_warn_lock_acquired = "File lock acquired";
 
 static const char *const msg_lines_columns = "%d lines, %d columns";
 static const char *const msg_dir_not_supported =

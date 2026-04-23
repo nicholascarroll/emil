@@ -80,7 +80,7 @@ static ssize_t rune_to_utf8(uint8_t *dest, uint32_t ru) {
 }
 
 static int testCaseUCS(char *testCh, int expected) {
-	int ucs = utf8ToUCS(testCh, 0);
+	int ucs = utf8ToUCS((const uint8_t *)testCh, 0);
 	printf("%s\tgot %04x\texpected %04x\n", testCh, ucs, expected);
 	return expected != ucs;
 }
@@ -106,7 +106,7 @@ static int testCaseReverseUCS(char *expectedChars, int expectedWidth,
 }
 
 static int testCaseStringWidth(char *str, int expected) {
-	int actual = stringWidth(str);
+	int actual = stringWidth((const uint8_t *)str);
 	printf("%s\tgot %i\texpected %i\n", str, actual, expected);
 	return actual != expected;
 }

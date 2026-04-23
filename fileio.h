@@ -11,6 +11,8 @@ int probeLock(const char *filename);
 int lockFile(struct buffer *bufr, const char *filename);
 void releaseLock(struct buffer *bufr);
 void checkFileModified(void);
+void initFileCheck(void);
+void resetFileCheckThrottle(void);
 
 /* File I/O operations */
 char *rowsToString(struct buffer *bufr, size_t *buflen);

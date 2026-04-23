@@ -16,11 +16,13 @@
 #include <fcntl.h>
 #include <glob.h>
 #include <limits.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/select.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -29,6 +31,55 @@ extern struct config E;
 
 /* External functions we need */
 extern void die(const char *s);
+
+/*** timed syscall support ***/
+
+/* SIGALRM handler for timed_stat / timed_lockFile.  Interrupts any
+ * blocking syscall (stat, open, fcntl) so checkFileModified never
+ * stalls the editor on a slow or hung filesystem. */
+
+static volatile sig_atomic_t file_check_timed_out;
+
+static void fileCheckAlarm(int sig) {
+	(void)sig;
+	file_check_timed_out = 1;
+}
+
+/* Install the SIGALRM handler.  Called once from main. */
+void initFileCheck(void) {
+	struct sigaction sa;
+	memset(&sa, 0, sizeof(sa));
+	sa.sa_handler = fileCheckAlarm;
+	sa.sa_flags = 0; /* no SA_RESTART: we want EINTR */
+	sigaction(SIGALRM, &sa, NULL);
+}
+
+/* Arm a 50ms one-shot timer.  Returns 0 on success. */
+static int armTimer(void) {
+	file_check_timed_out = 0;
+	struct itimerval it;
+	memset(&it, 0, sizeof(it));
+	it.it_value.tv_usec = 50000; /* 50ms */
+	return setitimer(ITIMER_REAL, &it, NULL);
+}
+
+/* Disarm the timer. */
+static void disarmTimer(void) {
+	struct itimerval it;
+	memset(&it, 0, sizeof(it));
+	setitimer(ITIMER_REAL, &it, NULL);
+}
+
+/* How many seconds between file-check syscalls. */
+#define FILE_CHECK_INTERVAL_SEC 2
+
+/* Force the next checkFileModified call to run immediately,
+ * bypassing the throttle.  Called on events where the user's
+ * context has changed and stale state should be caught promptly:
+ * buffer switch, resume from suspend (fg). */
+void resetFileCheckThrottle(void) {
+	memset(&E.last_file_check, 0, sizeof(E.last_file_check));
+}
 
 /*** file locking ***/
 
@@ -140,44 +191,54 @@ void releaseLock(struct buffer *bufr) {
  *
  * Called periodically (from refreshScreen) on the focused buffer.
  *
- * Two independent jobs, both cheap:
+ * Throttled: at most one check every FILE_CHECK_INTERVAL_SEC seconds
+ * (monotonic clock) to avoid hammering slow network filesystems.
+ *
+ * Timeout-guarded: each stat() / lockFile() call is wrapped in a
+ * 50ms SIGALRM deadline so a hung filesystem never stalls the editor.
+ *
+ * Two independent jobs:
  *
  *   1. Set bufr->external_mod if mtime has drifted since open/save.
- *      One-shot — returns early if the flag is already set, so the
- *      stat() cost is paid at most once per file until save/revert.
+ *      One-shot — skipped if the flag is already set.
  *
  *   2. Re-probe the advisory lock when we know we have a stale
  *      warning to clear: the buffer is dirty, we previously tried
  *      and failed to acquire the lock (lock_blocked_pid != 0), and
- *      we still don't hold it (lock_fd < 0).  markBufferDirty
- *      short-circuits once dirty is set, so without this re-probe
- *      the warning would persist forever after the blocking process
- *      exits.  The probe runs at most one open+fcntl+close per
- *      refresh, and only in the exact state where the warning is
- *      potentially stale — zero extra syscalls in the common case
- *      where we either hold the lock or nobody else wants it.
+ *      we still don't hold it (lock_fd < 0).
  *
  *      Job 2 is gated on !external_mod: if the blocking process
  *      saved changes before releasing the lock, Job 1 will have
  *      already set external_mod from the mtime drift, and we
  *      deliberately don't acquire a lock we'd use to overwrite
- *      those changes.  This mirrors markBufferDirty's own refusal
- *      to lock when external_mod is set.  The stale lock_blocked_pid
- *      remains on the buffer but is shadowed in the status bar by
- *      the higher-precedence [FILE CHANGED ON DISK] warning (see
- *      display.c precedence order). */
+ *      those changes. */
 
 void checkFileModified(void) {
 	if (E.buf->filename == NULL)
 		return;
 
+	/* Throttle: skip if we checked recently. */
+	struct timespec now;
+	if (clock_gettime(CLOCK_MONOTONIC, &now) == 0) {
+		long elapsed = now.tv_sec - E.last_file_check.tv_sec;
+		if (elapsed >= 0 && elapsed < FILE_CHECK_INTERVAL_SEC)
+			return;
+		E.last_file_check = now;
+	}
+
 	/* Job 1: mtime check. */
 	if (E.buf->open_mtime != 0 && !E.buf->external_mod) {
 		char *iopath = expandTilde(E.buf->filename);
 		struct stat st;
-		if (stat(iopath, &st) == 0) {
-			if (st.st_mtime != E.buf->open_mtime)
+		armTimer();
+		int rc = stat(iopath, &st);
+		disarmTimer();
+		if (rc == 0 && !file_check_timed_out) {
+			if (st.st_mtime != E.buf->open_mtime) {
 				E.buf->external_mod = 1;
+				setStatusMessage(msg_warn_file_changed,
+						 E.buf->filename);
+			}
 		}
 		free(iopath);
 	}
@@ -186,9 +247,13 @@ void checkFileModified(void) {
 	if (E.buf->dirty && E.buf->lock_blocked_pid != 0 &&
 	    E.buf->lock_fd < 0 && !E.buf->external_mod) {
 		char *iopath = expandTilde(E.buf->filename);
-		if (lockFile(E.buf, iopath) == 0) {
+		armTimer();
+		int rc = lockFile(E.buf, iopath);
+		disarmTimer();
+		if (rc == 0 && !file_check_timed_out) {
 			/* Acquired — warning clears. */
 			E.buf->lock_blocked_pid = 0;
+			setStatusMessage(msg_warn_lock_acquired);
 		}
 		/* On failure lockFile has already refreshed
 		 * lock_blocked_pid to reflect the current holder
@@ -313,7 +378,7 @@ int editorOpen(struct buffer *bufr, char *filename) {
 		while (linelen > 0 &&
 		       (line[linelen - 1] == '\n' || line[linelen - 1] == '\r'))
 			linelen--;
-		appendRowRaw(bufr, line, linelen);
+		appendRowRaw(bufr, (const uint8_t *)line, linelen);
 	}
 
 	/* Get the display length of the longest column */
@@ -404,6 +469,7 @@ int editorOpen(struct buffer *bufr, char *filename) {
 
 	if (lock_pid != 0) {
 		bufr->read_only = 1;
+		bufr->lock_blocked_pid = lock_pid;
 		if (lock_pid > 0)
 			setStatusMessage(msg_read_only_locked, lock_pid);
 		else
@@ -566,8 +632,8 @@ void save(void) {
 	}
 
 	if (E.buf->filename == NULL) {
-		char *input = (char *)editorPrompt(
-			E.buf, (uint8_t *)"Save as: %s", PROMPT_FILES, NULL);
+		char *input = (char *)editorPrompt(E.buf, "Save as: %s",
+						   PROMPT_FILES, NULL);
 		if (input == NULL) {
 			setStatusMessage(msg_save_aborted);
 			return;
@@ -648,8 +714,8 @@ void saveAs(void) {
 		setStatusMessage(msg_macro_blocked);
 		return;
 	}
-	char *new_filename = (char *)editorPrompt(
-		E.buf, (uint8_t *)"Save as: %s", PROMPT_FILES, NULL);
+	char *new_filename =
+		(char *)editorPrompt(E.buf, "Save as: %s", PROMPT_FILES, NULL);
 	if (new_filename == NULL) {
 		setStatusMessage(msg_save_aborted);
 		return;
@@ -672,6 +738,7 @@ struct buffer *switchToFile(const char *filename) {
 	if (buf) {
 		E.buf = buf;
 		E.windows[windowFocusedIdx()]->buf = buf;
+		resetFileCheckThrottle();
 		return buf;
 	}
 
@@ -841,7 +908,7 @@ int insertFileAtPath(struct buffer *buf, const char *path,
 				       line[linelen - 1] == '\r')) {
 			linelen--;
 		}
-		appendRowRaw(tmpbuf, line, linelen);
+		appendRowRaw(tmpbuf, (const uint8_t *)line, linelen);
 	}
 
 	free(line);
@@ -1072,8 +1139,7 @@ char *rebaseFilename(const char *filename, const char *old_cwd,
 }
 
 void changeDirectory(void) {
-	uint8_t *dir = editorPrompt(E.buf, (uint8_t *)"Directory: %s",
-				    PROMPT_DIR, NULL);
+	uint8_t *dir = editorPrompt(E.buf, "Directory: %s", PROMPT_DIR, NULL);
 	if (dir == NULL) {
 		setStatusMessage(msg_canceled);
 		return;
@@ -1171,7 +1237,7 @@ struct buffer *loadStdinBuffer(const char *data, size_t len) {
 			size_t end = i;
 			if (end > start && data[end - 1] == '\r')
 				end--;
-			appendRowRaw(buf, (char *)&data[start],
+			appendRowRaw(buf, (const uint8_t *)&data[start],
 				     (int)(end - start));
 			start = i + 1;
 		}
@@ -1181,7 +1247,8 @@ struct buffer *loadStdinBuffer(const char *data, size_t len) {
 		size_t end = len;
 		if (end > start && data[end - 1] == '\r')
 			end--;
-		appendRowRaw(buf, (char *)&data[start], (int)(end - start));
+		appendRowRaw(buf, (const uint8_t *)&data[start],
+			     (int)(end - start));
 	}
 
 	/* Stdin content is read-only: the *stdin* pseudo-file has no

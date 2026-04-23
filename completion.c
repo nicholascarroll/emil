@@ -265,7 +265,7 @@ static void replaceMinibufferText(struct buffer *minibuf, const char *text) {
 	}
 
 	/* Insert new text */
-	insertRow(minibuf, 0, (char *)text, strlen(text));
+	insertRow(minibuf, 0, (const uint8_t *)text, strlen(text));
 	minibuf->cx = strlen(text);
 	minibuf->cy = 0;
 }
@@ -281,8 +281,8 @@ static void showCompletionsBuffer(char **matches, int n_matches,
 	/* Add header */
 	char header[100];
 	snprintf(header, sizeof(header), msg_possible_completions, n_matches);
-	insertRow(comp_buf, 0, header, strlen(header));
-	insertRow(comp_buf, 1, "", 0);
+	insertRow(comp_buf, 0, (const uint8_t *)header, strlen(header));
+	insertRow(comp_buf, 1, (const uint8_t *)"", 0);
 
 	if (type == PROMPT_BUFFER) {
 		/* Buffer completions: vertical list with display names.
@@ -302,8 +302,8 @@ static void showCompletionsBuffer(char **matches, int n_matches,
 				}
 			}
 			int len = (int)strlen(show);
-			insertRow(comp_buf, comp_buf->numrows, (char *)show,
-				  len);
+			insertRow(comp_buf, comp_buf->numrows,
+				  (const uint8_t *)show, len);
 		}
 
 		/* Store match list for M-n/M-p navigation. */
@@ -366,7 +366,8 @@ static void showCompletionsBuffer(char **matches, int n_matches,
 				line_pos--;
 			line[line_pos] = '\0';
 
-			insertRow(comp_buf, comp_buf->numrows, line, line_pos);
+			insertRow(comp_buf, comp_buf->numrows,
+				  (const uint8_t *)line, line_pos);
 		}
 
 		for (int i = 0; i < n_matches; i++)

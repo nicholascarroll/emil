@@ -19,7 +19,7 @@
 
 extern struct config E;
 
-uint8_t *editorPrompt(struct buffer *bufr, const uint8_t *prompt,
+uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 		      enum promptType t,
 		      void (*callback)(struct buffer *, uint8_t *, int)) {
 	uint8_t *result = NULL;
@@ -28,7 +28,7 @@ uint8_t *editorPrompt(struct buffer *bufr, const uint8_t *prompt,
 	while (E.minibuf->numrows > 0) {
 		delRow(E.minibuf, 0);
 	}
-	insertRow(E.minibuf, 0, "", 0);
+	insertRow(E.minibuf, 0, (const uint8_t *)"", 0);
 	E.minibuf->cx = 0;
 	E.minibuf->cy = 0;
 
@@ -42,28 +42,14 @@ uint8_t *editorPrompt(struct buffer *bufr, const uint8_t *prompt,
 					(char *)E.minibuf->row[0].chars :
 					"";
 		if (!E.minibuf->completion_state.preserve_message) {
-			setStatusMessage((char *)prompt, content);
+			setStatusMessage(prompt, content);
 		}
 		E.minibuf->completion_state.preserve_message = 0;
-
-		/* Grow minibuffer if prompt + content exceeds one line */
-		int total_len = strlen(E.statusmsg);
-		int needed = (total_len + E.screencols - 1) / E.screencols;
-		if (needed < 1)
-			needed = 1;
-		if (needed > 5)
-			needed = 5;
-		if (needed != minibuffer_height) {
-			minibuffer_height = needed;
-			/* Force window height recalculation */
-			for (int w = 0; w < E.nwindows; w++)
-				E.windows[w]->height = 0;
-		}
 
 		refreshScreen();
 
 		/* Position cursor on bottom line */
-		int prompt_width = stringWidth(prompt) - 2;
+		int prompt_width = stringWidth((const uint8_t *)prompt) - 2;
 		cursorBottomLine(prompt_width + E.minibuf->cx + 1);
 
 		/* Read key */
@@ -108,8 +94,11 @@ uint8_t *editorPrompt(struct buffer *bufr, const uint8_t *prompt,
 					if (effective_path != current_text) {
 						while (E.minibuf->numrows > 0)
 							delRow(E.minibuf, 0);
-						insertRow(E.minibuf, 0,
-							  effective_path, elen);
+						insertRow(
+							E.minibuf, 0,
+							(const uint8_t *)
+								effective_path,
+							elen);
 						E.minibuf->cx = elen;
 						E.minibuf->cy = 0;
 						resetCompletionState(cs);
@@ -177,7 +166,8 @@ uint8_t *editorPrompt(struct buffer *bufr, const uint8_t *prompt,
 					while (E.minibuf->numrows > 0) {
 						delRow(E.minibuf, 0);
 					}
-					insertRow(E.minibuf, 0, last_search,
+					insertRow(E.minibuf, 0,
+						  (const uint8_t *)last_search,
 						  strlen(last_search));
 					E.minibuf->cx = strlen(last_search);
 					E.minibuf->cy = 0;
@@ -201,7 +191,8 @@ uint8_t *editorPrompt(struct buffer *bufr, const uint8_t *prompt,
 					while (E.minibuf->numrows > 0) {
 						delRow(E.minibuf, 0);
 					}
-					insertRow(E.minibuf, 0, last_search,
+					insertRow(E.minibuf, 0,
+						  (const uint8_t *)last_search,
 						  strlen(last_search));
 					E.minibuf->cx = strlen(last_search);
 					E.minibuf->cy = 0;
@@ -277,7 +268,8 @@ uint8_t *editorPrompt(struct buffer *bufr, const uint8_t *prompt,
 							delRow(E.minibuf, 0);
 						}
 						insertRow(E.minibuf, 0,
-							  history_str,
+							  (const uint8_t *)
+								  history_str,
 							  strlen(history_str));
 						E.minibuf->cx =
 							strlen(history_str);
@@ -287,7 +279,8 @@ uint8_t *editorPrompt(struct buffer *bufr, const uint8_t *prompt,
 					while (E.minibuf->numrows > 0) {
 						delRow(E.minibuf, 0);
 					}
-					insertRow(E.minibuf, 0, "", 0);
+					insertRow(E.minibuf, 0,
+						  (const uint8_t *)"", 0);
 					E.minibuf->cx = 0;
 					E.minibuf->cy = 0;
 				}
@@ -338,7 +331,8 @@ uint8_t *editorPrompt(struct buffer *bufr, const uint8_t *prompt,
 				while (E.minibuf->numrows > 0) {
 					delRow(E.minibuf, 0);
 				}
-				insertRow(E.minibuf, 0, joined, strlen(joined));
+				insertRow(E.minibuf, 0, (const uint8_t *)joined,
+					  strlen(joined));
 				E.minibuf->cx = strlen(joined);
 				E.minibuf->cy = 0;
 				free(joined);
@@ -355,13 +349,6 @@ uint8_t *editorPrompt(struct buffer *bufr, const uint8_t *prompt,
 	}
 
 done:
-	/* Restore minibuffer to single line */
-	if (minibuffer_height != 1) {
-		minibuffer_height = 1;
-		for (int w = 0; w < E.nwindows; w++)
-			E.windows[w]->height = 0;
-	}
-
 	if (result && strlen((char *)result) > 0) {
 		struct history *hist = NULL;
 		switch (t) {

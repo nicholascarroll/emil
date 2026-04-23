@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <termios.h>
+#include <sys/select.h>
 #include <unistd.h>
 
 const int page_overlap = 2;
@@ -199,7 +200,7 @@ int main(int argc, char *argv[]) {
 	signal(SIGPIPE, SIG_IGN);
 	signal(SIGUSR1, SIG_IGN);
 	signal(SIGUSR2, SIG_IGN);
-	signal(SIGALRM, SIG_IGN);
+	initFileCheck();
 
 	E.headbuf = newBuffer();
 	E.buf = E.headbuf;
@@ -317,25 +318,62 @@ int main(int argc, char *argv[]) {
 			for (int i = 0; i < E.nwindows; i++)
 				E.windows[i]->height = 0;
 			resizeScreen(0);
+			resetFileCheckThrottle();
 		}
 		refreshScreen();
 
 		int key = readKey();
 		if (key == -1)
 			continue; /* signal interrupted — recheck flags */
-		recordKey(key);
 
-		/* Stash printable key for self-insert */
-		if (key >= ' ' && key < KEY_ARROW_LEFT)
-			E.self_insert_key = key;
+		/*
+		 * Process this key and then drain any additional
+		 * keys already queued in the input buffer before
+		 * repainting.  This avoids a full refreshScreen()
+		 * between every single keystroke, which fixes two
+		 * classes of bugs:
+		 *
+		 *  1. Perceived command reordering (#51): rapid
+		 *     C-SPC C-a appears to move-then-mark because
+		 *     the expensive refresh between the two keys
+		 *     delays the visual feedback.
+		 *
+		 *  2. Modifier key desync (#52): the large write()
+		 *     in refreshScreen() floods the terminal
+		 *     emulator with output, creating a window where
+		 *     modifier key state (Ctrl) can fall out of sync
+		 *     with the next keypress, causing literal a/e to
+		 *     be inserted instead of C-a/C-e.
+		 *
+		 * The first key is read with a blocking read();
+		 * subsequent keys are drained with a non-blocking
+		 * select() check — we only consume what is already
+		 * buffered, never wait for more.
+		 */
+		for (;;) {
+			recordKey(key);
 
-		/* Clear the status message flag before dispatch.
-		 * Any message posted by the command will set it
-		 * again, so it survives to the next refresh. */
-		E.statusmsg_show = 0;
+			if (key >= ' ' && key < KEY_ARROW_LEFT)
+				E.self_insert_key = key;
 
-		int cmd = resolveBinding(key);
-		if (cmd != CMD_NONE)
-			processKeypress(cmd);
+			E.statusmsg_show = 0;
+
+			int cmd = resolveBinding(key);
+			if (cmd != CMD_NONE)
+				processKeypress(cmd);
+
+			/* Check for more keys already in the buffer */
+			fd_set fds;
+			struct timeval tv = { 0, 0 };
+			FD_ZERO(&fds);
+			FD_SET(STDIN_FILENO, &fds);
+			if (select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv) <=
+			    0)
+				break;
+
+			key = readKey();
+			if (key == -1)
+				break;
+		}
 	}
 }

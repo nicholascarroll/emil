@@ -35,7 +35,7 @@ static int initial_direction = 1;
 
 /* Helper function to search for regex match in a string */
 static uint8_t *regexSearch(uint8_t *text, uint8_t *pattern) {
-	if (!pattern || !text || strlen((char *)pattern) == 0) {
+	if (!pattern || !text || strlen((const char *)pattern) == 0) {
 		return NULL;
 	}
 
@@ -43,12 +43,13 @@ static uint8_t *regexSearch(uint8_t *text, uint8_t *pattern) {
 	regmatch_t match[1];
 
 	/* Try to compile regex, fall back to literal search if invalid */
-	if (regcomp(&regex, (char *)pattern, REG_EXTENDED) != 0) {
-		return strstr((char *)text, (char *)pattern);
+	if (regcomp(&regex, (const char *)pattern, REG_EXTENDED) != 0) {
+		return (uint8_t *)strstr((const char *)text,
+					 (const char *)pattern);
 	}
 
 	/* Execute regex search */
-	if (regexec(&regex, (char *)text, 1, match, 0) == 0) {
+	if (regexec(&regex, (const char *)text, 1, match, 0) == 0) {
 		regfree(&regex);
 		return text + match[0].rm_so;
 	}
@@ -59,9 +60,9 @@ static uint8_t *regexSearch(uint8_t *text, uint8_t *pattern) {
 
 /* Replace all occurrences of 'rep' in 'text' with 'with'.
  * Returns a newly allocated string.  Caller frees. */
-static char *str_replace(char *text, char *rep, char *with) {
-	char *ins;
-	char *tmp;
+static uint8_t *str_replace(uint8_t *text, uint8_t *rep, uint8_t *with) {
+	uint8_t *ins;
+	uint8_t *tmp;
 	size_t len_rep;
 	size_t len_with;
 	size_t len_front;
@@ -69,21 +70,23 @@ static char *str_replace(char *text, char *rep, char *with) {
 
 	if (!text || !rep)
 		return NULL;
-	len_rep = strlen(rep);
+	len_rep = strlen((const char *)rep);
 	if (len_rep == 0)
 		return NULL;
 	if (!with)
-		with = "";
-	len_with = strlen(with);
+		with = (uint8_t *)"";
+	len_with = strlen((const char *)with);
 
 	/* Count occurrences */
 	ins = text;
-	for (count = 0; (tmp = strstr(ins, rep)); ++count) {
+	for (count = 0;
+	     (tmp = (uint8_t *)strstr((const char *)ins, (const char *)rep));
+	     ++count) {
 		ins = tmp + len_rep;
 	}
 
 	/* Compute result size with overflow check */
-	size_t text_len = strlen(text);
+	size_t text_len = strlen((const char *)text);
 	size_t result_size;
 	if (len_with > len_rep) {
 		size_t diff = len_with - len_rep;
@@ -99,23 +102,23 @@ static char *str_replace(char *text, char *rep, char *with) {
 		result_size = text_len + 1;
 	}
 
-	char *result = xmalloc(result_size);
+	uint8_t *result = xmalloc(result_size);
 	tmp = result;
 
 	while (count--) {
-		ins = strstr(text, rep);
+		ins = (uint8_t *)strstr((const char *)text, (const char *)rep);
 		len_front = ins - text;
 		memcpy(tmp, text, len_front);
 		tmp += len_front;
 		size_t remaining = result_size - (tmp - result);
-		int written = snprintf(tmp, remaining, "%s", with);
+		int written = snprintf((char *)tmp, remaining, "%s", with);
 		if (written >= 0 && (size_t)written < remaining) {
 			tmp += written;
 		}
 		text += len_front + len_rep;
 	}
 	size_t final_remaining = result_size - (tmp - result);
-	snprintf(tmp, final_remaining, "%s", text);
+	snprintf((char *)tmp, final_remaining, "%s", text);
 	return result;
 }
 
@@ -127,7 +130,8 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 
 	if (bufr->query != query) {
 		free(bufr->query);
-		bufr->query = query ? xstrdup((char *)query) : NULL;
+		bufr->query = query ? (uint8_t *)xstrdup((const char *)query) :
+				      NULL;
 	}
 	bufr->match = 0;
 
@@ -145,7 +149,7 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 		direction = initial_direction;
 	}
 
-	if (!query || strlen((char *)query) == 0) {
+	if (!query || strlen((const char *)query) == 0) {
 		return;
 	}
 
@@ -164,9 +168,10 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 				match = regexSearch(&(row->chars[bufr->cx + 1]),
 						    query);
 			} else {
-				match = strstr(
-					(char *)&(row->chars[bufr->cx + 1]),
-					(char *)query);
+				match = (uint8_t *)strstr(
+					(const char *)&(
+						row->chars[bufr->cx + 1]),
+					(const char *)query);
 			}
 		}
 		if (match) {
@@ -194,7 +199,8 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 		if (regex_mode) {
 			match = regexSearch(row->chars, query);
 		} else {
-			match = strstr((char *)row->chars, (char *)query);
+			match = (uint8_t *)strstr((const char *)row->chars,
+						  (const char *)query);
 		}
 		if (match) {
 			last_match = current;
@@ -268,12 +274,13 @@ static uint8_t *transformerReplaceString(uint8_t *input) {
 static int findNextMatch(uint8_t *needle, int skip_current) {
 	int ox = E.buf->cx;
 	int oy = E.buf->cy;
-	int needle_len = strlen((char *)needle);
+	int needle_len = strlen((const char *)needle);
 
 	while (E.buf->cy < E.buf->numrows) {
 		erow *row = &E.buf->row[E.buf->cy];
-		uint8_t *match = strstr((char *)&(row->chars[E.buf->cx]),
-					(char *)needle);
+		uint8_t *match = (uint8_t *)strstr(
+			(const char *)&(row->chars[E.buf->cx]),
+			(const char *)needle);
 		if (match) {
 			int mx = match - row->chars;
 			if (skip_current && mx == ox && E.buf->cy == oy) {
@@ -298,9 +305,9 @@ void replaceString(void) {
 		return;
 	}
 
-	uint8_t *prompt = xmalloc(strlen(replace_orig) + 20);
-	snprintf(prompt, strlen(replace_orig) + 20, "Replace %s with: %%s",
-		 replace_orig);
+	char *prompt = xmalloc(strlen((const char *)replace_orig) + 20);
+	snprintf(prompt, strlen((const char *)replace_orig) + 20,
+		 "Replace %s with: %%s", replace_orig);
 	replace_repl = editorPrompt(E.buf, prompt, PROMPT_BASIC, NULL);
 	free(prompt);
 	if (replace_repl == NULL) {
@@ -338,11 +345,13 @@ void queryReplace(void) {
 	}
 
 	/* Status prompt shown during the y/n loop */
-	char *prompt =
-		xmalloc(strlen(replace_orig) + strlen(replace_repl) + 32);
-	snprintf(prompt, strlen(replace_orig) + strlen(replace_repl) + 32,
+	char *prompt = xmalloc(strlen((const char *)replace_orig) +
+			       strlen((const char *)replace_repl) + 32);
+	snprintf(prompt,
+		 strlen((const char *)replace_orig) +
+			 strlen((const char *)replace_repl) + 32,
 		 "Query replacing %s with %s:", replace_orig, replace_repl);
-	int bufwidth = stringWidth(prompt);
+	int bufwidth = stringWidth((const uint8_t *)prompt);
 
 	int savedMx = E.buf->markx;
 	int savedMy = E.buf->marky;
@@ -399,14 +408,14 @@ void queryReplace(void) {
 			doUndo(E.buf, 1);
 			E.buf->markx = E.buf->cx;
 			E.buf->marky = E.buf->cy;
-			E.buf->cx -= strlen(replace_orig);
+			E.buf->cx -= strlen((const char *)replace_orig);
 			break;
 		case 'U':
 			while (E.buf->undo != first)
 				doUndo(E.buf, 1);
 			E.buf->markx = E.buf->cx;
 			E.buf->marky = E.buf->cy;
-			E.buf->cx -= strlen(replace_orig);
+			E.buf->cx -= strlen((const char *)replace_orig);
 			break;
 		case CTRL('r'): {
 			char rprompt[128];
@@ -425,14 +434,16 @@ void queryReplace(void) {
 			}
 			/* Rebuild status prompt */
 			free(prompt);
-			prompt = xmalloc(strlen(replace_orig) +
-					 strlen(replace_repl) + 32);
+			prompt = xmalloc(strlen((const char *)replace_orig) +
+					 strlen((const char *)replace_repl) +
+					 32);
 			snprintf(prompt,
-				 strlen(replace_orig) + strlen(replace_repl) +
+				 strlen((const char *)replace_orig) +
+					 strlen((const char *)replace_repl) +
 					 32,
 				 "Query replacing %s with %s:", replace_orig,
 				 replace_repl);
-			bufwidth = stringWidth(prompt);
+			bufwidth = stringWidth((const uint8_t *)prompt);
 			break;
 		}
 		case 'e':
@@ -450,14 +461,16 @@ void queryReplace(void) {
 					goto QR_CLEANUP;
 			}
 			free(prompt);
-			prompt = xmalloc(strlen(replace_orig) +
-					 strlen(replace_repl) + 32);
+			prompt = xmalloc(strlen((const char *)replace_orig) +
+					 strlen((const char *)replace_repl) +
+					 32);
 			snprintf(prompt,
-				 strlen(replace_orig) + strlen(replace_repl) +
+				 strlen((const char *)replace_orig) +
+					 strlen((const char *)replace_repl) +
 					 32,
 				 "Query replacing %s with %s:", replace_orig,
 				 replace_repl);
-			bufwidth = stringWidth(prompt);
+			bufwidth = stringWidth((const uint8_t *)prompt);
 			break;
 		}
 		case CTRL('l'):
