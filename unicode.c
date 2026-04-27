@@ -1,12 +1,15 @@
+#ifndef _XOPEN_SOURCE
+#define _XOPEN_SOURCE 700
+#endif
+
 #include <sys/types.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <wchar.h>
-#include "wcwidth.h"
 #include "unicode.h"
 #include "emil.h"
 
-/* The UCS format used by wcwidth.c. NOT a general purpose function. */
+/* The UCS format used by wcwidth(). NOT a general purpose function. */
 static int utf8ToUCS(const uint8_t *str, int idx) {
 	int ret = 0;
 	uint8_t ch = str[idx];
@@ -156,7 +159,8 @@ int charInStringWidth(const uint8_t *str, int idx) {
 		return 2;
 	} else {
 		int rune = utf8ToUCS(str, idx);
-		return mk_wcwidth(rune);
+		int w = wcwidth((wchar_t)rune);
+		return w < 0 ? 1 : w;
 	}
 }
 

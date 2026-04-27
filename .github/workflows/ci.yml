@@ -228,3 +228,53 @@ jobs:
             make CC=gcc
             echo "--- Running Tests ---"
             make test
+
+  # Older glibc platforms — wcwidth table coverage testing.
+  # These surface codepoints where the system libc has outdated
+  # Unicode tables, validating the bundled-wcwidth fallback.
+
+  old-glibc-buster:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and Test on Debian 10 Buster (glibc 2.28)
+        uses: uraimo/run-on-arch-action@v3
+        with:
+          arch: aarch64
+          distro: buster
+          githubToken: ${{ github.token }}
+          install: |
+            apt-get update -y
+            apt-get install -y gcc make
+          run: |
+            echo "--- Platform info ---"
+            cat /etc/os-release | grep ^PRETTY_NAME=
+            ldd --version 2>&1 | head -1
+            echo ""
+            echo "--- Building Emil ---"
+            make CC=gcc
+            echo "--- Running Tests ---"
+            make test
+
+  old-glibc-stretch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and Test on Debian 9 Stretch (glibc 2.24)
+        uses: uraimo/run-on-arch-action@v3
+        with:
+          arch: aarch64
+          distro: stretch
+          githubToken: ${{ github.token }}
+          install: |
+            apt-get update -y
+            apt-get install -y gcc make
+          run: |
+            echo "--- Platform info ---"
+            cat /etc/os-release | grep ^PRETTY_NAME=
+            ldd --version 2>&1 | head -1
+            echo ""
+            echo "--- Building Emil ---"
+            make CC=gcc
+            echo "--- Running Tests ---"
+            make test

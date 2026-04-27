@@ -1,3 +1,7 @@
+#ifndef _XOPEN_SOURCE
+#define _XOPEN_SOURCE 700
+#endif
+
 #include "abuf.h"
 #include "buffer.h"
 #include "display.h"
@@ -10,6 +14,7 @@
 #include "util.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <locale.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,6 +22,7 @@
 #include <termios.h>
 #include <sys/select.h>
 #include <unistd.h>
+#include <wchar.h>
 
 const int page_overlap = 2;
 
@@ -155,6 +161,17 @@ void initEditor(void) {
 }
 
 int main(int argc, char *argv[]) {
+	/*
+	 * Set up a UTF-8 locale so that system wcwidth() works.
+	 * Try the user's environment first, then common fallbacks.
+	 */
+	const char *locale_attempts[] = { "", "C.UTF-8", "en_US.UTF-8", NULL };
+	for (int i = 0; locale_attempts[i] != NULL; i++) {
+		if (setlocale(LC_CTYPE, locale_attempts[i]) != NULL &&
+		    wcwidth((wchar_t)0x4E00) == 2)
+			break;
+	}
+
 	// Check for flags before entering raw mode
 	if (argc >= 2 && strncmp(argv[1], "--", 2) == 0) {
 		if (strcmp(argv[1], "--version") == 0) {

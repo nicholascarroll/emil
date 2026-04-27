@@ -28,7 +28,7 @@ MAN_BASEDIR = $(PREFIX)/man
 DOCDIR = $(PREFIX)/share/doc/emil
 
 # Source files
-OBJECTS = main.o wcwidth.o unicode.o buffer.o region.o undo.o transform.o \
+OBJECTS = main.o unicode.o buffer.o region.o undo.o transform.o \
           find.o pipe.o register.o fileio.o terminal.o display.o message.o \
           keymap.o edit.o prompt.o util.o completion.o history.o base64.o \
           abuf.o window.o ctags.o adjust.o mutate.o wrap.o motion.o dbuf.o \

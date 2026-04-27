@@ -35,7 +35,7 @@
 /* Write `content` to a fresh temp file; return mallocd path. */
 static char *make_temp_file(const char *content) {
 	static char tmpname[64];
-	strcpy(tmpname, "/tmp/emil_warn_XXXXXX");
+	emil_strlcpy(tmpname, "/tmp/emil_warn_XXXXXX", sizeof(tmpname));
 	int fd = mkstemp(tmpname);
 	if (fd < 0)
 		return NULL;

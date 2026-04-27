@@ -1,17 +1,22 @@
 /* test_wcwidth.c — Character and string width calculations. */
 
+#ifndef _XOPEN_SOURCE
+#define _XOPEN_SOURCE 700
+#endif
+
 #include "test.h"
 #include "test_harness.h"
 #include "unicode.h"
-#include "wcwidth.h"
+#include <locale.h>
 #include <stdint.h>
+#include <wchar.h>
 
 void test_char_width(void) {
-	TEST_ASSERT_EQUAL_INT(1, mk_wcwidth('A'));
-	TEST_ASSERT_EQUAL_INT(1, mk_wcwidth(' '));
-	TEST_ASSERT_EQUAL_INT(-1, mk_wcwidth('\t'));
-	TEST_ASSERT_EQUAL_INT(-1, mk_wcwidth('\n'));
-	TEST_ASSERT(mk_wcwidth('\0') <= 0);
+	TEST_ASSERT_EQUAL_INT(1, wcwidth(L'A'));
+	TEST_ASSERT_EQUAL_INT(1, wcwidth(L' '));
+	TEST_ASSERT(wcwidth(L'\t') <= 0);
+	TEST_ASSERT(wcwidth(L'\n') <= 0);
+	TEST_ASSERT(wcwidth(L'\0') <= 0);
 }
 
 void test_string_width(void) {
@@ -65,15 +70,15 @@ void test_tab_stops(void) {
 }
 
 void test_cjk_double_width(void) {
-	TEST_ASSERT_EQUAL_INT(2, mk_wcwidth(0x4E00));
-	TEST_ASSERT_EQUAL_INT(2, mk_wcwidth(0x9FFF));
-	TEST_ASSERT_EQUAL_INT(2, mk_wcwidth(0x3000));
+	TEST_ASSERT_EQUAL_INT(2, wcwidth(0x4E00));
+	TEST_ASSERT_EQUAL_INT(2, wcwidth(0x9FFF));
+	TEST_ASSERT_EQUAL_INT(2, wcwidth(0x3000));
 }
 
 void test_zero_width_combining(void) {
-	TEST_ASSERT_EQUAL_INT(0, mk_wcwidth(0x0300));
-	TEST_ASSERT_EQUAL_INT(0, mk_wcwidth(0x0301));
-	TEST_ASSERT_EQUAL_INT(0, mk_wcwidth(0x20DD));
+	TEST_ASSERT_EQUAL_INT(0, wcwidth(0x0300));
+	TEST_ASSERT_EQUAL_INT(0, wcwidth(0x0301));
+	TEST_ASSERT_EQUAL_INT(0, wcwidth(0x20DD));
 }
 
 void test_next_screen_x_multibyte(void) {
@@ -106,6 +111,14 @@ void tearDown(void) {
 }
 
 int main(void) {
+	/* Set up locale so wcwidth works in tests too */
+	const char *attempts[] = { "", "C.UTF-8", "en_US.UTF-8", NULL };
+	for (int i = 0; attempts[i] != NULL; i++) {
+		if (setlocale(LC_CTYPE, attempts[i]) != NULL &&
+		    wcwidth((wchar_t)0x4E00) == 2)
+			break;
+	}
+
 	TEST_BEGIN();
 	RUN_TEST(test_char_width);
 	RUN_TEST(test_string_width);
