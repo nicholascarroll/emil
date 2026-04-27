@@ -1161,6 +1161,7 @@ void whatCursor(void) {
 	}
 
 	/* Get character at cursor */
+	/* TODO Unicode codepoint uint32_t cp = utf8ToUCS(row->chars, E.buf->cx); */
 	char ch[8] = "EOL";
 	if (E.buf->cy < E.buf->numrows &&
 	    E.buf->cx < E.buf->row[E.buf->cy].size) {

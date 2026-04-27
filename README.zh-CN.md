@@ -146,14 +146,6 @@ Shell 集成为编译时选项（默认启用），允许在缓冲区上使用 s
 | **删除行尾空白** | `sed 's/[[:space:]]\+$//'` | `Ctrl-u Alt-\|` |
 | **删除重复行** | `awk '!seen[$0]++'` | `Ctrl-u Alt-\|` |
 
-更复杂的命令可转为 shell 脚本。例如，如果你有一个 OpenAI API 账户，你可以将附带的 shell 脚本 [gpt](filters/gpt) 放到你的 `$PATH` 中，然后使用：
-
-```
-Ctrl-x h Alt-| gpt "翻译成西班牙语"
-```
-
-这会将整个缓冲区的内容进行翻译，并将结果显示在 `*Shell Output*` 中。
-
 
 ### Shell 抽屉
 

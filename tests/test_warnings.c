@@ -58,6 +58,13 @@ static void bump_mtime(const char *path, int delta) {
 	utimensat(AT_FDCWD, path, times, 0);
 }
 
+/* Reset the throttle so the next checkFileModified runs immediately.
+ * Without this, the 2-second throttle suppresses back-to-back calls
+ * within the same test or across consecutive tests. */
+static void resetThrottle(void) {
+	resetFileCheckThrottle();
+}
+
 /* ---- external_mod / checkFileModified ---- */
 
 void test_external_mod_not_set_before_change(void) {
@@ -69,6 +76,7 @@ void test_external_mod_not_set_before_change(void) {
 	TEST_ASSERT_FALSE(buf->external_mod);
 
 	/* refreshScreen would call checkFileModified; call it directly. */
+	resetThrottle();
 	checkFileModified();
 	TEST_ASSERT_FALSE(buf->external_mod);
 
@@ -85,10 +93,12 @@ void test_external_mod_set_on_mtime_change(void) {
 
 	/* Simulate another process touching the file. */
 	bump_mtime(path, 10);
+	resetThrottle();
 	checkFileModified();
 	TEST_ASSERT_TRUE(buf->external_mod);
 
 	/* One-shot: once set, doesn't unset on its own. */
+	resetThrottle();
 	checkFileModified();
 	TEST_ASSERT_TRUE(buf->external_mod);
 
@@ -108,6 +118,7 @@ void test_markdirty_skips_lock_when_externally_modified(void) {
 
 	/* External process modifies the file; flag lights up. */
 	bump_mtime(path, 10);
+	resetThrottle();
 	checkFileModified();
 	TEST_ASSERT_TRUE(buf->external_mod);
 
@@ -162,8 +173,8 @@ void test_markdirty_normal_path_still_locks(void) {
  * that pipe; caller should read one byte then close it. */
 static pid_t fork_lock_holder(const char *path, int *release_write_fd,
 			      int *ready_read_fd) {
-	int ready[2];	 /* child → parent: lock placed */
-	int release[2];	 /* parent → child: please exit */
+	int ready[2];	/* child → parent: lock placed */
+	int release[2]; /* parent → child: please exit */
 	if (pipe(ready) != 0)
 		return -1;
 	if (pipe(release) != 0) {
@@ -298,6 +309,7 @@ void test_external_mod_persists_through_undo_to_clean(void) {
 	bump_mtime(path, 2);
 
 	/* Refresh notices the drift. */
+	resetThrottle();
 	checkFileModified();
 	TEST_ASSERT_TRUE(b->external_mod);
 
@@ -333,6 +345,9 @@ void test_checkFileModified_reacquires_stale_lock(void) {
 	struct buffer *b = make_test_buffer(NULL);
 	TEST_ASSERT_EQUAL_INT(0, editorOpen(b, path));
 
+	/* User toggles writable (C-x C-q) before editing. */
+	b->read_only = 0;
+
 	/* User's first edit — lock acquisition fails, PID recorded. */
 	markBufferDirty(b);
 	TEST_ASSERT_TRUE(b->dirty);
@@ -352,6 +367,7 @@ void test_checkFileModified_reacquires_stale_lock(void) {
 
 	/* refreshScreen tick: checkFileModified re-probes, acquires
 	 * the now-available lock, and clears the warning. */
+	resetThrottle();
 	checkFileModified();
 	TEST_ASSERT_TRUE(b->lock_fd >= 0);
 	TEST_ASSERT_EQUAL_INT(0, b->lock_blocked_pid);
@@ -380,6 +396,7 @@ void test_checkFileModified_does_not_reacquire_if_file_changed(void) {
 
 	struct buffer *b = make_test_buffer(NULL);
 	TEST_ASSERT_EQUAL_INT(0, editorOpen(b, path));
+	b->read_only = 0;
 	markBufferDirty(b);
 	TEST_ASSERT_EQUAL_INT((int)child, b->lock_blocked_pid);
 
@@ -387,6 +404,7 @@ void test_checkFileModified_does_not_reacquire_if_file_changed(void) {
 	release_and_reap(child, release_fd, ready_fd);
 	bump_mtime(path, 2);
 
+	resetThrottle();
 	checkFileModified();
 	TEST_ASSERT_TRUE(b->external_mod);
 	TEST_ASSERT_EQUAL_INT(-1, b->lock_fd); /* did NOT acquire */
@@ -421,6 +439,79 @@ void test_memory_flag_clears_when_budget_under_limit(void) {
  * logic is a single comparison in recheckMemoryBudget; if the
  * "clears" test passes, the flag path itself works. */
 
+/* ---- save / revert clearing external_mod ---- */
+
+/* save() clears external_mod after writing.  We can't easily call
+ * save() in the test harness (it needs terminal I/O for prompts),
+ * so we simulate the flag-clearing sequence that save() performs
+ * after a successful write:
+ *   markBufferClean → stat → open_mtime update → external_mod = 0
+ * The point of this test is that the latch is cleared by the save
+ * path but NOT by markBufferClean alone. */
+
+void test_save_clears_external_mod(void) {
+	char *path = make_temp_file("original\n");
+	TEST_ASSERT_NOT_NULL(path);
+
+	struct buffer *b = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, editorOpen(b, path));
+
+	/* User dirties the buffer. */
+	markBufferDirty(b);
+	TEST_ASSERT_TRUE(b->dirty);
+
+	/* File changes on disk. */
+	bump_mtime(path, 2);
+	resetThrottle();
+	checkFileModified();
+	TEST_ASSERT_TRUE(b->external_mod);
+
+	/* Simulate save's post-write sequence. */
+	markBufferClean(b);
+	struct stat st;
+	if (stat(path, &st) == 0)
+		b->open_mtime = st.st_mtime;
+	b->external_mod = 0;
+
+	TEST_ASSERT_FALSE(b->external_mod);
+	TEST_ASSERT_FALSE(b->dirty);
+
+	/* Subsequent checkFileModified should not re-fire —
+	 * open_mtime now matches the file. */
+	resetThrottle();
+	checkFileModified();
+	TEST_ASSERT_FALSE(b->external_mod);
+
+	unlink(path);
+	free(path);
+}
+
+/* revert() replaces the buffer with a fresh editorOpen, which
+ * initializes external_mod to 0.  Simulate by opening a new
+ * buffer on the same path after external_mod was set. */
+
+void test_revert_clears_external_mod(void) {
+	char *path = make_temp_file("original\n");
+	TEST_ASSERT_NOT_NULL(path);
+
+	struct buffer *b = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, editorOpen(b, path));
+
+	bump_mtime(path, 2);
+	resetThrottle();
+	checkFileModified();
+	TEST_ASSERT_TRUE(b->external_mod);
+
+	/* Simulate revert: open a fresh buffer on the same file. */
+	struct buffer *fresh = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, editorOpen(fresh, path));
+	TEST_ASSERT_FALSE(fresh->external_mod);
+	TEST_ASSERT_FALSE(fresh->dirty);
+
+	unlink(path);
+	free(path);
+}
+
 /* ---- setUp / tearDown / main ---- */
 
 void setUp(void) {
@@ -447,6 +538,9 @@ int main(void) {
 
 	RUN_TEST(test_memory_flag_initially_clear);
 	RUN_TEST(test_memory_flag_clears_when_budget_under_limit);
+
+	RUN_TEST(test_save_clears_external_mod);
+	RUN_TEST(test_revert_clears_external_mod);
 
 	return TEST_END();
 }

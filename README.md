@@ -163,12 +163,6 @@ Below are common "recipes" using standard Unix utilities.
 | **Trim whitespace**    | `sed 's/[[:space:]]\+$//'` | `Ctrl-u Alt-\|`        |
 | **De-duplicate lines** | `awk '!seen[$0]++'`   | `Ctrl-u Alt-\|`             |
 
-More complex commands can be converted into shell scripts. For example, if you have an OpenAI API account you can place the included shell script [gpt](filters/gpt) in your `$PATH` and use:
-
-```
-Ctrl-x h Alt-| gpt "translate to Spanish"
-```
-Which translates the entire buffer and shows the result in `*Shell Output*`.
 
 ### Shell Drawer
 `Ctrl-x Ctrl-z` suspends `emil` while preserving the current editor screen. This permits shell commands to be executed in the terminal below the editor content, after which editing may be resumed with `fg`.

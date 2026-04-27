@@ -60,7 +60,8 @@ const char *unicode_wcwidth_source(void) {
 #endif /* EMIL_DEBUG_WCWIDTH */
 
 /* The UCS format used by wcwidth(). NOT a general purpose function. */
-static int utf8ToUCS(const uint8_t *str, int idx) {
+/* TODO test this carefully cos now We are going to own this as "general purpose". */
+int utf8ToUCS(const uint8_t *str, int idx) {
 	int ret = 0;
 	uint8_t ch = str[idx];
 	if (utf8_is2Char(ch)) {

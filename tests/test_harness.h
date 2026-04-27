@@ -14,6 +14,7 @@
 
 #include "emil.h"
 #include "buffer.h"
+#include "fileio.h"
 #include "keymap.h"
 #include "history.h"
 #include "undo.h"
@@ -23,90 +24,93 @@
 /* E is defined in stubs.c (which replaces main.o) */
 extern struct config E;
 
-
 static void cleanupTestEditor(void) {
-    /* Free the buffer list.  Tests are expected to destroyBuffer()
+	/* Free the buffer list.  Tests are expected to destroyBuffer()
      * their own buffers, but if one forgets (or crashes mid-test),
      * clean up here so the sanitizer doesn't report leaks. */
-    while (E.headbuf) {
-        struct buffer *next = E.headbuf->next;
-        destroyBuffer(E.headbuf);
-        E.headbuf = next;
-    }
-    E.buf = NULL;
-    E.headbuf = NULL;
+	while (E.headbuf) {
+		struct buffer *next = E.headbuf->next;
+		destroyBuffer(E.headbuf);
+		E.headbuf = next;
+	}
+	E.buf = NULL;
+	E.headbuf = NULL;
 
-    /* Free histories */
-    freeHistory(&E.file_history);
-    freeHistory(&E.command_history);
-    freeHistory(&E.shell_history);
-    freeHistory(&E.search_history);
-    freeHistory(&E.kill_history);
+	/* Free histories */
+	freeHistory(&E.file_history);
+	freeHistory(&E.command_history);
+	freeHistory(&E.shell_history);
+	freeHistory(&E.search_history);
+	freeHistory(&E.kill_history);
 
-    /* Free the kill text */
-    clearText(&E.kill);
+	/* Free the kill text */
+	clearText(&E.kill);
 
-    /* Free registers */
-    for (int r = 0; r < 127; r++) {
-        if (E.registers[r].rtype == REGISTER_TEXT)
-            clearText(&E.registers[r].data.text);
-        E.registers[r].rtype = REGISTER_NULL;
-    }
+	/* Free registers */
+	for (int r = 0; r < 127; r++) {
+		if (E.registers[r].rtype == REGISTER_TEXT)
+			clearText(&E.registers[r].data.text);
+		E.registers[r].rtype = REGISTER_NULL;
+	}
 
-    /* Free macro */
-    free(E.macro.keys);
-    E.macro.keys = NULL;
-    E.macro.nkeys = 0;
-    E.macro.skeys = 0;
+	/* Free macro */
+	free(E.macro.keys);
+	E.macro.keys = NULL;
+	E.macro.nkeys = 0;
+	E.macro.skeys = 0;
 
-    /* Free render buffer */
-    abFree(&E.render_buf);
-    E.render_buf = (struct abuf)ABUF_INIT;
+	/* Free render buffer */
+	abFree(&E.render_buf);
+	E.render_buf = (struct abuf)ABUF_INIT;
 
-    /* Free windows */
-    if (E.windows) {
-        for (int i = 0; i < E.nwindows; i++)
-            free(E.windows[i]);
-        free(E.windows);
-        E.windows = NULL;
-    }
+	/* Free windows */
+	if (E.windows) {
+		for (int i = 0; i < E.nwindows; i++)
+			free(E.windows[i]);
+		free(E.windows);
+		E.windows = NULL;
+	}
 
-    /* Reset all remaining scalar state */
-    E.nwindows = 0;
-    E.recording = 0;
-    E.playback = 0;
-    E.micro = 0;
-    E.uarg = 0;
-    E.kill_ring_pos = 0;
-    E.self_insert_key = 0;
-    E.macro_depth = 0;
-    E.lastVisitedBuffer = NULL;
-    E.edbuf = NULL;
-    E.minibuf = NULL;
-    E.statusmsg[0] = '\0';
-    E.statusmsg_show = 0;
-    E.prefix_display[0] = '\0';
+	/* Reset all remaining scalar state */
+	E.nwindows = 0;
+	E.recording = 0;
+	E.playback = 0;
+	E.micro = 0;
+	E.uarg = 0;
+	E.kill_ring_pos = 0;
+	E.self_insert_key = 0;
+	E.macro_depth = 0;
+	E.lastVisitedBuffer = NULL;
+	E.edbuf = NULL;
+	E.minibuf = NULL;
+	E.statusmsg[0] = '\0';
+	E.statusmsg_show = 0;
+	E.prefix_display[0] = '\0';
 }
-
 
 static void initTestEditor(void) {
-    /* Always allocate fresh windows */
-    E.windows = malloc(sizeof(struct window *));
-    E.windows[0] = calloc(1, sizeof(struct window));
+	/* Always allocate fresh windows */
+	E.windows = malloc(sizeof(struct window *));
+	E.windows[0] = calloc(1, sizeof(struct window));
 
-    E.screencols = 80;
-    E.screenrows = 24;
-    E.nwindows = 1;
-    E.windows[0]->focused = 1;
+	E.screencols = 80;
+	E.screenrows = 24;
+	E.nwindows = 1;
+	E.windows[0]->focused = 1;
 
-    /* Initialize histories (safe to call on already-zeroed structs) */
-    initHistory(&E.file_history);
-    initHistory(&E.command_history);
-    initHistory(&E.shell_history);
-    initHistory(&E.search_history);
-    initHistory(&E.kill_history);
+	/* Install the SIGALRM handler for timed file checks */
+	initFileCheck();
+
+	/* Zero the throttle so the first checkFileModified runs immediately */
+	resetFileCheckThrottle();
+
+	/* Initialize histories (safe to call on already-zeroed structs) */
+	initHistory(&E.file_history);
+	initHistory(&E.command_history);
+	initHistory(&E.shell_history);
+	initHistory(&E.search_history);
+	initHistory(&E.kill_history);
 }
-
 
 /* Create a buffer with one line of content and wire it into E. */
 static struct buffer *make_test_buffer(const char *line) {

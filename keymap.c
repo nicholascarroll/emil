@@ -9,6 +9,7 @@
 #include "fileio.h"
 #include "find.h"
 #include "message.h"
+#include "palette.h"
 #include "pipe.h"
 #include "prompt.h"
 #include "region.h"
@@ -205,6 +206,8 @@ static int resolveMetaBinding(int ch) {
 		return CMD_CTAGS_BACK;
 	case '`':
 		return CMD_TOGGLE_HEADER_BODY;
+	case '/':
+		return CMD_EXPAND;
 	case '%':
 		return CMD_QUERY_REPLACE;
 	case '?':
@@ -1039,6 +1042,9 @@ static int dispatchMisc(int c, int uarg) {
 			buf->cx, buf->cy, w->scx, w->scy, w->height,
 			E.screenrows, w->rowoff);
 	}
+		return 1;
+	case CMD_EXPAND:
+		expandPalette();
 		return 1;
 	case CMD_KILL_LINE_BACKWARDS:
 		killLineBackwards();

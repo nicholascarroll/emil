@@ -148,11 +148,11 @@ TEST_OBJECTS="unicode.o buffer.o region.o undo.o transform.o \
     find.o pipe.o register.o fileio.o display.o message.o keymap.o \
     edit.o prompt.o util.o completion.o history.o base64.o abuf.o \
     window.o ctags.o adjust.o mutate.o wrap.o motion.o dbuf.o \
-    emil_subprocess.o tests/stubs.o"
+    emil_subprocess.o palette.o tests/stubs.o"
 
 echo "Unit tests:"
 
-for suite in unicode wcwidth buffer undo edit fileio relpath visual_line utf8_validate rect_undo transform subprocess shell adjust history abuf tilde keymap kill_ring insert_file status_bar; do
+for suite in unicode wcwidth buffer undo edit fileio relpath visual_line utf8_validate rect_undo transform subprocess shell adjust history abuf tilde keymap kill_ring insert_file status_bar warnings; do
     src="tests/test_${suite}.c"
     bin="tests/test_${suite}"
     printf "  %-12s " "$suite"
