@@ -104,7 +104,7 @@ hal:
 # Development targets
 debug:
 	@GIT_VERSION="`git describe --tags --always --dirty 2>/dev/null || echo $(VERSION)`"; \
-	$(MAKE) VERSION="$$GIT_VERSION" CFLAGS="$(CFLAGS) -g -O0" $(PROGNAME)
+	$(MAKE) VERSION="$$GIT_VERSION" CFLAGS="$(CFLAGS) -DEMIL_DEBUG_WCWIDTH -g -O0" $(PROGNAME)
 
 format:
 	clang-format -i *.c *.h

@@ -9,6 +9,56 @@
 #include "unicode.h"
 #include "emil.h"
 
+#ifdef EMIL_DEBUG_WCWIDTH
+#include "widechar_width_c.h"
+
+static int bundled_wcwidth(int cp) {
+	int w = widechar_wcwidth(cp);
+	if (w >= 0)
+		return w;
+	switch (w) {
+	case widechar_nonprint:
+		return 0;
+	case widechar_combining:
+		return 0;
+	case widechar_ambiguous:
+		return 1;
+	case widechar_private_use:
+		return 1;
+	case widechar_unassigned:
+		return 1;
+	case widechar_widened_in_9:
+		return 2;
+	case widechar_non_character:
+		return 0;
+	default:
+		return 1;
+	}
+}
+
+static int system_wcwidth(int cp) {
+	int w = wcwidth((wchar_t)cp);
+	return w < 0 ? 1 : w;
+}
+
+static int (*active_wcwidth)(int) = bundled_wcwidth;
+static int using_bundled = 1;
+
+void unicode_toggle_wcwidth(void) {
+	if (using_bundled) {
+		active_wcwidth = system_wcwidth;
+		using_bundled = 0;
+	} else {
+		active_wcwidth = bundled_wcwidth;
+		using_bundled = 1;
+	}
+}
+
+const char *unicode_wcwidth_source(void) {
+	return using_bundled ? "bundled (Unicode 17.0)" : "system";
+}
+#endif /* EMIL_DEBUG_WCWIDTH */
+
 /* The UCS format used by wcwidth(). NOT a general purpose function. */
 static int utf8ToUCS(const uint8_t *str, int idx) {
 	int ret = 0;
@@ -159,8 +209,12 @@ int charInStringWidth(const uint8_t *str, int idx) {
 		return 2;
 	} else {
 		int rune = utf8ToUCS(str, idx);
+#ifdef EMIL_DEBUG_WCWIDTH
+		return active_wcwidth(rune);
+#else
 		int w = wcwidth((wchar_t)rune);
 		return w < 0 ? 1 : w;
+#endif
 	}
 }
 

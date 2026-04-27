@@ -40,6 +40,13 @@ void showPrefix(const char *prefix) {
 
 // Forward declarations for command functions
 
+#ifdef EMIL_DEBUG_WCWIDTH
+static void toggleWcwidth(void) {
+	unicode_toggle_wcwidth();
+	setStatusMessage("Using %s wcwidth", unicode_wcwidth_source());
+}
+#endif
+
 static int compare_commands(const void *a, const void *b) {
 	return strcmp(((struct command *)a)->key, ((struct command *)b)->key);
 }
@@ -61,6 +68,9 @@ void setupCommands(void) {
 		{ "visual-line-mode", toggleVisualLineMode },
 		{ "version", editorVersion },
 		{ "view-register", viewRegister },
+#ifdef EMIL_DEBUG_WCWIDTH
+		{ "toggle-wcwidth", toggleWcwidth },
+#endif
 #ifdef EMIL_DEBUG_UNDO
 		{ "debug-unpair", debugUnpair },
 #endif

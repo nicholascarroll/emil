@@ -194,7 +194,7 @@ make CFLAGS="-DEMIL_BYTES_BUDGET=8388608"
 
 每帧渲染时，渲染器直接从缓冲区读取原始字节，将终端就绪序列直接输出至临时追加缓冲区。无中间渲染缓冲。**追加缓冲区通过单次 `write()` 调用写入终端，随后被截断。**
 
-渲染系统仅使用：光标定位（CSI H）、清除至行尾（CSI K）、反显（CSI 7m / CSI 0m）和清除下方（CSI J）。核心渲染器不使用滚动区域操作及行插入/删除 [^2]。
+渲染系统仅使用：光标定位（CSI H）、清除至行尾（CSI K）、反显（CSI 7m / CSI 0m）和清除下方（CSI J）。
 
 所有输入在单一循环中处理：
 
@@ -216,5 +216,4 @@ emil 是 [`japanoise/emsys`](https://github.com/japanoise/emsys) 的衍生项目
 
 [^1]: POSIX.1 已省略此项，参见 [Rationale](https://pubs.opengroup.org/onlinepubs/007904975/utilities/sh.html)。
 
-[^2]: 计划作为可选渲染加速层，通过运行时开关启用。
 

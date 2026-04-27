@@ -54,8 +54,8 @@ make && make install
 
 ### Internationalization Support
 
-`emil` edits UTF-8 text in any language. Application messages and the
-man page can additionally be set to a supported language at build time.
+`emil` edits text in any language. Application messages and the
+man page can be set to a supported language at build time.
 Default is English. Other languages supported are:
 
 | Language                 | CFLAG        | Man Dir |
@@ -207,7 +207,7 @@ Display widths are cached per-row and recomputed only when a row is edited. A cu
 
 On each frame, the renderer reads raw bytes from the buffer and emits terminal-ready sequences directly into an append buffer. No intermediate render buffers exist. The append buffer is written to the terminal in a single `write()` call, then truncated.
 
-The rendering system uses only cursor positioning (CSI H), erase-to-end-of-line (CSI K), reverse video (CSI 7m / CSI 0m), and clear-below (CSI J). Scroll region manipulation and line insert/delete are not used by the core renderer [^2] .
+The rendering system uses only cursor positioning (CSI H), erase-to-end-of-line (CSI K), reverse video (CSI 7m / CSI 0m), and clear-below (CSI J). 
 
 All input is processed in a single loop:
 
@@ -232,4 +232,3 @@ Distributed under the MIT License.
 
 [^1]: Omitted from POSIX.1, see [Rationale](https://pubs.opengroup.org/onlinepubs/007904975/utilities/sh.html).
 
-[^2]: Planned as an optional render acceleration layer enabled by a run-time toggle.

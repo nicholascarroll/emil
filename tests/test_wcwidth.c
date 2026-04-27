@@ -9,6 +9,7 @@
 #include "unicode.h"
 #include <locale.h>
 #include <stdint.h>
+#include <string.h>
 #include <wchar.h>
 
 void test_char_width(void) {
@@ -104,6 +105,18 @@ void test_string_width_mixed(void) {
 	TEST_ASSERT_EQUAL_INT(4, stringWidth(mixed));
 }
 
+#ifdef EMIL_DEBUG_WCWIDTH
+void test_toggle_wcwidth(void) {
+	const char *before = unicode_wcwidth_source();
+	unicode_toggle_wcwidth();
+	const char *after = unicode_wcwidth_source();
+	TEST_ASSERT(strcmp(before, after) != 0);
+	/* Toggle back */
+	unicode_toggle_wcwidth();
+	TEST_ASSERT(strcmp(before, unicode_wcwidth_source()) == 0);
+}
+#endif
+
 void setUp(void) {
 }
 void tearDown(void) {
@@ -129,5 +142,8 @@ int main(void) {
 	RUN_TEST(test_zero_width_combining);
 	RUN_TEST(test_next_screen_x_multibyte);
 	RUN_TEST(test_string_width_mixed);
+#ifdef EMIL_DEBUG_WCWIDTH
+	RUN_TEST(test_toggle_wcwidth);
+#endif
 	return TEST_END();
 }

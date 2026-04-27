@@ -194,6 +194,19 @@ done
 
 rm -f tests/stubs.o
 
+# System wcwidth() probe (informational, does not affect pass/fail)
+echo ""
+echo "System wcwidth() probe:"
+PROBE_SRC="tests/test_system_wcwidth.c"
+PROBE_BIN="tests/test_system_wcwidth"
+
+if $CC $TEST_CFLAGS -D_XOPEN_SOURCE=700 $SANITIZER_FLAGS -o "$PROBE_BIN" "$PROBE_SRC" $LDFLAGS 2>/dev/null; then
+    ./$PROBE_BIN 2>&1 | sed 's/^/  /'
+    rm -f "$PROBE_BIN"
+else
+    echo "  (skipped — failed to compile probe test)"
+fi
+
 
 # Print the last line of the report
 echo ""
