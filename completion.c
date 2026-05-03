@@ -258,7 +258,7 @@ static void getCommandCompletions(const char *prefix,
 	}
 }
 
-static void replaceMinibufferText(struct buffer *minibuf, const char *text) {
+void replaceMinibufferText(struct buffer *minibuf, const char *text) {
 	/* Clear current content */
 	while (minibuf->numrows > 0) {
 		delRow(minibuf, 0);

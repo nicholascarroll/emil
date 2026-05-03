@@ -250,6 +250,27 @@ static void snapToSymbol(struct buffer *buf, int direction) {
 	}
 }
 
+/* Close the palette popup and restore window focus to the buffer that
+ * was active when the palette was opened.
+ *
+ * If `origin` still inhabits a visible window, focus that window.
+ * Otherwise (typically when the palette was invoked from the
+ * minibuffer, which is not in any window) fall back to whichever
+ * window held focus before the palette opened — clamped to the
+ * current window count, since windows may have been closed.
+ *
+ * Updates E.windows[*]->focused and E.buf. */
+static void restoreFocusTo(struct buffer *origin, int origin_win) {
+	closeSpecialBuffer(PALETTE_BUF_NAME);
+
+	int ow = findBufferWindow(origin);
+	int target = (ow >= 0) ? ow :
+				 (origin_win < E.nwindows ? origin_win : 0);
+	for (int i = 0; i < E.nwindows; i++)
+		E.windows[i]->focused = (i == target);
+	E.buf = origin;
+}
+
 void expandPalette(void) {
 	/* Remember the invoking buffer so we can insert into it later. */
 	struct buffer *origin = E.buf;
@@ -311,39 +332,8 @@ void expandPalette(void) {
 						       &row->chars[cx], nbytes);
 						E.nunicode = nbytes;
 
-						/* Close palette and restore focus */
-						closeSpecialBuffer(
-							PALETTE_BUF_NAME);
-
-						/* Restore focus to the origin window */
-						int ow = findBufferWindow(
-							origin);
-						if (ow >= 0) {
-							for (int i = 0;
-							     i < E.nwindows;
-							     i++)
-								E.windows[i]
-									->focused =
-									(i ==
-									 ow);
-						} else {
-							/* Origin is the minibuffer (not in
-							 * any window).  Just refocus the
-							 * window that was active before the
-							 * palette was opened. */
-							int fw =
-								origin_win < E.nwindows ?
-									origin_win :
-									0;
-							for (int i = 0;
-							     i < E.nwindows;
-							     i++)
-								E.windows[i]
-									->focused =
-									(i ==
-									 fw);
-						}
-						E.buf = origin;
+						restoreFocusTo(origin,
+							       origin_win);
 
 						/* Insert the symbol */
 						undoAppendUnicode(E.buf);
@@ -369,19 +359,7 @@ void expandPalette(void) {
 
 		/* Cancel */
 		if (key == CTRL('g')) {
-			closeSpecialBuffer(PALETTE_BUF_NAME);
-
-			int ow = findBufferWindow(origin);
-			if (ow >= 0) {
-				for (int i = 0; i < E.nwindows; i++)
-					E.windows[i]->focused = (i == ow);
-			} else {
-				int fw = origin_win < E.nwindows ? origin_win :
-								   0;
-				for (int i = 0; i < E.nwindows; i++)
-					E.windows[i]->focused = (i == fw);
-			}
-			E.buf = origin;
+			restoreFocusTo(origin, origin_win);
 			setStatusMessage(msg_canceled);
 			return;
 		}
