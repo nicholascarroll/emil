@@ -54,9 +54,9 @@ make && make install
 
 ### Internationalization Support
 
-`emil` edits text in any language. Application messages and the
-man page can be set to a supported language at build time.
-Default is English. Other languages supported are:
+`emil` edits text in any any left-to-right script encoded in valid UTF-8. Right-to-left scripts such as Arabic and Hebrew are not supported. 
+
+Application messages and the man page can be set to a supported language at build time. Default is English. Other languages supported are:
 
 | Language                 | CFLAG        | Man Dir |
 | ------------------------ | ------------ |-------- |
@@ -213,8 +213,7 @@ All input is processed in a single loop:
 ## Contributing
 
 Bug fixes, portability improvements, performance work, and general code quality 
-PRs are welcome. If you’d like to propose a new feature, please open an issue 
-first: `emil` is deliberately small.  
+PRs are welcome. Please do not propose any new features. 
 
 
 ## Credits and License

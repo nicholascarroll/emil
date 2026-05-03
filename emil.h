@@ -130,8 +130,6 @@ struct buffer {
 	uint8_t match;
 	struct undo *undo;
 	struct undo *redo;
-	int undo_count;
-	int undo_pruned;
 	struct buffer *next;
 	int *screen_line_start;
 	int screen_line_cache_size;

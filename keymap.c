@@ -216,6 +216,8 @@ static int resolveMetaBinding(int ch) {
 		return CMD_BACKWARD_PARA;
 	case '}':
 		return CMD_FORWARD_PARA;
+	case ':': // for lost vi users
+		return CMD_HELP;
 	case 127:
 		return CMD_BACKSPACE_WORD;
 	/* C-M- (control+meta) combinations: ESC followed by a control char */

@@ -371,7 +371,7 @@ suspende mientras preserva la pantalla del editor (Cajón de Shell).
 .It Cm C-_
 En Emacs, esto sirve tanto para deshacer como para rehacer, creando un árbol de historial de deshacer al invertir la dirección del recorrido. En
 .Nm ,
-es únicamente para deshacer.
+es únicamente para deshacer (deshacer/rehacer es linear).
 .El
 .Sh ARCHIVOS Y CODIFICACIÓN
 .Nm
@@ -395,9 +395,6 @@ Mientras existan ediciones no guardadas en un archivo,
 mantendrá un bloqueo no obligatorio sobre el mismo. Si otra instancia de
 .Nm
 comienza a editar el archivo, recibirá una advertencia. El bloqueo no impide que otros procesos escriban en el archivo.
-.Sh HISTORIAL DE DESHACER
-.Nm
-mantiene un historial de deshacer lineal de hasta 100 acciones de edición por búfer.
 .Sh PRESUPUESTO DE MEMORIA
 .Nm
 monitorea el uso de memoria frente a un límite configurable (por defecto 1 GB). Este límite ("presupuesto") contabiliza el contenido de texto real de todos los búferes abiertos, el historial de cortes y los datos de deshacer/rehacer. Las asignaciones menores, como el historial de comandos, no se contabilizan.

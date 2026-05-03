@@ -53,6 +53,8 @@ static const char *const msg_wrote_bytes = "已写入 %d 字节到 %s";
 static const char *const msg_cant_open = "无法打开文件：%s";
 static const char *const msg_save_aborted = "保存已中止。";
 static const char *const msg_save_failed = "保存失败：%s";
+static const char *const msg_save_directly_prompt = 
+	" * TODO ";
 static const char *const msg_file_not_found = "文件未找到：%s";
 static const char *const msg_invalid_utf8 = "UTF-8 验证失败";
 static const char *const msg_binary_file = "文件包含空字节（二进制文件？）";
@@ -71,7 +73,7 @@ static const char *const msg_warn_lock_acquired = "已获取文件锁";
 
 static const char *const msg_lines_columns = "%d 行，%d 列";
 static const char *const msg_dir_not_supported = "不支持编辑目录。";
-static const char *const msg_inserted_lines = "从 %s 插入了 %d 行";
+static const char *const msg_inserted_lines = " * TODO check translation 从 %d 插入了 %s 行";
 static const char *const msg_error_opening = "打开文件出错：%s";
 static const char *const msg_changed_dir = "已更改目录";
 static const char *const msg_current_dir = "当前目录: %s";
@@ -150,8 +152,13 @@ static const char *const msg_diff_cannot_subprocess =
 static const char *const msg_diff_no_differences = "无差异";
 static const char *const msg_diff_failed = "Diff 失败 (退出状态 %d)";
 static const char *const msg_unknown_cx_x = "未知命令 C-x x %c";
-static const char *const msg_memory_limit = "打开文件总量超限";
-static const char *const msg_help = "文档：参见 shell 中的 `man emil`";
+static const char *const msg_memory_limit = "打开文件总量超限"; //* T0DO
+static const char *const msg_help = 
+	"打开:C-x C-f   保存:C-x C-s   退出:C-x C-c   "
+	"设置标记:C-SPC   剪切:C-w   复制:M-w   粘贴:C-y   "
+	"撤销:C-_   搜索:C-s   取消:C-g   "
+	"其中 C- 表示 Control 键，M- 表示 Meta（Alt）键。  "
+	"完整命令参考请参阅手册页（man emil）。";
 static const char *const msg_read_only_locked = "只读: PID %d 持有建议锁";
 static const char *const msg_read_only_locked_unknown =
 	"只读: 其他进程持有建议锁";
@@ -199,6 +206,8 @@ static const char *const msg_wrote_bytes = "Se escribieron %d bytes en %s";
 static const char *const msg_cant_open = "No se puede abrir el archivo: %s";
 static const char *const msg_save_aborted = "Guardado cancelado.";
 static const char *const msg_save_failed = "Error al guardar: %s";
+static const char *const msg_save_directly_prompt = 
+	" * TODO ";
 static const char *const msg_file_not_found = "Archivo no encontrado: %s";
 static const char *const msg_invalid_utf8 = "Error de validación UTF-8";
 static const char *const msg_binary_file =
@@ -330,9 +339,13 @@ static const char *const msg_diff_no_differences = "No hay diferencias";
 static const char *const msg_diff_failed = "Diff falló (estado de salida %d)";
 static const char *const msg_unknown_cx_x = "Comando desconocido C-x x %c";
 static const char *const msg_memory_limit =
-	"Se excedió el límite de archivos abiertos";
+	"Se excedió el presupuesto de memoria del editor";
 static const char *const msg_help =
-	"Documentación: consulte `man emil` en la terminal.";
+	"Abrir:C-x C-f   Guardar:C-x C-s   Salir:C-x C-c   "
+	"Marca:C-SPC   Cortar:C-w   Copiar:M-w   Pegar:C-y   "
+	"Deshacer:C-_   Buscar:C-s   Cancelar:C-g   "
+	"C- indica la tecla Control, M- indica la tecla Meta (Alt).  "
+	"Consulte el manual completo con: man emil.";
 static const char *const msg_read_only_locked =
 	"Solo lectura: bloqueo por PID %d";
 static const char *const msg_read_only_locked_unknown =
@@ -378,6 +391,8 @@ static const char *const msg_wrote_bytes = "Wrote %d bytes to %s";
 static const char *const msg_cant_open = "Can't open file: %s";
 static const char *const msg_save_aborted = "Save aborted.";
 static const char *const msg_save_failed = "Save failed: %s";
+static const char *const msg_save_directly_prompt =
+	"Atomic save failed (disk space). Overwrite directly? (y/N)";
 static const char *const msg_file_not_found = "File not found: %s";
 static const char *const msg_invalid_utf8 = "Failed UTF-8 validation";
 static const char *const msg_binary_file =
@@ -483,9 +498,13 @@ static const char *const msg_diff_cannot_subprocess =
 static const char *const msg_diff_no_differences = "No differences";
 static const char *const msg_diff_failed = "Diff failed (exit status %d)";
 static const char *const msg_unknown_cx_x = "Unknown command C-x x %c";
-static const char *const msg_memory_limit = "Open-file limit exceeded";
+static const char *const msg_memory_limit = "Editor memory budget exceeded"; 
 static const char *const msg_help =
-	"Documentation: see `man emil` (in your shell).";
+	"Open:C-x C-f   Save:C-x C-s   Quit:C-x C-c   "
+	"Mark:C-SPC   Kill:C-w   Copy:M-w   Yank:C-y   "
+	"Undo:C-_   Search:C-s   Cancel:C-g   "
+	"where C- denotes the Control key, M- denotes the Meta (Alt) key.  "
+	"For the complete command reference, see the man page.";
 static const char *const msg_read_only_locked =
 	"Read only: advisory lock by PID %d";
 static const char *const msg_read_only_locked_unknown =
@@ -493,3 +512,4 @@ static const char *const msg_read_only_locked_unknown =
 #endif
 
 #endif /* EMIL_MESSAGE_H */
+

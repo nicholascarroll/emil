@@ -216,10 +216,6 @@ static void undoStep(struct buffer *buf, int redo) {
 	*src = node->prev;
 	node->prev = prev_dst;
 
-	if (redo)
-		buf->undo_count++;
-	else
-		buf->undo_count--;
 }
 
 void doUndo(struct buffer *buf, int count) {
@@ -232,7 +228,7 @@ void doUndo(struct buffer *buf, int count) {
 	for (int j = 0; j < times; j++) {
 		if (buf->undo == NULL) {
 			setStatusMessage(msg_no_undo);
-			if (!buf->undo_pruned && !buf->internal_mod) {
+			if (!buf->internal_mod) {
 				markBufferClean(buf);
 			}
 			return;
@@ -316,23 +312,6 @@ static void freeUndos(struct undo *first);
 void pushUndo(struct buffer *buf, struct undo *new) {
 	new->prev = buf->undo;
 	buf->undo = new;
-	buf->undo_count++;
-
-	if (buf->undo_count > UNDO_LIMIT) {
-		/* Walk to the node just before the tail to prune */
-		struct undo *cur = buf->undo;
-		for (int i = 1; i < UNDO_LIMIT && cur->prev != NULL; i++) {
-			cur = cur->prev;
-		}
-		if (cur->prev != NULL) {
-			/* If the oldest entry is paired, free both */
-			freeUndos(cur->prev);
-			cur->prev = NULL;
-			cur->paired = 0; /* pair was split by pruning */
-		}
-		buf->undo_count = UNDO_LIMIT;
-		buf->undo_pruned = 1;
-	}
 }
 
 static void freeUndos(struct undo *first) {
@@ -355,7 +334,6 @@ void clearRedos(struct buffer *buf) {
 void clearUndosAndRedos(struct buffer *buf) {
 	freeUndos(buf->undo);
 	buf->undo = NULL;
-	buf->undo_count = 0;
 	clearRedos(buf);
 }
 

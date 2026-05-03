@@ -375,7 +375,7 @@ it suspends while preserving the editor screen (Shell Drawer).
 .It Cm C-_
 In Emacs, this is both undo and redo, creating an undo history tree by reversal of traversal direction. In
 .Nm ,
-it is only undo.
+it is only undo (undo/redo is linear).
 .El
 .Sh FILES AND ENCODING
 .Nm
@@ -399,9 +399,6 @@ While having unsaved edits to a file,
 will keep an advisory lock on the file. If another instance of 
 .Nm
 begins to edit the file, it receives a warning. The lock does not prevent other processes from writing to the file.
-.Sh UNDO HISTORY
-.Nm
-maintains a linear undo history of up to 100 editing actions per buffer.
 .Sh MEMORY BUDGET
 .Nm
 tracks memory usage against a configurable limit (default 1 GB). This limit ('budget') counts the actual text content of all open buffers, kill ring and undo/redo data. Minor allocations like command history are not counted.

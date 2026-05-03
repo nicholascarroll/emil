@@ -3,7 +3,6 @@
 
 #include "emil.h"
 
-#define UNDO_LIMIT 100
 
 void doUndo(struct buffer *buf, int count);
 void doRedo(struct buffer *buf, int count);

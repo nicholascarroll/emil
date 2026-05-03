@@ -247,7 +247,6 @@ struct buffer *newBuffer(void) {
 	ret->special_buffer = 0;
 	ret->undo = newUndo();
 	ret->redo = NULL;
-	ret->undo_count = 1;
 	ret->completion_state.last_completed_text = NULL;
 	ret->completion_state.completion_start_pos = 0;
 	ret->completion_state.successive_tabs = 0;
@@ -270,7 +269,6 @@ struct buffer *newBuffer(void) {
 	ret->external_mod = 0;
 	ret->lock_blocked_pid = 0;
 	ret->internal_mod = 0;
-	ret->undo_pruned = 0;
 	return ret;
 }
 

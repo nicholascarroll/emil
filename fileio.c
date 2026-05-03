@@ -653,7 +653,7 @@ void save(void) {
 	if (writeAtomic(iopath, buf, len) == -1) {
 		if (errno == ENOSPC) {
 			if (!confirmOverwriteDirect(
-				    "Atomic save failed (disk space). Overwrite directly? (y/N)")) {
+				    msg_save_directly_prompt)) {
 				free(buf);
 				free(iopath);
 				setStatusMessage(msg_save_aborted);
