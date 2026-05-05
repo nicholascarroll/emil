@@ -60,8 +60,8 @@ static const char *const msg_binary_file = "文件包含空字节（二进制文
 static const char *const msg_no_glob_match = "没有匹配的文件: %s";
 
 /* Status bar RHS warning messages. Max 13 display columns (6 CJK chars). */
-static const char *const msg_file_locked = "[%d 锁定]";
-static const char *const msg_file_changed_on_disk = "[文件已修改]";
+static const char *const msg_file_locked = "%d 锁定";
+static const char *const msg_file_changed_on_disk = "文件已修改";
 /*-------------------------------------------------------------*/
 
 /* Echo-area messages when persistent warnings first appear */
@@ -151,7 +151,7 @@ static const char *const msg_diff_cannot_subprocess =
 static const char *const msg_diff_no_differences = "无差异";
 static const char *const msg_diff_failed = "Diff 失败 (退出状态 %d)";
 static const char *const msg_unknown_cx_x = "未知命令 C-x x %c";
-static const char *const msg_memory_limit = "文件超过 1 GB 限制";
+static const char *const msg_memory_limit = "超过 1 GB 限制";
 static const char *const msg_help =
 	"打开:C-x C-f   保存:C-x C-s   退出:C-x C-c   "
 	"设置标记:C-SPC   剪切:C-w   复制:M-w   粘贴:C-y   "
@@ -213,8 +213,8 @@ static const char *const msg_binary_file =
 static const char *const msg_no_glob_match = "No hay archivos coincidentes: %s";
 
 /* Status bar RHS warning messages. Max 13 display columns (6 CJK chars). */
-static const char *const msg_file_locked = "[BLOQ %d]";
-static const char *const msg_file_changed_on_disk = "[ARCHIVO MOD]";
+static const char *const msg_file_locked = "%d BLOQ";
+static const char *const msg_file_changed_on_disk = "ARCHIVO MOD";
 /*-------------------------------------------------------------*/
 
 /* Echo-area messages when persistent warnings first appear */
@@ -335,8 +335,7 @@ static const char *const msg_diff_cannot_subprocess =
 static const char *const msg_diff_no_differences = "No hay diferencias";
 static const char *const msg_diff_failed = "Diff falló (estado de salida %d)";
 static const char *const msg_unknown_cx_x = "Comando desconocido C-x x %c";
-static const char *const msg_memory_limit =
-	"El archivo excede el límite de 1 GB";
+static const char *const msg_memory_limit = "Se excede el límite de 1 GB";
 static const char *const msg_help =
 	"Abrir:C-x C-f   Guardar:C-x C-s   Salir:C-x C-c   "
 	"Marca:C-SPC   Cortar:C-w   Copiar:M-w   Pegar:C-y   "
@@ -397,8 +396,8 @@ static const char *const msg_binary_file =
 static const char *const msg_no_glob_match = "No matching files: %s";
 
 /* Status bar RHS warning messages. Max 13 display columns (6 CJK chars). */
-static const char *const msg_file_locked = "[LOCK %d]";
-static const char *const msg_file_changed_on_disk = "[FILE MOD]";
+static const char *const msg_file_locked = "%d LOCK";
+static const char *const msg_file_changed_on_disk = "FILE MODIFIED";
 /*------------------------------------------------------------*/
 
 /* Echo-area messages when persistent warnings first appear */
@@ -494,7 +493,7 @@ static const char *const msg_diff_cannot_subprocess =
 static const char *const msg_diff_no_differences = "No differences";
 static const char *const msg_diff_failed = "Diff failed (exit status %d)";
 static const char *const msg_unknown_cx_x = "Unknown command C-x x %c";
-static const char *const msg_memory_limit = "File exceeds 1 GB limit";
+static const char *const msg_memory_limit = "Exceeds 1 GB limit";
 static const char *const msg_help =
 	"Open:C-x C-f   Save:C-x C-s   Quit:C-x C-c   "
 	"Mark:C-SPC   Kill:C-w   Copy:M-w   Yank:C-y   "

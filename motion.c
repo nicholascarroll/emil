@@ -158,6 +158,26 @@ void forwardWordEnd(int *dx, int *dy) {
 		int l = E.buf->row[cy].size;
 		while (cx < l) {
 			uint8_t c = E.buf->row[cy].chars[cx];
+			int nb = utf8_nBytes(c);
+
+			/* Decode codepoint for CJK check */
+			if (c >= 0x80) {
+				uint32_t cp =
+					utf8Decode(E.buf->row[cy].chars, cx);
+				if (isCJKChar(cp)) {
+					if (!pre) {
+						/* Stop before this CJK char */
+						*dx = cx;
+						*dy = cy;
+						return;
+					}
+					/* This CJK char is the word; advance past it */
+					*dx = cx + nb;
+					*dy = cy;
+					return;
+				}
+			}
+
 			if (isWordBoundary(c) && !pre) {
 				*dx = cx;
 				*dy = cy;
@@ -165,7 +185,7 @@ void forwardWordEnd(int *dx, int *dy) {
 			} else if (!isWordBoundary(c)) {
 				pre = 0;
 			}
-			cx++;
+			cx += nb;
 		}
 		if (!pre) {
 			*dx = cx;
@@ -193,7 +213,32 @@ void backwardWordEnd(int *dx, int *dy) {
 			cx = E.buf->row[cy].size;
 		}
 		while (cx > 0) {
-			uint8_t c = E.buf->row[cy].chars[cx - 1];
+			/* Step back to start of previous character */
+			int prev = cx - 1;
+			while (prev > 0 &&
+			       utf8_isCont(E.buf->row[cy].chars[prev]))
+				prev--;
+
+			uint8_t c = E.buf->row[cy].chars[prev];
+
+			/* Decode codepoint for CJK check */
+			if (c >= 0x80) {
+				uint32_t cp =
+					utf8Decode(E.buf->row[cy].chars, prev);
+				if (isCJKChar(cp)) {
+					if (!pre) {
+						/* Stop after this CJK char */
+						*dx = cx;
+						*dy = cy;
+						return;
+					}
+					/* This CJK char is the word; land on it */
+					*dx = prev;
+					*dy = cy;
+					return;
+				}
+			}
+
 			if (isWordBoundary(c) && !pre) {
 				*dx = cx;
 				*dy = cy;
@@ -201,7 +246,7 @@ void backwardWordEnd(int *dx, int *dy) {
 			} else if (!isWordBoundary(c)) {
 				pre = 0;
 			}
-			cx--;
+			cx = prev;
 		}
 		if (!pre) {
 			*dx = cx;
@@ -707,7 +752,8 @@ int isSentenceBoundary(erow *row, int x) {
 
 /**
  * Moves forward to the next sentence end.
- * Boundary: The space after punctuation OR the end of the line.
+ * Boundary: The space after punctuation OR a CJK/Indic sentence
+ * terminator OR the end of the line.
  */
 int forwardSentenceEnd(int *cx, int *cy) {
 	int start_x = *cx, start_y = *cy;
@@ -716,7 +762,24 @@ int forwardSentenceEnd(int *cx, int *cy) {
 		erow *row = &E.buf->row[y];
 		int x = (y == start_y) ? start_x : 0;
 
-		for (; x < row->size; x++) {
+		while (x < row->size) {
+			uint8_t c = row->chars[x];
+			int nb = utf8_nBytes(c);
+
+			/* Check for CJK/Indic sentence terminators */
+			if (c >= 0x80) {
+				uint32_t cp = utf8Decode(row->chars, x);
+				if (isCJKSentenceTerminator(cp) ||
+				    isIndicSentenceTerminator(cp)) {
+					int pot_x = x + nb;
+					if (y > start_y || pot_x > start_x) {
+						*cx = pot_x;
+						*cy = y;
+						return 0;
+					}
+				}
+			}
+
 			// Check for [Punct][Space][Upper] pattern
 			if (is_punct(row->chars[x]) &&
 			    (isSentenceBoundary(row, x + 2) ||
@@ -728,6 +791,7 @@ int forwardSentenceEnd(int *cx, int *cy) {
 					return 0;
 				}
 			}
+			x += nb;
 		}
 
 		// Invariant: End of line is always a sentence boundary
@@ -742,7 +806,8 @@ int forwardSentenceEnd(int *cx, int *cy) {
 
 /**
  * Moves backward to the nearest sentence start.
- * Boundary: The Uppercase letter of a pattern OR the start of a line (index 0).
+ * Boundary: The Uppercase letter of a pattern, the character after a
+ * CJK/Indic sentence terminator, or the start of a line (index 0).
  */
 int backwardSentenceStart(int *cx, int *cy) {
 	int start_x = *cx, start_y = *cy;
@@ -750,27 +815,50 @@ int backwardSentenceStart(int *cx, int *cy) {
 	for (int y = start_y; y >= 0; y--) {
 		erow *row = &E.buf->row[y];
 
-		// Start from current x on the first line, otherwise start from the end
+		// Start from current x on the first line, otherwise from the end
 		int x = (y == start_y) ? start_x : row->size;
 
-		for (int i = x; i >= 0; i--) {
-			// Empty lines are boundaries
-			if (row->size == 0) {
-				if (y < start_y || 0 < start_x) {
-					*cx = 0;
+		/* Step backward by full characters (critical for multi-byte CJK) */
+		while (x > 0) {
+			/* Move to start of previous character */
+			int prev = x - 1;
+			while (prev > 0 && utf8_isCont(row->chars[prev]))
+				prev--;
+
+			/* Check for CJK/Indic terminator *before* current position */
+			if (row->chars[prev] >= 0x80) {
+				uint32_t cp = utf8Decode(row->chars, prev);
+				if (isCJKSentenceTerminator(cp) ||
+				    isIndicSentenceTerminator(cp)) {
+					/* Land immediately after the terminator */
+					if (y < start_y ||
+					    (y == start_y && x < start_x)) {
+						*cx = x; /* x is already after the terminator */
+						*cy = y;
+						return 0;
+					}
+				}
+			}
+
+			/* Latin sentence start pattern or beginning of line */
+			if (prev == 0 || isSentenceBoundary(row, prev)) {
+				if (y < start_y ||
+				    (y == start_y && prev < start_x)) {
+					*cx = prev;
 					*cy = y;
 					return 0;
 				}
 			}
 
-			// Pattern match or Start of Line (index 0)
-			if (i == 0 || isSentenceBoundary(row, i)) {
-				if (y < start_y || i < start_x) {
-					*cx = i;
-					*cy = y;
-					return 0;
-				}
-			}
+			/* Move to previous character for next iteration */
+			x = prev;
+		}
+
+		/* Reached start of this line */
+		if (y < start_y || 0 < start_x) {
+			*cx = 0;
+			*cy = y;
+			return 0;
 		}
 	}
 	return -1;

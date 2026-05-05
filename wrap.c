@@ -134,6 +134,13 @@ int wordWrapBreak(erow *row, int screencols, int line_start_col,
 		if (isWordBoundary(c)) {
 			wb_col = col + cwidth;
 			wb_byte = bidx + utf8_nBytes(c);
+		} else if (c >= 0x80) {
+			/* CJK characters are each a valid line-break point */
+			uint32_t cp = utf8Decode(row->chars, bidx);
+			if (isCJKChar(cp)) {
+				wb_col = col + cwidth;
+				wb_byte = bidx + utf8_nBytes(c);
+			}
 		}
 
 		col += cwidth;

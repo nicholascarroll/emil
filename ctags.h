@@ -1,5 +1,5 @@
-#ifndef EMIL_CLANG_H
-#define EMIL_CLANG_H
+#ifndef EMIL_CTAGS_H
+#define EMIL_CTAGS_H
 
 #include "emil.h"
 
@@ -12,4 +12,4 @@ void ctagsBack(void);
 /* Toggle between .c and .h file (M-/) */
 void toggleHeaderBody(void);
 
-#endif /* EMIL_CLANG_H */
+#endif /* EMIL_CTAGS_H */

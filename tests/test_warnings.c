@@ -1,8 +1,7 @@
 /* test_warnings.c — persistent status-bar warning state.
  *
- * Covers the three persistent warnings that live in the status bar's
+ * Covers the persistent warnings that live in the status bar's
  * right-hand block:
- *   - E.memory_over_limit       (set by recheckMemoryBudget)
  *   - buf->external_mod         (set by checkFileModified)
  *   - buf->lock_blocked_pid     (set by lockFile via markBufferDirty)
  *
@@ -39,8 +38,13 @@ static char *make_temp_file(const char *content) {
 	int fd = mkstemp(tmpname);
 	if (fd < 0)
 		return NULL;
-	if (content)
-		write(fd, content, strlen(content));
+	if (content) {
+		if (write(fd, content, strlen(content)) < 0) {
+			close(fd);
+			unlink(tmpname);
+			return NULL;
+		}
+	}
 	close(fd);
 	return strdup(tmpname);
 }
@@ -206,10 +210,12 @@ static pid_t fork_lock_holder(const char *path, int *release_write_fd,
 			_exit(2);
 		/* Lock placed — signal parent and block. */
 		char ok = 'R';
-		write(ready[1], &ok, 1);
+		if (write(ready[1], &ok, 1) != 1)
+			_exit(3);
 		close(ready[1]);
 		char buf;
-		read(release[0], &buf, 1); /* blocks until parent writes */
+		if (read(release[0], &buf, 1) != 1)
+			_exit(4);
 		close(release[0]);
 		close(fd);
 		_exit(0);
@@ -224,7 +230,9 @@ static pid_t fork_lock_holder(const char *path, int *release_write_fd,
 
 static void release_and_reap(pid_t pid, int release_fd, int ready_fd) {
 	char b = 'G';
-	write(release_fd, &b, 1);
+	if (write(release_fd, &b, 1) != 1) {
+		/* Best-effort signal to child; nothing to recover. */
+	}
 	close(release_fd);
 	close(ready_fd);
 	int status;
@@ -414,31 +422,6 @@ void test_checkFileModified_does_not_reacquire_if_file_changed(void) {
 	free(path);
 }
 
-/* ---- memory_over_limit ---- */
-
-void test_memory_flag_initially_clear(void) {
-	E.memory_over_limit = 0;
-	recheckMemoryBudget();
-	TEST_ASSERT_FALSE(E.memory_over_limit);
-}
-
-void test_memory_flag_clears_when_budget_under_limit(void) {
-	/* Simulate the flag being latched from a prior over-limit event,
-	 * then verify recheck clears it once the budget is back under. */
-	struct buffer *buf = make_test_buffer("small");
-	(void)buf;
-
-	E.memory_over_limit = 1; /* stale flag */
-	recheckMemoryBudget();
-	TEST_ASSERT_FALSE(E.memory_over_limit);
-}
-
-/* Note: we don't test the "set on over-limit" side here — it would
- * require either allocating >1GB of buffer text (default
- * EMIL_BYTES_BUDGET) or compiling with a reduced limit.  The
- * logic is a single comparison in recheckMemoryBudget; if the
- * "clears" test passes, the flag path itself works. */
-
 /* ---- save / revert clearing external_mod ---- */
 
 /* save() clears external_mod after writing.  We can't easily call
@@ -535,9 +518,6 @@ int main(void) {
 	RUN_TEST(test_external_mod_persists_through_undo_to_clean);
 	RUN_TEST(test_checkFileModified_reacquires_stale_lock);
 	RUN_TEST(test_checkFileModified_does_not_reacquire_if_file_changed);
-
-	RUN_TEST(test_memory_flag_initially_clear);
-	RUN_TEST(test_memory_flag_clears_when_budget_under_limit);
 
 	RUN_TEST(test_save_clears_external_mod);
 	RUN_TEST(test_revert_clears_external_mod);

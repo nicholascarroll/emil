@@ -152,7 +152,7 @@ TEST_OBJECTS="unicode.o buffer.o region.o undo.o transform.o \
 
 echo "Unit tests:"
 
-for suite in unicode wcwidth buffer undo edit fileio relpath visual_line utf8_validate rect_undo transform subprocess shell adjust history abuf tilde keymap kill_ring insert_file status_bar warnings; do
+for suite in unicode wcwidth buffer undo edit fileio relpath visual_line utf8_validate rect_undo transform subprocess shell adjust history abuf tilde keymap kill_ring insert_file status_bar cjk_indic warnings; do
     src="tests/test_${suite}.c"
     bin="tests/test_${suite}"
     printf "  %-12s " "$suite"

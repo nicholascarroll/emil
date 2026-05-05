@@ -42,7 +42,7 @@ static int system_wcwidth(int cp) {
 }
 
 static int (*active_wcwidth)(int) = bundled_wcwidth;
-static int using_bundled = 1;
+static int using_bundled = 0;
 
 void unicode_toggle_wcwidth(void) {
 	if (using_bundled) {
@@ -59,10 +59,9 @@ const char *unicode_wcwidth_source(void) {
 }
 #endif /* EMIL_DEBUG_WCWIDTH */
 
-/* The UCS format used by wcwidth(). NOT a general purpose function. */
-/* TODO test this carefully cos now We are going to own this as "general purpose". */
-int utf8ToUCS(const uint8_t *str, int idx) {
-	int ret = 0;
+/* Decode the UTF-8 character at str[idx] and return its Unicode codepoint. */
+uint32_t utf8Decode(const uint8_t *str, int idx) {
+	uint32_t ret = 0;
 	uint8_t ch = str[idx];
 	if (utf8_is2Char(ch)) {
 		ret = (ch & 0x1F) << 6;
@@ -72,13 +71,11 @@ int utf8ToUCS(const uint8_t *str, int idx) {
 		ret |= ((str[idx + 1] & 0x3F) << 6);
 		ret |= (str[idx + 2] & 0x3F);
 	} else if (utf8_is4Char(ch)) {
-		/* This currently won't work because wchar is too small */
 		ret = (ch & 0x07) << 18;
 		ret |= ((str[idx + 1] & 0x3F) << 12);
 		ret |= ((str[idx + 2] & 0x3F) << 6);
 		ret |= (str[idx + 3] & 0x3F);
 	} else {
-		/* Why did you even call this, man */
 		ret = str[idx];
 	}
 	return ret;
@@ -134,7 +131,7 @@ static ssize_t rune_to_utf8(uint8_t *dest, uint32_t ru) {
 }
 
 static int testCaseUCS(char *testCh, int expected) {
-	int ucs = utf8ToUCS((const uint8_t *)testCh, 0);
+	int ucs = utf8Decode((const uint8_t *)testCh, 0);
 	printf("%s\tgot %04x\texpected %04x\n", testCh, ucs, expected);
 	return expected != ucs;
 }
@@ -209,7 +206,7 @@ int charInStringWidth(const uint8_t *str, int idx) {
 		/* The canonical way to display DEL is ^? */
 		return 2;
 	} else {
-		int rune = utf8ToUCS(str, idx);
+		int rune = utf8Decode(str, idx);
 #ifdef EMIL_DEBUG_WCWIDTH
 		return active_wcwidth(rune);
 #else
@@ -247,6 +244,42 @@ int utf8_nBytes(uint8_t ch) {
 
 int utf8_isCont(uint8_t ch) {
 	return (0x80 <= ch && ch <= 0xBF);
+}
+
+/* CJK character classifier.  Returns 1 if cp is a CJK ideograph,
+ * Hiragana, Katakana, Hangul syllable, or Hangul Jamo, i.e. a
+ * character that functions as its own word and is a valid line-break
+ * point in CJK typesetting. */
+int isCJKChar(uint32_t cp) {
+	return (cp >= 0x4E00 && cp <= 0x9FFF)	   /* CJK Unified Ideographs */
+	       || (cp >= 0x3400 && cp <= 0x4DBF)   /* CJK Extension A */
+	       || (cp >= 0x20000 && cp <= 0x2A6DF) /* CJK Extension B */
+	       || (cp >= 0x2A700 && cp <= 0x2B73F) /* CJK Extension C */
+	       || (cp >= 0x2B740 && cp <= 0x2B81F) /* CJK Extension D */
+	       || (cp >= 0x2B820 && cp <= 0x2CEAF) /* CJK Extension E */
+	       || (cp >= 0x2CEB0 && cp <= 0x2EBEF) /* CJK Extension F */
+	       || (cp >= 0x30000 && cp <= 0x3134F) /* CJK Extension G */
+	       ||
+	       (cp >= 0xF900 && cp <= 0xFAFF) /* CJK Compatibility Ideographs */
+	       || (cp >= 0x3040 && cp <= 0x309F) /* Hiragana */
+	       || (cp >= 0x30A0 && cp <= 0x30FF) /* Katakana */
+	       ||
+	       (cp >= 0x31F0 && cp <= 0x31FF) /* Katakana Phonetic Extensions */
+	       || (cp >= 0xAC00 && cp <= 0xD7AF) /* Hangul Syllables */
+	       || (cp >= 0x1100 && cp <= 0x11FF) /* Hangul Jamo */
+	       || (cp >= 0x3130 && cp <= 0x318F) /* Hangul Compatibility Jamo */
+	       || (cp >= 0xA960 && cp <= 0xA97F) /* Hangul Jamo Extended-A */
+	       || (cp >= 0xD7B0 && cp <= 0xD7FF); /* Hangul Jamo Extended-B */
+}
+
+/* CJK sentence terminators: 。(U+3002) ！(U+FF01) ？(U+FF1F) */
+int isCJKSentenceTerminator(uint32_t cp) {
+	return cp == 0x3002 || cp == 0xFF01 || cp == 0xFF1F;
+}
+
+/* Indic sentence terminators: danda । (U+0964) and double danda ॥ (U+0965) */
+int isIndicSentenceTerminator(uint32_t cp) {
+	return cp == 0x0964 || cp == 0x0965;
 }
 
 /*

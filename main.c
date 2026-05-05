@@ -229,11 +229,8 @@ int main(int argc, char *argv[]) {
 			if (stdin_len > EMIL_MAX_FILE_SIZE) {
 				free(stdin_data);
 				disableRawMode();
-				fprintf(stderr,
-					"stdin: data exceeds open-file "
-					"limit (%zuMB > %zuMB)\n",
-					stdin_len / (1024 * 1024),
-					EMIL_MAX_FILE_SIZE / (1024 * 1024));
+				fprintf(stderr, "stdin: %s\n",
+					msg_memory_limit);
 				exit(1);
 			}
 			struct buffer *stdinBuf =

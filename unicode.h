@@ -16,7 +16,12 @@ int utf8_nBytes(uint8_t ch);
 
 int utf8_isCont(uint8_t ch);
 
-int utf8ToUCS(const uint8_t *str, int idx);
+uint32_t utf8Decode(const uint8_t *str, int idx);
+
+/* Codepoint classifiers */
+int isCJKChar(uint32_t cp);
+int isCJKSentenceTerminator(uint32_t cp);
+int isIndicSentenceTerminator(uint32_t cp);
 
 int utf8_validate(const uint8_t *buf, int len);
 

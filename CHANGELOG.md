@@ -1,3 +1,13 @@
+
+## [0.5.0] - 2026-05-08
+- CJK and Indic sentence movement: #69, #71, #72, #73, #74
+- Replaced the Memory Budget feature with simpler File size limit (1GB)
+- Removed undo limit
+- Palette for emojis and symbol chars #84.
+- Now uses system wcwidth
+- Temporarily added option to debug build `M-x toggle-wcwidth` to use bundled wcwidth
+- Fixed #46, #54, #65, #66.
+
 ## [0.4.0] - 2026-04-23
 - Remove dependency on subprocess.h
 - Removed the dict shell script
