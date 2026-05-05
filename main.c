@@ -226,15 +226,14 @@ int main(int argc, char *argv[]) {
 	if (stdin_data != NULL) {
 		if (stdin_len > 0) {
 			/* Hard limit — no prompt for stdin */
-			if (stdin_len > (size_t)EMIL_BYTES_BUDGET) {
+			if (stdin_len > EMIL_MAX_FILE_SIZE) {
 				free(stdin_data);
 				disableRawMode();
 				fprintf(stderr,
 					"stdin: data exceeds open-file "
 					"limit (%zuMB > %zuMB)\n",
 					stdin_len / (1024 * 1024),
-					(size_t)EMIL_BYTES_BUDGET /
-						(1024 * 1024));
+					EMIL_MAX_FILE_SIZE / (1024 * 1024));
 				exit(1);
 			}
 			struct buffer *stdinBuf =
@@ -247,7 +246,6 @@ int main(int argc, char *argv[]) {
 					msg_invalid_utf8);
 				exit(1);
 			}
-			stdinBuf->file_size = stdin_len;
 			stdinBuf->next = E.headbuf;
 			E.headbuf = stdinBuf;
 			E.buf = stdinBuf;

@@ -3,7 +3,6 @@
 
 #include "emil.h"
 
-
 void doUndo(struct buffer *buf, int count);
 void doRedo(struct buffer *buf, int count);
 void undoAppendChar(struct buffer *buf, uint8_t c);

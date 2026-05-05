@@ -53,8 +53,7 @@ static const char *const msg_wrote_bytes = "已写入 %d 字节到 %s";
 static const char *const msg_cant_open = "无法打开文件：%s";
 static const char *const msg_save_aborted = "保存已中止。";
 static const char *const msg_save_failed = "保存失败：%s";
-static const char *const msg_save_directly_prompt = 
-	" * TODO ";
+static const char *const msg_save_directly_prompt = " * TODO ";
 static const char *const msg_file_not_found = "文件未找到：%s";
 static const char *const msg_invalid_utf8 = "UTF-8 验证失败";
 static const char *const msg_binary_file = "文件包含空字节（二进制文件？）";
@@ -63,7 +62,6 @@ static const char *const msg_no_glob_match = "没有匹配的文件: %s";
 /* Status bar RHS warning messages. Max 13 display columns (6 CJK chars). */
 static const char *const msg_file_locked = "[%d 锁定]";
 static const char *const msg_file_changed_on_disk = "[文件已修改]";
-static const char *const msg_memory_over_limit = "[内存超限!]";
 /*-------------------------------------------------------------*/
 
 /* Echo-area messages when persistent warnings first appear */
@@ -73,7 +71,8 @@ static const char *const msg_warn_lock_acquired = "已获取文件锁";
 
 static const char *const msg_lines_columns = "%d 行，%d 列";
 static const char *const msg_dir_not_supported = "不支持编辑目录。";
-static const char *const msg_inserted_lines = " * TODO check translation 从 %d 插入了 %s 行";
+static const char *const msg_inserted_lines =
+	" * TODO check translation 从 %d 插入了 %s 行";
 static const char *const msg_error_opening = "打开文件出错：%s";
 static const char *const msg_changed_dir = "已更改目录";
 static const char *const msg_current_dir = "当前目录: %s";
@@ -152,8 +151,8 @@ static const char *const msg_diff_cannot_subprocess =
 static const char *const msg_diff_no_differences = "无差异";
 static const char *const msg_diff_failed = "Diff 失败 (退出状态 %d)";
 static const char *const msg_unknown_cx_x = "未知命令 C-x x %c";
-static const char *const msg_memory_limit = "打开文件总量超限"; //* T0DO
-static const char *const msg_help = 
+static const char *const msg_memory_limit = "文件超过 1 GB 限制";
+static const char *const msg_help =
 	"打开:C-x C-f   保存:C-x C-s   退出:C-x C-c   "
 	"设置标记:C-SPC   剪切:C-w   复制:M-w   粘贴:C-y   "
 	"撤销:C-_   搜索:C-s   取消:C-g   "
@@ -206,8 +205,7 @@ static const char *const msg_wrote_bytes = "Se escribieron %d bytes en %s";
 static const char *const msg_cant_open = "No se puede abrir el archivo: %s";
 static const char *const msg_save_aborted = "Guardado cancelado.";
 static const char *const msg_save_failed = "Error al guardar: %s";
-static const char *const msg_save_directly_prompt = 
-	" * TODO ";
+static const char *const msg_save_directly_prompt = " * TODO ";
 static const char *const msg_file_not_found = "Archivo no encontrado: %s";
 static const char *const msg_invalid_utf8 = "Error de validación UTF-8";
 static const char *const msg_binary_file =
@@ -217,7 +215,6 @@ static const char *const msg_no_glob_match = "No hay archivos coincidentes: %s";
 /* Status bar RHS warning messages. Max 13 display columns (6 CJK chars). */
 static const char *const msg_file_locked = "[BLOQ %d]";
 static const char *const msg_file_changed_on_disk = "[ARCHIVO MOD]";
-static const char *const msg_memory_over_limit = "[MEM EXCED]";
 /*-------------------------------------------------------------*/
 
 /* Echo-area messages when persistent warnings first appear */
@@ -339,7 +336,7 @@ static const char *const msg_diff_no_differences = "No hay diferencias";
 static const char *const msg_diff_failed = "Diff falló (estado de salida %d)";
 static const char *const msg_unknown_cx_x = "Comando desconocido C-x x %c";
 static const char *const msg_memory_limit =
-	"Se excedió el presupuesto de memoria del editor";
+	"El archivo excede el límite de 1 GB";
 static const char *const msg_help =
 	"Abrir:C-x C-f   Guardar:C-x C-s   Salir:C-x C-c   "
 	"Marca:C-SPC   Cortar:C-w   Copiar:M-w   Pegar:C-y   "
@@ -402,7 +399,6 @@ static const char *const msg_no_glob_match = "No matching files: %s";
 /* Status bar RHS warning messages. Max 13 display columns (6 CJK chars). */
 static const char *const msg_file_locked = "[LOCK %d]";
 static const char *const msg_file_changed_on_disk = "[FILE MOD]";
-static const char *const msg_memory_over_limit = "[MEM OVER!]";
 /*------------------------------------------------------------*/
 
 /* Echo-area messages when persistent warnings first appear */
@@ -498,7 +494,7 @@ static const char *const msg_diff_cannot_subprocess =
 static const char *const msg_diff_no_differences = "No differences";
 static const char *const msg_diff_failed = "Diff failed (exit status %d)";
 static const char *const msg_unknown_cx_x = "Unknown command C-x x %c";
-static const char *const msg_memory_limit = "Editor memory budget exceeded"; 
+static const char *const msg_memory_limit = "File exceeds 1 GB limit";
 static const char *const msg_help =
 	"Open:C-x C-f   Save:C-x C-s   Quit:C-x C-c   "
 	"Mark:C-SPC   Kill:C-w   Copy:M-w   Yank:C-y   "
@@ -512,4 +508,3 @@ static const char *const msg_read_only_locked_unknown =
 #endif
 
 #endif /* EMIL_MESSAGE_H */
-

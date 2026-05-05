@@ -215,7 +215,6 @@ static void undoStep(struct buffer *buf, int redo) {
 	*dst = node;
 	*src = node->prev;
 	node->prev = prev_dst;
-
 }
 
 void doUndo(struct buffer *buf, int count) {

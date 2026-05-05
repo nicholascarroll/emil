@@ -2,7 +2,6 @@
 #include "emil.h"
 #include "fileio.h"
 #include "message.h"
-#include "undo.h"
 #include <errno.h>
 #include <limits.h>
 #include <string.h>
@@ -18,37 +17,6 @@ int rejectIfReadOnly(struct buffer *buf) {
 		return 1;
 	}
 	return 0;
-}
-
-size_t totalBufferBytes(void) {
-	size_t total = 0;
-	for (struct buffer *b = E.headbuf; b; b = b->next)
-		for (int i = 0; i < b->numrows; i++)
-			total += b->row[i].size;
-	return total;
-}
-
-static size_t undoChainBytes(struct undo *u) {
-	size_t total = 0;
-	for (; u; u = u->prev)
-		total += u->datalen;
-	return total;
-}
-
-size_t totalUndoBytes(void) {
-	size_t total = 0;
-	for (struct buffer *b = E.headbuf; b; b = b->next)
-		total += undoChainBytes(b->undo) + undoChainBytes(b->redo);
-	return total;
-}
-
-size_t totalBudgetBytes(void) {
-	return totalBufferBytes() + totalUndoBytes();
-}
-
-void recheckMemoryBudget(void) {
-	E.memory_over_limit =
-		(totalBudgetBytes() > (size_t)EMIL_BYTES_BUDGET) ? 1 : 0;
 }
 
 void *xmalloc(size_t size) {

@@ -29,7 +29,6 @@ void resizeScreen(int sig);
 void recenter(struct window *win);
 void toggleVisualLineMode(void);
 void editorVersion(void);
-void showMemoryBudget(void);
 void help(void);
 void whatCursor(void);
 

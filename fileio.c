@@ -341,18 +341,15 @@ int editorOpen(struct buffer *bufr, char *filename) {
 		return -1;
 	}
 
-	/* Check file size against budget (hard limit) */
+	/* Check file size against hard limit */
 	{
 		struct stat st;
 		if (fstat(fileno(fp), &st) == 0 && S_ISREG(st.st_mode)) {
-			bufr->file_size = (size_t)st.st_size;
-			if (totalBudgetBytes() + bufr->file_size >
-			    (size_t)EMIL_BYTES_BUDGET) {
+			if ((size_t)st.st_size > EMIL_MAX_FILE_SIZE) {
 				fclose(fp);
 				setStatusMessage(msg_memory_limit);
 				free(bufr->filename);
 				bufr->filename = NULL;
-				bufr->file_size = 0;
 				free(iopath);
 				return -1;
 			}
@@ -519,7 +516,6 @@ void revert(void) {
 		new->cx = new->row[new->cy].size;
 	}
 	destroyBuffer(buf);
-	recheckMemoryBudget();
 }
 
 static int writeAtomic(const char *iopath, const char *buf, size_t len) {
@@ -652,8 +648,7 @@ void save(void) {
 	/* Try atomic write first */
 	if (writeAtomic(iopath, buf, len) == -1) {
 		if (errno == ENOSPC) {
-			if (!confirmOverwriteDirect(
-				    msg_save_directly_prompt)) {
+			if (!confirmOverwriteDirect(msg_save_directly_prompt)) {
 				free(buf);
 				free(iopath);
 				setStatusMessage(msg_save_aborted);
@@ -705,7 +700,6 @@ void save(void) {
 	free(showName);
 
 	free(iopath);
-	recheckMemoryBudget();
 }
 
 void saveAs(void) {
@@ -857,7 +851,7 @@ int insertFileAtPath(struct buffer *buf, const char *path,
 	if (display_name == NULL)
 		display_name = path;
 
-	/* Reject directories and check file size against budget */
+	/* Reject directories and check file size against hard limit */
 	struct stat ist;
 	if (stat(path, &ist) == 0) {
 		if (S_ISDIR(ist.st_mode)) {
@@ -865,8 +859,7 @@ int insertFileAtPath(struct buffer *buf, const char *path,
 			return 1;
 		}
 		if (S_ISREG(ist.st_mode) &&
-		    totalBudgetBytes() + (size_t)ist.st_size >
-			    (size_t)EMIL_BYTES_BUDGET) {
+		    (size_t)ist.st_size > EMIL_MAX_FILE_SIZE) {
 			setStatusMessage(msg_memory_limit);
 			return 1;
 		}

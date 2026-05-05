@@ -399,10 +399,9 @@ While having unsaved edits to a file,
 will keep an advisory lock on the file. If another instance of 
 .Nm
 begins to edit the file, it receives a warning. The lock does not prevent other processes from writing to the file.
-.Sh MEMORY BUDGET
+.Sh File Size Limit
 .Nm
-tracks memory usage against a configurable limit (default 1 GB). This limit ('budget') counts the actual text content of all open buffers, kill ring and undo/redo data. Minor allocations like command history are not counted.
-When opening a file would exceed the budget, the operation is refused. A warning is shown in the status bar when a kill or yank operation pushes total usage over the budget.
+is not designed for editing very large files. Files larger than 1 GB cannot be opened.
 
 .Sh SEE ALSO
 .Xr emacs 1

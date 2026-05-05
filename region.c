@@ -34,11 +34,6 @@ void addToKillRing(const char *text, int is_rect, int rect_width,
 	E.kill.is_rectangle = is_rect;
 	E.kill.rect_width = rect_width;
 	E.kill.rect_height = rect_height;
-
-	/* Recheck the memory budget; sets E.memory_over_limit if the
-	 * kill ring has pushed us over.  The status bar reads this
-	 * flag and displays the persistent [MEMORY OVER!] warning. */
-	recheckMemoryBudget();
 }
 
 /* Save and restore the kill text around operations that temporarily
@@ -376,8 +371,6 @@ void yank(int count) {
 		E.kill_ring_pos =
 			E.kill_history.count > 0 ? E.kill_history.count - 1 : 0;
 	}
-
-	recheckMemoryBudget();
 }
 
 void yankPop(void) {
@@ -828,6 +821,4 @@ void yankRectangle(void) {
 	clearMarkQuiet();
 	clearText(&E.kill);
 	E.kill = saved;
-
-	recheckMemoryBudget();
 }

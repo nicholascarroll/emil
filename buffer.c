@@ -265,7 +265,6 @@ struct buffer *newBuffer(void) {
 	ret->read_only = 0;
 	ret->lock_fd = -1;
 	ret->open_mtime = 0;
-	ret->file_size = 0;
 	ret->external_mod = 0;
 	ret->lock_blocked_pid = 0;
 	ret->internal_mod = 0;
@@ -588,11 +587,6 @@ void killBuffer(void) {
 	destroyBuffer(bufr);
 	resetFileCheckThrottle();
 	computeDisplayNames();
-
-	/* The closed buffer's text and undo chains are gone; the memory
-	 * budget may have dropped back under the limit.  Recheck so the
-	 * [MEMORY OVER!] warning clears when appropriate. */
-	recheckMemoryBudget();
 }
 
 /* Basename helper: returns pointer into path after the last '/'. */

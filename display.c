@@ -784,11 +784,7 @@ static void statusRight(const struct window *win, char *out, int *out_bytes,
 	/* Determine warning text (if any) */
 	char warn_buf[64];
 	const char *warn = NULL;
-	if (E.memory_over_limit) {
-		snprintf(warn_buf, sizeof(warn_buf), "%s",
-			 msg_memory_over_limit);
-		warn = warn_buf;
-	} else if (bufr->external_mod) {
+	if (bufr->external_mod) {
 		snprintf(warn_buf, sizeof(warn_buf), "%s",
 			 msg_file_changed_on_disk);
 		warn = warn_buf;
@@ -1201,12 +1197,6 @@ void toggleVisualLineMode(void) {
 
 void editorVersion(void) {
 	setStatusMessage("emil " EMIL_VERSION);
-}
-
-void showMemoryBudget(void) {
-	size_t used = totalBudgetBytes();
-	size_t limit = (size_t)EMIL_BYTES_BUDGET;
-	setStatusMessage("Memory: %zu / %zu bytes", used, limit);
 }
 
 void help(void) {

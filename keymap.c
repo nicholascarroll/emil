@@ -65,7 +65,6 @@ void setupCommands(void) {
 		{ "replace-regexp", replaceRegex },
 		{ "replace-string", replaceString },
 		{ "revert-buffer", revert },
-		{ "show-memory-budget", showMemoryBudget },
 		{ "visual-line-mode", toggleVisualLineMode },
 		{ "version", editorVersion },
 		{ "view-register", viewRegister },

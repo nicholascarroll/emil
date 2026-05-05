@@ -12,9 +12,7 @@
 
 #define EMIL_TAB_STOP 8
 
-#ifndef EMIL_BYTES_BUDGET
-#define EMIL_BYTES_BUDGET (1024 * 1024 * 1024)
-#endif
+#define EMIL_MAX_FILE_SIZE ((size_t)1024 * 1024 * 1024)
 
 #ifndef EMIL_VERSION
 #define EMIL_VERSION "unknown"
@@ -45,7 +43,7 @@ enum promptType {
 
 /* Type policy:
  * Positions (cx, cy, markx, marky) — int, signed for sentinels
- * Sizes (erow.size, abuf.len) — int, bounded by EMIL_BYTES_BUDGET
+ * Sizes (erow.size, abuf.len) — int, bounded by EMIL_MAX_FILE_SIZE
  * Accumulations to malloc — size_t (e.g. rowsToString totlen)  */
 
 typedef struct erow {
@@ -116,7 +114,6 @@ struct buffer {
 	 * Safe across the 2038 boundary.  Do NOT do arithmetic on
 	 * this field. */
 	time_t open_mtime;    /* st_mtime at open/save, 0 if unset */
-	size_t file_size;     /* st_size at open, for open-file budget */
 	int external_mod;     /* 1 if file changed on disk since open/save */
 	int lock_blocked_pid; /* PID holding the lock we couldn't acquire,
 	                       * or -1 if held by unknown process, or 0
@@ -247,11 +244,8 @@ struct config {
 	struct history shell_history;
 	struct history search_history;
 	struct history kill_history;
-	int kill_ring_pos;     /* Current position in kill ring for M-y */
-	int self_insert_key;   /* Stashed key for CMD_SELF_INSERT */
-	int memory_over_limit; /* 1 if totalBudgetBytes has exceeded
-	                         * EMIL_BYTES_BUDGET; cleared when the
-	                         * budget drops back below the limit */
+	int kill_ring_pos;   /* Current position in kill ring for M-y */
+	int self_insert_key; /* Stashed key for CMD_SELF_INSERT */
 	struct timespec last_file_check; /* monotonic time of last
 	                                  * checkFileModified syscall */
 	struct abuf render_buf;		 /* Persistent screen-render buffer */

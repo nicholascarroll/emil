@@ -177,17 +177,7 @@ Notes:
 
 ## Editing Large Files
 
-`emil` is not designed for editing very large files. 
- 
-`emil` tracks memory usage against a configurable limit (default 1 GB). This limit ('budget') counts the actual text content of all open buffers, kill ring and undo/redo data. Minor allocations like command history are not counted.
-
-When opening a new file would exceed the budget, the operation is refused. A warning is shown in the status bar when a kill or yank operation pushes total usage over the budget.
-
-The budget can be adjusted at build time:
-
-```
-    make CFLAGS="-DEMIL_BYTES_BUDGET=8388608"
-```
+`emil` is not designed for editing very large files. Files larger than 1 GB cannot be opened.
 
 ## Raw Console
 
