@@ -486,6 +486,7 @@ void test_revert_clears_external_mod(void) {
 	TEST_ASSERT_TRUE(b->external_mod);
 
 	/* Simulate revert: open a fresh buffer on the same file. */
+	destroyBuffer(b);
 	struct buffer *fresh = make_test_buffer(NULL);
 	TEST_ASSERT_EQUAL_INT(0, editorOpen(fresh, path));
 	TEST_ASSERT_FALSE(fresh->external_mod);

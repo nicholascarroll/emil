@@ -1051,9 +1051,14 @@ char *relativePath(const char *from, const char *to) {
  * Does NOT resolve symlinks — purely string-level.
  * Modifies the string in place and returns it. */
 char *cleanPath(char *path) {
-	/* Stack of pointers to segment starts within path */
+	/* Stack of pointers to segment starts within path.
+	 * PATH_MAX/2 is the theoretical maximum number of segments
+	 * ("/" plus one-char names), but in practice 256 is generous.
+	 * If a path somehow exceeds this, return it unmodified rather
+	 * than silently dropping segments. */
 	char *segs[256];
 	int depth = 0;
+	int overflow = 0;
 
 	char *p = path;
 	if (*p == '/')
@@ -1073,13 +1078,19 @@ char *cleanPath(char *path) {
 			if (depth > 0)
 				depth--;
 		} else {
-			if (depth < 256)
-				segs[depth++] = seg;
+			if (depth >= 256) {
+				overflow = 1;
+				break;
+			}
+			segs[depth++] = seg;
 			/* null-terminate this segment for later copy */
 			if (seg[len] != '\0')
 				seg[len] = '\0';
 		}
 	}
+
+	if (overflow)
+		return path; /* too many segments, return unmodified */
 
 	/* Reassemble */
 	char *out = path;

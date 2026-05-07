@@ -171,17 +171,19 @@ Notes:
    - `less` clears the terminal when it quits; `less -X` and `more` do not.
    - The named command `cd` (change directory) in `emil` does not also change the directory in the shell.
 
-### System Clipboard Integration
+## System Clipboard Integration
 `Ctrl-c` copies selected text to both the kill ring and the user's system clipboard when an OSC 52 enabled terminal client is used.
+
+OSC 52 has a protocol limit of 74,993 bytes. Selections larger than this are not
+sent to the clipboard and a status message is displayed. Some terminal emulators
+have lower limits and will silently fail after writing only the first part of the
+text to the system clipboard.
 
 
 ## Editing Large Files
 
 `emil` is not designed for editing very large files. Files larger than 1 GB cannot be opened.
 
-## Raw Console
-
-On a raw Linux virtual console (Ctrl+Alt+F3 etc.) the in-kernel console cannot display Chinese. Alternatives include **kmscon** and **fbterm**.
 
 ## Internals
 

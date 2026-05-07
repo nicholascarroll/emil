@@ -19,108 +19,108 @@ void clearStatusMessage(void);
 static const char *const msg_quit = "退出";
 static const char *const msg_canceled = "已取消。";
 
-static const char *const msg_read_only = "缓冲区为只读";
+static const char *const msg_read_only = "缓冲区只读";
 static const char *const msg_writable = "缓冲区已设为可写";
 static const char *const msg_buffer_empty = "缓冲区为空";
 static const char *const msg_beginning_of_buffer = "缓冲区开头";
 static const char *const msg_end_of_buffer = "缓冲区末尾";
 static const char *const msg_new_file = "%s（新文件）";
-static const char *const msg_find_file = "查找文件: %s";
-static const char *const msg_find_file_read_only = "查找文件: %s"; // * TODO
+static const char *const msg_find_file = "查找文件：%s";
+static const char *const msg_find_file_read_only = "查找文件（只读）：%s";
 
 static const char *const msg_mark_set = "标记已设置。";
-static const char *const msg_mark_cleared = "标记已清除";
+static const char *const msg_mark_cleared = "标记已停用";
 static const char *const msg_mark_invalid = "标记无效。";
-static const char *const msg_mark_popped = "已弹出标记";
+static const char *const msg_mark_popped = "标记已弹出。";
 static const char *const msg_no_mark_set = "此缓冲区未设置标记。";
 
-static const char *const msg_rectangle_on = "矩形模式已开启";
-static const char *const msg_rectangle_off = "矩形模式已关闭";
+static const char *const msg_rectangle_on = "矩形模式已开";
+static const char *const msg_rectangle_off = "矩形模式已关";
 
 static const char *const msg_kill_ring_empty = "剪切环为空。";
 static const char *const msg_no_more_kill_entries =
-	"剪切环中没有更多条目可粘贴！";
-static const char *const msg_not_after_yank = "上一个命令不是粘贴";
+	"剪切环中无更多条目可粘贴！";
+static const char *const msg_not_after_yank = "上一命令不是粘贴";
 
-static const char *const msg_undo = "撤销操作";
-static const char *const msg_redo = "重做操作";
-static const char *const msg_no_undo = "没有更多可撤销的操作";
-static const char *const msg_no_redo = "没有更多可重做的操作";
+static const char *const msg_undo = "已撤销。";
+static const char *const msg_redo = "已重做。";
+static const char *const msg_no_undo = "无更多撤销信息。";
+static const char *const msg_no_redo = "无更多重做信息。";
 static const char *const msg_unpaired_undo_redo =
-	"未匹配的 %d 次撤销, %d 次重做。";
+	"不配对：%d 次撤销，%d 次重做。";
 
 static const char *const msg_wrote_bytes = "已写入 %d 字节到 %s";
 static const char *const msg_cant_open = "无法打开文件：%s";
 static const char *const msg_save_aborted = "保存已中止。";
 static const char *const msg_save_failed = "保存失败：%s";
-static const char *const msg_save_directly_prompt = " * TODO ";
+static const char *const msg_save_directly_prompt =
+	"原子保存失败（磁盘空间）。直接覆盖？（y/N）";
 static const char *const msg_file_not_found = "文件未找到：%s";
 static const char *const msg_invalid_utf8 = "UTF-8 验证失败";
-static const char *const msg_binary_file = "文件包含空字节（二进制文件？）";
-static const char *const msg_no_glob_match = "没有匹配的文件: %s";
+static const char *const msg_binary_file = "文件含空字节（二进制文件？）";
+static const char *const msg_no_glob_match = "无匹配文件：%s";
 
 /* Status bar RHS warning messages. Max 13 display columns (6 CJK chars). */
 static const char *const msg_file_locked = "%d 锁定";
-static const char *const msg_file_changed_on_disk = "文件已修改";
+static const char *const msg_file_changed_on_disk = "文件已变更";
 /*-------------------------------------------------------------*/
 
 /* Echo-area messages when persistent warnings first appear */
-static const char *const msg_warn_file_changed = "警告: %s 在磁盘上已被修改";
-static const char *const msg_warn_lock_blocked = "警告: PID %d 持有文件锁";
+static const char *const msg_warn_file_changed = "警告：%s 在磁盘上已被修改";
+static const char *const msg_warn_lock_blocked = "警告：PID %d 持有文件锁";
 static const char *const msg_warn_lock_acquired = "已获取文件锁";
 
 static const char *const msg_lines_columns = "%d 行，%d 列";
 static const char *const msg_dir_not_supported = "不支持编辑目录。";
-static const char *const msg_inserted_lines =
-	" * TODO check translation 从 %d 插入了 %s 行";
+static const char *const msg_inserted_lines = "已插入 %d 行，来自 %s";
 static const char *const msg_error_opening = "打开文件出错：%s";
 static const char *const msg_changed_dir = "已更改目录";
-static const char *const msg_current_dir = "当前目录: %s";
-static const char *const msg_indeterminate_cd = "cd: 无法确定当前目录";
+static const char *const msg_current_dir = "当前目录：%s";
+static const char *const msg_indeterminate_cd = "cd：无法确定当前目录";
 
-static const char *const msg_canceled_replace = "已取消字符串替换。";
-static const char *const msg_canceled_query_replace = "已取消交互式替换。";
-static const char *const msg_replaced_n = "已替换 %d 处";
+static const char *const msg_canceled_replace = "字符串替换已取消。";
+static const char *const msg_canceled_query_replace = "查询替换已取消。";
+static const char *const msg_replaced_n = "已替换 %d 处。";
 static const char *const msg_regex_error = "正则表达式错误：%s";
 static const char *const msg_regex_compile = "无法编译正则表达式：%s";
-static const char *const msg_no_match = "未匹配到 %s";
+static const char *const msg_no_match = "%s 无匹配";
 static const char *const msg_no_match_bracket = "[无匹配]";
 
-static const char *const msg_nothing_to_complete = "此处无可补全内容。";
-static const char *const msg_possible_completions = "可能的补全 (%d):";
-static const char *const msg_complete_not_unique = "[已补全，但有多个匹配项]";
+static const char *const msg_nothing_to_complete = "此处无可补全。";
+static const char *const msg_possible_completions = "可能的补全（%d）：";
+static const char *const msg_complete_not_unique = "[已补全，不唯一]";
 
-static const char *const msg_indent_tabs = "缩进已设为制表符";
-static const char *const msg_indent_spaces = "缩进已设为 %i 个空格";
+static const char *const msg_indent_tabs = "缩进设为制表符";
+static const char *const msg_indent_spaces = "缩进设为 %i 个空格";
 
 static const char *const msg_cannot_transpose = "此处无法转置";
 
-static const char *const msg_no_other_windows = "没有其他窗口可选择";
-static const char *const msg_no_windows_delete = "没有其他窗口可删除";
+static const char *const msg_no_other_windows = "无其他窗口可选";
+static const char *const msg_no_windows_delete = "无其他窗口可删除";
 static const char *const msg_cant_kill_last_window = "无法关闭最后一个窗口";
 
 static const char *const msg_switched_to = "已切换到缓冲区 %s";
-static const char *const msg_no_buffer_named = "没有名为 ‘%s’ 的缓冲区";
-static const char *const msg_no_buffer_switch = "没有可切换的缓冲区";
+static const char *const msg_no_buffer_named = "无名为 '%s' 的缓冲区";
+static const char *const msg_no_buffer_switch = "无可切换的缓冲区";
 static const char *const msg_buffer_switch_canceled = "缓冲区切换已取消";
 
-static const char *const msg_recording = "正在录制宏…";
+static const char *const msg_recording = "正在录制宏……";
 static const char *const msg_already_recording = "已在录制中";
 static const char *const msg_not_recording = "未在录制";
 static const char *const msg_macro_recorded = "宏已录制（%d 键）";
-static const char *const msg_no_macro = "没有已录制的宏";
+static const char *const msg_no_macro = "无已录制的宏";
 static const char *const msg_macro_depth = "宏递归深度超限";
-static const char *const msg_macro_blocked = "录制/回放宏时不可用";
+static const char *const msg_macro_blocked = "录制或回放宏时不可用";
 
-static const char *const msg_shell_canceled = "已取消 Shell 命令。";
+static const char *const msg_shell_canceled = "Shell 命令已取消。";
 static const char *const msg_shell_read_bytes = "已读取 %d 字节";
-static const char *const msg_shell_exit_status = "Shell 命令退出状态为 %d";
-static const char *const msg_shell_disabled = "Shell 集成已禁用";
+static const char *const msg_shell_exit_status = "Shell 命令退出状态 %d";
+static const char *const msg_shell_disabled = "Shell 集成在编译时已禁用。";
 
 static const char *const msg_register_empty = "寄存器 %s 为空。";
 static const char *const msg_no_command = "未找到命令";
 
-static const char *const msg_trailing_removed = "已删除 %d 个尾随字符";
+static const char *const msg_trailing_removed = "已删除 %d 个尾部空白字符";
 static const char *const msg_no_change = "无变化。";
 
 static const char *const msg_unknown_ctrl = "未知命令 C-%c";
@@ -129,40 +129,40 @@ static const char *const msg_unknown_cx_ctrl = "未知命令 C-x C-%c";
 static const char *const msg_unknown_meta = "未知命令 M-%s";
 
 static const char *const msg_unsaved_quit =
-	"有未保存的更改。确定要退出吗？（y 或 n）";
+	"有未保存的更改。确定退出？（y 或 n）";
 static const char *const msg_buffer_modified_kill =
-	"缓冲区 %s 已修改；仍要关闭吗？（y 或 n）";
+	"缓冲区 %s 已修改；仍要关闭？（y 或 n）";
 
-static const char *const msg_no_piped_input = "标准输入: 无管道输入";
-static const char *const msg_no_symbol_at_point = "当前光标处无符号";
-static const char *const msg_tag_not_found = "未找到标签: %s";
-static const char *const msg_tag = "标签: %s";
+static const char *const msg_no_piped_input = "标准输入：无管道输入";
+static const char *const msg_no_symbol_at_point = "光标处无符号";
+static const char *const msg_tag_not_found = "未找到标签：%s";
+static const char *const msg_tag = "标签：%s";
 static const char *const msg_tag_stack_empty = "标签栈为空";
 static const char *const msg_no_file_extension = "无文件扩展名";
-static const char *const msg_no_ext_mapping = "没有 %s 的头文件/主体映射";
-static const char *const msg_no_ext_file = "没有对应的文件: %s";
+static const char *const msg_no_ext_mapping = "无 %s 的头文件/源文件映射";
+static const char *const msg_no_ext_file = "无对应文件：%s";
 static const char *const msg_buffer_without_file = "缓冲区未关联文件";
-static const char *const msg_diff_buffer_matches_file = "缓冲区内容与文件一致";
+static const char *const msg_diff_buffer_matches_file = "缓冲区与文件一致";
 static const char *const msg_diff_cannot_create_temp =
-	"Diff 失败: 无法创建临时文件";
-static const char *const msg_diff_cannot_write = "Diff 失败: 写入错误";
+	"Diff 失败：无法创建临时文件";
+static const char *const msg_diff_cannot_write = "Diff 失败：写入错误";
 static const char *const msg_diff_cannot_subprocess =
-	"Diff 失败: 无法创建子进程";
+	"Diff 失败：无法创建子进程";
 static const char *const msg_diff_no_differences = "无差异";
-static const char *const msg_diff_failed = "Diff 失败 (退出状态 %d)";
+static const char *const msg_diff_failed = "Diff 失败（退出状态 %d）";
 static const char *const msg_unknown_cx_x = "未知命令 C-x x %c";
 static const char *const msg_memory_limit = "超过 1 GB 限制";
 static const char *const msg_help =
 	"打开:C-x C-f   保存:C-x C-s   退出:C-x C-c   "
-	"设置标记:C-SPC   剪切:C-w   复制:M-w   粘贴:C-y   "
+	"标记:C-SPC   剪切:C-w   复制:M-w   粘贴:C-y   "
 	"撤销:C-_   搜索:C-s   取消:C-g   "
-	"其中 C- 表示 Control 键，M- 表示 Meta（Alt）键。  "
-	"完整命令参考请参阅手册页（man emil）。";
-static const char *const msg_read_only_locked = "只读: PID %d 持有建议锁";
+	"C- 为 Control 键，M- 为 Meta（Alt）键。  "
+	"完整命令参考见手册页（man emil）。";
+static const char *const msg_read_only_locked = "只读：PID %d 持有建议锁";
 static const char *const msg_read_only_locked_unknown =
-	"只读: 其他进程持有建议锁";
-
-#elif defined(EMIL_LANG_ES)
+	"只读：其他进程持有建议锁";
+static const char *const msg_osc52_too_large =
+	"选区过大，无法经 OSC 52 复制到剪贴板（%d 字节，上限 %d）";
 
 /* ESPAÑOL (Latinoamérica) */
 static const char *const msg_quit = "Salir";
@@ -205,7 +205,8 @@ static const char *const msg_wrote_bytes = "Se escribieron %d bytes en %s";
 static const char *const msg_cant_open = "No se puede abrir el archivo: %s";
 static const char *const msg_save_aborted = "Guardado cancelado.";
 static const char *const msg_save_failed = "Error al guardar: %s";
-static const char *const msg_save_directly_prompt = " * TODO ";
+static const char *const msg_save_directly_prompt =
+	"Guardado atómico falló (espacio en disco). ¿Sobrescribir directamente? (y/N)";
 static const char *const msg_file_not_found = "Archivo no encontrado: %s";
 static const char *const msg_invalid_utf8 = "Error de validación UTF-8";
 static const char *const msg_binary_file =
@@ -346,6 +347,8 @@ static const char *const msg_read_only_locked =
 	"Solo lectura: bloqueo por PID %d";
 static const char *const msg_read_only_locked_unknown =
 	"Solo lectura: bloqueo por otro proceso";
+static const char *const msg_osc52_too_large =
+	"Selección demasiado grande para copiar vía OSC 52 (%d bytes, límite %d)";
 
 #else
 
@@ -504,6 +507,8 @@ static const char *const msg_read_only_locked =
 	"Read only: advisory lock by PID %d";
 static const char *const msg_read_only_locked_unknown =
 	"Read only: advisory lock by another process";
+static const char *const msg_osc52_too_large =
+	"Selection too large for OSC 52 clipboard (%d bytes, limit %d)";
 #endif
 
 #endif /* EMIL_MESSAGE_H */

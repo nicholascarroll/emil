@@ -3,6 +3,7 @@ VERSION = 0.5.0
 
 PROGNAME = emil
 PREFIX = /usr/local
+DESTDIR =
 SHELL = /bin/sh
 
 # Documentation defaults
@@ -51,30 +52,30 @@ $(PROGNAME): $(OBJECTS)
 # Installation
 
 install: $(PROGNAME)
-	-mkdir -p $(BINDIR) 
-	-mkdir -p $(MAN_BASEDIR)/$(MAN_SUBDIR)/man1
-	-mkdir -p $(DOCDIR)
-	cp $(PROGNAME) $(BINDIR)/
-	-cp $(MAN_SOURCE) $(MAN_BASEDIR)/$(MAN_SUBDIR)/man1/$(PROGNAME).1 2>/dev/null
-	-cp README*.md $(DOCDIR)/ 2>/dev/null
-	chmod 755 $(BINDIR)/$(PROGNAME)
+	-mkdir -p $(DESTDIR)$(BINDIR) 
+	-mkdir -p $(DESTDIR)$(MAN_BASEDIR)/$(MAN_SUBDIR)/man1
+	-mkdir -p $(DESTDIR)$(DOCDIR)
+	cp $(PROGNAME) $(DESTDIR)$(BINDIR)/
+	-cp $(MAN_SOURCE) $(DESTDIR)$(MAN_BASEDIR)/$(MAN_SUBDIR)/man1/$(PROGNAME).1 2>/dev/null
+	-cp README*.md $(DESTDIR)$(DOCDIR)/ 2>/dev/null
+	chmod 755 $(DESTDIR)$(BINDIR)/$(PROGNAME)
 
 uninstall:
 	# Remove the binary
-	rm -f $(BINDIR)/$(PROGNAME)
+	rm -f $(DESTDIR)$(BINDIR)/$(PROGNAME)
 	
 	# Remove the specific man page installed
 	# This uses the current MAN_SUBDIR to find the right file
-	rm -f $(MAN_BASEDIR)/$(MAN_SUBDIR)/man1/$(PROGNAME).1
+	rm -f $(DESTDIR)$(MAN_BASEDIR)/$(MAN_SUBDIR)/man1/$(PROGNAME).1
 	
 	# Clean up documentation
-	rm -f $(DOCDIR)/README*.md
+	rm -f $(DESTDIR)$(DOCDIR)/README*.md
 	
 	# Attempt to remove directories only if they are empty
 	# We use '-' to ignore errors if other files exist in these dirs
-	-rmdir $(DOCDIR) 2>/dev/null
-	-rmdir $(MAN_BASEDIR)/$(MAN_SUBDIR)/man1 2>/dev/null
-	-rmdir $(MAN_BASEDIR)/$(MAN_SUBDIR) 2>/dev/null
+	-rmdir $(DESTDIR)$(DOCDIR) 2>/dev/null
+	-rmdir $(DESTDIR)$(MAN_BASEDIR)/$(MAN_SUBDIR)/man1 2>/dev/null
+	-rmdir $(DESTDIR)$(MAN_BASEDIR)/$(MAN_SUBDIR) 2>/dev/null
 
 # Cleanup
 clean:

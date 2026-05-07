@@ -197,40 +197,37 @@ void copyToClipboard(const uint8_t *text) {
 	if (text == NULL || text[0] == '\0')
 		return;
 
-	char *encoded = base64_encode(text, strlen((const char *)text));
+	/*
+	 * OSC 52 sets the system clipboard: \033]52;c;<base64>\033\\
+	 * Tmux intercepts and forwards this without DCS wrapping.
+	 * xterm caps the sequence at 100000 bytes (74993 raw).
+	 */
+
+	size_t textlen = strlen((const char *)text);
+	if (textlen > 74993) {
+		setStatusMessage(msg_osc52_too_large, (int)textlen, 74993);
+		return;
+	}
+
+	char *encoded = base64_encode(text, textlen);
 	if (encoded == NULL)
 		return;
 
-	/*
-	 * OSC 52: \033]52;c;<base64>\033\\
-	 *
-	 * "c" targets the system clipboard. The ST (String Terminator)
-	 * is \033\\ (ESC backslash), which is more portable than BEL
-	 * across terminal emulators and tmux.
-	 *
-	 * When running inside tmux, the OSC 52 sequence must be wrapped
-	 * in a DCS passthrough so that tmux forwards it to the outer
-	 * terminal:  \033Ptmux;\033 <osc52> \033\033\\
-	 *
-	 * Inside the passthrough, every ESC in the inner sequence must
-	 * be doubled (\033\033 instead of \033).
-	 */
-	int in_tmux = (getenv("TMUX") != NULL);
-
-	if (in_tmux)
-		IGNORE_RETURN(write(STDOUT_FILENO, "\033Ptmux;\033", 9));
-
-	IGNORE_RETURN(write(STDOUT_FILENO, "\033]52;c;", 7));
-	IGNORE_RETURN(write(STDOUT_FILENO, encoded, strlen(encoded)));
-
-	if (in_tmux) {
-		/* Doubled ESC for the inner ST, then close the DCS */
-		IGNORE_RETURN(write(STDOUT_FILENO, "\033\033\\", 3));
-		IGNORE_RETURN(write(STDOUT_FILENO, "\033\\", 2));
-	} else {
-		IGNORE_RETURN(write(STDOUT_FILENO, "\033\\", 2));
+	size_t elen = strlen(encoded);
+	size_t total = 7 + elen + 2; /* \033]52;c; + payload + \033\\ */
+	char *buf = xmalloc(total);
+	if (buf == NULL) {
+		free(encoded);
+		return;
 	}
 
+	memcpy(buf, "\033]52;c;", 7);
+	memcpy(buf + 7, encoded, elen);
+	memcpy(buf + 7 + elen, "\033\\", 2);
+
+	IGNORE_RETURN(write(STDOUT_FILENO, buf, total));
+
+	free(buf);
 	free(encoded);
 }
 
