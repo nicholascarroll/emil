@@ -84,6 +84,17 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 					 * Replace minibuffer with the directory path,
 					 * append / if needed, and trigger completion. */
 					int elen = strlen(effective_path);
+					/* Read the last byte BEFORE the
+					 * replace/reset below: when
+					 * effective_path points into
+					 * cs->matches, resetCompletionState
+					 * frees it, and the old
+					 * effective_path[elen - 1] test was
+					 * a use-after-free read. */
+					int ends_slash =
+						(elen > 0 &&
+						 effective_path[elen - 1] ==
+							 '/');
 
 					/* Replace minibuffer content with effective path */
 					if (effective_path != current_text) {
@@ -93,8 +104,7 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 						resetCompletionState(cs);
 					}
 
-					if (elen > 0 &&
-					    effective_path[elen - 1] != '/') {
+					if (elen > 0 && !ends_slash) {
 						E.minibuf->cx =
 							E.minibuf->row[0].size;
 						insertChar(E.minibuf, '/', 1);

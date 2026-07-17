@@ -36,6 +36,8 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <errno.h>
+#include <signal.h>
+#include <time.h>
 
 extern struct config E;
 
@@ -212,14 +214,14 @@ static struct buffer *output_to_buffer(const char *output) {
 	for (size_t i = 0; i < len; i++) {
 		if (output[i] == '\n') {
 			insertRow(buf, buf->numrows,
-				  (char *)&output[rowStart], rowLen);
+				  (const uint8_t *)&output[rowStart], rowLen);
 			rowStart = i + 1;
 			rowLen = 0;
 		} else {
 			rowLen++;
 			if (i == len - 1) {
 				insertRow(buf, buf->numrows,
-					  (char *)&output[rowStart], rowLen);
+					  (const uint8_t *)&output[rowStart], rowLen);
 			}
 		}
 	}
@@ -669,6 +671,159 @@ void tearDown(void) {
 	cleanupTestEditor();
 }
 
+
+/* ---- Pipe deadlock regressions ------------------------------------ */
+/* The old transformerPipeCmd wrote all stdin, joined, then read
+ * stdout; diffBufferWithFile joined before reading.  Both deadlocked
+ * permanently once either pipe filled (~64 KB).
+ *
+ * Watchdog note: alarm() shares ITIMER_REAL with fileio.c's
+ * timed_stat/timed_lockFile machinery, and the harness installs
+ * fileCheckAlarm as the SIGALRM handler — which only sets a flag and
+ * would NOT terminate a deadlocked test (the pump loop retries on
+ * EINTR).  So the watchdog temporarily restores the default SIGALRM
+ * disposition, which kills the test binary and turns a regressed
+ * deadlock into a suite FAILURE instead of a hang, then reinstalls
+ * the harness handler afterwards. */
+
+static void (*watchdog_saved_handler)(int);
+
+static void watchdogStart(unsigned sec) {
+	watchdog_saved_handler = signal(SIGALRM, SIG_DFL);
+	alarm(sec);
+}
+
+static void watchdogStop(void) {
+	alarm(0);
+	signal(SIGALRM, watchdog_saved_handler);
+}
+
+void test_pipe_large_output_no_deadlock(void) {
+	watchdogStart(300);
+	uint8_t *r = pipeCommandCapture((const uint8_t *)"seq 1 60000", NULL);
+	watchdogStop();
+	TEST_ASSERT_NOT_NULL(r);
+	TEST_ASSERT_TRUE(strlen((char *)r) > 65536);
+	free(r);
+}
+
+void test_pipe_large_region_roundtrip_no_deadlock(void) {
+	size_t n = 200 * 1024;
+	uint8_t *in = xmalloc(n + 1);
+	memset(in, 'x', n);
+	in[n] = 0;
+	watchdogStart(300);
+	uint8_t *r = pipeCommandCapture((const uint8_t *)"cat", in);
+	watchdogStop();
+	TEST_ASSERT_NOT_NULL(r);
+	TEST_ASSERT_EQUAL_INT((int)n, (int)strlen((char *)r));
+	free(r);
+	free(in);
+}
+
+void test_pipe_child_exits_early(void) {
+	/* main.c ignores SIGPIPE; match that so writes to an exited
+	 * child fail with EPIPE instead of killing the test. */
+	signal(SIGPIPE, SIG_IGN);
+	size_t n = 200 * 1024;
+	uint8_t *in = xmalloc(n + 1);
+	memset(in, 'x', n);
+	in[n] = 0;
+	watchdogStart(300);
+	uint8_t *r = pipeCommandCapture((const uint8_t *)"head -c 10", in);
+	watchdogStop();
+	TEST_ASSERT_NOT_NULL(r);
+	TEST_ASSERT_EQUAL_INT(10, (int)strlen((char *)r));
+	free(r);
+	free(in);
+}
+
+/* ---- C-g cancellation ---- */
+
+/* Preloading the interrupt pipe with C-g before the call makes the
+ * pump cancel on its first select() — no threads or tty needed. */
+void test_pipe_cancel_ctrl_g(void) {
+	int intr[2];
+	TEST_ASSERT_EQUAL_INT(0, pipe(intr));
+	uint8_t cg = 0x07;
+	TEST_ASSERT_EQUAL_INT(1, (int)write(intr[1], &cg, 1));
+
+	int canceled = -1;
+	watchdogStart(300);
+	uint8_t *r = pipeCommandCaptureIntr((const uint8_t *)"sleep 30",
+					    NULL, intr[0], &canceled);
+	watchdogStop();
+
+	TEST_ASSERT_NULL(r);
+	TEST_ASSERT_EQUAL_INT(1, canceled);
+	close(intr[0]);
+	close(intr[1]);
+}
+
+/* A SIGINT-ignoring child must still die via the second C-g
+ * (SIGKILL).  Escalation is user-driven — no timers — so the test
+ * simply delivers two C-g presses from a helper process, spaced so
+ * the first arrives after the child's 'trap' is installed and the
+ * second demonstrates that SIGINT alone was not enough:
+ *
+ *   t=1s  C-g #1 -> SIGINT   (ignored by the trap)
+ *   t=2s  C-g #2 -> SIGKILL  (unignorable)
+ *
+ * A correct run therefore finishes in ~2 s.  If SIGKILL were
+ * broken, the child would sleep out its full 20 s, which the
+ * elapsed-time bound catches long before the watchdog. */
+void test_pipe_cancel_escalates_to_sigkill(void) {
+	/* First C-g after 2 s: ample margin for the target's spawn
+	 * and trap-install even on emulated runners; second 1 s
+	 * later. */
+	FILE *cg_helper = popen(
+		"sleep 2; printf '\\007'; sleep 1; printf '\\007'", "r");
+	TEST_ASSERT_NOT_NULL(cg_helper);
+
+	int canceled = -1;
+	time_t t0 = time(NULL);
+	watchdogStart(300);
+	uint8_t *r = pipeCommandCaptureIntr(
+		(const uint8_t *)"trap '' INT; sleep 20", NULL,
+		fileno(cg_helper), &canceled);
+	watchdogStop();
+	time_t t1 = time(NULL);
+
+	TEST_ASSERT_NULL(r);
+	TEST_ASSERT_EQUAL_INT(1, canceled);
+	/* Discriminator: sleep durations are wall-clock even on
+	 * slow emulated CI (QEMU RISC-V/PowerPC), so a working
+	 * SIGKILL path finishes in ~3 s plus spawn overhead, while a
+	 * broken one waits out the child's full 20 s sleep.  15 s
+	 * leaves headroom for emulated process-spawn overhead while
+	 * staying safely under the 20 s floor of the failure mode.
+	 * Watchdog budgets in these tests are hang detectors, not
+	 * performance bounds — hence 300 s. */
+	TEST_ASSERT_TRUE(t1 - t0 <= 15);
+	pclose(cg_helper);
+}
+
+/* Non-C-g type-ahead on the interrupt fd is discarded and does not
+ * cancel the command. */
+void test_pipe_intr_ignores_other_bytes(void) {
+	int intr[2];
+	TEST_ASSERT_EQUAL_INT(0, pipe(intr));
+	TEST_ASSERT_EQUAL_INT(3, (int)write(intr[1], "abc", 3));
+
+	int canceled = -1;
+	watchdogStart(300);
+	uint8_t *r = pipeCommandCaptureIntr((const uint8_t *)"echo hi",
+					    NULL, intr[0], &canceled);
+	watchdogStop();
+
+	TEST_ASSERT_NOT_NULL(r);
+	TEST_ASSERT_EQUAL_INT(0, canceled);
+	TEST_ASSERT_EQUAL_STRING("hi\n", (char *)r);
+	free(r);
+	close(intr[0]);
+	close(intr[1]);
+}
+
 int main(void) {
 	TEST_BEGIN();
 
@@ -686,6 +841,13 @@ int main(void) {
 	RUN_TEST(test_shell_multiline_to_buffer);
 	RUN_TEST(test_shell_pipeline_to_buffer);
 	RUN_TEST(test_shell_utf8_output);
+
+	RUN_TEST(test_pipe_large_output_no_deadlock);
+	RUN_TEST(test_pipe_large_region_roundtrip_no_deadlock);
+	RUN_TEST(test_pipe_child_exits_early);
+	RUN_TEST(test_pipe_cancel_ctrl_g);
+	RUN_TEST(test_pipe_cancel_escalates_to_sigkill);
+	RUN_TEST(test_pipe_intr_ignores_other_bytes);
 
 	/* 2. Shell command piping region */
 	RUN_TEST(test_shell_pipe_region);

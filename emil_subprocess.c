@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
+#include <signal.h>
 #include <unistd.h>
 
 int subprocess_create(const char *const command_line[], int options,
@@ -79,15 +80,50 @@ int subprocess_create(const char *const command_line[], int options,
 				   environ :
 				   (char *const[]){ NULL };
 
+	/* Spawn the child into its own process group (pgid == child pid)
+	 * so a cancellation signal can reach every member of a shell
+	 * pipeline, not just /bin/sh.  If the platform rejects the
+	 * attribute, spawn ungrouped and record that, so
+	 * subprocess_signal degrades to the immediate child. */
+	posix_spawnattr_t attr;
+	posix_spawnattr_t *attrp = NULL;
+	int attr_inited = 0;
+	int grouped = 0;
+	if (posix_spawnattr_init(&attr) == 0) {
+		attr_inited = 1;
+		if (posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETPGROUP) ==
+			    0 &&
+		    posix_spawnattr_setpgroup(&attr, 0) == 0) {
+			attrp = &attr;
+			grouped = 1;
+		}
+	}
+
 	int rc;
 	if (options & subprocess_option_search_user_path) {
-		rc = posix_spawnp(&child, command_line[0], &actions, NULL,
+		rc = posix_spawnp(&child, command_line[0], &actions, attrp,
 				  (char *const *)command_line, env);
 	} else {
-		rc = posix_spawn(&child, command_line[0], &actions, NULL,
+		rc = posix_spawn(&child, command_line[0], &actions, attrp,
 				 (char *const *)command_line, env);
 	}
 
+	/* Retry ungrouped if the attribute itself made the spawn fail. */
+	if (rc != 0 && attrp != NULL) {
+		grouped = 0;
+		if (options & subprocess_option_search_user_path) {
+			rc = posix_spawnp(&child, command_line[0], &actions,
+					  NULL, (char *const *)command_line,
+					  env);
+		} else {
+			rc = posix_spawn(&child, command_line[0], &actions,
+					 NULL, (char *const *)command_line,
+					 env);
+		}
+	}
+
+	if (attr_inited)
+		posix_spawnattr_destroy(&attr);
 	posix_spawn_file_actions_destroy(&actions);
 
 	if (rc != 0) {
@@ -110,6 +146,7 @@ int subprocess_create(const char *const command_line[], int options,
 	out_process->stderr_file = fdopen(stderrfd[0], "rb");
 	out_process->child = child;
 	out_process->return_status = 0;
+	out_process->grouped = grouped;
 
 	if (!out_process->stdin_file || !out_process->stdout_file) {
 		/* Critical streams failed — clean up everything */
@@ -166,6 +203,51 @@ int subprocess_join(struct subprocess_s *const process,
 		*out_return_code = process->return_status;
 
 	return 0;
+}
+
+/* Non-blocking reap: returns 1 if the child was reaped (or already
+ * gone), 0 if it is still running, -1 on error.  Used by the
+ * cancellation path, which must never block the editor on waitpid
+ * for a child that ignores even SIGKILL (e.g. D-state on a hung
+ * filesystem). */
+int subprocess_tryjoin(struct subprocess_s *const process,
+		       int *const out_return_code) {
+	if (process->child == 0) {
+		if (out_return_code)
+			*out_return_code = process->return_status;
+		return 1;
+	}
+	int status;
+	pid_t r = waitpid(process->child, &status, WNOHANG);
+	if (r == 0)
+		return 0;
+	if (r != process->child)
+		return -1;
+	process->child = 0;
+	if (WIFEXITED(status))
+		process->return_status = WEXITSTATUS(status);
+	else
+		process->return_status = EXIT_FAILURE;
+	if (out_return_code)
+		*out_return_code = process->return_status;
+	return 1;
+}
+
+int subprocess_signal(struct subprocess_s *const process, int sig) {
+	if (process->child == 0)
+		return 0;
+	if (process->grouped && kill(-process->child, sig) == 0)
+		return 0;
+	/* Group signalling can fail with ESRCH in a narrow window:
+	 * glibc's posix_spawn normally vfork-blocks until the child
+	 * has run its setpgid, but under QEMU user-mode emulation
+	 * (big-endian CI: PowerPC, s390x) vfork degrades to fork and
+	 * posix_spawn can return before the process group exists.
+	 * The child's PID exists from fork time, so signalling it
+	 * directly always reaches at least the immediate child; for
+	 * a pipeline caught mid-setup the window is microseconds and
+	 * any subsequent signal reaches the by-then-existing group. */
+	return kill(process->child, sig);
 }
 
 int subprocess_destroy(struct subprocess_s *const process) {

@@ -24,7 +24,8 @@ static int getRegisterName(char *prompt) {
 		cursorBottomLine(psize + 2);
 		refreshScreen();
 		key = readKey();
-	} while (key > 127);
+	} while (key < 0 ||
+		 key >= (int)(sizeof(E.registers) / sizeof(E.registers[0])));
 	recordKey(key);
 	return key;
 }
@@ -327,6 +328,14 @@ void incrementRegister(void) {
 			struct text saved = E.kill;
 			E.kill = (struct text){ 0 };
 			copyRegion();
+			/* copyRegion no-ops on an invalid mark, leaving
+			 * E.kill.str NULL — bail rather than strlen(NULL). */
+			if (E.kill.str == NULL) {
+				E.kill = saved;
+				registerMessage(
+					"No region to add to register %s", reg);
+				break;
+			}
 			size_t kill_len = strlen((char *)E.kill.str);
 			size_t region_len =
 				strlen((char *)E.registers[reg].data.text.str);

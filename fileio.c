@@ -330,6 +330,18 @@ int editorOpen(struct buffer *bufr, char *filename) {
 	FILE *fp = fopen(iopath, "r");
 	if (!fp) {
 		if (errno == ENOENT) {
+			/* A path with a trailing '/' names a directory;
+			 * it can never be created as a regular file, so
+			 * don't offer it as a "new file". */
+			size_t plen = strlen(iopath);
+			if (plen > 0 && iopath[plen - 1] == '/') {
+				setStatusMessage(msg_cant_open,
+						 strerror(EISDIR));
+				free(bufr->filename);
+				bufr->filename = NULL;
+				free(iopath);
+				return -1;
+			}
 			setStatusMessage(msg_new_file, bufr->filename);
 			free(iopath);
 			return 0;
@@ -341,11 +353,24 @@ int editorOpen(struct buffer *bufr, char *filename) {
 		return -1;
 	}
 
-	/* Check file size against hard limit */
+	/* Reject directories (fopen(dir, "r") succeeds on many
+	 * systems and reads then silently fail with EISDIR, which
+	 * would present the directory as an empty new buffer) and
+	 * check regular files against the hard size limit. */
 	{
 		struct stat st;
-		if (fstat(fileno(fp), &st) == 0 && S_ISREG(st.st_mode)) {
-			if ((size_t)st.st_size > EMIL_MAX_FILE_SIZE) {
+		if (fstat(fileno(fp), &st) == 0) {
+			if (S_ISDIR(st.st_mode)) {
+				fclose(fp);
+				setStatusMessage(msg_cant_open,
+						 strerror(EISDIR));
+				free(bufr->filename);
+				bufr->filename = NULL;
+				free(iopath);
+				return -1;
+			}
+			if (S_ISREG(st.st_mode) &&
+			    (size_t)st.st_size > EMIL_MAX_FILE_SIZE) {
 				fclose(fp);
 				setStatusMessage(msg_memory_limit);
 				free(bufr->filename);
@@ -519,16 +544,38 @@ void revert(void) {
 }
 
 static int writeAtomic(const char *iopath, const char *buf, size_t len) {
+	/* Follow symlinks: if iopath is a symlink, we want to replace
+	 * the file it points at, not clobber the link with a regular
+	 * file (which would orphan e.g. a dotfile managed in a repo).
+	 * realpath resolves the link; on a new file it fails with
+	 * ENOENT and we keep the original path. */
+	char resolved[PATH_MAX];
+	const char *target = iopath;
+	if (realpath(iopath, resolved) != NULL)
+		target = resolved;
+
 	char tmpname[PATH_MAX];
-	snprintf(tmpname, sizeof(tmpname), "%s.tmpXXXXXX", iopath);
+	if ((size_t)snprintf(tmpname, sizeof(tmpname), "%s.tmpXXXXXX",
+			     target) >= sizeof(tmpname)) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
 
 	int fd = mkstemp(tmpname);
 	if (fd == -1)
 		return -1;
 
+	/* Preserve the existing file's permissions; for a new file,
+	 * use 0644 masked by the umask (mkstemp creates 0600) to
+	 * match writeDirect's open(..., 0644) semantics. */
 	struct stat st;
-	if (stat(iopath, &st) == 0)
+	if (stat(target, &st) == 0) {
 		fchmod(fd, st.st_mode);
+	} else {
+		mode_t um = umask(0);
+		umask(um);
+		fchmod(fd, 0644 & ~um);
+	}
 
 	size_t total = 0;
 	while (total < len) {
@@ -560,7 +607,7 @@ static int writeAtomic(const char *iopath, const char *buf, size_t len) {
 		return -1;
 	}
 
-	if (rename(tmpname, iopath) == -1) {
+	if (rename(tmpname, target) == -1) {
 		unlink(tmpname);
 		return -1;
 	}

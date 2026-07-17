@@ -38,6 +38,7 @@ static const char *const msg_rectangle_on = "矩形模式已开";
 static const char *const msg_rectangle_off = "矩形模式已关";
 
 static const char *const msg_kill_ring_empty = "剪切环为空。";
+static const char *const msg_no_rect_kill = "最近的剪切不是矩形。";
 static const char *const msg_no_more_kill_entries =
 	"剪切环中无更多条目可粘贴！";
 static const char *const msg_not_after_yank = "上一命令不是粘贴";
@@ -115,6 +116,8 @@ static const char *const msg_macro_blocked = "录制或回放宏时不可用";
 static const char *const msg_shell_canceled = "Shell 命令已取消。";
 static const char *const msg_shell_read_bytes = "已读取 %d 字节";
 static const char *const msg_shell_exit_status = "Shell 命令退出状态 %d";
+static const char *const msg_shell_interrupted =
+	"已发送中断信号——再按 C-g 强制终止。";
 static const char *const msg_shell_disabled = "Shell 集成在编译时已禁用。";
 
 static const char *const msg_register_empty = "寄存器 %s 为空。";
@@ -189,6 +192,8 @@ static const char *const msg_rectangle_off = "Modo rectángulo desactivado";
 
 static const char *const msg_kill_ring_empty =
 	"El historial de cortes está vacío.";
+static const char *const msg_no_rect_kill =
+	"El último corte no es un rectángulo.";
 static const char *const msg_no_more_kill_entries =
 	"No hay más elementos en el historial de cortes.";
 static const char *const msg_not_after_yank =
@@ -290,6 +295,8 @@ static const char *const msg_shell_canceled = "Comando de shell cancelado.";
 static const char *const msg_shell_read_bytes = "Se leyeron %d bytes";
 static const char *const msg_shell_exit_status =
 	"El comando de shell finalizó con estado %d";
+static const char *const msg_shell_interrupted =
+	"Interrupción enviada; C-g de nuevo para forzar el cierre.";
 static const char *const msg_shell_disabled =
 	"Integración con shell deshabilitada en compilación";
 
@@ -375,6 +382,7 @@ static const char *const msg_rectangle_on = "Rectangle mode ON";
 static const char *const msg_rectangle_off = "Rectangle mode OFF";
 
 static const char *const msg_kill_ring_empty = "Kill ring empty.";
+static const char *const msg_no_rect_kill = "Last kill is not a rectangle.";
 static const char *const msg_no_more_kill_entries =
 	"No more kill ring entries to yank!";
 static const char *const msg_not_after_yank = "Previous command was not a yank";
@@ -458,6 +466,8 @@ static const char *const msg_shell_canceled = "Canceled shell command.";
 static const char *const msg_shell_read_bytes = "Read %d bytes";
 static const char *const msg_shell_exit_status =
 	"Shell command exited with status %d";
+static const char *const msg_shell_interrupted =
+	"Interrupt sent — C-g again to force kill.";
 static const char *const msg_shell_disabled =
 	"Shell integration disabled at build time.";
 

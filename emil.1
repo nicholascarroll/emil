@@ -313,6 +313,8 @@ When enabled at compile time:
 .Bl -tag -width Ds
 .It Cm M-|
 Filter the selected region through a shell command.
+A running command can be interrupted with C-g (SIGINT); a second
+C-g force-kills it.  The buffer is left unmodified.
 .It Cm C-u M-|
 Filter the selected region and replace with output.
 .It Cm M-!

@@ -45,6 +45,7 @@ void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
 		memcpy(&row->chars[startx], data, datalen);
 		row->size += datalen;
 		row->cached_width = -1;
+		row->cached_sublines = -1;
 		markBufferDirty(buf);
 		invalidateScreenCache(buf);
 		adjustAllPoints(buf, startx, starty, startx + datalen, starty,
@@ -92,6 +93,7 @@ void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
 	row->size = new_size;
 	row->chars[row->size] = '\0';
 	row->cached_width = -1;
+	row->cached_sublines = -1;
 
 	/* Walk remaining data, inserting interior and final lines */
 	int insert_at = starty + 1;
@@ -157,6 +159,7 @@ void bulkDelete(struct buffer *buf, int startx, int starty, int endx,
 			row->size - endx + 1); /* +1 for NUL */
 		row->size -= endx - startx;
 		row->cached_width = -1;
+		row->cached_sublines = -1;
 		markBufferDirty(buf);
 		invalidateScreenCache(buf);
 	} else {
@@ -182,6 +185,7 @@ void bulkDelete(struct buffer *buf, int startx, int starty, int endx,
 		first->size = new_size;
 		first->chars[first->size] = '\0';
 		first->cached_width = -1;
+		first->cached_sublines = -1;
 		delRow(buf, starty + 1);
 		markBufferDirty(buf);
 		invalidateScreenCache(buf);

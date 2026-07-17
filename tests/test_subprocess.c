@@ -252,6 +252,112 @@ void tearDown(void) {
 	cleanupTestEditor();
 }
 
+/* ---- Watchdog: alarm() with default disposition so a hung test
+ * kills the binary (suite FAIL) instead of wedging CI.  The harness
+ * installs a flag-only SIGALRM handler which would otherwise
+ * swallow the alarm. ---- */
+
+#include <signal.h>
+#include <sys/select.h>
+#include <unistd.h>
+
+static void (*wd_saved)(int);
+static void wdStart(unsigned sec) {
+	wd_saved = signal(SIGALRM, SIG_DFL);
+	alarm(sec);
+}
+static void wdStop(void) {
+	alarm(0);
+	signal(SIGALRM, wd_saved);
+}
+
+/* ---- Cancellation contract: subprocess_signal ---- */
+
+/* Signalling a spawned child terminates it and join reaps it. */
+void test_subprocess_signal_terminates(void) {
+	const char *cmd[] = { "/bin/sh", "-c", "sleep 30", NULL };
+	struct subprocess_s proc;
+	int rc = subprocess_create(cmd, subprocess_option_inherit_environment,
+				   &proc);
+	TEST_ASSERT_EQUAL_INT(0, rc);
+
+	wdStart(300);
+	TEST_ASSERT_EQUAL_INT(0, subprocess_signal(&proc, SIGTERM));
+	int exit_code;
+	TEST_ASSERT_EQUAL_INT(0, subprocess_join(&proc, &exit_code));
+	wdStop();
+
+	subprocess_destroy(&proc);
+}
+
+/* Signalling reaches the WHOLE pipeline (process group), not just
+ * /bin/sh: 'cat' holds our stdout pipe open, so stdout only reaches
+ * EOF if cat itself died.  Under an ungrouped kill, cat would live
+ * for the full 30 s and this test would be killed by the watchdog. */
+void test_subprocess_signal_kills_pipeline(void) {
+	/* The right side announces readiness so we never signal
+	 * before the pipeline exists (signalling too early kills sh
+	 * pre-fork and the test proves nothing). */
+	const char *cmd[] = { "/bin/sh", "-c",
+			      "sleep 30 | { echo ready; cat; }", NULL };
+	struct subprocess_s proc;
+	int rc = subprocess_create(cmd, subprocess_option_inherit_environment,
+				   &proc);
+	TEST_ASSERT_EQUAL_INT(0, rc);
+	if (!proc.grouped) {
+		/* Platform couldn't spawn a process group: graceful
+		 * degradation.  Group semantics can't hold, so only
+		 * verify the immediate child dies. */
+		wdStart(300);
+		subprocess_signal(&proc, SIGTERM);
+		int ec;
+		TEST_ASSERT_EQUAL_INT(0, subprocess_join(&proc, &ec));
+		wdStop();
+		subprocess_destroy(&proc);
+		return;
+	}
+
+	wdStart(300);
+
+	/* Wait for "ready\n" — the stdout-holding child now exists. */
+	{
+		char rb[16] = { 0 };
+		size_t got = 0;
+		int rfd = fileno(subprocess_stdout(&proc));
+		while (got < 6) {
+			ssize_t n = read(rfd, rb + got, 6 - got);
+			if (n <= 0)
+				break;
+			got += (size_t)n;
+		}
+		TEST_ASSERT_EQUAL_STRING("ready\n", rb);
+	}
+
+	TEST_ASSERT_EQUAL_INT(0, subprocess_signal(&proc, SIGTERM));
+
+	/* stdout must reach EOF promptly — proves cat died too. */
+	int fd = fileno(subprocess_stdout(&proc));
+	int got_eof = 0;
+	for (int i = 0; i < 50 && !got_eof; i++) { /* <= 5 s */
+		fd_set r;
+		struct timeval tv = { 0, 100000 };
+		FD_ZERO(&r);
+		FD_SET(fd, &r);
+		if (select(fd + 1, &r, NULL, NULL, &tv) > 0) {
+			char b[256];
+			ssize_t n = read(fd, b, sizeof(b));
+			if (n <= 0)
+				got_eof = 1;
+		}
+	}
+	TEST_ASSERT_TRUE(got_eof);
+
+	int exit_code;
+	TEST_ASSERT_EQUAL_INT(0, subprocess_join(&proc, &exit_code));
+	wdStop();
+	subprocess_destroy(&proc);
+}
+
 int main(void) {
 	TEST_BEGIN();
 
@@ -266,6 +372,8 @@ int main(void) {
 	RUN_TEST(test_subprocess_nonzero_exit_with_output);
 	RUN_TEST(test_subprocess_bad_command);
 	RUN_TEST(test_subprocess_utf8_roundtrip);
+	RUN_TEST(test_subprocess_signal_terminates);
+	RUN_TEST(test_subprocess_signal_kills_pipeline);
 #endif
 
 	return TEST_END();

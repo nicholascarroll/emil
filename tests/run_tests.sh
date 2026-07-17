@@ -152,7 +152,7 @@ TEST_OBJECTS="unicode.o buffer.o region.o undo.o transform.o \
 
 echo "Unit tests:"
 
-for suite in unicode wcwidth buffer undo edit fileio relpath visual_line utf8_validate rect_undo transform subprocess shell adjust history abuf tilde keymap kill_ring insert_file status_bar cjk_indic warnings; do
+for suite in unicode wcwidth buffer undo edit fileio relpath visual_line utf8_validate rect_undo transform subprocess shell adjust history abuf tilde keymap kill_ring insert_file status_bar cjk_indic warnings escape ctags; do
     src="tests/test_${suite}.c"
     bin="tests/test_${suite}"
     printf "  %-12s " "$suite"
@@ -189,24 +189,11 @@ for suite in unicode wcwidth buffer undo edit fileio relpath visual_line utf8_va
         echo "PASS ($total tests)"
     fi
 
+
     rm -f "$bin"
 done
 
 rm -f tests/stubs.o
-
-# System wcwidth() probe (informational, does not affect pass/fail)
-echo ""
-echo "System wcwidth() probe:"
-PROBE_SRC="tests/test_system_wcwidth.c"
-PROBE_BIN="tests/test_system_wcwidth"
-
-if $CC $TEST_CFLAGS -D_XOPEN_SOURCE=700 $SANITIZER_FLAGS -o "$PROBE_BIN" "$PROBE_SRC" $LDFLAGS 2>/dev/null; then
-    ./$PROBE_BIN 2>&1 | sed 's/^/  /'
-    rm -f "$PROBE_BIN"
-else
-    echo "  (skipped — failed to compile probe test)"
-fi
-
 
 # Print the last line of the report
 echo ""

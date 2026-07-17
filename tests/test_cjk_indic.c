@@ -13,6 +13,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <locale.h>
+#include <wchar.h>
 
 extern struct config E;
 
@@ -331,8 +332,225 @@ void tearDown(void) {
 	cleanupTestEditor();
 }
 
+/* ---- 行首禁则: closing punctuation forbidden at line start ---- */
+
+/* A break that would put 。 at the start of the next line must move
+ * back one character, carrying 字。 over together. */
+void test_wordwrap_no_leading_close_punct(void) {
+	/* 中文字。测试 — 18 bytes, cols=7: 中文字 fits (6 cols) but
+	 * the break after 字 is suppressed (。 would lead), so the
+	 * line breaks after 文. */
+	uint8_t text[] = "\xE4\xB8\xAD\xE6\x96\x87\xE5\xAD\x97"
+			 "\xE3\x80\x82\xE6\xB5\x8B\xE8\xAF\x95";
+	erow row = { 0 };
+	row.chars = text;
+	row.size = 18;
+	row.cached_width = -1;
+
+	int break_col, break_byte;
+	int more = wordWrapBreak(&row, 7, 0, 0, &break_col, &break_byte);
+
+	TEST_ASSERT_TRUE(more);
+	TEST_ASSERT_EQUAL(4, break_col);  /* after 文 */
+	TEST_ASSERT_EQUAL(6, break_byte); /* 字。测试 wraps together */
+}
+
+/* The ideal break is right AFTER closing punctuation: 。 is itself a
+ * break-after candidate. */
+void test_wordwrap_break_after_close_punct(void) {
+	/* 中文。字词 — cols=6: 中文。 exactly fills the line and the
+	 * break lands after 。, not back at 中|文. */
+	uint8_t text[] = "\xE4\xB8\xAD\xE6\x96\x87\xE3\x80\x82"
+			 "\xE5\xAD\x97\xE8\xAF\x8D";
+	erow row = { 0 };
+	row.chars = text;
+	row.size = 15;
+	row.cached_width = -1;
+
+	int break_col, break_byte;
+	int more = wordWrapBreak(&row, 6, 0, 0, &break_col, &break_byte);
+
+	TEST_ASSERT_TRUE(more);
+	TEST_ASSERT_EQUAL(6, break_col);  /* after 。 */
+	TEST_ASSERT_EQUAL(9, break_byte); /* next line: 字词 */
+}
+
+/* Chained forbidden characters (」。) all travel together. */
+void test_wordwrap_close_punct_chain(void) {
+	/* 文字」。后 — cols=6: breaks after 字 and after 」 are both
+	 * suppressed, so the line breaks after 文 and 字」。 wrap as
+	 * a unit. */
+	uint8_t text[] = "\xE6\x96\x87\xE5\xAD\x97\xE3\x80\x8D"
+			 "\xE3\x80\x82\xE5\x90\x8E";
+	erow row = { 0 };
+	row.chars = text;
+	row.size = 15;
+	row.cached_width = -1;
+
+	int break_col, break_byte;
+	int more = wordWrapBreak(&row, 6, 0, 0, &break_col, &break_byte);
+
+	TEST_ASSERT_TRUE(more);
+	TEST_ASSERT_EQUAL(2, break_col);  /* after 文 */
+	TEST_ASSERT_EQUAL(3, break_byte); /* next line: 字」。后 */
+}
+
+/* A line of pure closing punctuation suppresses every candidate; the
+ * hard-break fallback then applies (a forbidden character DOES start
+ * the next line here, by design — better than an empty line or a
+ * loop). */
+void test_wordwrap_all_forbidden_fallback(void) {
+	/* 。。。。 — cols=4: two fit, hard break before the third. */
+	uint8_t text[] = "\xE3\x80\x82\xE3\x80\x82\xE3\x80\x82"
+			 "\xE3\x80\x82";
+	erow row = { 0 };
+	row.chars = text;
+	row.size = 12;
+	row.cached_width = -1;
+
+	int break_col, break_byte;
+	int more = wordWrapBreak(&row, 4, 0, 0, &break_col, &break_byte);
+
+	TEST_ASSERT_TRUE(more);
+	TEST_ASSERT_EQUAL(4, break_col);
+	TEST_ASSERT_EQUAL(6, break_byte);
+}
+
+/* The rule also guards ASCII space breaks: a space followed by 。 is
+ * not a break candidate, and the 。 (fitting at end of line) becomes
+ * the break point instead. */
+void test_wordwrap_space_before_close_punct(void) {
+	/* "ab cd 。ef" — cols=8: break after the first space is
+	 * recorded, after the second suppressed, then 。 fits at
+	 * column 8 and the break lands after it. */
+	uint8_t text[] = "ab cd \xE3\x80\x82"
+			 "ef";
+	erow row = { 0 };
+	row.chars = text;
+	row.size = 11;
+	row.cached_width = -1;
+
+	int break_col, break_byte;
+	int more = wordWrapBreak(&row, 8, 0, 0, &break_col, &break_byte);
+
+	TEST_ASSERT_TRUE(more);
+	TEST_ASSERT_EQUAL(8, break_col);  /* after 。 */
+	TEST_ASSERT_EQUAL(9, break_byte); /* next line: "ef" */
+}
+
+/* ---- Thai/Lao/Khmer boundaries ---- */
+
+/* Khmer sentences end at ។ (KHAN); sentence motion must recognise it
+ * in both directions. */
+void test_sentence_khmer_khan(void) {
+	/* កខ។គឃ — terminator ។ at bytes 6..8 */
+	struct buffer *buf = make_test_buffer(
+		"\xE1\x9E\x80\xE1\x9E\x81\xE1\x9F\x94"
+		"\xE1\x9E\x82\xE1\x9E\x83");
+	(void)buf;
+
+	int cx = 0, cy = 0;
+	TEST_ASSERT_EQUAL_INT(0, forwardSentenceEnd(&cx, &cy));
+	TEST_ASSERT_EQUAL_INT(9, cx); /* just past ។ */
+	TEST_ASSERT_EQUAL_INT(0, cy);
+
+	cx = 15;
+	cy = 0;
+	TEST_ASSERT_EQUAL_INT(0, backwardSentenceStart(&cx, &cy));
+	TEST_ASSERT_EQUAL_INT(9, cx); /* sentence starts after ។ */
+	TEST_ASSERT_EQUAL_INT(0, cy);
+}
+
+/* ZERO WIDTH SPACE is the explicit word separator of digital
+ * Thai/Lao/Khmer text: word wrap must treat it as a break
+ * opportunity. */
+void test_wordwrap_zwsp_break(void) {
+	/* กขค[ZWSP]งจฉ — cols=4: break falls at the ZWSP (consumed at
+	 * end of line 1), next line starts งจฉ. */
+	uint8_t text[] = "\xE0\xB8\x81\xE0\xB8\x82\xE0\xB8\x84"
+			 "\xE2\x80\x8B"
+			 "\xE0\xB8\x87\xE0\xB8\x88\xE0\xB8\x89";
+	erow row = { 0 };
+	row.chars = text;
+	row.size = 21;
+	row.cached_width = -1;
+
+	int break_col, break_byte;
+	int more = wordWrapBreak(&row, 4, 0, 0, &break_col, &break_byte);
+
+	TEST_ASSERT_TRUE(more);
+	TEST_ASSERT_EQUAL(3, break_col);   /* ZWSP itself is width 0 */
+	TEST_ASSERT_EQUAL(12, break_byte); /* just past the ZWSP */
+}
+
+/* Word motion honours ZWSP as a boundary in both directions. */
+void test_word_motion_zwsp(void) {
+	/* กข[ZWSP]งจ */
+	struct buffer *buf = make_test_buffer(
+		"\xE0\xB8\x81\xE0\xB8\x82"
+		"\xE2\x80\x8B"
+		"\xE0\xB8\x87\xE0\xB8\x88");
+
+	buf->cx = 0;
+	buf->cy = 0;
+	int dx, dy;
+	forwardWordEnd(&dx, &dy);
+	TEST_ASSERT_EQUAL_INT(6, dx); /* stops at the ZWSP */
+	TEST_ASSERT_EQUAL_INT(0, dy);
+
+	buf->cx = 15;
+	buf->cy = 0;
+	backwardWordEnd(&dx, &dy);
+	TEST_ASSERT_EQUAL_INT(9, dx); /* stops just after the ZWSP */
+	TEST_ASSERT_EQUAL_INT(0, dy);
+}
+
+/* Preposed vowels (เ แ โ ใ ไ) are written before their consonant; the
+ * hard-break fallback must not strand one at end of line. */
+void test_wordwrap_no_split_after_preposed(void) {
+	/* กขคเงจ — cols=4: the raw hard break would fall between เ
+	 * and ง; it retreats to before เ instead. */
+	uint8_t text[] = "\xE0\xB8\x81\xE0\xB8\x82\xE0\xB8\x84"
+			 "\xE0\xB9\x80"
+			 "\xE0\xB8\x87\xE0\xB8\x88";
+	erow row = { 0 };
+	row.chars = text;
+	row.size = 18;
+	row.cached_width = -1;
+
+	int break_col, break_byte;
+	int more = wordWrapBreak(&row, 4, 0, 0, &break_col, &break_byte);
+
+	TEST_ASSERT_TRUE(more);
+	TEST_ASSERT_EQUAL(3, break_col); /* before เ */
+	TEST_ASSERT_EQUAL(9, break_byte); /* เงจ wraps together */
+}
+
+/* A hard break can never separate a base character from a following
+ * combining mark: zero-width marks always "fit", so the break lands
+ * after the whole cluster. */
+void test_wordwrap_combining_cluster_intact(void) {
+	/* กขกิค — cols=3: line 1 is exactly กขกิ (the SARA I stays
+	 * glued to its base), line 2 is ค. */
+	uint8_t text[] = "\xE0\xB8\x81\xE0\xB8\x82\xE0\xB8\x81"
+			 "\xE0\xB8\xB4"
+			 "\xE0\xB8\x84";
+	erow row = { 0 };
+	row.chars = text;
+	row.size = 15;
+	row.cached_width = -1;
+
+	int break_col, break_byte;
+	int more = wordWrapBreak(&row, 3, 0, 0, &break_col, &break_byte);
+
+	TEST_ASSERT_TRUE(more);
+	TEST_ASSERT_EQUAL(3, break_col);
+	TEST_ASSERT_EQUAL(12, break_byte); /* after กิ, before ค */
+}
+
 int main(void) {
 	setlocale(LC_CTYPE, "C.UTF-8");
+
 	TEST_BEGIN();
 
 	/* #71 — utf8Decode */
@@ -369,6 +587,16 @@ int main(void) {
 	/* #74 — CJK word-wrap */
 	RUN_TEST(test_wordwrap_cjk_breaks_between_chars);
 	RUN_TEST(test_wordwrap_cjk_no_hard_break);
+	RUN_TEST(test_wordwrap_no_leading_close_punct);
+	RUN_TEST(test_wordwrap_break_after_close_punct);
+	RUN_TEST(test_wordwrap_close_punct_chain);
+	RUN_TEST(test_wordwrap_all_forbidden_fallback);
+	RUN_TEST(test_wordwrap_space_before_close_punct);
+	RUN_TEST(test_sentence_khmer_khan);
+	RUN_TEST(test_wordwrap_zwsp_break);
+	RUN_TEST(test_word_motion_zwsp);
+	RUN_TEST(test_wordwrap_no_split_after_preposed);
+	RUN_TEST(test_wordwrap_combining_cluster_intact);
 	RUN_TEST(test_wordwrap_ascii_unchanged);
 
 	return TEST_END();

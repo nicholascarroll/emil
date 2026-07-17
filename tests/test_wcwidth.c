@@ -12,14 +12,6 @@
 #include <string.h>
 #include <wchar.h>
 
-void test_char_width(void) {
-	TEST_ASSERT_EQUAL_INT(1, wcwidth(L'A'));
-	TEST_ASSERT_EQUAL_INT(1, wcwidth(L' '));
-	TEST_ASSERT(wcwidth(L'\t') <= 0);
-	TEST_ASSERT(wcwidth(L'\n') <= 0);
-	TEST_ASSERT(wcwidth(L'\0') <= 0);
-}
-
 void test_string_width(void) {
 	TEST_ASSERT_EQUAL_INT(5, stringWidth((uint8_t *)"Hello"));
 	TEST_ASSERT_EQUAL_INT(0, stringWidth((uint8_t *)""));
@@ -70,18 +62,6 @@ void test_tab_stops(void) {
 #undef TAB_STOP
 }
 
-void test_cjk_double_width(void) {
-	TEST_ASSERT_EQUAL_INT(2, wcwidth(0x4E00));
-	TEST_ASSERT_EQUAL_INT(2, wcwidth(0x9FFF));
-	TEST_ASSERT_EQUAL_INT(2, wcwidth(0x3000));
-}
-
-void test_zero_width_combining(void) {
-	TEST_ASSERT_EQUAL_INT(0, wcwidth(0x0300));
-	TEST_ASSERT_EQUAL_INT(0, wcwidth(0x0301));
-	TEST_ASSERT_EQUAL_INT(0, wcwidth(0x20DD));
-}
-
 void test_next_screen_x_multibyte(void) {
 	int idx;
 
@@ -105,17 +85,6 @@ void test_string_width_mixed(void) {
 	TEST_ASSERT_EQUAL_INT(4, stringWidth(mixed));
 }
 
-#ifdef EMIL_DEBUG_WCWIDTH
-void test_toggle_wcwidth(void) {
-	const char *before = unicode_wcwidth_source();
-	unicode_toggle_wcwidth();
-	const char *after = unicode_wcwidth_source();
-	TEST_ASSERT(strcmp(before, after) != 0);
-	/* Toggle back */
-	unicode_toggle_wcwidth();
-	TEST_ASSERT(strcmp(before, unicode_wcwidth_source()) == 0);
-}
-#endif
 
 void setUp(void) {
 }
@@ -133,17 +102,11 @@ int main(void) {
 	}
 
 	TEST_BEGIN();
-	RUN_TEST(test_char_width);
 	RUN_TEST(test_string_width);
 	RUN_TEST(test_char_in_string_width);
 	RUN_TEST(test_next_screen_x);
 	RUN_TEST(test_tab_stops);
-	RUN_TEST(test_cjk_double_width);
-	RUN_TEST(test_zero_width_combining);
 	RUN_TEST(test_next_screen_x_multibyte);
 	RUN_TEST(test_string_width_mixed);
-#ifdef EMIL_DEBUG_WCWIDTH
-	RUN_TEST(test_toggle_wcwidth);
-#endif
 	return TEST_END();
 }

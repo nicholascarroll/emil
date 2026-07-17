@@ -16,8 +16,8 @@ void test_new_destroy_buffer(void) {
 
 void test_insert_row_beginning(void) {
 	struct buffer *buf = make_test_buffer(NULL);
-	insertRow(buf, 0, "second", 6);
-	insertRow(buf, 0, "first", 5);
+	insertRow(buf, 0, (const uint8_t *)"second", 6);
+	insertRow(buf, 0, (const uint8_t *)"first", 5);
 	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("first", (char *)buf->row[0].chars);
 	TEST_ASSERT_EQUAL_STRING("second", (char *)buf->row[1].chars);
@@ -25,27 +25,27 @@ void test_insert_row_beginning(void) {
 
 void test_insert_row_middle(void) {
 	struct buffer *buf = make_test_buffer(NULL);
-	insertRow(buf, 0, "first", 5);
-	insertRow(buf, 1, "third", 5);
-	insertRow(buf, 1, "second", 6);
+	insertRow(buf, 0, (const uint8_t *)"first", 5);
+	insertRow(buf, 1, (const uint8_t *)"third", 5);
+	insertRow(buf, 1, (const uint8_t *)"second", 6);
 	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("second", (char *)buf->row[1].chars);
 }
 
 void test_insert_row_end(void) {
 	struct buffer *buf = make_test_buffer(NULL);
-	insertRow(buf, 0, "first", 5);
-	insertRow(buf, 1, "second", 6);
-	insertRow(buf, 2, "third", 5);
+	insertRow(buf, 0, (const uint8_t *)"first", 5);
+	insertRow(buf, 1, (const uint8_t *)"second", 6);
+	insertRow(buf, 2, (const uint8_t *)"third", 5);
 	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("third", (char *)buf->row[2].chars);
 }
 
 void test_del_row_beginning(void) {
 	struct buffer *buf = make_test_buffer(NULL);
-	insertRow(buf, 0, "first", 5);
-	insertRow(buf, 1, "second", 6);
-	insertRow(buf, 2, "third", 5);
+	insertRow(buf, 0, (const uint8_t *)"first", 5);
+	insertRow(buf, 1, (const uint8_t *)"second", 6);
+	insertRow(buf, 2, (const uint8_t *)"third", 5);
 	delRow(buf, 0);
 	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("second", (char *)buf->row[0].chars);
@@ -53,9 +53,9 @@ void test_del_row_beginning(void) {
 
 void test_del_row_middle(void) {
 	struct buffer *buf = make_test_buffer(NULL);
-	insertRow(buf, 0, "first", 5);
-	insertRow(buf, 1, "second", 6);
-	insertRow(buf, 2, "third", 5);
+	insertRow(buf, 0, (const uint8_t *)"first", 5);
+	insertRow(buf, 1, (const uint8_t *)"second", 6);
+	insertRow(buf, 2, (const uint8_t *)"third", 5);
 	delRow(buf, 1);
 	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("third", (char *)buf->row[1].chars);
@@ -63,9 +63,9 @@ void test_del_row_middle(void) {
 
 void test_del_row_end(void) {
 	struct buffer *buf = make_test_buffer(NULL);
-	insertRow(buf, 0, "first", 5);
-	insertRow(buf, 1, "second", 6);
-	insertRow(buf, 2, "third", 5);
+	insertRow(buf, 0, (const uint8_t *)"first", 5);
+	insertRow(buf, 1, (const uint8_t *)"second", 6);
+	insertRow(buf, 2, (const uint8_t *)"third", 5);
 	delRow(buf, 2);
 	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("second", (char *)buf->row[1].chars);
@@ -87,7 +87,7 @@ void test_row_del_char(void) {
 
 void test_row_append_string(void) {
 	struct buffer *buf = make_test_buffer("Hello");
-	rowAppendString(buf, &buf->row[0], " World", 6);
+	rowAppendString(buf, &buf->row[0], (const uint8_t *)" World", 6);
 	TEST_ASSERT_EQUAL_INT(11, buf->row[0].size);
 	TEST_ASSERT_EQUAL_STRING("Hello World", (char *)buf->row[0].chars);
 }
@@ -95,7 +95,7 @@ void test_row_append_string(void) {
 void test_row_capacity_growth(void) {
 	struct buffer *buf = make_test_buffer(NULL);
 	for (int i = 0; i < 20; i++)
-		insertRow(buf, i, "row", 3);
+		insertRow(buf, i, (const uint8_t *)"row", 3);
 	TEST_ASSERT_EQUAL_INT(20, buf->numrows);
 	TEST_ASSERT(buf->rowcap >= 20);
 }
@@ -209,7 +209,7 @@ void test_del_row_only_row(void) {
 
 void test_row_append_string_zero_len(void) {
 	struct buffer *buf = make_test_buffer("Hello");
-	rowAppendString(buf, &buf->row[0], "", 0);
+	rowAppendString(buf, &buf->row[0], (const uint8_t *)"", 0);
 	TEST_ASSERT_EQUAL_INT(5, buf->row[0].size);
 	TEST_ASSERT_EQUAL_STRING("Hello", (char *)buf->row[0].chars);
 }

@@ -109,8 +109,9 @@ void moveCursor(int key, int count) {
 				E.buf->cy--;
 				if (E.buf->row[E.buf->cy].chars == NULL)
 					break;
-				while (utf8_isCont(
-					E.buf->row[E.buf->cy].chars[E.buf->cx]))
+				while (E.buf->cx < E.buf->row[E.buf->cy].size &&
+				       utf8_isCont(E.buf->row[E.buf->cy]
+							   .chars[E.buf->cx]))
 					E.buf->cx++;
 			}
 			break;
@@ -176,6 +177,18 @@ void forwardWordEnd(int *dx, int *dy) {
 					*dy = cy;
 					return;
 				}
+				/* ZWSP: explicit word separator in
+				 * Thai/Lao/Khmer text — behaves like a
+				 * space. */
+				if (isWordSeparatorCP(cp)) {
+					if (!pre) {
+						*dx = cx;
+						*dy = cy;
+						return;
+					}
+					cx += nb;
+					continue;
+				}
 			}
 
 			if (isWordBoundary(c) && !pre) {
@@ -194,8 +207,17 @@ void forwardWordEnd(int *dx, int *dy) {
 		}
 		cx = 0;
 	}
-	*dx = cx;
-	*dy = icy;
+	/* Only whitespace/boundary characters between point and end of
+	 * buffer.  Land at end of buffer (like Emacs M-f), not at
+	 * (0, starting row): cx was reset to 0 at each line end, so the
+	 * old "*dx = cx" moved the cursor BACKWARD to column 0. */
+	if (E.buf->numrows > 0) {
+		*dy = E.buf->numrows - 1;
+		*dx = E.buf->row[*dy].size;
+	} else {
+		*dx = cx;
+		*dy = icy;
+	}
 }
 
 void backwardWordEnd(int *dx, int *dy) {
@@ -236,6 +258,16 @@ void backwardWordEnd(int *dx, int *dy) {
 					*dx = prev;
 					*dy = cy;
 					return;
+				}
+				/* ZWSP: explicit word separator. */
+				if (isWordSeparatorCP(cp)) {
+					if (!pre) {
+						*dx = cx;
+						*dy = cy;
+						return;
+					}
+					cx = prev;
+					continue;
 				}
 			}
 
@@ -426,7 +458,11 @@ static uint8_t charAt(int cx, int cy) {
 int bufferForwardSexpEnd(int *cx, int *cy, const char **errmsg) {
 	int px = *cx, py = *cy;
 
-	/* Skip whitespace and newlines */
+	/* Skip whitespace and newlines.  charAt() reports end-of-line
+	 * positions as '\n' and only returns 0 once cy passes numrows,
+	 * but stepForward() refuses to advance past the last row's end
+	 * — so a failed step must terminate the loop, or it spins
+	 * forever reading '\n' at the same position. */
 	while (py < E.buf->numrows) {
 		uint8_t ch = charAt(px, py);
 		if (ch == 0) {
@@ -435,7 +471,10 @@ int bufferForwardSexpEnd(int *cx, int *cy, const char **errmsg) {
 		}
 		if (ch != ' ' && ch != '\t' && ch != '\n')
 			break;
-		stepForward(&px, &py);
+		if (!stepForward(&px, &py)) {
+			*errmsg = "End of buffer";
+			return -1;
+		}
 	}
 	if (py >= E.buf->numrows) {
 		*errmsg = "End of buffer";
@@ -460,8 +499,11 @@ int bufferForwardSexpEnd(int *cx, int *cy, const char **errmsg) {
 				depth--;
 			else if (c == ch)
 				depth++;
-			if (depth > 0)
-				stepForward(&sx, &sy);
+			if (depth > 0 && !stepForward(&sx, &sy)) {
+				/* End of buffer without a match */
+				*errmsg = "Unmatched delimiter";
+				return -1;
+			}
 		}
 		/* Land after the closing delimiter */
 		stepForward(&sx, &sy);
@@ -494,7 +536,11 @@ int bufferForwardSexpEnd(int *cx, int *cy, const char **errmsg) {
 				*cy = sy;
 				return 0;
 			}
-			stepForward(&sx, &sy);
+			if (!stepForward(&sx, &sy)) {
+				/* End of buffer without a match */
+				*errmsg = "Unmatched quote";
+				return -1;
+			}
 		}
 	}
 
@@ -770,7 +816,8 @@ int forwardSentenceEnd(int *cx, int *cy) {
 			if (c >= 0x80) {
 				uint32_t cp = utf8Decode(row->chars, x);
 				if (isCJKSentenceTerminator(cp) ||
-				    isIndicSentenceTerminator(cp)) {
+				    isIndicSentenceTerminator(cp) ||
+				    isSEAsianSentenceTerminator(cp)) {
 					int pot_x = x + nb;
 					if (y > start_y || pot_x > start_x) {
 						*cx = pot_x;
@@ -829,7 +876,8 @@ int backwardSentenceStart(int *cx, int *cy) {
 			if (row->chars[prev] >= 0x80) {
 				uint32_t cp = utf8Decode(row->chars, prev);
 				if (isCJKSentenceTerminator(cp) ||
-				    isIndicSentenceTerminator(cp)) {
+				    isIndicSentenceTerminator(cp) ||
+				    isSEAsianSentenceTerminator(cp)) {
 					/* Land immediately after the terminator */
 					if (y < start_y ||
 					    (y == start_y && x < start_x)) {

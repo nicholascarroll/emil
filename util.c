@@ -11,6 +11,30 @@
 
 extern struct config E;
 
+size_t escapePercent(char *dst, const char *src, size_t dsize) {
+	/* Copy src into dst, doubling every '%' so the result is safe
+	 * to embed inside a printf-style format string.  Truncates (but
+	 * never splits a '%%' pair) if dsize is too small.  Returns the
+	 * number of bytes written, excluding the NUL. */
+	size_t di = 0;
+	if (dsize == 0)
+		return 0;
+	for (const char *s = src; *s != '\0'; s++) {
+		if (*s == '%') {
+			if (di + 2 >= dsize) /* need room for "%%" + NUL */
+				break;
+			dst[di++] = '%';
+			dst[di++] = '%';
+		} else {
+			if (di + 1 >= dsize) /* need room for char + NUL */
+				break;
+			dst[di++] = *s;
+		}
+	}
+	dst[di] = '\0';
+	return di;
+}
+
 int rejectIfReadOnly(struct buffer *buf) {
 	if (buf->read_only) {
 		setStatusMessage(msg_read_only);
@@ -19,6 +43,10 @@ int rejectIfReadOnly(struct buffer *buf) {
 	return 0;
 }
 
+/* Never returns NULL for size > 0: allocation failure aborts.
+ * (Static analyzers that flag callers for NULL dereference are
+ * reasoning about the size == 0 case, which callers never hit with
+ * a zero size and a subsequent dereference.) */
 void *xmalloc(size_t size) {
 	void *ptr = malloc(size);
 	if (!ptr && size != 0) {
@@ -74,10 +102,13 @@ ssize_t emil_getline(char **lineptr, size_t *n, FILE *stream) {
 		return -1;
 
 	if (*lineptr == NULL || *n == 0) {
-		*n = 120;
-		*lineptr = malloc(*n);
-		if (*lineptr == NULL)
+		/* realloc (not malloc) so a non-NULL *lineptr passed
+		 * with *n == 0 is not leaked. */
+		ptr = realloc(*lineptr, 120);
+		if (ptr == NULL)
 			return -1;
+		*lineptr = ptr;
+		*n = 120;
 	}
 
 	(*lineptr)[0] = '\0';
@@ -97,12 +128,16 @@ ssize_t emil_getline(char **lineptr, size_t *n, FILE *stream) {
 		if ((*lineptr)[len - 1] == '\n')
 			return len;
 
-		/* Line doesn't end with newline, need to grow buffer and read more */
-		*n *= 2;
-		ptr = realloc(*lineptr, *n);
+		/* Line doesn't end with newline, need to grow buffer
+		 * and read more.  Update *n only after the realloc
+		 * succeeds so the caller's size always matches the
+		 * actual allocation. */
+		size_t newsize = *n * 2;
+		ptr = realloc(*lineptr, newsize);
 		if (ptr == NULL)
 			return -1;
 		*lineptr = ptr;
+		*n = newsize;
 
 		eptr = *lineptr + len;
 		if (fgets(eptr, *n - len, stream) == NULL)

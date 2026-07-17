@@ -94,6 +94,7 @@ void splitLineAtPoint(void) {
 		row->size = E.buf->cx;
 		row->chars[row->size] = '\0';
 		row->cached_width = -1;
+		row->cached_sublines = -1;
 		invalidateScreenCache(E.buf);
 	}
 	E.buf->cy++;
@@ -207,7 +208,12 @@ UNINDENT_PERFORM:
 	mutateDelete(E.buf, 0, E.buf->cy, trunc, E.buf->cy, old_text, trunc);
 	free(old_text);
 
+	/* If the cursor sat inside the removed indentation (cx < trunc),
+	 * the unconditional subtraction drove cx negative, and any
+	 * subsequent row->chars[cx] access read out of bounds. */
 	E.buf->cx -= trunc;
+	if (E.buf->cx < 0)
+		E.buf->cx = 0;
 }
 
 /* Character deletion */
@@ -374,6 +380,11 @@ void transposeChars(void) {
 		return;
 	}
 
+	if (E.buf->cy >= E.buf->numrows) {
+		setStatusMessage(msg_end_of_buffer);
+		return;
+	}
+
 	erow *row = &E.buf->row[E.buf->cy];
 
 	/* If nothing after point, back up one character. */
@@ -416,7 +427,7 @@ void killLine(int count) {
 
 	int times = count ? count : 1;
 	for (int i = 0; i < times; i++) {
-		if (E.buf->numrows <= 0) {
+		if (E.buf->numrows <= 0 || E.buf->cy >= E.buf->numrows) {
 			return;
 		}
 

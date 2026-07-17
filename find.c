@@ -14,6 +14,8 @@
 #include "unused.h"
 #include "util.h"
 #include <regex.h>
+#include <sys/select.h>
+#include <unistd.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -31,30 +33,107 @@ static uint8_t *replace_orig;
 static uint8_t *replace_repl;
 
 static int regex_mode = 0;
+
+/* Nonzero only while searchInteractive's prompt is live: the
+ * between-rows interrupt poll must not run when findCallback is
+ * driven by tests or any non-interactive caller, where stdin does
+ * not carry key input. */
+static int search_poll_enabled = 0;
+
+/* Poll stdin between scanned rows so C-g can cancel a long search
+ * scan (large file, expensive pattern) without waiting for the full
+ * pass.  A single blown-up regexec call on one pathological line
+ * cannot be interrupted — this bounds everything around it.
+ *
+ * Protocol (never loses or reorders type-ahead):
+ *   - If a probed byte is already stashed, do not probe again.
+ *   - Probe at most ONE pending byte.
+ *   - C-g: drain all further pending input (panic mashing must not
+ *     replay into the buffer), then push the C-g back so readKey
+ *     delivers it to the prompt loop and the search cancels through
+ *     the existing CTRL('g') path.
+ *   - Any other byte: push it back for readKey and stop probing.
+ *     Sequence continuation bytes are still queued on the fd where
+ *     readKey's escape parsing expects them.
+ * Returns 1 if the scan should abort. */
+static int searchInterrupted(void) {
+	if (!search_poll_enabled || terminalPushbackPending())
+		return 0;
+
+	fd_set rfds;
+	struct timeval tv = { 0, 0 };
+	FD_ZERO(&rfds);
+	FD_SET(STDIN_FILENO, &rfds);
+	if (select(STDIN_FILENO + 1, &rfds, NULL, NULL, &tv) <= 0)
+		return 0;
+
+	uint8_t c;
+	if (read(STDIN_FILENO, &c, 1) != 1)
+		return 0; /* EOF/error: nothing to deliver */
+
+	if (c != CTRL('g')) {
+		terminalPushbackByte(c);
+		return 0;
+	}
+
+	/* Drain whatever was mashed after the C-g. */
+	while (1) {
+		FD_ZERO(&rfds);
+		FD_SET(STDIN_FILENO, &rfds);
+		tv.tv_sec = 0;
+		tv.tv_usec = 0;
+		if (select(STDIN_FILENO + 1, &rfds, NULL, NULL, &tv) <= 0)
+			break;
+		uint8_t discard;
+		if (read(STDIN_FILENO, &discard, 1) != 1)
+			break;
+	}
+
+	terminalPushbackByte(CTRL('g'));
+	return 1;
+}
 static int initial_direction = 1;
 
 /* Helper function to search for regex match in a string */
+/* Compiled-pattern cache for regexSearch.  Incremental regex search
+ * calls regexSearch once per scanned row per keystroke; compiling
+ * per call made the scan ~38x slower than the regexec itself.  The
+ * cache holds one compiled pattern (the current search string) and
+ * recompiles only when the pattern text changes.  re_cache_ok == 0
+ * caches "this pattern does not compile" so invalid patterns fall
+ * back to literal search without re-attempting regcomp per row.
+ * The one live regex_t is intentionally left allocated at exit. */
+static char *re_cache_pat = NULL;
+static regex_t re_cache;
+static int re_cache_ok = 0;
+
 static uint8_t *regexSearch(uint8_t *text, uint8_t *pattern) {
-	if (!pattern || !text || strlen((const char *)pattern) == 0) {
+	if (!pattern || !text || pattern[0] == '\0') {
 		return NULL;
 	}
 
-	regex_t regex;
-	regmatch_t match[1];
+	if (!re_cache_pat || strcmp(re_cache_pat, (const char *)pattern) != 0) {
+		if (re_cache_pat) {
+			if (re_cache_ok)
+				regfree(&re_cache);
+			free(re_cache_pat);
+		}
+		re_cache_pat = xstrdup((const char *)pattern);
+		re_cache_ok = (regcomp(&re_cache, (const char *)pattern,
+				       REG_EXTENDED) == 0);
+	}
 
-	/* Try to compile regex, fall back to literal search if invalid */
-	if (regcomp(&regex, (const char *)pattern, REG_EXTENDED) != 0) {
+	/* Invalid regex: fall back to literal search */
+	if (!re_cache_ok) {
 		return (uint8_t *)strstr((const char *)text,
 					 (const char *)pattern);
 	}
 
-	/* Execute regex search */
-	if (regexec(&regex, (const char *)text, 1, match, 0) == 0) {
-		regfree(&regex);
+	regmatch_t match[1];
+	if (regexec(&re_cache, (const char *)text, 1, match, 0) == 0) {
 		return text + match[0].rm_so;
 	}
 
-	regfree(&regex);
 	return NULL;
 }
 
@@ -188,6 +267,12 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 		}
 	}
 	for (int i = 0; i < bufr->numrows; i++) {
+		/* Every 256 rows, give C-g a chance to cancel the
+		 * scan; the pushed-back C-g then cancels the search
+		 * through the prompt loop's normal path. */
+		if ((i & 0xFF) == 0xFF && searchInterrupted())
+			return;
+
 		current += direction;
 		if (current == -1)
 			current = bufr->numrows - 1;
@@ -225,8 +310,10 @@ static void searchInteractive(int direction, int regex,
 	int saved_cx = E.buf->cx;
 	int saved_cy = E.buf->cy;
 
+	search_poll_enabled = 1;
 	uint8_t *query =
 		editorPrompt(E.buf, prompt_fmt, PROMPT_SEARCH, findCallback);
+	search_poll_enabled = 0;
 
 	free(E.buf->query);
 	E.buf->query = NULL;
@@ -305,9 +392,12 @@ void replaceString(void) {
 		return;
 	}
 
-	char *prompt = xmalloc(strlen((const char *)replace_orig) + 20);
-	snprintf(prompt, strlen((const char *)replace_orig) + 20,
-		 "Replace %s with: %%s", replace_orig);
+	size_t esc_sz = strlen((const char *)replace_orig) * 2 + 1;
+	char *esc = xmalloc(esc_sz);
+	escapePercent(esc, (const char *)replace_orig, esc_sz);
+	char *prompt = xmalloc(esc_sz + 20);
+	snprintf(prompt, esc_sz + 20, "Replace %s with: %%s", esc);
+	free(esc);
 	replace_repl = editorPrompt(E.buf, prompt, PROMPT_BASIC, NULL);
 	free(prompt);
 	if (replace_repl == NULL) {
@@ -333,9 +423,15 @@ void queryReplace(void) {
 		return;
 	}
 
-	char prompt_buf[128];
+	/* Cap source to 78 chars before escaping (not via %.78s) so
+	 * truncation never splits a "%%" pair. */
+	char qr_trunc[79];
+	emil_strlcpy(qr_trunc, (const char *)replace_orig, sizeof(qr_trunc));
+	char esc_buf[158]; /* 78 * 2 + NUL */
+	escapePercent(esc_buf, qr_trunc, sizeof(esc_buf));
+	char prompt_buf[192];
 	snprintf(prompt_buf, sizeof(prompt_buf), "Query replace %s with: %%s",
-		 replace_orig);
+		 esc_buf);
 	replace_repl = editorPrompt(E.buf, prompt_buf, PROMPT_BASIC, NULL);
 	if (replace_repl == NULL) {
 		free(replace_orig);
@@ -405,22 +501,44 @@ void queryReplace(void) {
 			transformRegion(transformerReplaceString);
 			goto QR_CLEANUP;
 		case 'u':
-			doUndo(E.buf, 1);
-			E.buf->markx = E.buf->cx;
-			E.buf->marky = E.buf->cy;
-			E.buf->cx -= strlen((const char *)replace_orig);
+			/* Only undo replacements made in THIS session
+			 * (records newer than 'first').  An unguarded
+			 * doUndo here would (a) undo unrelated earlier
+			 * edits and (b) leave the cursor unmoved when
+			 * the undo stack is empty, after which the
+			 * unconditional cx -= len below drove cx
+			 * negative and the next 'y' passed negative
+			 * coordinates into transformRegion ->
+			 * collectRegionText (heap OOB read). */
+			if (E.buf->undo != first) {
+				doUndo(E.buf, 1);
+				E.buf->markx = E.buf->cx;
+				E.buf->marky = E.buf->cy;
+				E.buf->cx -= strlen((const char *)replace_orig);
+				if (E.buf->cx < 0)
+					E.buf->cx = 0;
+			}
 			break;
 		case 'U':
-			while (E.buf->undo != first)
-				doUndo(E.buf, 1);
-			E.buf->markx = E.buf->cx;
-			E.buf->marky = E.buf->cy;
-			E.buf->cx -= strlen((const char *)replace_orig);
+			if (E.buf->undo != first) {
+				while (E.buf->undo != first)
+					doUndo(E.buf, 1);
+				E.buf->markx = E.buf->cx;
+				E.buf->marky = E.buf->cy;
+				E.buf->cx -= strlen((const char *)replace_orig);
+				if (E.buf->cx < 0)
+					E.buf->cx = 0;
+			}
 			break;
 		case CTRL('r'): {
-			char rprompt[128];
+			char r_trunc[79];
+			emil_strlcpy(r_trunc, (const char *)replace_orig,
+				     sizeof(r_trunc));
+			char resc[158];
+			escapePercent(resc, r_trunc, sizeof(resc));
+			char rprompt[192];
 			snprintf(rprompt, sizeof(rprompt),
-				 "Replace this %s with: %%s", replace_orig);
+				 "Replace this %s with: %%s", resc);
 			uint8_t *newStr = editorPrompt(E.buf, rprompt,
 						       PROMPT_BASIC, NULL);
 			if (newStr != NULL) {
@@ -448,9 +566,14 @@ void queryReplace(void) {
 		}
 		case 'e':
 		case 'E': {
-			char eprompt[128];
+			char e_trunc[79];
+			emil_strlcpy(e_trunc, (const char *)replace_orig,
+				     sizeof(e_trunc));
+			char eesc[158];
+			escapePercent(eesc, e_trunc, sizeof(eesc));
+			char eprompt[192];
 			snprintf(eprompt, sizeof(eprompt),
-				 "Query replace %s with: %%s", replace_orig);
+				 "Query replace %s with: %%s", eesc);
 			uint8_t *newStr = editorPrompt(E.buf, eprompt,
 						       PROMPT_BASIC, NULL);
 			if (newStr != NULL) {

@@ -29,6 +29,11 @@ struct subprocess_s {
 	FILE *stderr_file;
 	pid_t child;
 	int return_status;
+	/* 1 if the child was spawned into its own process group (pgid ==
+	 * child), so signals can reach an entire shell pipeline.  0 when
+	 * POSIX_SPAWN_SETPGROUP is unavailable; subprocess_signal then
+	 * degrades to signalling the immediate child only. */
+	int grouped;
 };
 
 int subprocess_create(const char *const command_line[], int options,
@@ -37,6 +42,17 @@ FILE *subprocess_stdin(const struct subprocess_s *const process);
 FILE *subprocess_stdout(const struct subprocess_s *const process);
 int subprocess_join(struct subprocess_s *const process,
 		    int *const out_return_code);
+
+/* Send 'sig' to the child — to its whole process group when the
+ * child was spawned grouped (see struct field), so every member of a
+ * shell pipeline receives it.  Returns kill()'s result; 0 if there
+ * is no live child. */
+int subprocess_signal(struct subprocess_s *const process, int sig);
+
+/* Non-blocking join: 1 = reaped (exit code stored), 0 = still
+ * running, -1 = error.  For cancellation paths that must not block. */
+int subprocess_tryjoin(struct subprocess_s *const process,
+		       int *const out_return_code);
 int subprocess_destroy(struct subprocess_s *const process);
 
 #endif /* EMIL_SUBPROCESS_H */

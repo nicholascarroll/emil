@@ -3,6 +3,7 @@
 #include "test.h"
 #include "test_harness.h"
 #include "transform.h"
+#include "region.h"
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
@@ -194,6 +195,53 @@ void tearDown(void) {
 	cleanupTestEditor();
 }
 
+
+/* ---- Transpose regressions ---- */
+
+/* Regression: a region containing a single word (no boundary before
+ * a second word) made startSecond - endFirst negative, passing a
+ * huge size_t to memcpy (M-t crash on one-word buffers). */
+void test_transpose_words_single_word(void) {
+	uint8_t *r = transformerTransposeWords((uint8_t *)"hello");
+	TEST_ASSERT_EQUAL_STRING("hello", (char *)r);
+	free(r);
+	r = transformerTransposeWords((uint8_t *)"hello ");
+	TEST_ASSERT_EQUAL_STRING("hello ", (char *)r);
+	free(r);
+}
+
+void test_transpose_words_two_words(void) {
+	uint8_t *r = transformerTransposeWords((uint8_t *)"foo bar");
+	TEST_ASSERT_EQUAL_STRING("bar foo", (char *)r);
+	free(r);
+}
+
+void test_transpose_chars_empty(void) {
+	uint8_t *r = transformerTransposeChars((uint8_t *)"");
+	TEST_ASSERT_EQUAL_STRING("", (char *)r);
+	free(r);
+}
+
+
+/* Regression: a transformer returning NULL (transformerPipeCmd does,
+ * when the subprocess can't be spawned or joined) crashed
+ * transformRange with strlen(NULL).  The buffer must stay untouched. */
+static uint8_t *nullTransformer(uint8_t *in) {
+	(void)in;
+	return NULL;
+}
+
+void test_transform_region_null_transformer(void) {
+	struct buffer *buf = make_test_buffer("hello world");
+	buf->cx = 0;
+	buf->cy = 0;
+	buf->markx = 5;
+	buf->marky = 0;
+	buf->mark_active = 1;
+	transformRegion(nullTransformer);
+	TEST_ASSERT_EQUAL_STRING("hello world", row_str(buf, 0));
+}
+
 int main(void) {
 	TEST_BEGIN();
 
@@ -231,6 +279,11 @@ int main(void) {
 	/* Symbol passthrough */
 	RUN_TEST(test_upcase_multiply_sign);
 	RUN_TEST(test_downcase_divide_sign);
+
+	RUN_TEST(test_transpose_words_single_word);
+	RUN_TEST(test_transpose_words_two_words);
+	RUN_TEST(test_transpose_chars_empty);
+	RUN_TEST(test_transform_region_null_transformer);
 
 	return TEST_END();
 }

@@ -116,7 +116,7 @@ static void initTestEditor(void) {
 static struct buffer *make_test_buffer(const char *line) {
 	struct buffer *buf = newBuffer();
 	if (line && *line)
-		insertRow(buf, 0, (char *)line, strlen(line));
+		insertRow(buf, 0, (const uint8_t *)line, strlen(line));
 	buf->cx = 0;
 	buf->cy = 0;
 	buf->dirty = 0;
@@ -133,7 +133,7 @@ static struct buffer *make_test_buffer(const char *line) {
 static struct buffer *make_test_buffer_lines(const char **lines, int n) {
 	struct buffer *buf = newBuffer();
 	for (int i = 0; i < n; i++)
-		insertRow(buf, i, (char *)lines[i], strlen(lines[i]));
+		insertRow(buf, i, (const uint8_t *)lines[i], strlen(lines[i]));
 	buf->cx = 0;
 	buf->cy = 0;
 	buf->dirty = 0;

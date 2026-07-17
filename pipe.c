@@ -16,11 +16,13 @@
 #endif
 
 #include <fcntl.h>
+#include <signal.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/select.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -41,7 +43,163 @@ extern struct config E;
 
 static uint8_t *cmd;
 
+/* Interrupt source watched during a running command.  The editor
+ * uses the terminal (STDIN_FILENO); tests substitute their own
+ * pipe via pipeCommandCaptureIntr, and -1 disables interruption. */
+static int pipe_intr_fd = STDIN_FILENO;
+
+/* 1 if the most recent transformerPipeCmd run was cancelled (as
+ * opposed to failing).  Read by pipeCommandCaptureIntr. */
+static int pipe_last_canceled;
+
+/* Pump 'input' into sp's stdin while draining its stdout into 'out'
+ * and discarding its stderr, using select() so neither side can
+ * deadlock on a full pipe (~64 KB).  Closes and NULLs
+ * sp->stdin_file once input is exhausted so the child sees EOF (and
+ * join/destroy don't close it again).  'input' may be NULL for
+ * commands that take no stdin.
+ *
+ * If intr_fd >= 0 it is watched for C-g (0x07); any other byte is
+ * consumed and discarded (type-ahead during a synchronous command
+ * is dropped, as in Emacs).  Escalation is user-driven, as in
+ * Emacs — no timers of any kind in this path:
+ *
+ *   1st C-g: SIGINT to the child's process group, stop feeding
+ *            stdin, keep draining until the pipes reach EOF.
+ *   2nd C-g: SIGKILL to the group (for children that ignore or
+ *            trap SIGINT).
+ *   3rd C-g: abandon the pipes entirely (a child unkillable even
+ *            by SIGKILL is in uninterruptible sleep on a dead
+ *            filesystem; the editor must not be wedged by it).
+ *
+ * Returns 0 if the command ran to completion, nonzero (the stage
+ * reached) if cancelled. */
+static int pumpSubprocessIO(struct subprocess_s *sp, uint8_t *input,
+			    struct dbuf *out, int intr_fd) {
+	int in_fd = sp->stdin_file ? fileno(sp->stdin_file) : -1;
+	int out_fd = sp->stdout_file ? fileno(sp->stdout_file) : -1;
+	int err_fd = sp->stderr_file ? fileno(sp->stderr_file) : -1;
+
+	size_t in_len = input ? strlen((char *)input) : 0;
+	size_t in_off = 0;
+
+	if (in_fd >= 0)
+		fcntl(in_fd, F_SETFL, O_NONBLOCK);
+
+	int out_open = (out_fd >= 0);
+	int err_open = (err_fd >= 0);
+	int cancel_stage = 0;
+
+	while (out_open || err_open || (cancel_stage == 0 && in_off < in_len)) {
+		/* Nothing left to write (or cancelled): close stdin
+		 * so the child sees EOF. */
+		if (sp->stdin_file && (cancel_stage > 0 || in_off >= in_len)) {
+			fclose(sp->stdin_file);
+			sp->stdin_file = NULL;
+			in_fd = -1;
+		}
+
+		fd_set rfds, wfds;
+		FD_ZERO(&rfds);
+		FD_ZERO(&wfds);
+		int maxfd = -1;
+		if (out_open) {
+			FD_SET(out_fd, &rfds);
+			if (out_fd > maxfd)
+				maxfd = out_fd;
+		}
+		if (err_open) {
+			FD_SET(err_fd, &rfds);
+			if (err_fd > maxfd)
+				maxfd = err_fd;
+		}
+		if (intr_fd >= 0) {
+			FD_SET(intr_fd, &rfds);
+			if (intr_fd > maxfd)
+				maxfd = intr_fd;
+		}
+		int want_write =
+			(cancel_stage == 0 && in_fd >= 0 && in_off < in_len);
+		if (want_write) {
+			FD_SET(in_fd, &wfds);
+			if (in_fd > maxfd)
+				maxfd = in_fd;
+		}
+		if (maxfd < 0)
+			break;
+
+		if (select(maxfd + 1, &rfds, want_write ? &wfds : NULL, NULL,
+			   NULL) < 0) {
+			if (errno == EINTR)
+				continue;
+			break;
+		}
+
+		uint8_t io[4096];
+		if (intr_fd >= 0 && FD_ISSET(intr_fd, &rfds)) {
+			ssize_t n = read(intr_fd, io, sizeof(io));
+			if (n < 0 && (errno == EINTR || errno == EAGAIN)) {
+				; /* retry next iteration */
+			} else if (n <= 0) {
+				intr_fd = -1; /* source gone: stop watching */
+			} else {
+				for (ssize_t i = 0; i < n; i++) {
+					if (io[i] != 0x07) /* not C-g */
+						continue;
+					cancel_stage++;
+					if (cancel_stage == 1) {
+						subprocess_signal(sp, SIGINT);
+						if (intr_fd == STDIN_FILENO) {
+							setStatusMessage(
+								msg_shell_interrupted);
+							refreshScreen();
+						}
+					} else if (cancel_stage == 2) {
+						subprocess_signal(sp, SIGKILL);
+					}
+				}
+				if (cancel_stage >= 3)
+					break; /* abandon unkillable child */
+			}
+		}
+		if (out_open && FD_ISSET(out_fd, &rfds)) {
+			ssize_t n = read(out_fd, io, sizeof(io));
+			if (n > 0)
+				dbuf_append(out, io, (int)n);
+			else if (n < 0 && (errno == EINTR || errno == EAGAIN))
+				; /* interrupted: retry next iteration */
+			else
+				out_open = 0;
+		}
+		if (err_open && FD_ISSET(err_fd, &rfds)) {
+			/* Drain and discard: a chatty child must not
+			 * block on a full stderr pipe either. */
+			ssize_t n = read(err_fd, io, sizeof(io));
+			if (n < 0 && (errno == EINTR || errno == EAGAIN))
+				; /* interrupted: retry next iteration */
+			else if (n <= 0)
+				err_open = 0;
+		}
+		if (want_write && FD_ISSET(in_fd, &wfds)) {
+			ssize_t n =
+				write(in_fd, input + in_off, in_len - in_off);
+			if (n > 0)
+				in_off += (size_t)n;
+			else if (n < 0 && errno != EAGAIN && errno != EINTR)
+				in_off = in_len; /* child closed stdin
+						  * (SIGPIPE is ignored) */
+		}
+	}
+
+	if (sp->stdin_file) {
+		fclose(sp->stdin_file);
+		sp->stdin_file = NULL;
+	}
+	return cancel_stage;
+}
+
 static uint8_t *transformerPipeCmd(uint8_t *input) {
+	pipe_last_canceled = 0;
 	/* Using sh -c lets us use pipes and stuff and takes care of quoting. */
 	const char *command_line[4] = { "/bin/sh", "-c", (char *)cmd, NULL };
 	struct subprocess_s subprocess;
@@ -53,14 +211,32 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 			"Shell command failed: unable to create subprocess");
 		return NULL;
 	}
-	FILE *p_stdin = subprocess_stdin(&subprocess);
-	FILE *p_stdout = subprocess_stdout(&subprocess);
+	/* Pump region text in and command output out concurrently;
+	 * see pumpSubprocessIO for why this must be interleaved.
+	 * pipe_intr_fd (the terminal in the editor) is watched so C-g
+	 * cancels a long-running command without losing the session. */
+	struct dbuf d = DBUF_INIT;
+	int canceled =
+		(pumpSubprocessIO(&subprocess, input, &d, pipe_intr_fd) != 0);
 
-	/* If we have a region send to subprocess */
-	if (input) {
-		for (int i = 0; input[i]; i++) {
-			fputc(input[i], p_stdin);
+	pipe_last_canceled = canceled;
+	if (canceled) {
+		/* Reap without ever blocking: the child has had SIGTERM
+		 * and possibly SIGKILL; if it is unreapable even now
+		 * (D-state on a hung filesystem), abandon it rather
+		 * than wedge the editor in waitpid — the one zombie is
+		 * the lesser evil.  select() doubles as a portable
+		 * sub-second sleep. */
+		for (int i = 0; i < 20; i++) {
+			if (subprocess_tryjoin(&subprocess, NULL) != 0)
+				break;
+			struct timeval nap = { 0, 100000 };
+			select(0, NULL, NULL, NULL, &nap);
 		}
+		subprocess_destroy(&subprocess);
+		dbuf_free(&d);
+		setStatusMessage(msg_canceled);
+		return NULL;
 	}
 
 	/* Join process */
@@ -69,6 +245,7 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 		setStatusMessage(
 			"Shell command failed: error waiting for subprocess");
 		subprocess_destroy(&subprocess);
+		dbuf_free(&d);
 		return NULL;
 	}
 
@@ -76,14 +253,6 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 	if (sub_ret != 0) {
 		setStatusMessage(msg_shell_exit_status, sub_ret);
 		/* Continue anyway to show any output/errors */
-	}
-
-	/* Read stdout of process into buffer */
-	struct dbuf d = DBUF_INIT;
-	int c = fgetc(p_stdout);
-	while (c != EOF) {
-		dbuf_byte(&d, (uint8_t)c);
-		c = fgetc(p_stdout);
 	}
 
 	/* Only show byte count if subprocess succeeded */
@@ -94,6 +263,30 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 	/* Cleanup & return — caller frees result */
 	subprocess_destroy(&subprocess);
 	return dbuf_detach(&d, NULL);
+}
+
+/* Run 'command' through /bin/sh -c with optional 'input' on stdin,
+ * returning captured stdout (caller frees, NULL on spawn failure).
+ * Thin wrapper over the static transformerPipeCmd so tests can
+ * exercise the real subprocess I/O path instead of replicating it. */
+uint8_t *pipeCommandCapture(const uint8_t *command, uint8_t *input) {
+	return pipeCommandCaptureIntr(command, input, -1, NULL);
+}
+
+/* As pipeCommandCapture, but watching intr_fd for C-g cancellation.
+ * *out_canceled (if non-NULL) is set to 1 when the command was
+ * cancelled, 0 otherwise. */
+uint8_t *pipeCommandCaptureIntr(const uint8_t *command, uint8_t *input,
+				int intr_fd, int *out_canceled) {
+	int saved_intr = pipe_intr_fd;
+	pipe_intr_fd = intr_fd;
+	cmd = (uint8_t *)command;
+	uint8_t *out = transformerPipeCmd(input);
+	cmd = NULL;
+	pipe_intr_fd = saved_intr;
+	if (out_canceled)
+		*out_canceled = pipe_last_canceled;
+	return out;
 }
 
 uint8_t *editorPipe(int useRegion) {
@@ -290,17 +483,15 @@ void diffBufferWithFile(void) {
 	}
 	free(iopath);
 
-	/* diff doesn't need stdin; just read stdout */
+	/* diff takes no stdin, but its stdout must be drained BEFORE
+	 * joining: a diff larger than the pipe capacity (~64 KB) blocks
+	 * the child on write, and waitpid never returns. */
+	struct dbuf d = DBUF_INIT;
+	pumpSubprocessIO(&subprocess, NULL, &d, -1);
+
 	int sub_ret = -1;
 	subprocess_join(&subprocess, &sub_ret);
 
-	FILE *p_stdout = subprocess_stdout(&subprocess);
-	struct dbuf d = DBUF_INIT;
-	int c = fgetc(p_stdout);
-	while (c != EOF) {
-		dbuf_byte(&d, (uint8_t)c);
-		c = fgetc(p_stdout);
-	}
 	int output_len;
 	char *output = (char *)dbuf_detach(&d, &output_len);
 
@@ -388,6 +579,24 @@ void pipeCmd(int useRegion) {
 
 void diffBufferWithFile(void) {
 	setStatusMessage(msg_shell_disabled);
+}
+
+uint8_t *pipeCommandCapture(const uint8_t *command, uint8_t *input) {
+	(void)command;
+	(void)input;
+	setStatusMessage(msg_shell_disabled);
+	return NULL;
+}
+
+uint8_t *pipeCommandCaptureIntr(const uint8_t *command, uint8_t *input,
+				int intr_fd, int *out_canceled) {
+	(void)command;
+	(void)input;
+	(void)intr_fd;
+	if (out_canceled)
+		*out_canceled = 0;
+	setStatusMessage(msg_shell_disabled);
+	return NULL;
 }
 
 #endif /* EMIL_DISABLE_SHELL */

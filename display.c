@@ -1136,6 +1136,7 @@ void resizeScreen(int UNUSED(sig)) {
 	for (struct buffer *b = E.headbuf; b != NULL; b = b->next) {
 		for (int i = 0; i < b->numrows; i++) {
 			b->row[i].cached_width = -1;
+			b->row[i].cached_sublines = -1;
 		}
 		b->screen_line_cache_valid = 0;
 	}

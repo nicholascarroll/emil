@@ -70,9 +70,74 @@ static char *wordAtPoint(void) {
 
 /* ---- ctags file lookup (prefers .c over .h) ---- */
 
+/* Walk from the current working directory up toward the filesystem
+ * root looking for a "tags" file, mirroring how vim/emacs locate a
+ * project's tag index.  See ctags.h for the contract.  The depth bound
+ * keeps a pathological filesystem from spinning forever. */
+int findTagsDir(char *out_dir, size_t dirsz) {
+	char dir[PATH_MAX];
+	if (getcwd(dir, sizeof(dir)) == NULL)
+		return -1;
+
+	for (int depth = 0; depth < 256; depth++) {
+		char path[PATH_MAX];
+		int n = snprintf(path, sizeof(path), "%s/tags", dir);
+		if (n < 0 || (size_t)n >= sizeof(path)) {
+			/* Path too long to probe; stop rather than
+			 * risk a truncated access() of the wrong file. */
+			return -1;
+		}
+
+		if (access(path, R_OK) == 0) {
+			if (emil_strlcpy(out_dir, dir, dirsz) >= dirsz)
+				return -1;
+			return 0;
+		}
+
+		/* Not here — step up to the parent directory. */
+		if (dir[0] == '/' && dir[1] == '\0')
+			break; /* already at root */
+		char *slash = strrchr(dir, '/');
+		if (slash == NULL)
+			break; /* getcwd is absolute; shouldn't happen */
+		if (slash == dir)
+			dir[1] = '\0'; /* parent is root "/" */
+		else
+			*slash = '\0';
+	}
+
+	return -1;
+}
+
+int resolveTagPath(const char *tagsdir, const char *tagpath, char *out,
+		   size_t outsz) {
+	int n;
+	if (tagpath[0] == '/' || tagpath[0] == '~')
+		n = snprintf(out, outsz, "%s", tagpath);
+	else
+		n = snprintf(out, outsz, "%s/%s", tagsdir, tagpath);
+	if (n < 0 || (size_t)n >= outsz)
+		return -1;
+	return 0;
+}
+
+/* Open the project's tags file (found via findTagsDir) and report the
+ * directory it lives in.  Returns NULL if none is found. */
+static FILE *openTagsFile(char *out_dir, size_t dirsz) {
+	if (findTagsDir(out_dir, dirsz) != 0)
+		return NULL;
+
+	char path[PATH_MAX];
+	int n = snprintf(path, sizeof(path), "%s/tags", out_dir);
+	if (n < 0 || (size_t)n >= sizeof(path))
+		return NULL;
+	return fopen(path, "r");
+}
+
 static int ctagsLookup(const char *sym, char *out_file, size_t filesz,
-		       int *out_line, char *out_pat, size_t patsz) {
-	FILE *fp = fopen("tags", "r");
+		       int *out_line, char *out_pat, size_t patsz,
+		       char *out_dir, size_t dirsz) {
+	FILE *fp = openTagsFile(out_dir, dirsz);
 	if (!fp)
 		return -1;
 
@@ -159,16 +224,27 @@ void ctagsJump(void) {
 
 	char tagfile[PATH_MAX];
 	char tagpat[1024];
+	char tagsdir[PATH_MAX];
 	int tagline;
 	if (ctagsLookup(sym, tagfile, sizeof(tagfile), &tagline, tagpat,
-			sizeof(tagpat)) < 0) {
+			sizeof(tagpat), tagsdir, sizeof(tagsdir)) < 0) {
+		setStatusMessage(msg_tag_not_found, sym);
+		free(sym);
+		return;
+	}
+
+	/* Tag file paths are relative to the directory containing the
+	 * tags file, NOT the current working directory.  Join them so
+	 * the jump works no matter where emil was launched from. */
+	char resolved[PATH_MAX];
+	if (resolveTagPath(tagsdir, tagfile, resolved, sizeof(resolved)) != 0) {
 		setStatusMessage(msg_tag_not_found, sym);
 		free(sym);
 		return;
 	}
 
 	pushLocation();
-	struct buffer *buf = switchToFile(tagfile);
+	struct buffer *buf = switchToFile(resolved);
 	if (buf) {
 		if (tagline > 0) {
 			buf->cy = (tagline - 1 < buf->numrows) ? tagline - 1 :
@@ -244,6 +320,14 @@ void toggleHeaderBody(void) {
 	}
 
 	char other[PATH_MAX];
+	/* base_len is measured on the original string; if the filename
+	 * doesn't fit in 'other', the offset arithmetic below would
+	 * write past the buffer (glibc happens to reject the
+	 * underflowed snprintf size, but that's not portable). */
+	if (strlen(E.buf->filename) >= sizeof(other)) {
+		setStatusMessage(msg_no_ext_mapping, ext);
+		return;
+	}
 	emil_strlcpy(other, E.buf->filename, sizeof(other));
 
 	size_t base_len = ext - E.buf->filename;

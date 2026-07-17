@@ -29,6 +29,16 @@ int readKey(void) {
 	return 0;
 }
 
+/* Pushback stubs: tests never route bytes through readKey, so a
+ * stored byte is simply ignored. */
+static int stub_pushback = -1;
+void terminalPushbackByte(uint8_t c) {
+	stub_pushback = c;
+}
+int terminalPushbackPending(void) {
+	return stub_pushback >= 0;
+}
+
 int getCursorPosition(int *rows, int *cols) {
 	*rows = 24;
 	*cols = 80;

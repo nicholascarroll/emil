@@ -9,68 +9,35 @@
 #include "unicode.h"
 #include "emil.h"
 
-#ifdef EMIL_DEBUG_WCWIDTH
-#include "widechar_width_c.h"
-
-static int bundled_wcwidth(int cp) {
-	int w = widechar_wcwidth(cp);
-	if (w >= 0)
-		return w;
-	switch (w) {
-	case widechar_nonprint:
-		return 0;
-	case widechar_combining:
-		return 0;
-	case widechar_ambiguous:
-		return 1;
-	case widechar_private_use:
-		return 1;
-	case widechar_unassigned:
-		return 1;
-	case widechar_widened_in_9:
-		return 2;
-	case widechar_non_character:
-		return 0;
-	default:
-		return 1;
-	}
-}
-
-static int system_wcwidth(int cp) {
-	int w = wcwidth((wchar_t)cp);
-	return w < 0 ? 1 : w;
-}
-
-static int (*active_wcwidth)(int) = bundled_wcwidth;
-static int using_bundled = 0;
-
-void unicode_toggle_wcwidth(void) {
-	if (using_bundled) {
-		active_wcwidth = system_wcwidth;
-		using_bundled = 0;
-	} else {
-		active_wcwidth = bundled_wcwidth;
-		using_bundled = 1;
-	}
-}
-
-const char *unicode_wcwidth_source(void) {
-	return using_bundled ? "bundled (Unicode 17.0)" : "system";
-}
-#endif /* EMIL_DEBUG_WCWIDTH */
-
 /* Decode the UTF-8 character at str[idx] and return its Unicode codepoint. */
 uint32_t utf8Decode(const uint8_t *str, int idx) {
+	/* Each continuation byte is verified before the byte after it
+	 * is read.  Rows are NUL-terminated at chars[size], and NUL is
+	 * never a continuation byte, so decoding stops at the
+	 * terminator for truncated sequences (which can reach a buffer
+	 * via byte-column rectangle operations on multibyte text)
+	 * instead of reading past the allocation.  An invalid sequence
+	 * decodes as its lead byte, matching the pre-existing handling
+	 * of stray non-UTF-8 bytes. */
 	uint32_t ret = 0;
 	uint8_t ch = str[idx];
 	if (utf8_is2Char(ch)) {
+		if ((str[idx + 1] & 0xC0) != 0x80)
+			return ch;
 		ret = (ch & 0x1F) << 6;
 		ret |= (str[idx + 1] & 0x3F);
 	} else if (utf8_is3Char(ch)) {
+		if ((str[idx + 1] & 0xC0) != 0x80 ||
+		    (str[idx + 2] & 0xC0) != 0x80)
+			return ch;
 		ret = (ch & 0x0F) << 12;
 		ret |= ((str[idx + 1] & 0x3F) << 6);
 		ret |= (str[idx + 2] & 0x3F);
 	} else if (utf8_is4Char(ch)) {
+		if ((str[idx + 1] & 0xC0) != 0x80 ||
+		    (str[idx + 2] & 0xC0) != 0x80 ||
+		    (str[idx + 3] & 0xC0) != 0x80)
+			return ch;
 		ret = (ch & 0x07) << 18;
 		ret |= ((str[idx + 1] & 0x3F) << 12);
 		ret |= ((str[idx + 2] & 0x3F) << 6);
@@ -207,12 +174,8 @@ int charInStringWidth(const uint8_t *str, int idx) {
 		return 2;
 	} else {
 		int rune = utf8Decode(str, idx);
-#ifdef EMIL_DEBUG_WCWIDTH
-		return active_wcwidth(rune);
-#else
 		int w = wcwidth((wchar_t)rune);
 		return w < 0 ? 1 : w;
-#endif
 	}
 }
 
@@ -272,9 +235,59 @@ int isCJKChar(uint32_t cp) {
 	       || (cp >= 0xD7B0 && cp <= 0xD7FF); /* Hangul Jamo Extended-B */
 }
 
+/* 行首禁则 — characters forbidden at the start of a wrapped line.
+ * Initial set: closing punctuation that must stay attached to the
+ * character it follows.  Word wrap consults this to avoid recording
+ * a break point immediately before any of these.  Extend the table
+ * as needed (e.g. " ' 】 〉 〕 are natural future members). */
+int isLineStartForbidden(uint32_t cp) {
+	switch (cp) {
+	case 0x3001: /* 、 IDEOGRAPHIC COMMA */
+	case 0x3002: /* 。 IDEOGRAPHIC FULL STOP */
+	case 0xFF0C: /* ， FULLWIDTH COMMA */
+	case 0xFF01: /* ！ FULLWIDTH EXCLAMATION MARK */
+	case 0xFF1F: /* ？ FULLWIDTH QUESTION MARK */
+	case 0xFF1A: /* ： FULLWIDTH COLON */
+	case 0xFF1B: /* ； FULLWIDTH SEMICOLON */
+	case 0xFF09: /* ） FULLWIDTH RIGHT PARENTHESIS */
+	case 0x300D: /* 」 RIGHT CORNER BRACKET */
+	case 0x300B: /* 》 RIGHT DOUBLE ANGLE BRACKET */
+	case 0xFF3D: /* ］ FULLWIDTH RIGHT SQUARE BRACKET */
+		return 1;
+	default:
+		return 0;
+	}
+}
+
 /* CJK sentence terminators: 。(U+3002) ！(U+FF01) ？(U+FF1F) */
 int isCJKSentenceTerminator(uint32_t cp) {
 	return cp == 0x3002 || cp == 0xFF01 || cp == 0xFF1F;
+}
+
+/* Southeast Asian sentence terminators: Khmer ។ (U+17D4 KHAN, full
+ * stop) and ៕ (U+17D5 BARIYOOSAN, end of section); Thai ๚ (U+0E5A
+ * ANGKHANKHU) and ๛ (U+0E5B KHOMUT) for classical texts.  Modern
+ * Thai and Lao mark sentence ends with spaces only — inherently
+ * ambiguous without a dictionary — so those fall back to the
+ * end-of-line invariant in sentence motion. */
+int isSEAsianSentenceTerminator(uint32_t cp) {
+	return cp == 0x17D4 || cp == 0x17D5 || cp == 0x0E5A || cp == 0x0E5B;
+}
+
+/* Explicit word-separator codepoints beyond ASCII.  ZERO WIDTH SPACE
+ * is the standard way digital Thai/Lao/Khmer text marks word breaks
+ * in otherwise unspaced runs; word motion treats it as a boundary
+ * and word wrap treats it as a break opportunity. */
+int isWordSeparatorCP(uint32_t cp) {
+	return cp == 0x200B;
+}
+
+/* Preposed vowels are spacing characters written BEFORE the
+ * consonant they modify (Thai เ แ โ ใ ไ, Lao ເ ແ ໂ ໃ ໄ).  A line
+ * break between the vowel and its consonant is visually wrong, so
+ * the word-wrap hard-break fallback refuses to split there. */
+int isPreposedVowel(uint32_t cp) {
+	return (cp >= 0x0E40 && cp <= 0x0E44) || (cp >= 0x0EC0 && cp <= 0x0EC4);
 }
 
 /* Indic sentence terminators: danda । (U+0964) and double danda ॥ (U+0965) */

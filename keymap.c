@@ -41,13 +41,6 @@ void showPrefix(const char *prefix) {
 
 // Forward declarations for command functions
 
-#ifdef EMIL_DEBUG_WCWIDTH
-static void toggleWcwidth(void) {
-	unicode_toggle_wcwidth();
-	setStatusMessage("Using %s wcwidth", unicode_wcwidth_source());
-}
-#endif
-
 static int compare_commands(const void *a, const void *b) {
 	return strcmp(((struct command *)a)->key, ((struct command *)b)->key);
 }
@@ -68,9 +61,6 @@ void setupCommands(void) {
 		{ "visual-line-mode", toggleVisualLineMode },
 		{ "version", editorVersion },
 		{ "view-register", viewRegister },
-#ifdef EMIL_DEBUG_WCWIDTH
-		{ "toggle-wcwidth", toggleWcwidth },
-#endif
 #ifdef EMIL_DEBUG_UNDO
 		{ "debug-unpair", debugUnpair },
 #endif
@@ -1025,7 +1015,7 @@ static int dispatchMisc(int c, int uarg) {
 			return 1;
 		}
 		uint8_t *cmd =
-			editorPrompt(E.buf, "cmd: %s", PROMPT_COMMAND, NULL);
+			editorPrompt(E.buf, "M-x %s", PROMPT_COMMAND, NULL);
 		if (cmd != NULL) {
 			runCommand((char *)cmd);
 			free(cmd);

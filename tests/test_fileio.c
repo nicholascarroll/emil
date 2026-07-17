@@ -122,9 +122,9 @@ void test_getline_multiple_reallocs(void) {
 
 void test_rows_to_string(void) {
 	struct buffer *buf = make_test_buffer(NULL);
-	insertRow(buf, 0, "Hello", 5);
-	insertRow(buf, 1, "World", 5);
-	insertRow(buf, 2, "", 0);
+	insertRow(buf, 0, (const uint8_t *)"Hello", 5);
+	insertRow(buf, 1, (const uint8_t *)"World", 5);
+	insertRow(buf, 2, (const uint8_t *)"", 0);
 
 	size_t buflen = 0;
 	char *str = rowsToString(buf, &buflen);
@@ -164,6 +164,32 @@ void test_open_empty_file(void) {
 	TEST_ASSERT_EQUAL_INT(0, buf->numrows);
 
 	unlink(tmpname);
+}
+
+/* Regression: fopen(dir, "r") succeeds on Linux, so editorOpen used
+ * to present a directory as an empty, editable buffer. */
+void test_open_directory_fails(void) {
+	char tmpname[] = "/tmp/emil_test_dir_XXXXXX";
+	TEST_ASSERT_NOT_NULL(mkdtemp(tmpname));
+
+	struct buffer *buf = make_test_buffer(NULL);
+	int rc = editorOpen(buf, tmpname);
+	TEST_ASSERT_EQUAL_INT(-1, rc);
+	TEST_ASSERT_NULL(buf->filename);
+	TEST_ASSERT_EQUAL_INT(0, buf->numrows);
+
+	rmdir(tmpname);
+}
+
+/* Regression: a nonexistent path with a trailing '/' names a
+ * directory; it used to be offered as a "new file" that could never
+ * be saved. */
+void test_open_trailing_slash_fails(void) {
+	struct buffer *buf = make_test_buffer(NULL);
+	int rc = editorOpen(buf, "/tmp/emil_no_such_dir_xyzzy/");
+	TEST_ASSERT_EQUAL_INT(-1, rc);
+	TEST_ASSERT_NULL(buf->filename);
+	TEST_ASSERT_EQUAL_INT(0, buf->numrows);
 }
 
 /* ---- UTF-8 validation ---- */
@@ -261,6 +287,8 @@ int main(void) {
 	RUN_TEST(test_rows_to_string);
 	RUN_TEST(test_open_temp_file);
 	RUN_TEST(test_open_empty_file);
+	RUN_TEST(test_open_directory_fails);
+	RUN_TEST(test_open_trailing_slash_fails);
 
 	RUN_TEST(test_utf8_valid_file);
 	RUN_TEST(test_utf8_invalid_continuation);

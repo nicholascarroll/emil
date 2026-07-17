@@ -156,6 +156,36 @@ void test_empty_kill_not_recorded(void) {
 	TEST_ASSERT_EQUAL_INT(count_before, E.kill_history.count);
 }
 
+/* --- 5. rectangle yank with no rectangle kill --------------------- */
+
+/* Regression: C-x r y is bound to yankRectangle unconditionally.
+ * With an empty or plain-text kill (rect_height == 0), the geometry
+ * arithmetic computed boty = cy - 1 and read row[-1] at the top of
+ * the buffer (heap-buffer-overflow under ASAN). */
+void test_yank_rectangle_without_rect_kill(void) {
+	struct buffer *buf = make_test_buffer("hello");
+	buf->cx = 0;
+	buf->cy = 0;
+
+	/* No kill at all */
+	yankRectangle();
+	TEST_ASSERT_EQUAL_STRING("hello", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
+
+	/* Plain-text (non-rectangle) kill */
+	addToKillRing("plain", 0, 0, 0);
+	yankRectangle();
+	TEST_ASSERT_EQUAL_STRING("hello", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
+
+	/* Read-only buffer with a real rectangle kill: no modification */
+	addToKillRing("ab", 1, 2, 1);
+	buf->read_only = 1;
+	yankRectangle();
+	TEST_ASSERT_EQUAL_STRING("hello", row_str(buf, 0));
+	buf->read_only = 0;
+}
+
 /* --- runner ------------------------------------------------------- */
 
 int main(void) {
@@ -164,5 +194,6 @@ int main(void) {
 	RUN_TEST(test_yank_pop_returns_previous_kill);
 	RUN_TEST(test_rectangle_yank_preserves_geometry);
 	RUN_TEST(test_empty_kill_not_recorded);
+	RUN_TEST(test_yank_rectangle_without_rect_kill);
 	return TEST_END();
 }

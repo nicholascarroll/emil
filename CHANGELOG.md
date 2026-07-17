@@ -1,4 +1,13 @@
 
+## [0.6.0] - 2026-07-18
+- Thai/Lao/Khmer boundaries and Chinese line-breaking: word wrap 
+  now follows 行首禁则  #87, #88.
+- Shell commands (M-|, M-!) can now be cancelled.
+- Opening a directory now fails with an error, #67
+- Kill-ring save/restore now preserves rectangle metadata.
+- Removed the bundled wcwidth table (widechar_width_c.h)
+- More effective cancel (C-g) during interactive search
+
 ## [0.5.0] - 2026-05-08
 - CJK and Indic sentence movement: #69, #71, #72, #73, #74
 - Replaced the Memory Budget feature with simpler File size limit (1GB)

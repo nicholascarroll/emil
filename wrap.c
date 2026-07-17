@@ -29,19 +29,39 @@ void buildScreenCache(struct buffer *buf, int screencols) {
 	if (!buf->screen_line_start)
 		return;
 
+	/* A column-width change invalidates every row's cached subline
+	 * count (the wrap points move even though the text didn't). */
+	if (buf->screen_cache_cols != screencols) {
+		for (int i = 0; i < buf->numrows; i++)
+			buf->row[i].cached_sublines = -1;
+		buf->screen_cache_cols = screencols;
+	}
+
 	int screen_line = 0;
 	for (int i = 0; i < buf->numrows; i++) {
 		buf->screen_line_start[i] = screen_line;
 		if (!buf->word_wrap) {
 			screen_line += 1;
 		} else {
-			/* Recompute only if cached_width is stale (-1) */
+			/* Recompute only if cached_width is stale (-1).
+			 * A stale width means the row text changed, so
+			 * the subline count is stale too — deriving it
+			 * this way keeps every cached_width
+			 * invalidation site (present and future) a
+			 * subline invalidation site automatically.
+			 * Previously countScreenLines re-scanned every
+			 * row's bytes on every rebuild, making each
+			 * keystroke O(total file bytes) in wrap
+			 * mode. */
 			if (buf->row[i].cached_width < 0) {
 				buf->row[i].cached_width =
 					calculateLineWidth(&buf->row[i]);
+				buf->row[i].cached_sublines = -1;
 			}
-			screen_line +=
-				countScreenLines(&buf->row[i], screencols);
+			if (buf->row[i].cached_sublines < 0)
+				buf->row[i].cached_sublines = countScreenLines(
+					&buf->row[i], screencols);
+			screen_line += buf->row[i].cached_sublines;
 		}
 	}
 
@@ -96,6 +116,23 @@ int charsToDisplayColumn(erow *row, int char_pos) {
 	return col;
 }
 
+/* 行首禁则: a break must not be recorded when the character that
+ * would begin the next line is forbidden there (closing punctuation
+ * such as 。 」 ）).  Suppressing the candidate makes the break fall
+ * earlier, carrying the punctuation to the next line attached to its
+ * preceding character; chains (字」。) resolve by suppressing each
+ * candidate in turn.  If every candidate on a segment is suppressed,
+ * the hard-break fallback still applies, so a pathological line of
+ * pure punctuation can neither loop nor produce an empty line. */
+static int breakForbiddenBefore(erow *row, int next_bidx) {
+	if (next_bidx >= row->size)
+		return 0;
+	uint8_t c = row->chars[next_bidx];
+	if (c < 0x80)
+		return 0;
+	return isLineStartForbidden(utf8Decode(row->chars, next_bidx));
+}
+
 /* Find the next word-wrap break point for a single screen line.
  *
  * Given a row, a screen width, and a starting position (column and byte
@@ -112,8 +149,18 @@ int wordWrapBreak(erow *row, int screencols, int line_start_col,
 	int bidx = line_start_byte;
 	int wb_col = -1;
 	int wb_byte = -1;
+	/* Last hard-break position not immediately after a preposed
+	 * vowel (Thai เ แ โ ใ ไ etc.), so the no-word-boundary
+	 * fallback never splits a vowel from its consonant. */
+	int hard_col = line_start_col;
+	int hard_byte = line_start_byte;
+	int prev_preposed = 0;
 
 	while (bidx < row->size) {
+		if (!prev_preposed) {
+			hard_col = col;
+			hard_byte = bidx;
+		}
 		uint8_t c = row->chars[bidx];
 		int cwidth;
 
@@ -131,17 +178,32 @@ int wordWrapBreak(erow *row, int screencols, int line_start_col,
 		if (col + cwidth - line_start_col > screencols)
 			break;
 
+		int this_preposed = 0;
 		if (isWordBoundary(c)) {
-			wb_col = col + cwidth;
-			wb_byte = bidx + utf8_nBytes(c);
-		} else if (c >= 0x80) {
-			/* CJK characters are each a valid line-break point */
-			uint32_t cp = utf8Decode(row->chars, bidx);
-			if (isCJKChar(cp)) {
+			if (!breakForbiddenBefore(row, bidx + utf8_nBytes(c))) {
 				wb_col = col + cwidth;
 				wb_byte = bidx + utf8_nBytes(c);
 			}
+		} else if (c >= 0x80) {
+			/* CJK characters are each a valid line-break
+			 * point, as is CJK closing punctuation (the
+			 * ideal break is right after 。 ！ 」 etc.) —
+			 * both subject to 行首禁则 on the following
+			 * character. */
+			uint32_t cp = utf8Decode(row->chars, bidx);
+			/* Break candidates: CJK characters, CJK
+			 * closing punctuation, and ZWSP (the explicit
+			 * Thai/Lao/Khmer word separator) — all subject
+			 * to 行首禁则 on the following character. */
+			if ((isCJKChar(cp) || isLineStartForbidden(cp) ||
+			     isWordSeparatorCP(cp)) &&
+			    !breakForbiddenBefore(row, bidx + utf8_nBytes(c))) {
+				wb_col = col + cwidth;
+				wb_byte = bidx + utf8_nBytes(c);
+			}
+			this_preposed = isPreposedVowel(cp);
 		}
+		prev_preposed = this_preposed;
 
 		col += cwidth;
 		bidx += utf8_nBytes(c);
@@ -156,6 +218,11 @@ int wordWrapBreak(erow *row, int screencols, int line_start_col,
 		/* Break at the last word boundary. */
 		*break_col = wb_col;
 		*break_byte = wb_byte;
+	} else if (hard_byte > line_start_byte && hard_byte < bidx) {
+		/* No word boundary — hard break, retreated off any
+		 * preposed-vowel/consonant seam. */
+		*break_col = hard_col;
+		*break_byte = hard_byte;
 	} else {
 		/* No word boundary — hard break at column limit. */
 		*break_col = col;

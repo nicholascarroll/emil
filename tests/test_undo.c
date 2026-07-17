@@ -77,7 +77,7 @@ void test_undo_delete_chars(void) {
 
 void test_coalesce_consecutive_inserts(void) {
 	struct buffer *buf = make_test_buffer("");
-	insertRow(buf, 0, "", 0);
+	insertRow(buf, 0, (const uint8_t *)"", 0);
 	buf->cx = 0;
 	clearUndosAndRedos(buf);
 

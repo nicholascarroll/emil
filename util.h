@@ -20,6 +20,12 @@ ssize_t emil_getline(char **lineptr, size_t *n, FILE *stream);
 size_t emil_strlcpy(char *dst, const char *src, size_t dsize);
 size_t emil_strlcat(char *dst, const char *src, size_t dsize);
 
+/* Copy src into dst[dsize], doubling each '%' so the result can be
+ * safely embedded in a printf-style format string.  Use whenever
+ * user-controlled text is interpolated into an editorPrompt() format
+ * or any other string later passed as a format. */
+size_t escapePercent(char *dst, const char *src, size_t dsize);
+
 /* Tilde / home-directory helpers */
 char *expandTilde(const char *path);  /* ~/foo → /home/u/foo; caller frees */
 char *collapseHome(const char *path); /* /home/u/foo → ~/foo; caller frees */

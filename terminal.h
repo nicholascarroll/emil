@@ -10,6 +10,8 @@ void applyRawMode(void);
 int getCursorPosition(int *rows, int *cols);
 int getWindowSize(int *rows, int *cols);
 int readKey(void);
+void terminalPushbackByte(uint8_t c);
+int terminalPushbackPending(void);
 void deserializeUnicode(void);
 void copyToClipboard(const uint8_t *text);
 void disableRawModeKeepScreen(void);

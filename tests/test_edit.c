@@ -405,7 +405,7 @@ void test_editor_back_para(void) {
 void test_insert_newline_empty_buffer(void) {
 	struct buffer *buf = make_test_buffer(NULL);
 	/* Start with one empty row, like a real empty file */
-	insertRow(buf, 0, "", 0);
+	insertRow(buf, 0, (const uint8_t *)"", 0);
 	clearUndosAndRedos(buf);
 	E.buf = buf;
 	buf->cx = 0;
@@ -453,6 +453,41 @@ void test_move_cursor_empty_buffer(void) {
 	TEST_ASSERT_EQUAL_INT(0, buf->cx);
 	moveCursor(KEY_ARROW_RIGHT, 1);
 	TEST_ASSERT_EQUAL_INT(0, buf->cx);
+}
+
+/* Regression: moving up from a long line onto a shorter one used to
+ * read row->chars past the allocation when cx exceeded the shorter
+ * row's size (heap-buffer-overflow under ASAN). */
+void test_move_cursor_up_to_shorter_line(void) {
+	const char *lines[] = { "ab", "this is a long line" };
+	struct buffer *buf = make_test_buffer_lines(lines, 2);
+	buf->cy = 1;
+	buf->cx = 15;
+	moveCursor(KEY_ARROW_UP, 1);
+	TEST_ASSERT_EQUAL_INT(0, buf->cy);
+	TEST_ASSERT_EQUAL_INT(2, buf->cx); /* clamped to row length */
+}
+
+/* Regression: killLine and transposeChars with the cursor on the
+ * virtual line past EOF (cy == numrows) used to index row[numrows],
+ * reading past the row array (heap-buffer-overflow under ASAN when
+ * numrows == rowcap). */
+void test_kill_line_on_virtual_eof_line(void) {
+	struct buffer *buf = newBuffer();
+	E.buf = buf;
+	E.headbuf = buf;
+	E.windows[0]->buf = buf;
+	/* Fill rowcap exactly (16) so row[numrows] is out of bounds */
+	for (int i = 0; i < 16; i++)
+		insertRow(buf, i, (const uint8_t *)"line", 4);
+	buf->dirty = 0;
+	clearUndosAndRedos(buf);
+	buf->cy = buf->numrows;
+	buf->cx = 0;
+	killLine(1);
+	TEST_ASSERT_EQUAL_INT(16, buf->numrows); /* no-op */
+	transposeChars();
+	TEST_ASSERT_EQUAL_INT(16, buf->numrows); /* no-op */
 }
 
 void setUp(void) {
@@ -521,6 +556,8 @@ int main(void) {
 	RUN_TEST(test_backspace_at_origin);
 	RUN_TEST(test_del_char_at_end_of_last_line);
 	RUN_TEST(test_move_cursor_empty_buffer);
+	RUN_TEST(test_move_cursor_up_to_shorter_line);
+	RUN_TEST(test_kill_line_on_virtual_eof_line);
 
 	return TEST_END();
 }

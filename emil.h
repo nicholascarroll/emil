@@ -50,7 +50,15 @@ typedef struct erow {
 	int size;
 	int charcap; /* bytes allocated (>= size + 1) */
 	uint8_t *chars;
-	int cached_width; /* display width in columns, or -1 if stale */
+	int cached_width;    /* display width in columns, or -1 if stale */
+	int cached_sublines; /* wrapped screen-line count at the last
+			      * buildScreenCache column width, or -1 if
+			      * stale.  Validity is derived from
+			      * cached_width: buildScreenCache marks
+			      * this stale whenever it finds
+			      * cached_width stale, so every mutation
+			      * site that invalidates cached_width
+			      * invalidates this too. */
 } erow;
 
 struct undo {
@@ -131,6 +139,9 @@ struct buffer {
 	int *screen_line_start;
 	int screen_line_cache_size;
 	int screen_line_cache_valid;
+	int screen_cache_cols; /* screencols at last buildScreenCache;
+				* a change invalidates every row's
+				* cached_sublines */
 	struct completion_state completion_state;
 };
 

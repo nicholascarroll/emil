@@ -88,6 +88,7 @@ void insertRow(struct buffer *bufr, int at, const uint8_t *s, size_t len) {
 	bufr->row[at].chars[len] = '\0';
 
 	bufr->row[at].cached_width = -1;
+	bufr->row[at].cached_sublines = -1;
 
 	bufr->numrows++;
 	markBufferDirty(bufr);
@@ -121,6 +122,7 @@ void appendRowRaw(struct buffer *bufr, const uint8_t *s, size_t len) {
 	memcpy(bufr->row[at].chars, s, len);
 	bufr->row[at].chars[len] = '\0';
 	bufr->row[at].cached_width = -1;
+	bufr->row[at].cached_sublines = -1;
 
 	bufr->numrows++;
 }
@@ -165,6 +167,7 @@ void rowInsertChar(struct buffer *bufr, erow *row, int at, int c) {
 	row->chars[at] = c;
 	markBufferDirty(bufr);
 	row->cached_width = -1;
+	row->cached_sublines = -1;
 	invalidateScreenCache(bufr);
 }
 
@@ -187,6 +190,7 @@ void rowInsertUnicode(struct buffer *bufr, erow *row, int at) {
 	row->size += E.nunicode;
 	memcpy(&row->chars[at], E.unicode, E.nunicode);
 	row->cached_width = -1;
+	row->cached_sublines = -1;
 	markBufferDirty(bufr);
 	invalidateScreenCache(bufr);
 }
@@ -208,6 +212,7 @@ void rowAppendString(struct buffer *bufr, erow *row, const uint8_t *s,
 	row->size += len;
 	row->chars[row->size] = '\0';
 	row->cached_width = -1;
+	row->cached_sublines = -1;
 	markBufferDirty(bufr);
 	invalidateScreenCache(bufr);
 }
@@ -222,6 +227,7 @@ void rowDelChar(struct buffer *bufr, erow *row, int at) {
 		row->size - ((at + size) - 1));
 	row->size -= size;
 	row->cached_width = -1;
+	row->cached_sublines = -1;
 	markBufferDirty(bufr);
 	invalidateScreenCache(bufr);
 }
@@ -296,6 +302,7 @@ void destroyBuffer(struct buffer *buf) {
 void updateBuffer(struct buffer *buf) {
 	for (int i = 0; i < buf->numrows; i++) {
 		buf->row[i].cached_width = -1;
+		buf->row[i].cached_sublines = -1;
 	}
 	invalidateScreenCache(buf);
 }
@@ -397,8 +404,10 @@ void switchToNamedBuffer(void) {
 					   "*scratch*";
 		const char *slash = strrchr(full, '/');
 		const char *base = slash ? slash + 1 : full;
+		char base_esc[256];
+		escapePercent(base_esc, base, sizeof(base_esc));
 		snprintf(prompt, sizeof(prompt),
-			 "Switch to buffer (default %s): %%s", base);
+			 "Switch to buffer (default %s): %%s", base_esc);
 	} else {
 		snprintf(prompt, sizeof(prompt), "Switch to buffer: %%s");
 	}

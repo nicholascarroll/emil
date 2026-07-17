@@ -175,6 +175,12 @@ uint8_t *transformerCapitalCase(uint8_t *input) {
 uint8_t *transformerTransposeChars(uint8_t *input) {
 	MKOUTPUT(input, len, output);
 
+	/* Empty input would make len - endFirst negative below. */
+	if (len == 0) {
+		output[0] = 0;
+		return output;
+	}
+
 	int endFirst = utf8_nBytes(input[0]);
 
 	memcpy(output, input + endFirst, len - endFirst);
@@ -204,6 +210,14 @@ uint8_t *transformerTransposeWords(uint8_t *input) {
 		}
 	}
 	int offset = 0;
+	/* No second word in the region (startSecond was never found):
+	 * the copy sizes below would go negative, so return the input
+	 * unchanged. */
+	if (startSecond < endFirst) {
+		memcpy(output, input, len);
+		output[len] = 0;
+		return output;
+	}
 	memcpy(output, input + startSecond, len - startSecond);
 	offset += len - startSecond;
 	memcpy(output + offset, input + endFirst, startSecond - endFirst);

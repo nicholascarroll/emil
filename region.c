@@ -37,16 +37,21 @@ void addToKillRing(const char *text, int is_rect, int rect_width,
 }
 
 /* Save and restore the kill text around operations that temporarily
- * overwrite E.kill (transforms, rectangle ops). */
-static uint8_t *saveKill(void) {
-	if (E.kill.str == NULL)
-		return NULL;
-	return (uint8_t *)xstrdup((char *)E.kill.str);
+ * overwrite E.kill (transforms, rectangle ops).  The whole struct is
+ * preserved: restoring only the string would leave the rectangle
+ * metadata from the internal operation attached to the restored
+ * text, so a saved rectangle kill could yank back as plain text (or
+ * vice versa). */
+static struct text saveKill(void) {
+	struct text saved = E.kill;
+	if (saved.str != NULL)
+		saved.str = (uint8_t *)xstrdup((char *)saved.str);
+	return saved;
 }
 
-static void restoreKill(uint8_t *saved) {
+static void restoreKill(struct text saved) {
 	free(E.kill.str);
-	E.kill.str = saved;
+	E.kill = saved;
 }
 
 /* Push the current mark position onto the mark ring (if mark is valid). */
@@ -434,6 +439,13 @@ void transformRange(int startx, int starty, int endx, int endy,
 		collectRegionText(E.buf, startx, starty, endx, endy, &old_len);
 
 	uint8_t *transformed = transformer(old_text);
+	/* A transformer may fail (transformerPipeCmd returns NULL when
+	 * the subprocess can't be spawned or joined).  Leave the
+	 * buffer untouched. */
+	if (transformed == NULL) {
+		free(old_text);
+		return;
+	}
 	int repl_len = strlen((char *)transformed);
 
 	int ex, ey;
@@ -474,9 +486,16 @@ void replaceRegex(void) {
 		return;
 	}
 
-	char prompt[64];
-	snprintf(prompt, sizeof(prompt), "Regex replace %.35s with: %%s",
-		 regex);
+	/* Cap the source to 35 chars *before* escaping so truncation can
+	 * never split a "%%" pair (a lone trailing '%' in the format
+	 * would be undefined behaviour when editorPrompt formats it). */
+	char regex_trunc[36];
+	emil_strlcpy(regex_trunc, (const char *)regex, sizeof(regex_trunc));
+	char regex_esc[72]; /* 35 chars * 2 + NUL */
+	escapePercent(regex_esc, regex_trunc, sizeof(regex_esc));
+	char prompt[128];
+	snprintf(prompt, sizeof(prompt), "Regex replace %s with: %%s",
+		 regex_esc);
 	uint8_t *repl = editorPrompt(buf, prompt, PROMPT_BASIC, NULL);
 	if (repl == NULL) {
 		free(regex);
@@ -544,7 +563,7 @@ void replaceRegex(void) {
 	int out_len;
 	uint8_t *out = dbuf_detach(&d, &out_len);
 
-	uint8_t *okill = saveKill();
+	struct text okill = saveKill();
 
 	int ex, ey;
 	mutateReplace(buf, buf->cx, buf->cy, buf->markx, buf->marky, old_text,
@@ -573,7 +592,7 @@ void stringRectangle(void) {
 		return;
 	}
 
-	uint8_t *okill = saveKill();
+	struct text okill = saveKill();
 	normalizeRegion();
 
 	struct buffer *buf = E.buf;
@@ -749,6 +768,19 @@ void killRectangle(void) {
 }
 
 void yankRectangle(void) {
+	if (rejectIfReadOnly(E.buf))
+		return;
+
+	/* C-x r y is bound here unconditionally, so guard against a
+	 * missing or non-rectangle kill: with rect_height == 0 the
+	 * arithmetic below would compute boty = cy - 1 and read
+	 * row[-1] at the top of the buffer. */
+	if (E.kill.str == NULL || !E.kill.is_rectangle ||
+	    E.kill.rect_width <= 0 || E.kill.rect_height <= 0) {
+		setStatusMessage(msg_no_rect_kill);
+		return;
+	}
+
 	int rw = E.kill.rect_width;
 	int rh = E.kill.rect_height;
 
