@@ -11,30 +11,6 @@
 
 extern struct config E;
 
-size_t escapePercent(char *dst, const char *src, size_t dsize) {
-	/* Copy src into dst, doubling every '%' so the result is safe
-	 * to embed inside a printf-style format string.  Truncates (but
-	 * never splits a '%%' pair) if dsize is too small.  Returns the
-	 * number of bytes written, excluding the NUL. */
-	size_t di = 0;
-	if (dsize == 0)
-		return 0;
-	for (const char *s = src; *s != '\0'; s++) {
-		if (*s == '%') {
-			if (di + 2 >= dsize) /* need room for "%%" + NUL */
-				break;
-			dst[di++] = '%';
-			dst[di++] = '%';
-		} else {
-			if (di + 1 >= dsize) /* need room for char + NUL */
-				break;
-			dst[di++] = *s;
-		}
-	}
-	dst[di] = '\0';
-	return di;
-}
-
 int rejectIfReadOnly(struct buffer *buf) {
 	if (buf->read_only) {
 		setStatusMessage(msg_read_only);

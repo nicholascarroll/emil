@@ -675,8 +675,8 @@ void save(void) {
 	}
 
 	if (E.buf->filename == NULL) {
-		char *input = (char *)editorPrompt(E.buf, "Save as: %s",
-						   PROMPT_FILES, NULL);
+		char *input = (char *)editorPrompt(
+			E.buf, "Save as: ", PROMPT_FILES, NULL);
 		if (input == NULL) {
 			setStatusMessage(msg_save_aborted);
 			return;
@@ -756,7 +756,7 @@ void saveAs(void) {
 		return;
 	}
 	char *new_filename =
-		(char *)editorPrompt(E.buf, "Save as: %s", PROMPT_FILES, NULL);
+		(char *)editorPrompt(E.buf, "Save as: ", PROMPT_FILES, NULL);
 	if (new_filename == NULL) {
 		setStatusMessage(msg_save_aborted);
 		return;
@@ -1025,7 +1025,7 @@ int insertFileAtPath(struct buffer *buf, const char *path,
 void insertFile(void) {
 	struct buffer *buf = E.buf;
 	uint8_t *filename =
-		editorPrompt(buf, "Insert file: %s", PROMPT_FILES, NULL);
+		editorPrompt(buf, "Insert file: ", PROMPT_FILES, NULL);
 	if (filename == NULL) {
 		return;
 	}
@@ -1190,7 +1190,7 @@ char *rebaseFilename(const char *filename, const char *old_cwd,
 }
 
 void changeDirectory(void) {
-	uint8_t *dir = editorPrompt(E.buf, "Directory: %s", PROMPT_DIR, NULL);
+	uint8_t *dir = editorPrompt(E.buf, "Directory: ", PROMPT_DIR, NULL);
 	if (dir == NULL) {
 		setStatusMessage(msg_canceled);
 		return;

@@ -1015,7 +1015,7 @@ static int dispatchMisc(int c, int uarg) {
 			return 1;
 		}
 		uint8_t *cmd =
-			editorPrompt(E.buf, "M-x %s", PROMPT_COMMAND, NULL);
+			editorPrompt(E.buf, "M-x ", PROMPT_COMMAND, NULL);
 		if (cmd != NULL) {
 			runCommand((char *)cmd);
 			free(cmd);

@@ -744,7 +744,7 @@ void endOfLine(int count) {
 
 void gotoLine(void) {
 	setMarkSilent();
-	uint8_t *nls = editorPrompt(E.buf, "Goto line: %s", PROMPT_BASIC, NULL);
+	uint8_t *nls = editorPrompt(E.buf, "Goto line: ", PROMPT_BASIC, NULL);
 	if (!nls)
 		return;
 

@@ -1,5 +1,5 @@
 
-## [0.6.0] - 2026-07-18
+## [0.6.0] - 2026-07-17
 - Thai/Lao/Khmer boundaries and Chinese line-breaking: word wrap 
   now follows 行首禁则  #87, #88.
 - Shell commands (M-|, M-!) can now be cancelled.

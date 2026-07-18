@@ -407,12 +407,14 @@ void switchToNamedBuffer(void) {
 					   "*scratch*";
 		const char *slash = strrchr(full, '/');
 		const char *base = slash ? slash + 1 : full;
-		char base_esc[256];
-		escapePercent(base_esc, base, sizeof(base_esc));
+		/* Prompt is a plain prefix (see editorPrompt): the
+		 * basename embeds verbatim, no percent escaping.
+		 * %.255s keeps the prompt reasonable for absurdly
+		 * long names; snprintf bounds it regardless. */
 		snprintf(prompt, sizeof(prompt),
-			 "Switch to buffer (default %s): %%s", base_esc);
+			 "Switch to buffer (default %.255s): ", base);
 	} else {
-		snprintf(prompt, sizeof(prompt), "Switch to buffer: %%s");
+		snprintf(prompt, sizeof(prompt), "Switch to buffer: ");
 	}
 
 	uint8_t *buffer_name = editorPrompt(E.buf, prompt, PROMPT_BUFFER, NULL);

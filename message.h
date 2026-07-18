@@ -25,8 +25,8 @@ static const char *const msg_buffer_empty = "缓冲区为空";
 static const char *const msg_beginning_of_buffer = "缓冲区开头";
 static const char *const msg_end_of_buffer = "缓冲区末尾";
 static const char *const msg_new_file = "%s（新文件）";
-static const char *const msg_find_file = "查找文件：%s";
-static const char *const msg_find_file_read_only = "查找文件（只读）：%s";
+static const char *const msg_find_file = "查找文件：";
+static const char *const msg_find_file_read_only = "查找文件（只读）：";
 
 static const char *const msg_mark_set = "标记已设置。";
 static const char *const msg_mark_cleared = "标记已停用";
@@ -177,9 +177,9 @@ static const char *const msg_buffer_empty = "El búfer está vacío";
 static const char *const msg_beginning_of_buffer = "Inicio del búfer";
 static const char *const msg_end_of_buffer = "Fin del búfer";
 static const char *const msg_new_file = "%s (archivo nuevo)";
-static const char *const msg_find_file = "Abrir archivo: %s";
+static const char *const msg_find_file = "Abrir archivo: ";
 static const char *const msg_find_file_read_only =
-	"Abrir archivo (solo lectura): %s";
+	"Abrir archivo (solo lectura): ";
 
 static const char *const msg_mark_set = "Marca establecida.";
 static const char *const msg_mark_cleared = "Marca desactivada";
@@ -369,8 +369,8 @@ static const char *const msg_buffer_empty = "Buffer is empty";
 static const char *const msg_beginning_of_buffer = "Beginning of buffer";
 static const char *const msg_end_of_buffer = "End of buffer";
 static const char *const msg_new_file = "%s (New file)";
-static const char *const msg_find_file = "Find File: %s";
-static const char *const msg_find_file_read_only = "Find File Read Only: %s";
+static const char *const msg_find_file = "Find File: ";
+static const char *const msg_find_file_read_only = "Find File Read Only: ";
 
 static const char *const msg_mark_set = "Mark set.";
 static const char *const msg_mark_cleared = "Mark deactivated";

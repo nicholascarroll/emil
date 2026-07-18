@@ -24,7 +24,6 @@ size_t emil_strlcat(char *dst, const char *src, size_t dsize);
  * safely embedded in a printf-style format string.  Use whenever
  * user-controlled text is interpolated into an editorPrompt() format
  * or any other string later passed as a format. */
-size_t escapePercent(char *dst, const char *src, size_t dsize);
 
 /* Tilde / home-directory helpers */
 char *expandTilde(const char *path);  /* ~/foo → /home/u/foo; caller frees */

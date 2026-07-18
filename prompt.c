@@ -22,6 +22,14 @@ extern struct config E;
 uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 		      enum promptType t,
 		      void (*callback)(struct buffer *, uint8_t *, int)) {
+	/* 'prompt' is a plain prefix string displayed before the
+	 * minibuffer content.  It is NEVER used as a printf format:
+	 * user-controlled text (search terms, filenames) may be
+	 * embedded in it freely by callers without escaping.  This is
+	 * the fix for the tainted-format-string class (CodeQL
+	 * cpp/tainted-format-string): keeping runtime data out of the
+	 * format-argument position entirely, rather than escaping it
+	 * at each call site. */
 	uint8_t *result = NULL;
 	int history_pos = -1;
 
@@ -37,14 +45,14 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 					(char *)E.minibuf->row[0].chars :
 					"";
 		if (!E.minibuf->completion_state.preserve_message) {
-			setStatusMessage(prompt, content);
+			setStatusMessage("%s%s", prompt, content);
 		}
 		E.minibuf->completion_state.preserve_message = 0;
 
 		refreshScreen();
 
 		/* Position cursor on bottom line */
-		int prompt_width = stringWidth((const uint8_t *)prompt) - 2;
+		int prompt_width = stringWidth((const uint8_t *)prompt);
 		cursorBottomLine(prompt_width + E.minibuf->cx + 1);
 
 		/* Read key */

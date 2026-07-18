@@ -291,7 +291,7 @@ uint8_t *pipeCommandCaptureIntr(const uint8_t *command, uint8_t *input,
 
 uint8_t *editorPipe(int useRegion) {
 	cmd = NULL;
-	cmd = editorPrompt(E.buf, "Shell: %s", PROMPT_BASIC, NULL);
+	cmd = editorPrompt(E.buf, "Shell: ", PROMPT_BASIC, NULL);
 
 	if (cmd == NULL) {
 		setStatusMessage(msg_shell_canceled);

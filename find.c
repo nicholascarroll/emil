@@ -327,19 +327,19 @@ static void searchInteractive(int direction, int regex,
 }
 
 void editorFind(void) {
-	searchInteractive(1, 0, "Search (C-g to cancel): %s");
+	searchInteractive(1, 0, "Search (C-g to cancel): ");
 }
 
 void reverseFind(void) {
-	searchInteractive(-1, 0, "Reverse search (C-g to cancel): %s");
+	searchInteractive(-1, 0, "Reverse search (C-g to cancel): ");
 }
 
 void regexFind(void) {
-	searchInteractive(1, 1, "Regex search (C-g to cancel): %s");
+	searchInteractive(1, 1, "Regex search (C-g to cancel): ");
 }
 
 void backwardRegexFind(void) {
-	searchInteractive(-1, 1, "Reverse regex search (C-g to cancel): %s");
+	searchInteractive(-1, 1, "Reverse regex search (C-g to cancel): ");
 }
 
 /*** Replace ***/
@@ -386,18 +386,17 @@ static int findNextMatch(uint8_t *needle, int skip_current) {
 }
 
 void replaceString(void) {
-	replace_orig = editorPrompt(E.buf, "Replace: %s", PROMPT_BASIC, NULL);
+	replace_orig = editorPrompt(E.buf, "Replace: ", PROMPT_BASIC, NULL);
 	if (replace_orig == NULL) {
 		setStatusMessage(msg_canceled_replace);
 		return;
 	}
 
-	size_t esc_sz = strlen((const char *)replace_orig) * 2 + 1;
-	char *esc = xmalloc(esc_sz);
-	escapePercent(esc, (const char *)replace_orig, esc_sz);
-	char *prompt = xmalloc(esc_sz + 20);
-	snprintf(prompt, esc_sz + 20, "Replace %s with: %%s", esc);
-	free(esc);
+	/* Prompt is a plain prefix (see editorPrompt), so the search
+	 * string can be embedded verbatim — no percent escaping. */
+	size_t psz = strlen((const char *)replace_orig) + 20;
+	char *prompt = xmalloc(psz);
+	snprintf(prompt, psz, "Replace %s with: ", replace_orig);
 	replace_repl = editorPrompt(E.buf, prompt, PROMPT_BASIC, NULL);
 	free(prompt);
 	if (replace_repl == NULL) {
@@ -417,21 +416,18 @@ void replaceString(void) {
 
 void queryReplace(void) {
 	replace_orig =
-		editorPrompt(E.buf, "Query replace: %s", PROMPT_BASIC, NULL);
+		editorPrompt(E.buf, "Query replace: ", PROMPT_BASIC, NULL);
 	if (replace_orig == NULL) {
 		setStatusMessage(msg_canceled_query_replace);
 		return;
 	}
 
-	/* Cap source to 78 chars before escaping (not via %.78s) so
-	 * truncation never splits a "%%" pair. */
-	char qr_trunc[79];
-	emil_strlcpy(qr_trunc, (const char *)replace_orig, sizeof(qr_trunc));
-	char esc_buf[158]; /* 78 * 2 + NUL */
-	escapePercent(esc_buf, qr_trunc, sizeof(esc_buf));
+	/* Cap the displayed search string to 78 chars.  The prompt is a
+	 * plain prefix (see editorPrompt), so no percent escaping is
+	 * needed and %.78s truncation is safe. */
 	char prompt_buf[192];
-	snprintf(prompt_buf, sizeof(prompt_buf), "Query replace %s with: %%s",
-		 esc_buf);
+	snprintf(prompt_buf, sizeof(prompt_buf),
+		 "Query replace %.78s with: ", replace_orig);
 	replace_repl = editorPrompt(E.buf, prompt_buf, PROMPT_BASIC, NULL);
 	if (replace_repl == NULL) {
 		free(replace_orig);
@@ -531,14 +527,9 @@ void queryReplace(void) {
 			}
 			break;
 		case CTRL('r'): {
-			char r_trunc[79];
-			emil_strlcpy(r_trunc, (const char *)replace_orig,
-				     sizeof(r_trunc));
-			char resc[158];
-			escapePercent(resc, r_trunc, sizeof(resc));
 			char rprompt[192];
 			snprintf(rprompt, sizeof(rprompt),
-				 "Replace this %s with: %%s", resc);
+				 "Replace this %.78s with: ", replace_orig);
 			uint8_t *newStr = editorPrompt(E.buf, rprompt,
 						       PROMPT_BASIC, NULL);
 			if (newStr != NULL) {
@@ -566,14 +557,9 @@ void queryReplace(void) {
 		}
 		case 'e':
 		case 'E': {
-			char e_trunc[79];
-			emil_strlcpy(e_trunc, (const char *)replace_orig,
-				     sizeof(e_trunc));
-			char eesc[158];
-			escapePercent(eesc, e_trunc, sizeof(eesc));
 			char eprompt[192];
 			snprintf(eprompt, sizeof(eprompt),
-				 "Query replace %s with: %%s", eesc);
+				 "Query replace %.78s with: ", replace_orig);
 			uint8_t *newStr = editorPrompt(E.buf, eprompt,
 						       PROMPT_BASIC, NULL);
 			if (newStr != NULL) {

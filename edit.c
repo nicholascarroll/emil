@@ -64,8 +64,8 @@ void indentTabs(void) {
 }
 
 void indentSpaces(void) {
-	uint8_t *indentS = editorPrompt(E.buf, "Set indentation to: %s",
-					PROMPT_BASIC, NULL);
+	uint8_t *indentS =
+		editorPrompt(E.buf, "Set indentation to: ", PROMPT_BASIC, NULL);
 	if (indentS == NULL) {
 		goto cancel;
 	}

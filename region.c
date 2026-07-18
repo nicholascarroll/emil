@@ -480,22 +480,17 @@ void replaceRegex(void) {
 	struct buffer *buf = E.buf;
 
 	uint8_t *regex =
-		editorPrompt(buf, "Regex replace: %s", PROMPT_BASIC, NULL);
+		editorPrompt(buf, "Regex replace: ", PROMPT_BASIC, NULL);
 	if (regex == NULL) {
 		setStatusMessage("%s", cancel);
 		return;
 	}
 
-	/* Cap the source to 35 chars *before* escaping so truncation can
-	 * never split a "%%" pair (a lone trailing '%' in the format
-	 * would be undefined behaviour when editorPrompt formats it). */
-	char regex_trunc[36];
-	emil_strlcpy(regex_trunc, (const char *)regex, sizeof(regex_trunc));
-	char regex_esc[72]; /* 35 chars * 2 + NUL */
-	escapePercent(regex_esc, regex_trunc, sizeof(regex_esc));
+	/* Cap the displayed pattern to 35 chars.  The prompt is a plain
+	 * prefix (see editorPrompt), so no percent escaping is needed
+	 * and %.35s truncation is safe. */
 	char prompt[128];
-	snprintf(prompt, sizeof(prompt), "Regex replace %s with: %%s",
-		 regex_esc);
+	snprintf(prompt, sizeof(prompt), "Regex replace %.35s with: ", regex);
 	uint8_t *repl = editorPrompt(buf, prompt, PROMPT_BASIC, NULL);
 	if (repl == NULL) {
 		free(regex);
@@ -586,7 +581,7 @@ void stringRectangle(void) {
 		return;
 
 	uint8_t *string =
-		editorPrompt(E.buf, "String rectangle: %s", PROMPT_BASIC, NULL);
+		editorPrompt(E.buf, "String rectangle: ", PROMPT_BASIC, NULL);
 	if (string == NULL) {
 		setStatusMessage(msg_canceled);
 		return;
