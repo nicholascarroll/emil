@@ -266,7 +266,8 @@ void backSpace(int count) {
 			do {
 				E.buf->cx--;
 				undoBackSpace(E.buf, row->chars[E.buf->cx]);
-			} while (utf8_isCont(row->chars[E.buf->cx]));
+			} while (E.buf->cx > 0 &&
+				 utf8_isCont(row->chars[E.buf->cx]));
 			rowDelChar(E.buf, row, E.buf->cx);
 		} else {
 			undoBackSpace(E.buf, '\n');

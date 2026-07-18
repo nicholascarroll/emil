@@ -1,5 +1,14 @@
 
-## [0.6.0] - 2026-07-17
+## [Unreleased]
+- Fixed crash yanking a rectangle into an empty buffer.
+- Fixed crash scrolling an empty buffer in word-wrap mode.
+- Fixed out-of-bounds read in backspace over stray UTF-8 continuation bytes.
+- Fixed duplicate scratch buffers when killing the last buffer shown in two windows.
+- Refactored C-y rectangle handling.
+- Reverted to a single README (in English with Chinese build instructions merged in)
+- Corrected punctuation in Chinese man page
+
+## [0.6.0] - 2026-07-18
 - Thai/Lao/Khmer boundaries and Chinese line-breaking: word wrap 
   now follows 行首禁则  #87, #88.
 - Shell commands (M-|, M-!) can now be cancelled.

@@ -456,6 +456,51 @@ void test_kill_rect_zero_width(void) {
 }
 
 /* ----------------------------------------------------------------
+ * Edge case: yank rectangle into an empty (rowless) buffer
+ * ---------------------------------------------------------------- */
+
+void test_yank_rect_into_empty_buffer(void) {
+	/* Regression: kill a rectangle in one buffer, then yank into a
+	 * buffer with numrows == 0 (e.g. a freshly opened empty file).
+	 * Previously mutateExtendRows built its undo record with
+	 * starty = -1 and read buf->row[-1]. */
+	const char *lines[] = { "ABCDE", "FGHIJ" };
+	struct buffer *src = make_test_buffer_lines(lines, 2);
+
+	/* Kill columns 1-3, rows 0-1 => "BCD"/"GHI" */
+	src->cx = 1;
+	src->cy = 0;
+	set_mark(src, 4, 1);
+	killRectangle();
+
+	/* Fresh empty buffer: make_test_buffer("") inserts no rows.
+	 * Wiring it into E orphans src, so destroy src explicitly. */
+	struct buffer *dst = make_test_buffer("");
+	destroyBuffer(src);
+	TEST_ASSERT_EQUAL_INT(0, dst->numrows);
+
+	yankRectangle();
+
+	TEST_ASSERT_EQUAL_INT(2, dst->numrows);
+	TEST_ASSERT_EQUAL_STRING("BCD", row_str(dst, 0));
+	TEST_ASSERT_EQUAL_STRING("GHI", row_str(dst, 1));
+	TEST_ASSERT_EQUAL_INT(0, dst->cx);
+	TEST_ASSERT_EQUAL_INT(0, dst->cy);
+
+	/* Undo the whole chain: the closest representable state to a
+	 * rowless buffer is a single empty row. */
+	doUndo(dst, 1);
+	TEST_ASSERT_EQUAL_INT(1, dst->numrows);
+	TEST_ASSERT_EQUAL_STRING("", row_str(dst, 0));
+
+	/* Redo restores the yanked rectangle. */
+	doRedo(dst, 1);
+	TEST_ASSERT_EQUAL_INT(2, dst->numrows);
+	TEST_ASSERT_EQUAL_STRING("BCD", row_str(dst, 0));
+	TEST_ASSERT_EQUAL_STRING("GHI", row_str(dst, 1));
+}
+
+/* ----------------------------------------------------------------
  * Runner
  * ---------------------------------------------------------------- */
 
@@ -498,6 +543,7 @@ int main(void) {
 
 	/* Edge cases */
 	RUN_TEST(test_kill_rect_zero_width);
+	RUN_TEST(test_yank_rect_into_empty_buffer);
 
 	return TEST_END();
 }

@@ -165,6 +165,15 @@ void scrollViewport(struct window *win, struct buffer *buf, int n) {
 	}
 
 	/* Word-wrap mode: scroll by individual screen lines */
+	if (buf->numrows == 0) {
+		/* Nothing to scroll; without this, `last = numrows - 1`
+		 * below is -1 and countScreenLines dereferences
+		 * buf->row[-1] on a NULL row array. */
+		win->rowoff = 0;
+		win->skip_sublines = 0;
+		return;
+	}
+
 	buildScreenCache(buf, E.screencols);
 
 	if (n > 0) {

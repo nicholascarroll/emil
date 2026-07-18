@@ -429,6 +429,23 @@ void test_backspace_at_origin(void) {
 	TEST_ASSERT_EQUAL_INT(0, buf->cy);
 }
 
+void test_backspace_stray_continuation_byte(void) {
+	/* Regression: a row beginning with a stray UTF-8 continuation
+	 * byte (reachable via byte-column rectangle ops through
+	 * multi-byte text) must not walk cx below 0.  Previously the
+	 * continuation walk in backSpace had no lower bound and read
+	 * chars[-1]. */
+	struct buffer *buf = make_test_buffer("x");
+	E.buf = buf;
+	/* Replace row content with a lone continuation byte. */
+	buf->row[0].chars[0] = 0x80;
+	buf->cx = 1;
+	buf->cy = 0;
+	backSpace(1);
+	TEST_ASSERT_EQUAL_INT(0, buf->cx);
+	TEST_ASSERT_EQUAL_INT(0, buf->row[0].size);
+}
+
 void test_del_char_at_end_of_last_line(void) {
 	struct buffer *buf = make_test_buffer("Hello");
 	E.buf = buf;
@@ -554,6 +571,7 @@ int main(void) {
 	/* Edge cases */
 	RUN_TEST(test_insert_newline_empty_buffer);
 	RUN_TEST(test_backspace_at_origin);
+	RUN_TEST(test_backspace_stray_continuation_byte);
 	RUN_TEST(test_del_char_at_end_of_last_line);
 	RUN_TEST(test_move_cursor_empty_buffer);
 	RUN_TEST(test_move_cursor_up_to_shorter_line);

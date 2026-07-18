@@ -858,10 +858,12 @@ static int dispatchRegion(int c, int uarg) {
 		}
 		return 1;
 	case CMD_YANK:
-		if (E.kill.is_rectangle)
-			yankRectangle();
-		else
-			yank(uarg);
+		/* yank() owns the rectangle decision: with a numeric
+		 * argument the entry that gets yanked may not be the
+		 * head of the kill ring, so only yank() — after it
+		 * resolves uarg against the history — knows whether a
+		 * rectangle is involved. */
+		yank(uarg);
 		return 1;
 	case CMD_YANK_POP:
 		yankPop();

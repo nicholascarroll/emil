@@ -3,6 +3,7 @@
 #include "test.h"
 #include "test_harness.h"
 #include "edit.h"
+#include "display.h"
 #include <stdint.h>
 
 /* ---- Helper ---- */
@@ -340,6 +341,29 @@ void tearDown(void) {
 	cleanupTestEditor();
 }
 
+
+/* ---- scrollViewport on an empty wrap buffer ---- */
+
+void test_scroll_viewport_empty_wrap_buffer(void) {
+	/* Regression: PageDown on an empty word-wrap buffer (e.g. an
+	 * existing empty .md file) previously computed last = -1 in the
+	 * wrap branch and dereferenced buf->row[-1] with row == NULL. */
+	struct buffer *b = make_test_buffer("");
+	TEST_ASSERT_EQUAL_INT(0, b->numrows);
+	E.screencols = 20;
+	E.windows[0]->height = 24;
+	b->word_wrap = 1;
+
+	scrollViewport(E.windows[0], b, 5);
+	TEST_ASSERT_EQUAL_INT(0, E.windows[0]->rowoff);
+	TEST_ASSERT_EQUAL_INT(0, E.windows[0]->skip_sublines);
+
+	scrollViewport(E.windows[0], b, -3);
+	TEST_ASSERT_EQUAL_INT(0, E.windows[0]->rowoff);
+	TEST_ASSERT_EQUAL_INT(0, E.windows[0]->skip_sublines);
+}
+
+
 int main(void) {
 	TEST_BEGIN();
 
@@ -375,6 +399,9 @@ int main(void) {
 	/* C-k visual line kill */
 	RUN_TEST(test_kill_visual_line_mid_subline);
 	RUN_TEST(test_kill_line_no_wrap);
+
+	/* Empty-buffer scrolling */
+	RUN_TEST(test_scroll_viewport_empty_wrap_buffer);
 
 	return TEST_END();
 }

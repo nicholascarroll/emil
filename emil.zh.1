@@ -210,9 +210,14 @@ Zap to char：剪切至指定字符（含该字符）。
 之间的文本。
 设置标记后，移动光标改变区域范围。
 .Bl -tag -width Ds
-.It Cm C-SPC
+.It Cm C-SPC 或 C-@
 设置标记：在光标处建立标记。
-.It Cm C-u C-SPC
+两者发送相同的控制字节（NUL）。
+若输入法占用了
+.Cm C-SPC Ns ，
+可改用
+.Cm C-@ Ns 。
+.It Cm C-u C-SPC 或 C-u C-@
 弹出标记：跳转至上一标记位置（标记环）。
 .It Cm C-x C-x
 交换光标与标记位置。
@@ -242,24 +247,21 @@ Zap to char：剪切至指定字符（含该字符）。
 .Bl -tag -width Ds
 .It Cm C-x r SPACE x
 将当前光标位置存入寄存器
-.Ar x
-。
+.Ar x Ns 。
 .It Cm C-x r j x
 跳转至寄存器
 .Ar x
 中的光标位置。
 .It Cm C-x r s x
 将区域存入寄存器
-.Ar x
-。
+.Ar x Ns 。
 .It Cm C-x r y x
 粘贴寄存器
 .Ar x
 的内容。
 .It Cm C-x r k x
 剪切区域至寄存器
-.Ar x
-。
+.Ar x Ns 。
 .It Cm C-x r v x
 查看寄存器
 .Ar x
@@ -417,5 +419,4 @@ Zap to char：剪切至指定字符（含该字符）。
 是 japanoise 所作
 .Em emsys
 的衍生版本。
-.Lk
-https://github.com/japanoise/emsys
+.Lk https://github.com/japanoise/emsys

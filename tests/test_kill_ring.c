@@ -22,6 +22,7 @@
 #include "emil.h"
 #include "buffer.h"
 #include "region.h"
+#include "keymap.h"
 #include <string.h>
 
 extern struct config E;
@@ -188,6 +189,45 @@ void test_yank_rectangle_without_rect_kill(void) {
 
 /* --- runner ------------------------------------------------------- */
 
+/* --- 6. numeric-argument yank past a rectangle at the head -------- */
+
+void test_yank_with_arg_selects_string_past_rectangle(void) {
+	/* A rectangle at the head of the kill ring must not decide how
+	 * C-u N C-y behaves: the argument selects an older entry, which
+	 * here is a plain string.  The dispatch used to branch on the
+	 * head's is_rectangle flag and drop the argument entirely,
+	 * yanking the rectangle instead. */
+	const char *lines[] = { "ABCDEF", "abcdef" };
+	struct buffer *buf = make_test_buffer_lines(lines, 2);
+
+	/* Oldest kill: the string "CDEF" from row 0. */
+	kill_range(buf, 2, 0, 6, 0);
+	TEST_ASSERT_EQUAL_STRING("AB", row_str(buf, 0));
+
+	/* Newest kill: a 2x1 rectangle "ab" from row 1. */
+	buf->rectangle_mode = 1;
+	buf->markx = 0;
+	buf->marky = 1;
+	buf->mark_active = 1;
+	buf->cx = 2;
+	buf->cy = 1;
+	killRectangle();
+	buf->rectangle_mode = 0;
+	TEST_ASSERT_EQUAL_INT(2, E.kill_history.count);
+	TEST_ASSERT_TRUE(E.kill.is_rectangle);
+
+	/* C-u 2 C-y: second most recent entry = the string "CDEF".
+	 * Driven through processKeypress so the real dispatch path is
+	 * exercised, not just yank()'s contract. */
+	buf->cx = buf->row[0].size;
+	buf->cy = 0;
+	E.uarg = 2;
+	processKeypress(CMD_YANK);
+	E.uarg = 0;
+	TEST_ASSERT_EQUAL_STRING("ABCDEF", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
+}
+
 int main(void) {
 	TEST_BEGIN();
 	RUN_TEST(test_yank_returns_most_recent_kill);
@@ -195,5 +235,6 @@ int main(void) {
 	RUN_TEST(test_rectangle_yank_preserves_geometry);
 	RUN_TEST(test_empty_kill_not_recorded);
 	RUN_TEST(test_yank_rectangle_without_rect_kill);
+	RUN_TEST(test_yank_with_arg_selects_string_past_rectangle);
 	return TEST_END();
 }

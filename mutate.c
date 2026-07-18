@@ -153,17 +153,32 @@ void mutateExtendRows(struct buffer *buf, int from_row, int n_rows) {
 	 * paired=0 — this is the head of a chain; a following
 	 * mutateReplace with chain_to_prev=1 pairs onto it. */
 	struct undo *ext = newUndo();
-	ext->starty = from_row - 1;
-	ext->startx = buf->row[ext->starty].size;
+	int n_newlines;
+	if (from_row == 0) {
+		/* Extending a rowless buffer: there is no preceding row
+		 * to anchor to, so the record starts at the origin and
+		 * the n inserted rows read as n-1 joining newlines.
+		 * Undoing restores a single empty row — the closest
+		 * representable state to a rowless buffer.  Without
+		 * this case starty would be -1 and the buf->row[]
+		 * read below is out of bounds. */
+		ext->starty = 0;
+		ext->startx = 0;
+		n_newlines = n_rows - 1;
+	} else {
+		ext->starty = from_row - 1;
+		ext->startx = buf->row[ext->starty].size;
+		n_newlines = n_rows;
+	}
 	ext->endx = 0;
 	ext->endy = buf->numrows - 1;
-	if (n_rows + 1 > ext->datasize) {
-		ext->datasize = n_rows + 1;
+	if (n_newlines + 1 > ext->datasize) {
+		ext->datasize = n_newlines + 1;
 		ext->data = xrealloc(ext->data, ext->datasize);
 	}
-	memset(ext->data, '\n', n_rows);
-	ext->data[n_rows] = 0;
-	ext->datalen = n_rows;
+	memset(ext->data, '\n', n_newlines);
+	ext->data[n_newlines] = 0;
+	ext->datalen = n_newlines;
 	ext->append = 0;
 	ext->delete = 0;
 	ext->paired = 0;

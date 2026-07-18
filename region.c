@@ -356,6 +356,15 @@ void yank(int count) {
 			yankRectangle();
 			return;
 		}
+	} else if (E.kill.is_rectangle) {
+		/* count == 1: the head of the kill ring is a rectangle,
+		 * so yank it as one rather than inserting the raw
+		 * rw*rh byte block inline.  Callers do not make this
+		 * decision — see the count > 1 path above, where the
+		 * entry selected by the argument may differ from the
+		 * head. */
+		yankRectangle();
+		return;
 	}
 
 	int killLen = strlen((char *)E.kill.str);
@@ -410,10 +419,7 @@ void yankPop(void) {
 		E.kill.rect_width = entry->rect_width;
 		E.kill.rect_height = entry->rect_height;
 		int saved_pos = E.kill_ring_pos;
-		if (entry->is_rectangle)
-			yankRectangle();
-		else
-			yank(1);
+		yank(1);
 		E.kill_ring_pos = saved_pos;
 	} else {
 		setStatusMessage(msg_no_more_kill_entries);

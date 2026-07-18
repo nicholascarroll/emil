@@ -565,16 +565,25 @@ void killBuffer(void) {
 		}
 	}
 
+	/* If this is the sole buffer, create the replacement scratch
+	 * buffer once, outside the window loop: with the killed buffer
+	 * shown in multiple windows, creating it per-window replaced
+	 * E.headbuf on each iteration, leaking the earlier scratch and
+	 * leaving windows pointing at buffers no longer in the list. */
+	struct buffer *scratch = NULL;
+	if (bufr->next == NULL && prevBuf == NULL) {
+		scratch = newBuffer();
+		scratch->filename = xstrdup("*scratch*");
+		scratch->special_buffer = 1;
+	}
+
 	// Update window focus
 	for (int i = 0; i < E.nwindows; i++) {
 		if (E.windows[i]->buf == bufr) {
-			// If it's the last buffer, create a new scratch buffer
-			if (bufr->next == NULL && prevBuf == NULL) {
-				E.windows[i]->buf = newBuffer();
-				E.windows[i]->buf->filename =
-					xstrdup("*scratch*");
-				E.windows[i]->buf->special_buffer = 1;
-				E.headbuf = E.windows[i]->buf;
+			// If it's the last buffer, use the shared scratch
+			if (scratch != NULL) {
+				E.windows[i]->buf = scratch;
+				E.headbuf = scratch;
 				E.buf = E.headbuf; // Ensure E.buf is updated
 			} else if (bufr->next == NULL) {
 				E.windows[i]->buf = E.headbuf;
