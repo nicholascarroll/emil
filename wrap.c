@@ -43,16 +43,22 @@ void buildScreenCache(struct buffer *buf, int screencols) {
 		if (!buf->word_wrap) {
 			screen_line += 1;
 		} else {
-			/* Recompute only if cached_width is stale (-1).
-			 * A stale width means the row text changed, so
-			 * the subline count is stale too — deriving it
-			 * this way keeps every cached_width
-			 * invalidation site (present and future) a
-			 * subline invalidation site automatically.
+			/* Recompute the subline count only for rows
+			 * marked stale (-1) by a mutation site.
 			 * Previously countScreenLines re-scanned every
 			 * row's bytes on every rebuild, making each
-			 * keystroke O(total file bytes) in wrap
-			 * mode. */
+			 * keystroke O(total file bytes) in wrap mode.
+			 *
+			 * The width-stale check below is a safety net
+			 * only, NOT the invalidation mechanism: it
+			 * cannot be relied on because
+			 * calculateLineWidth() (called from display
+			 * paths) may re-validate cached_width before
+			 * this rebuild runs, hiding the staleness.
+			 * The real invariant lives at the mutation
+			 * sites: every one must set BOTH cached_width
+			 * and cached_sublines to -1 (see erow in
+			 * emil.h). */
 			if (buf->row[i].cached_width < 0) {
 				buf->row[i].cached_width =
 					calculateLineWidth(&buf->row[i]);

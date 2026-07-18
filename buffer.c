@@ -268,6 +268,9 @@ struct buffer *newBuffer(void) {
 	ret->screen_line_start = NULL;
 	ret->screen_line_cache_size = 0;
 	ret->screen_line_cache_valid = 0;
+	ret->screen_cache_cols = 0; /* no real width is 0, so the first
+				     * buildScreenCache always takes the
+				     * column-change path */
 	ret->read_only = 0;
 	ret->lock_fd = -1;
 	ret->open_mtime = 0;

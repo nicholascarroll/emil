@@ -53,12 +53,16 @@ typedef struct erow {
 	int cached_width;    /* display width in columns, or -1 if stale */
 	int cached_sublines; /* wrapped screen-line count at the last
 			      * buildScreenCache column width, or -1 if
-			      * stale.  Validity is derived from
-			      * cached_width: buildScreenCache marks
-			      * this stale whenever it finds
-			      * cached_width stale, so every mutation
-			      * site that invalidates cached_width
-			      * invalidates this too. */
+			      * stale.  INVARIANT: any code that
+			      * modifies row text must set BOTH
+			      * cached_width and cached_sublines to -1.
+			      * Do not rely on cached_sublines being
+			      * derived from a stale cached_width:
+			      * calculateLineWidth() can re-validate
+			      * cached_width at any time (it is called
+			      * from display paths), which would leave
+			      * a width-only invalidation with a stale
+			      * but apparently valid subline count. */
 } erow;
 
 struct undo {
