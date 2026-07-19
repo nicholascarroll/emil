@@ -8,6 +8,7 @@
 #include "terminal.h"
 #include "undo.h"
 #include "unicode.h"
+#include "util.h"
 #include "window.h"
 #include <string.h>
 
@@ -334,6 +335,17 @@ void expandPalette(void) {
 
 						restoreFocusTo(origin,
 							       origin_win);
+
+						/* Reject BEFORE recording
+						 * undo: the origin buffer
+						 * may be read-only, and
+						 * rowInsertUnicode below
+						 * would refuse the insert
+						 * after undoAppendUnicode
+						 * had already pushed a
+						 * phantom record. */
+						if (rejectIfReadOnly(E.buf))
+							return;
 
 						/* Insert the symbol */
 						undoAppendUnicode(E.buf);

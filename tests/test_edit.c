@@ -46,6 +46,69 @@ void test_insert_char_readonly(void) {
 	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
 }
 
+/* Regression: a self-insert refused by a read-only buffer must not
+ * record undo.  Previously processKeypress called undoSelfInsert
+ * before insertChar's read-only check, so toggling the buffer
+ * writable and undoing deleted text that was never inserted. */
+void test_self_insert_readonly_records_no_undo(void) {
+	struct buffer *buf = make_test_buffer("Hello");
+	buf->read_only = 1;
+	buf->cx = 0;
+	buf->cy = 0;
+
+	/* Drive the real key path: CMD_SELF_INSERT of 'X'. */
+	E.self_insert_key = 'X';
+	processKeypress(CMD_SELF_INSERT);
+
+	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
+	TEST_ASSERT_NULL(buf->undo);
+
+	/* Make writable and undo: buffer must be unchanged. */
+	buf->read_only = 0;
+	doUndo(buf, 1);
+	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
+}
+
+/* Regression: same for the multibyte path.  insertUnicode had no
+ * read-only guard, so undoAppendUnicode recorded a phantom insert
+ * whose undo removed a byte range that split UTF-8 sequences. */
+void test_insert_unicode_readonly_records_no_undo(void) {
+	struct buffer *buf = make_test_buffer("h\xC3\xA9llo"); /* héllo */
+	buf->read_only = 1;
+	buf->cx = 0;
+	buf->cy = 0;
+
+	E.unicode[0] = 0xC3; /* é */
+	E.unicode[1] = 0xA9;
+	E.nunicode = 2;
+	insertUnicode(1);
+
+	TEST_ASSERT_EQUAL_STRING("h\xC3\xA9llo", row_str(buf, 0));
+	TEST_ASSERT_NULL(buf->undo);
+
+	buf->read_only = 0;
+	doUndo(buf, 1);
+	TEST_ASSERT_EQUAL_STRING("h\xC3\xA9llo", row_str(buf, 0));
+}
+
+/* Regression: a refused self-insert must not shift tracked points.
+ * Previously undoAppendChar ran adjustAllPoints for the phantom
+ * insertion, drifting the mark in a read-only buffer. */
+void test_self_insert_readonly_does_not_move_mark(void) {
+	struct buffer *buf = make_test_buffer("Hello");
+	buf->read_only = 1;
+	buf->cx = 0;
+	buf->cy = 0;
+	buf->markx = 3;
+	buf->marky = 0;
+
+	E.self_insert_key = 'X';
+	processKeypress(CMD_SELF_INSERT);
+
+	TEST_ASSERT_EQUAL(3, buf->markx);
+	TEST_ASSERT_EQUAL(0, buf->marky);
+}
+
 /* ---- Newlines ---- */
 
 void test_insert_newline_splits(void) {
@@ -681,6 +744,9 @@ int main(void) {
 	RUN_TEST(test_insert_char_end);
 	RUN_TEST(test_insert_char_with_count);
 	RUN_TEST(test_insert_char_readonly);
+	RUN_TEST(test_self_insert_readonly_records_no_undo);
+	RUN_TEST(test_insert_unicode_readonly_records_no_undo);
+	RUN_TEST(test_self_insert_readonly_does_not_move_mark);
 
 	RUN_TEST(test_insert_newline_splits);
 	RUN_TEST(test_insert_newline_at_beginning);

@@ -1,5 +1,5 @@
 
-## [Unreleased]
+## [0.7.0] - 2026-07-20
 - Fixed crash yanking a rectangle into an empty buffer.
 - Fixed crash scrolling an empty buffer in word-wrap mode.
 - Fixed out-of-bounds read in backspace over stray UTF-8 continuation bytes.
@@ -7,6 +7,12 @@
 - Refactored C-y rectangle handling.
 - Reverted to a single README (in English with Chinese build instructions merged in)
 - Corrected punctuation in Chinese man page
+- Fixes for pipe shell
+- Fixes for macros
+- Fixed undo bug affecting read-only buffers
+
+### Known Bugs
+- #90 Read-only buffer corruption from kill-rectangle
 
 ## [0.6.0] - 2026-07-18
 - Thai/Lao/Khmer boundaries and Chinese line-breaking: word wrap 

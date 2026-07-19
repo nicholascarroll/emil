@@ -43,6 +43,15 @@ void insertChar(struct buffer *bufr, int c, int count) {
 }
 
 void insertUnicode(int count) {
+	/* Reject BEFORE recording undo or touching the mark:
+	 * undoAppendUnicode must not push a record (nor shift tracked
+	 * points via adjustAllPoints) for an insertion that
+	 * rowInsertUnicode then refuses.  Undoing such a phantom
+	 * record deletes a byte range that can split a UTF-8
+	 * sequence, breaking the valid-UTF-8 buffer invariant. */
+	if (rejectIfReadOnly(E.buf))
+		return;
+
 	E.buf->mark_active = 0;
 	int times = UARG_COUNT(count);
 	for (int i = 0; i < times; i++) {

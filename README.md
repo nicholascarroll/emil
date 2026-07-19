@@ -174,7 +174,7 @@ Notes:
 ## System Clipboard Integration
 `Ctrl-c` copies selected text to both the kill ring and the user's system clipboard when an OSC 52 enabled terminal client is used.
 
-OSC 52 has a protocol limit of 74,993 bytes. Selections larger than this are not
+OSC 52 has a practical limit of 74,993 bytes. Selections larger than this are not
 sent to the clipboard and a status message is displayed. Some terminal emulators
 have lower limits and will silently fail after writing only the first part of the
 text to the system clipboard.
@@ -210,8 +210,7 @@ PRs are welcome. Please do not propose any new features.
 
 ## Credits and License
 
-emil is a derivative of [`japanoise/emsys`](https://github.com/japanoise/emsys) and is not affiliated with the Free Software Foundation or the GNU Project. 
-Distributed under the MIT License.
+emil is a derivative of [`japanoise/emsys`](https://github.com/japanoise/emsys) and is distributed under the MIT License.
 
 ---
 

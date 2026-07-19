@@ -685,6 +685,9 @@ static int dispatchEdit(int c, int uarg) {
 			int count = UARG_COUNT(uarg);
 			insertUnicode(count);
 		} else if (key != KEY_UNICODE_ERROR && key < KEY_ARROW_LEFT) {
+			/* Reject BEFORE recording undo (see CMD_SELF_INSERT). */
+			if (rejectIfReadOnly(E.buf))
+				return 1;
 			int count = UARG_COUNT(uarg);
 			undoSelfInsert(key, count);
 			insertChar(E.buf, key, count);
@@ -1194,6 +1197,12 @@ void processKeypress(int c) {
 	/* Self-insert */
 	if (c == CMD_TAB || c == CMD_SELF_INSERT) {
 		if (c == CMD_TAB && E.buf == E.minibuf)
+			goto done;
+		/* Reject BEFORE recording undo: undoSelfInsert must not
+		 * push a record for an insertion that insertChar then
+		 * refuses, or a later undo (after C-x C-q) deletes text
+		 * that was never inserted. */
+		if (rejectIfReadOnly(E.buf))
 			goto done;
 		int ch = (c == CMD_TAB) ? '\t' : E.self_insert_key;
 		int count = UARG_COUNT(uarg);
