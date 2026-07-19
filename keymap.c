@@ -181,6 +181,8 @@ static int resolveMetaBinding(int ch) {
 	case 'z':
 		return CMD_ZAP_TO_CHAR;
 	/* Punctuation and symbols */
+	case '-':
+		return CMD_NEGATIVE_ARG;
 	case '<':
 		return CMD_BEG_OF_FILE;
 	case '>':
@@ -234,6 +236,13 @@ static int resolveMetaBinding(int ch) {
  */
 int resolveBinding(int key) {
 	static enum PrefixState prefix = PREFIX_NONE;
+	/* Set when the previous key was C-u itself: the next digit then
+	 * REPLACES the default/multiplied seed instead of accumulating.
+	 * This is how "C-u 4 2" yields 42 rather than replacing twice,
+	 * without conflating the seed value 4 with a typed digit 4. */
+	static int uarg_fresh = 0;
+	int was_fresh = uarg_fresh;
+	uarg_fresh = 0;
 
 	/* Handle prefix state transitions */
 	if (key == CTRL('x') && prefix == PREFIX_NONE) {
@@ -315,9 +324,15 @@ int resolveBinding(int key) {
 		case '=':
 			return CMD_WHAT_CURSOR;
 		case 'x':
-			/* C-x x sub-prefix — read another key */
+			/* C-x x sub-prefix — read another key.  The key
+			 * must be recorded: the main loop only records
+			 * keys it read itself, and a macro missing this
+			 * key would desynchronize on playback. */
 			{
 				int nextkey = readKey();
+				if (nextkey == -1)
+					return CMD_NONE;
+				recordKey(nextkey);
 				if (nextkey == 't') {
 					return CMD_VISUAL_LINE_MODE;
 				} else {
@@ -358,6 +373,9 @@ int resolveBinding(int key) {
 		switch (key) {
 		case '\x1b': {
 			int nextkey = readKey();
+			if (nextkey == -1)
+				return CMD_NONE;
+			recordKey(nextkey); /* keep macros in sync */
 			if (IS_META_KEY(nextkey)) {
 				int mch = META_CHAR(nextkey);
 				if (mch == 'W' || mch == 'w')
@@ -498,6 +516,7 @@ int resolveBinding(int key) {
 	case CTRL('t'):
 		return CMD_TRANSPOSE_CHARS;
 	case CTRL('u'):
+		uarg_fresh = 1;
 		return CMD_UNIVERSAL_ARG;
 	case CTRL('v'):
 		return CMD_PAGE_DOWN;
@@ -524,7 +543,14 @@ int resolveBinding(int key) {
 	/* Printable characters — check for digit accumulation after C-u */
 	if (key >= ' ' && key < KEY_ARROW_LEFT) {
 		if (E.uarg && key >= '0' && key <= '9') {
-			if (E.uarg == 4) {
+			if (E.uarg == UARG_REVERSE) {
+				/* Negative numeric arguments don't exist:
+				 * M-- is a pure reverse modifier, so digits
+				 * after it are refused. */
+				setStatusMessage("M--");
+				return CMD_NONE;
+			}
+			if (was_fresh) {
 				E.uarg = key - '0';
 			} else {
 				E.uarg = E.uarg * 10 + (key - '0');
@@ -656,10 +682,10 @@ static int dispatchEdit(int c, int uarg) {
 	case CMD_QUOTED_INSERT: {
 		int key = readKey();
 		if (key == KEY_UNICODE) {
-			int count = uarg ? uarg : 1;
+			int count = UARG_COUNT(uarg);
 			insertUnicode(count);
 		} else if (key != KEY_UNICODE_ERROR && key < KEY_ARROW_LEFT) {
-			int count = uarg ? uarg : 1;
+			int count = UARG_COUNT(uarg);
 			undoSelfInsert(key, count);
 			insertChar(E.buf, key, count);
 			if (count > 1)
@@ -687,16 +713,16 @@ static int dispatchEdit(int c, int uarg) {
 		capitalCaseWord(uarg);
 		return 1;
 	case CMD_TRANSPOSE_WORDS:
-		transposeWords();
+		transposeWords(uarg);
 		return 1;
 	case CMD_TRANSPOSE_CHARS:
 		if (E.buf->rectangle_mode && !markInvalidSilent())
 			stringRectangle();
 		else
-			transposeChars();
+			transposeChars(uarg);
 		return 1;
 	case CMD_TRANSPOSE_SENTENCES:
-		transposeSentences();
+		transposeSentences(uarg);
 		return 1;
 	case CMD_ZAP_TO_CHAR:
 		zapToChar();
@@ -858,15 +884,15 @@ static int dispatchRegion(int c, int uarg) {
 		}
 		return 1;
 	case CMD_YANK:
-		/* yank() owns the rectangle decision: with a numeric
-		 * argument the entry that gets yanked may not be the
-		 * head of the kill ring, so only yank() — after it
-		 * resolves uarg against the history — knows whether a
-		 * rectangle is involved. */
+		/* uarg semantics: any C-u prefix = reverse yank (point
+		 * stays before the text, mark set after); M-- = no-op.
+		 * yank() owns the rectangle decision internally. */
 		yank(uarg);
 		return 1;
 	case CMD_YANK_POP:
-		yankPop();
+		/* uarg semantics: M-- = cycle the ring toward newer
+		 * kills; a C-u prefix = no-op. */
+		yankPop(uarg);
 		return 1;
 	case CMD_KILL_REGION:
 		if (!E.buf->rectangle_mode) {
@@ -949,6 +975,12 @@ static int dispatchSearch(int c) {
 static int dispatchMacro(int c, int uarg) {
 	switch (c) {
 	case CMD_MACRO_RECORD:
+		if (E.playback) {
+			/* A replayed C-x ( would clobber E.macro.keys —
+			 * the very array being played back. */
+			setStatusMessage(msg_macro_blocked);
+			return 1;
+		}
 		if (!E.recording) {
 			E.recording = 1;
 			E.macro.nkeys = 0;
@@ -963,6 +995,10 @@ static int dispatchMacro(int c, int uarg) {
 		}
 		return 1;
 	case CMD_MACRO_END:
+		if (E.playback) {
+			setStatusMessage(msg_macro_blocked);
+			return 1;
+		}
 		if (E.recording) {
 			E.recording = 0;
 			setStatusMessage(msg_macro_recorded, E.macro.nkeys);
@@ -971,8 +1007,17 @@ static int dispatchMacro(int c, int uarg) {
 		}
 		return 1;
 	case CMD_MACRO_EXEC:
+		if (E.recording || E.playback) {
+			/* No self-referential macros: executing the
+			 * macro while recording it would embed a C-x e
+			 * that replays the (by then different) macro,
+			 * and nested playback re-enters execMacro on
+			 * the same E.playback cursor. */
+			setStatusMessage(msg_macro_blocked);
+			return 1;
+		}
 		if (E.macro.nkeys > 0) {
-			for (int i = 0; i < (uarg ? uarg : 1); i++) {
+			for (int i = 0; i < UARG_COUNT(uarg); i++) {
 				execMacro(&E.macro);
 			}
 		} else {
@@ -1047,6 +1092,7 @@ static int dispatchMisc(int c, int uarg) {
 		setStatusMessage(msg_quit);
 		return 1;
 	case CMD_UNIVERSAL_ARG:
+	case CMD_NEGATIVE_ARG:
 		/* Handled before dispatch chain */
 		return 1;
 	default:
@@ -1058,7 +1104,11 @@ void processKeypress(int c) {
 	/* Record is handled by the caller (main loop) at the key level.
 	 * Commands arriving here are already resolved. */
 
-	if (c != CMD_YANK && c != CMD_YANK_POP) {
+	/* Argument-building keys (C-u, M--, M-digits) must not break a
+	 * yank/yank-pop chain: "C-y M-- M-y" builds the reverse modifier
+	 * between the two yank commands. */
+	if (c != CMD_YANK && c != CMD_YANK_POP && c != CMD_UNIVERSAL_ARG &&
+	    c != CMD_NEGATIVE_ARG && !(c >= KEY_ALT_0 && c <= KEY_ALT_9)) {
 		E.kill_ring_pos = -1;
 	}
 
@@ -1077,8 +1127,10 @@ void processKeypress(int c) {
 	}
 
 	if (c >= KEY_ALT_0 && c <= KEY_ALT_9) {
-		if (!E.uarg) {
-			E.uarg = 0;
+		if (E.uarg == UARG_REVERSE) {
+			/* Digits are refused after M--; see resolveBinding. */
+			setStatusMessage("M--");
+			return;
 		}
 		E.uarg *= 10;
 		E.uarg += c - KEY_ALT_0;
@@ -1086,14 +1138,24 @@ void processKeypress(int c) {
 		return;
 	}
 
-	/* Handle C-u (Universal Argument) */
+	/* Handle C-u (Universal Argument).  A pending M-- is simply
+	 * overwritten: the last modifier typed wins. */
 	if (c == CMD_UNIVERSAL_ARG) {
-		if (!E.uarg) {
+		if (E.uarg <= 0) {
 			E.uarg = 4;
 		} else {
 			E.uarg *= 4;
 		}
 		setStatusMessage("C-u %d", E.uarg);
+		return;
+	}
+
+	/* Handle M-- (reverse modifier).  Not a numeric argument: it
+	 * flips direction for the commands that understand it (yank-pop,
+	 * transpose, word case) and is ignored by everything else. */
+	if (c == CMD_NEGATIVE_ARG) {
+		E.uarg = UARG_REVERSE;
+		setStatusMessage("M--");
 		return;
 	}
 
@@ -1134,7 +1196,7 @@ void processKeypress(int c) {
 		if (c == CMD_TAB && E.buf == E.minibuf)
 			goto done;
 		int ch = (c == CMD_TAB) ? '\t' : E.self_insert_key;
-		int count = uarg ? uarg : 1;
+		int count = UARG_COUNT(uarg);
 		undoSelfInsert(ch, count);
 		insertChar(E.buf, ch, count);
 		if (count > 1)

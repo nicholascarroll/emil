@@ -75,7 +75,7 @@ static void moveVisualRow(int direction) {
 }
 
 void moveCursor(int key, int count) {
-	int times = count ? count : 1;
+	int times = UARG_COUNT(count);
 	for (int i = 0; i < times; i++) {
 		erow *row = (E.buf->cy >= E.buf->numrows) ?
 				    NULL :
@@ -292,14 +292,14 @@ void backwardWordEnd(int *dx, int *dy) {
 }
 
 void forwardWord(int count) {
-	int times = count ? count : 1;
+	int times = UARG_COUNT(count);
 	for (int i = 0; i < times; i++) {
 		forwardWordEnd(&E.buf->cx, &E.buf->cy);
 	}
 }
 
 void backWord(int count) {
-	int times = count ? count : 1;
+	int times = UARG_COUNT(count);
 	for (int i = 0; i < times; i++) {
 		backwardWordEnd(&E.buf->cx, &E.buf->cy);
 	}
@@ -365,14 +365,14 @@ void forwardParaBoundary(int *cx, int *cy) {
 }
 
 void backPara(int count) {
-	int times = count ? count : 1;
+	int times = UARG_COUNT(count);
 	for (int i = 0; i < times; i++) {
 		backwardParaBoundary(&E.buf->cx, &E.buf->cy);
 	}
 }
 
 void forwardPara(int count) {
-	int times = count ? count : 1;
+	int times = UARG_COUNT(count);
 	for (int i = 0; i < times; i++) {
 		forwardParaBoundary(&E.buf->cx, &E.buf->cy);
 	}
@@ -552,7 +552,7 @@ int bufferForwardSexpEnd(int *cx, int *cy, const char **errmsg) {
 }
 
 void forwardSexp(int count) {
-	int times = count ? count : 1;
+	int times = UARG_COUNT(count);
 
 	for (int t = 0; t < times; t++) {
 		int cx = E.buf->cx;
@@ -569,7 +569,7 @@ void forwardSexp(int count) {
 }
 
 void backwardSexp(int count) {
-	int times = count ? count : 1;
+	int times = UARG_COUNT(count);
 
 	for (int t = 0; t < times; t++) {
 		int cx = E.buf->cx;
@@ -651,7 +651,7 @@ void backwardSexp(int count) {
 
 void pageUp(int count) {
 	struct window *win = E.windows[windowFocusedIdx()];
-	int times = count ? count : 1;
+	int times = UARG_COUNT(count);
 
 	for (int n = 0; n < times; n++) {
 		int scroll_lines = win->height - page_overlap;
@@ -665,7 +665,7 @@ void pageUp(int count) {
 
 void pageDown(int count) {
 	struct window *win = E.windows[windowFocusedIdx()];
-	int times = count ? count : 1;
+	int times = UARG_COUNT(count);
 
 	for (int n = 0; n < times; n++) {
 		int scroll_lines = win->height - page_overlap;
@@ -679,7 +679,7 @@ void pageDown(int count) {
 
 void scrollLineUp(int count) {
 	struct window *win = E.windows[windowFocusedIdx()];
-	int times = count ? count : 1;
+	int times = UARG_COUNT(count);
 
 	scrollViewport(win, E.buf, -times);
 	clampCursorToViewport(win, E.buf);
@@ -687,7 +687,7 @@ void scrollLineUp(int count) {
 
 void scrollLineDown(int count) {
 	struct window *win = E.windows[windowFocusedIdx()];
-	int times = count ? count : 1;
+	int times = UARG_COUNT(count);
 
 	scrollViewport(win, E.buf, times);
 	clampCursorToViewport(win, E.buf);
@@ -913,14 +913,14 @@ int backwardSentenceStart(int *cx, int *cy) {
 }
 
 void forwardSentence(int count) {
-	int times = count ? count : 1;
+	int times = UARG_COUNT(count);
 	for (int i = 0; i < times; i++) {
 		forwardSentenceEnd(&E.buf->cx, &E.buf->cy);
 	}
 }
 
 void backwardSentence(int count) {
-	int times = count ? count : 1;
+	int times = UARG_COUNT(count);
 	for (int i = 0; i < times; i++) {
 		backwardSentenceStart(&E.buf->cx, &E.buf->cy);
 	}

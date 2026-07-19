@@ -22,6 +22,12 @@
 #define CSI ESC "["
 #define CRLF "\r\n"
 
+/* Universal argument encoding — see the uarg field in struct config.
+ * UARG_REVERSE is the M-- reverse modifier; UARG_COUNT extracts a
+ * repeat count, treating "no argument" and "reverse" alike as 1. */
+#define UARG_REVERSE (-1)
+#define UARG_COUNT(u) ((u) > 0 ? (u) : 1)
+
 /* Suppress GCC's warn_unused_result where the return value is
  * intentionally discarded (e.g. best-effort write to stdout). */
 #define IGNORE_RETURN(expr) \
@@ -250,7 +256,15 @@ struct config {
 	int cmd_count;
 	struct editorRegister registers[127];
 	struct buffer *lastVisitedBuffer;
-	int uarg; /* Universal argument: 0 = off, non-zero = active with that value */
+	/* Universal argument.  Encodes three states in one int:
+	 *   0            no argument pending
+	 *   > 0          repeat count (C-u, C-u N, M-N)
+	 *   UARG_REVERSE the M-- reverse modifier
+	 * Commands that understand the reverse modifier (yank-pop,
+	 * transpose, word case) test for UARG_REVERSE explicitly; all
+	 * other commands must read the value through UARG_COUNT, which
+	 * maps both 0 and UARG_REVERSE to a count of 1. */
+	int uarg;
 	int macro_depth; /* Current macro execution depth to prevent infinite
                       recursion */
 

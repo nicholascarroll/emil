@@ -236,7 +236,8 @@ int main(int argc, char *argv[]) {
 			struct buffer *stdinBuf =
 				loadStdinBuffer(stdin_data, stdin_len);
 			if (stdinBuf == NULL) {
-				/* Binary data — bail out cleanly */
+				/* Binary or invalid UTF-8 — bail out
+				 * cleanly */
 				free(stdin_data);
 				disableRawMode();
 				fprintf(stderr, "stdin: %s\n",

@@ -26,17 +26,17 @@ void backSpace(int count);
 
 /* Word transformations */
 void wordTransform(int times, uint8_t *(*transformer)(uint8_t *));
-void upcaseWord(int times);
-void downcaseWord(int times);
-void capitalCaseWord(int times);
+void upcaseWord(int uarg);
+void downcaseWord(int uarg);
+void capitalCaseWord(int uarg);
 
 /* Word deletion */
 void deleteWord(int count);
 void backspaceWord(int count);
 
 /* Character/word transposition */
-void transposeWords(void);
-void transposeChars(void);
+void transposeWords(int uarg);
+void transposeChars(int uarg);
 
 /* Line operations */
 void killLine(int count);
@@ -48,7 +48,7 @@ void killParagraph(int count);
 void markParagraph(void);
 
 /* Sentence transposition */
-void transposeSentences(void);
+void transposeSentences(int uarg);
 
 /* Zap to char */
 void zapToChar(void);

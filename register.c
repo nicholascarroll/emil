@@ -378,7 +378,7 @@ void insertRegister(void) {
 			E.kill.is_rectangle = 0;
 			E.kill.rect_width = 0;
 			E.kill.rect_height = 0;
-			yank(1);
+			yank(0);
 			E.kill = saved;
 			registerMessage("Inserted string register %s", reg);
 		}

@@ -18,8 +18,8 @@ void deleteRange(int startx, int starty, int endx, int endy,
 		 int add_to_kill_ring);
 void killRegion(void);
 void copyRegion(void);
-void yank(int count);
-void yankPop(void);
+void yank(int uarg);
+void yankPop(int uarg);
 void transformRange(int startx, int starty, int endx, int endy,
 		    uint8_t *(*transformer)(uint8_t *));
 void transformRegion(uint8_t *(*transformer)(uint8_t *));

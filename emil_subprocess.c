@@ -20,6 +20,7 @@
 
 #include "emil_subprocess.h"
 
+#include <errno.h>
 #include <spawn.h>
 #include <stdlib.h>
 #include <string.h>
@@ -162,7 +163,8 @@ int subprocess_create(const char *const command_line[], int options,
 			fclose(out_process->stderr_file);
 		else
 			close(stderrfd[0]);
-		waitpid(child, NULL, 0);
+		while (waitpid(child, NULL, 0) == -1 && errno == EINTR)
+			;
 		return -1;
 	}
 
@@ -188,7 +190,15 @@ int subprocess_join(struct subprocess_s *const process,
 	}
 
 	if (process->child) {
-		if (process->child != waitpid(process->child, &status, 0))
+		/* Retry on EINTR: SIGCONT/SIGTSTP are installed
+		 * without SA_RESTART, and a resume landing mid-wait
+		 * must not turn into a spurious join failure (and a
+		 * leaked zombie). */
+		pid_t r;
+		do {
+			r = waitpid(process->child, &status, 0);
+		} while (r == -1 && errno == EINTR);
+		if (r != process->child)
 			return -1;
 
 		process->child = 0;
@@ -218,7 +228,10 @@ int subprocess_tryjoin(struct subprocess_s *const process,
 		return 1;
 	}
 	int status;
-	pid_t r = waitpid(process->child, &status, WNOHANG);
+	pid_t r;
+	do {
+		r = waitpid(process->child, &status, WNOHANG);
+	} while (r == -1 && errno == EINTR);
 	if (r == 0)
 		return 0;
 	if (r != process->child)

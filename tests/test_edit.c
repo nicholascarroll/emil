@@ -503,8 +503,167 @@ void test_kill_line_on_virtual_eof_line(void) {
 	buf->cx = 0;
 	killLine(1);
 	TEST_ASSERT_EQUAL_INT(16, buf->numrows); /* no-op */
-	transposeChars();
+	transposeChars(0);
 	TEST_ASSERT_EQUAL_INT(16, buf->numrows); /* no-op */
+}
+
+/* ---- M-- reverse modifier: transpose and word case ---- */
+
+/* Forward baseline: C-t at "ab|cd" drags b forward → "acb|d". */
+void test_transpose_chars_forward(void) {
+	struct buffer *buf = make_test_buffer("abcd");
+	buf->cx = 2;
+	transposeChars(0);
+	TEST_ASSERT_EQUAL_STRING("acbd", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(3, buf->cx);
+}
+
+/* M-- C-t at "abc|d" drags c backward past b → "ac|bd". */
+void test_transpose_chars_reverse(void) {
+	struct buffer *buf = make_test_buffer("abcd");
+	buf->cx = 3;
+	transposeChars(UARG_REVERSE);
+	TEST_ASSERT_EQUAL_STRING("acbd", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(2, buf->cx);
+}
+
+/* Reverse then forward transpose at the same spot round-trips. */
+void test_transpose_chars_reverse_roundtrip(void) {
+	struct buffer *buf = make_test_buffer("abcd");
+	buf->cx = 3;
+	transposeChars(UARG_REVERSE);
+	TEST_ASSERT_EQUAL_STRING("acbd", row_str(buf, 0));
+	transposeChars(0);
+	TEST_ASSERT_EQUAL_STRING("abcd", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(3, buf->cx);
+}
+
+/* M-- C-t with fewer than two characters before point: refused. */
+void test_transpose_chars_reverse_needs_two_before(void) {
+	struct buffer *buf = make_test_buffer("abcd");
+	buf->cx = 1;
+	transposeChars(UARG_REVERSE);
+	TEST_ASSERT_EQUAL_STRING("abcd", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(1, buf->cx);
+
+	buf->cx = 0;
+	transposeChars(UARG_REVERSE);
+	TEST_ASSERT_EQUAL_STRING("abcd", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(0, buf->cx);
+}
+
+/* M-- C-t with multi-byte characters: "aé漢|" drags 漢 back past é.
+ * "é" is 2 bytes (0xC3 0xA9), "漢" is 3 bytes (0xE6 0xBC 0xA2). */
+void test_transpose_chars_reverse_utf8(void) {
+	struct buffer *buf = make_test_buffer("a\xc3\xa9\xe6\xbc\xa2");
+	buf->cx = 6; /* end of line, after 漢 */
+	transposeChars(UARG_REVERSE);
+	TEST_ASSERT_EQUAL_STRING("a\xe6\xbc\xa2\xc3\xa9", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(4, buf->cx); /* after the dragged 漢 */
+}
+
+/* M-- M-t at "alpha beta|" drags beta back past alpha → "beta| alpha". */
+void test_transpose_words_reverse(void) {
+	struct buffer *buf = make_test_buffer("alpha beta gamma");
+	buf->cx = 10; /* end of "beta" */
+	transposeWords(UARG_REVERSE);
+	TEST_ASSERT_EQUAL_STRING("beta alpha gamma", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(4, buf->cx); /* after the dragged "beta" */
+}
+
+/* M-- M-t with point in trailing whitespace still acts on the two
+ * words before point. */
+void test_transpose_words_reverse_from_gap(void) {
+	struct buffer *buf = make_test_buffer("one two three");
+	buf->cx = 7; /* on the space after "two" */
+	transposeWords(UARG_REVERSE);
+	TEST_ASSERT_EQUAL_STRING("two one three", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(3, buf->cx); /* after the dragged "two" */
+}
+
+/* M-- M-t with only one word before point: refused, point restored. */
+void test_transpose_words_reverse_needs_two_words(void) {
+	struct buffer *buf = make_test_buffer("alpha beta");
+	buf->cx = 5; /* end of "alpha", first word of the buffer */
+	transposeWords(UARG_REVERSE);
+	TEST_ASSERT_EQUAL_STRING("alpha beta", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(5, buf->cx);
+}
+
+/* M-- C-x C-t at "One. Two.|" drags the second sentence back past the
+ * first, point after the dragged sentence. */
+void test_transpose_sentences_reverse(void) {
+	struct buffer *buf = make_test_buffer("Alpha one. Beta two.");
+	buf->cx = 20; /* end of line, after the second sentence */
+	transposeSentences(UARG_REVERSE);
+	TEST_ASSERT_EQUAL_STRING(" Beta two.Alpha one.", row_str(buf, 0));
+}
+
+/* Forward baseline for the sentence layout above, for symmetry: the
+ * gap travels with the second segment in both directions. */
+void test_transpose_sentences_forward_baseline(void) {
+	struct buffer *buf = make_test_buffer("Alpha one. Beta two.");
+	buf->cx = 11; /* start of "Beta" */
+	transposeSentences(0);
+	TEST_ASSERT_EQUAL_STRING(" Beta two.Alpha one.", row_str(buf, 0));
+}
+
+/* M-- M-u upcases the word before point without moving point. */
+void test_upcase_word_reverse(void) {
+	struct buffer *buf = make_test_buffer("alpha beta gamma");
+	buf->cx = 10; /* end of "beta" */
+	upcaseWord(UARG_REVERSE);
+	TEST_ASSERT_EQUAL_STRING("alpha BETA gamma", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(10, buf->cx);
+}
+
+/* Forward M-u still moves point past the word it changes. */
+void test_upcase_word_forward_moves_point(void) {
+	struct buffer *buf = make_test_buffer("alpha beta");
+	buf->cx = 0;
+	upcaseWord(0);
+	TEST_ASSERT_EQUAL_STRING("ALPHA beta", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(5, buf->cx);
+}
+
+/* M-- M-l and M-- M-c behave the same way on the previous word. */
+void test_downcase_capitalize_word_reverse(void) {
+	struct buffer *buf = make_test_buffer("ALPHA BETA");
+	buf->cx = 10;
+	downcaseWord(UARG_REVERSE);
+	TEST_ASSERT_EQUAL_STRING("ALPHA beta", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(10, buf->cx);
+
+	capitalCaseWord(UARG_REVERSE);
+	TEST_ASSERT_EQUAL_STRING("ALPHA Beta", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(10, buf->cx);
+}
+
+/* M-- M-u at the start of the buffer: no word before point, no-op. */
+void test_upcase_word_reverse_at_buffer_start(void) {
+	struct buffer *buf = make_test_buffer("alpha");
+	buf->cx = 0;
+	upcaseWord(UARG_REVERSE);
+	TEST_ASSERT_EQUAL_STRING("alpha", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(0, buf->cx);
+}
+
+/* Reverse word transforms respect read-only buffers: no edit, and
+ * crucially no point movement from the repositioning step. */
+void test_transpose_reverse_readonly(void) {
+	struct buffer *buf = make_test_buffer("alpha beta");
+	buf->cx = 10;
+	buf->read_only = 1;
+	transposeWords(UARG_REVERSE);
+	TEST_ASSERT_EQUAL_STRING("alpha beta", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(10, buf->cx);
+	transposeChars(UARG_REVERSE);
+	TEST_ASSERT_EQUAL_STRING("alpha beta", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(10, buf->cx);
+	upcaseWord(UARG_REVERSE);
+	TEST_ASSERT_EQUAL_STRING("alpha beta", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(10, buf->cx);
+	buf->read_only = 0;
 }
 
 void setUp(void) {
@@ -576,6 +735,23 @@ int main(void) {
 	RUN_TEST(test_move_cursor_empty_buffer);
 	RUN_TEST(test_move_cursor_up_to_shorter_line);
 	RUN_TEST(test_kill_line_on_virtual_eof_line);
+
+	/* M-- reverse modifier: transpose and word case */
+	RUN_TEST(test_transpose_chars_forward);
+	RUN_TEST(test_transpose_chars_reverse);
+	RUN_TEST(test_transpose_chars_reverse_roundtrip);
+	RUN_TEST(test_transpose_chars_reverse_needs_two_before);
+	RUN_TEST(test_transpose_chars_reverse_utf8);
+	RUN_TEST(test_transpose_words_reverse);
+	RUN_TEST(test_transpose_words_reverse_from_gap);
+	RUN_TEST(test_transpose_words_reverse_needs_two_words);
+	RUN_TEST(test_transpose_sentences_reverse);
+	RUN_TEST(test_transpose_sentences_forward_baseline);
+	RUN_TEST(test_upcase_word_reverse);
+	RUN_TEST(test_upcase_word_forward_moves_point);
+	RUN_TEST(test_downcase_capitalize_word_reverse);
+	RUN_TEST(test_upcase_word_reverse_at_buffer_start);
+	RUN_TEST(test_transpose_reverse_readonly);
 
 	return TEST_END();
 }

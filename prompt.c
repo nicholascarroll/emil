@@ -57,6 +57,13 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 
 		/* Read key */
 		int c = readKey();
+		if (c == -1) {
+			/* Interrupted by a signal (suspend/resume,
+			 * resize).  The main loop skips these; doing
+			 * anything else here would record -1 into a
+			 * running macro and feed -1 to the callback. */
+			continue;
+		}
 		recordKey(c);
 
 		int callback_key = c;

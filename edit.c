@@ -44,7 +44,7 @@ void insertChar(struct buffer *bufr, int c, int count) {
 
 void insertUnicode(int count) {
 	E.buf->mark_active = 0;
-	int times = count ? count : 1;
+	int times = UARG_COUNT(count);
 	for (int i = 0; i < times; i++) {
 		undoAppendUnicode(E.buf);
 		if (E.buf->cy == E.buf->numrows) {
@@ -107,7 +107,7 @@ void insertNewline(int count) {
 
 	E.buf->mark_active = 0;
 
-	int times = count ? count : 1;
+	int times = UARG_COUNT(count);
 	for (int i = 0; i < times; i++) {
 		undoAppendChar(E.buf, '\n');
 		splitLineAtPoint();
@@ -224,7 +224,7 @@ void delChar(int count) {
 
 	E.buf->mark_active = 0;
 
-	int times = count ? count : 1;
+	int times = UARG_COUNT(count);
 	for (int i = 0; i < times; i++) {
 		if (E.buf->cy == E.buf->numrows)
 			return;
@@ -250,7 +250,7 @@ void backSpace(int count) {
 		return;
 
 	E.buf->mark_active = 0;
-	int times = count ? count : 1;
+	int times = UARG_COUNT(count);
 	for (int i = 0; i < times; i++) {
 		if (!E.buf->numrows)
 			return;
@@ -283,8 +283,7 @@ void backSpace(int count) {
 /* Word transformations */
 
 void wordTransform(int times, uint8_t *(*transformer)(uint8_t *)) {
-	if (times < 1)
-		times = 1;
+	times = UARG_COUNT(times);
 	int icx = E.buf->cx;
 	int icy = E.buf->cy;
 	for (int i = 0; i < times; i++) {
@@ -295,16 +294,37 @@ void wordTransform(int times, uint8_t *(*transformer)(uint8_t *)) {
 	transformRegion(transformer);
 }
 
-void upcaseWord(int times) {
-	wordTransform(times, transformerUpcase);
+/* M-- variant: transform the word before point, leaving point where
+ * it is.  The case transformers are byte-length preserving, so
+ * transformRange's "point at end of replacement" lands back on the
+ * original position. */
+static void wordTransformBackward(uint8_t *(*transformer)(uint8_t *)) {
+	int icx = E.buf->cx;
+	int icy = E.buf->cy;
+	int sx = icx, sy = icy;
+	backwardWordEnd(&sx, &sy);
+	if (sx == icx && sy == icy)
+		return; /* no word before point */
+	transformRange(sx, sy, icx, icy, transformer);
 }
 
-void downcaseWord(int times) {
-	wordTransform(times, transformerDowncase);
+static void caseWord(int uarg, uint8_t *(*transformer)(uint8_t *)) {
+	if (uarg == UARG_REVERSE)
+		wordTransformBackward(transformer);
+	else
+		wordTransform(uarg, transformer);
 }
 
-void capitalCaseWord(int times) {
-	wordTransform(times, transformerCapitalCase);
+void upcaseWord(int uarg) {
+	caseWord(uarg, transformerUpcase);
+}
+
+void downcaseWord(int uarg) {
+	caseWord(uarg, transformerDowncase);
+}
+
+void capitalCaseWord(int uarg) {
+	caseWord(uarg, transformerCapitalCase);
 }
 
 /* Word deletion */
@@ -315,7 +335,7 @@ static void deleteByWord(int count, void (*boundary)(int *, int *)) {
 	E.buf->mark_active = 0;
 	int startx = E.buf->cx;
 	int starty = E.buf->cy;
-	int times = count ? count : 1;
+	int times = UARG_COUNT(count);
 	for (int i = 0; i < times; i++) {
 		int endx = E.buf->cx;
 		int endy = E.buf->cy;
@@ -344,7 +364,63 @@ void backspaceWord(int count) {
 
 /* Character/word transposition */
 
-void transposeWords(void) {
+/* M-- M-t: drag the word before point backward past the word before
+ * it, point following the dragged word (Emacs transpose-words with a
+ * negative argument). */
+static void transposeWordsBackward(void) {
+	/* Checked here, not just in transformRange: the point
+	 * repositioning below must not run against a refused edit. */
+	if (rejectIfReadOnly(E.buf))
+		return;
+
+	E.buf->mark_active = 0;
+	if (E.buf->numrows == 0) {
+		setStatusMessage(msg_buffer_empty);
+		return;
+	}
+
+	int icx = E.buf->cx, icy = E.buf->cy;
+
+	/* W2 = word ending at or before point. */
+	int s2x = icx, s2y = icy;
+	backwardWordEnd(&s2x, &s2y);
+	if (s2x == icx && s2y == icy) {
+		setStatusMessage(msg_cannot_transpose);
+		return;
+	}
+
+	/* W1 = word before W2.  backwardWordEnd reads from point, so
+	 * park point at the start of W2 for the query. */
+	E.buf->cx = s2x;
+	E.buf->cy = s2y;
+	int s1x = s2x, s1y = s2y;
+	backwardWordEnd(&s1x, &s1y);
+	if (s1x == s2x && s1y == s2y) {
+		E.buf->cx = icx;
+		E.buf->cy = icy;
+		setStatusMessage(msg_cannot_transpose);
+		return;
+	}
+
+	/* End of W2. */
+	int e2x = s2x, e2y = s2y;
+	forwardWordEnd(&e2x, &e2y);
+
+	transformRange(s1x, s1y, e2x, e2y, transformerTransposeWords);
+
+	/* Point after the dragged word, which is now the first word of
+	 * the transformed region. */
+	E.buf->cx = s1x;
+	E.buf->cy = s1y;
+	forwardWordEnd(&E.buf->cx, &E.buf->cy);
+}
+
+void transposeWords(int uarg) {
+	if (uarg == UARG_REVERSE) {
+		transposeWordsBackward();
+		return;
+	}
+
 	E.buf->mark_active = 0;
 	if (E.buf->numrows == 0) {
 		setStatusMessage(msg_buffer_empty);
@@ -374,7 +450,64 @@ void transposeWords(void) {
 		       transformerTransposeWords);
 }
 
-void transposeChars(void) {
+/* M-- C-t: drag the character before point backward past the
+ * character before it, point following the dragged character.  Like
+ * the forward version, this stays within the current line. */
+static void transposeCharsBackward(void) {
+	/* Checked here, not just in transformRange: the point
+	 * repositioning below must not run against a refused edit. */
+	if (rejectIfReadOnly(E.buf))
+		return;
+
+	E.buf->mark_active = 0;
+	if (E.buf->numrows == 0) {
+		setStatusMessage(msg_buffer_empty);
+		return;
+	}
+
+	if (E.buf->cy >= E.buf->numrows) {
+		setStatusMessage(msg_end_of_buffer);
+		return;
+	}
+
+	erow *row = &E.buf->row[E.buf->cy];
+
+	/* Need two characters before point on this line. */
+	if (E.buf->cx == 0) {
+		setStatusMessage(msg_cannot_transpose);
+		return;
+	}
+
+	/* Start of the character before point... */
+	int c2x = E.buf->cx - 1;
+	while (c2x > 0 && utf8_isCont(row->chars[c2x]))
+		c2x--;
+	if (c2x == 0) {
+		setStatusMessage(msg_cannot_transpose);
+		return;
+	}
+
+	/* ...and of the character before that. */
+	int c1x = c2x - 1;
+	while (c1x > 0 && utf8_isCont(row->chars[c1x]))
+		c1x--;
+
+	transformRange(c1x, E.buf->cy, E.buf->cx, E.buf->cy,
+		       transformerTransposeChars);
+
+	/* Point lands after the dragged character, which is now first in
+	 * the transformed range.  Re-read the row: the replace may have
+	 * reallocated its chars. */
+	row = &E.buf->row[E.buf->cy];
+	E.buf->cx = c1x + utf8_nBytes(row->chars[c1x]);
+}
+
+void transposeChars(int uarg) {
+	if (uarg == UARG_REVERSE) {
+		transposeCharsBackward();
+		return;
+	}
+
 	E.buf->mark_active = 0;
 	if (E.buf->numrows == 0) {
 		setStatusMessage(msg_buffer_empty);
@@ -426,7 +559,7 @@ void killLine(int count) {
 
 	E.buf->mark_active = 0;
 
-	int times = count ? count : 1;
+	int times = UARG_COUNT(count);
 	for (int i = 0; i < times; i++) {
 		if (E.buf->numrows <= 0 || E.buf->cy >= E.buf->numrows) {
 			return;
@@ -472,6 +605,14 @@ void killLineBackwards(void) {
 }
 
 void quit(void) {
+	if (E.playback) {
+		/* The unsaved-changes confirmation below reads a key;
+		 * during playback that read comes from the macro key
+		 * stream (now bounds-checked to return -1), so the
+		 * prompt could never be answered — block instead. */
+		setStatusMessage(msg_macro_blocked);
+		return;
+	}
 	if (E.recording) {
 		E.recording = 0;
 	}
@@ -508,7 +649,7 @@ void killSexp(int count) {
 
 	E.buf->mark_active = 0;
 
-	int times = count ? count : 1;
+	int times = UARG_COUNT(count);
 	for (int i = 0; i < times; i++) {
 		int endx = E.buf->cx;
 		int endy = E.buf->cy;
@@ -532,7 +673,7 @@ void killParagraph(int count) {
 
 	E.buf->mark_active = 0;
 
-	int times = count ? count : 1;
+	int times = UARG_COUNT(count);
 	for (int i = 0; i < times; i++) {
 		int endx = E.buf->cx;
 		int endy = E.buf->cy;
@@ -566,10 +707,88 @@ void markParagraph(void) {
 	setStatusMessage(msg_mark_set);
 }
 
+/* M-- C-x C-t: drag the sentence ending at or before point backward
+ * past the sentence before it, point landing after the dragged
+ * sentence.  Mirrors the forward version's segmentation: the gap
+ * between the two sentences travels with the second segment. */
+static void transposeSentencesBackward(void) {
+	if (rejectIfReadOnly(E.buf))
+		return;
+
+	E.buf->mark_active = 0;
+
+	if (E.buf->numrows == 0) {
+		setStatusMessage(msg_buffer_empty);
+		return;
+	}
+
+	/* Sentence B: ends at or before point. */
+	int b_start_x = E.buf->cx, b_start_y = E.buf->cy;
+	if (backwardSentenceStart(&b_start_x, &b_start_y) < 0) {
+		setStatusMessage(msg_beginning_of_buffer);
+		return;
+	}
+
+	/* Sentence A: the one before B. */
+	int a_start_x = b_start_x, a_start_y = b_start_y;
+	if (backwardSentenceStart(&a_start_x, &a_start_y) < 0) {
+		setStatusMessage(msg_beginning_of_buffer);
+		return;
+	}
+
+	/* A ends where the gap before B begins (same convention as the
+	 * forward version: gap is folded into the B segment). */
+	int a_end_x = a_start_x, a_end_y = a_start_y;
+	forwardSentenceEnd(&a_end_x, &a_end_y);
+
+	/* B end: forward from B start. */
+	int b_end_x = b_start_x, b_end_y = b_start_y;
+	if (forwardSentenceEnd(&b_end_x, &b_end_y) < 0) {
+		setStatusMessage(msg_end_of_buffer);
+		return;
+	}
+
+	int a_len, b_len;
+	uint8_t *a_text = collectRegionText(E.buf, a_start_x, a_start_y,
+					    a_end_x, a_end_y, &a_len);
+	uint8_t *b_text = collectRegionText(E.buf, a_end_x, a_end_y, b_end_x,
+					    b_end_y, &b_len);
+
+	int old_len;
+	uint8_t *old_text = collectRegionText(E.buf, a_start_x, a_start_y,
+					      b_end_x, b_end_y, &old_len);
+
+	/* Build replacement: B + A */
+	int repl_len = b_len + a_len;
+	uint8_t *repl = xmalloc(repl_len + 1);
+	memcpy(repl, b_text, b_len);
+	memcpy(repl + b_len, a_text, a_len);
+	repl[repl_len] = 0;
+
+	int ex, ey;
+	mutateReplace(E.buf, a_start_x, a_start_y, b_end_x, b_end_y, old_text,
+		      old_len, repl, repl_len, 0, &ex, &ey);
+
+	/* Point after the dragged sentence, now first in the region. */
+	E.buf->cx = a_start_x;
+	E.buf->cy = a_start_y;
+	forwardSentenceEnd(&E.buf->cx, &E.buf->cy);
+
+	free(a_text);
+	free(b_text);
+	free(old_text);
+	free(repl);
+}
+
 /* Transpose sentences (C-x C-t) — swap sentence before point with
  * sentence after point, leaving point after both. */
 
-void transposeSentences(void) {
+void transposeSentences(int uarg) {
+	if (uarg == UARG_REVERSE) {
+		transposeSentencesBackward();
+		return;
+	}
+
 	if (rejectIfReadOnly(E.buf))
 		return;
 

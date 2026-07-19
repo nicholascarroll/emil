@@ -58,7 +58,7 @@ void test_yank_returns_most_recent_kill(void) {
 	/* Yank it back at end of line. */
 	buf->cx = buf->row[0].size;
 	buf->cy = 0;
-	yank(1);
+	yank(0);
 	TEST_ASSERT_EQUAL_STRING("hello world", row_str(buf, 0));
 }
 
@@ -79,11 +79,11 @@ void test_yank_pop_returns_previous_kill(void) {
 	/* Yank at end: most recent kill = "def". */
 	buf->cx = buf->row[0].size;
 	buf->cy = 0;
-	yank(1);
+	yank(0);
 	TEST_ASSERT_EQUAL_STRING("abc  def", row_str(buf, 0));
 
 	/* M-y: replace the just-yanked text with the previous kill "ghi". */
-	yankPop();
+	yankPop(0);
 	TEST_ASSERT_EQUAL_STRING("abc  ghi", row_str(buf, 0));
 }
 
@@ -189,43 +189,95 @@ void test_yank_rectangle_without_rect_kill(void) {
 
 /* --- runner ------------------------------------------------------- */
 
-/* --- 6. numeric-argument yank past a rectangle at the head -------- */
+/* --- 6. C-u C-y: reverse yank — point before, mark after ---------- */
 
-void test_yank_with_arg_selects_string_past_rectangle(void) {
-	/* A rectangle at the head of the kill ring must not decide how
-	 * C-u N C-y behaves: the argument selects an older entry, which
-	 * here is a plain string.  The dispatch used to branch on the
-	 * head's is_rectangle flag and drop the argument entirely,
-	 * yanking the rectangle instead. */
-	const char *lines[] = { "ABCDEF", "abcdef" };
-	struct buffer *buf = make_test_buffer_lines(lines, 2);
+void test_reverse_yank_leaves_point_before_text(void) {
+	struct buffer *buf = make_test_buffer("hello world");
 
-	/* Oldest kill: the string "CDEF" from row 0. */
-	kill_range(buf, 2, 0, 6, 0);
-	TEST_ASSERT_EQUAL_STRING("AB", row_str(buf, 0));
+	/* Kill "world". */
+	kill_range(buf, 6, 0, 11, 0);
+	TEST_ASSERT_EQUAL_STRING("hello ", row_str(buf, 0));
 
-	/* Newest kill: a 2x1 rectangle "ab" from row 1. */
-	buf->rectangle_mode = 1;
-	buf->markx = 0;
-	buf->marky = 1;
-	buf->mark_active = 1;
-	buf->cx = 2;
-	buf->cy = 1;
-	killRectangle();
-	buf->rectangle_mode = 0;
-	TEST_ASSERT_EQUAL_INT(2, E.kill_history.count);
-	TEST_ASSERT_TRUE(E.kill.is_rectangle);
-
-	/* C-u 2 C-y: second most recent entry = the string "CDEF".
-	 * Driven through processKeypress so the real dispatch path is
-	 * exercised, not just yank()'s contract. */
+	/* C-u C-y at end of line, driven through the real dispatch so
+	 * the uarg hand-off is exercised.  Any positive uarg means
+	 * reverse; bare C-u arrives as 4. */
 	buf->cx = buf->row[0].size;
 	buf->cy = 0;
-	E.uarg = 2;
+	E.uarg = 4;
 	processKeypress(CMD_YANK);
-	E.uarg = 0;
-	TEST_ASSERT_EQUAL_STRING("ABCDEF", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
+	TEST_ASSERT_EQUAL_STRING("hello world", row_str(buf, 0));
+
+	/* Point stayed before the yanked text; mark sits after it. */
+	TEST_ASSERT_EQUAL_INT(6, buf->cx);
+	TEST_ASSERT_EQUAL_INT(0, buf->cy);
+	TEST_ASSERT_EQUAL_INT(11, buf->markx);
+	TEST_ASSERT_EQUAL_INT(0, buf->marky);
+	TEST_ASSERT_TRUE(buf->mark_active);
+}
+
+/* --- 7. M-- M-y: cycle the kill ring toward newer kills ----------- */
+
+void test_reverse_yank_pop_cycles_forward(void) {
+	struct buffer *buf = make_test_buffer("abc def ghi");
+
+	/* Ring, oldest → newest: "ghi", "def". */
+	kill_range(buf, 8, 0, 11, 0);
+	kill_range(buf, 4, 0, 7, 0);
+	TEST_ASSERT_EQUAL_STRING("abc  ", row_str(buf, 0));
+
+	/* Yank ("def"), M-y (→ "ghi"), then M-- M-y returns to "def". */
+	buf->cx = buf->row[0].size;
+	buf->cy = 0;
+	yank(0);
+	TEST_ASSERT_EQUAL_STRING("abc  def", row_str(buf, 0));
+	yankPop(0);
+	TEST_ASSERT_EQUAL_STRING("abc  ghi", row_str(buf, 0));
+	yankPop(UARG_REVERSE);
+	TEST_ASSERT_EQUAL_STRING("abc  def", row_str(buf, 0));
+}
+
+/* --- 8. designed no-ops: M-- C-y and C-u M-y ---------------------- */
+
+void test_reverse_modifier_noop_combinations(void) {
+	struct buffer *buf = make_test_buffer("stub ");
+
+	kill_range(buf, 0, 0, 4, 0);
+	TEST_ASSERT_EQUAL_STRING(" ", row_str(buf, 0));
+
+	/* M-- C-y: nothing happens. */
+	buf->cx = buf->row[0].size;
+	buf->cy = 0;
+	yank(UARG_REVERSE);
+	TEST_ASSERT_EQUAL_STRING(" ", row_str(buf, 0));
+
+	/* Yank, then C-u M-y: nothing happens, buffer unchanged. */
+	yank(0);
+	TEST_ASSERT_EQUAL_STRING(" stub", row_str(buf, 0));
+	yankPop(4);
+	TEST_ASSERT_EQUAL_STRING(" stub", row_str(buf, 0));
+}
+
+/* --- 9. argument keys don't break the yank chain ------------------ */
+
+void test_negative_arg_preserves_kill_ring_pos(void) {
+	struct buffer *buf = make_test_buffer("abc def ghi");
+
+	kill_range(buf, 8, 0, 11, 0);
+	kill_range(buf, 4, 0, 7, 0);
+
+	buf->cx = buf->row[0].size;
+	buf->cy = 0;
+
+	/* C-y, then M-- as a keypress, then M-y: the M-- keystroke must
+	 * not reset E.kill_ring_pos, or the pop reports "not after
+	 * yank".  Full dispatch path. */
+	processKeypress(CMD_YANK);
+	TEST_ASSERT_EQUAL_STRING("abc  def", row_str(buf, 0));
+	processKeypress(CMD_NEGATIVE_ARG);
+	TEST_ASSERT_EQUAL_INT(UARG_REVERSE, E.uarg);
+	processKeypress(CMD_YANK_POP);
+	TEST_ASSERT_EQUAL_STRING("abc  ghi", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(0, E.uarg); /* consumed by dispatch */
 }
 
 int main(void) {
@@ -235,6 +287,9 @@ int main(void) {
 	RUN_TEST(test_rectangle_yank_preserves_geometry);
 	RUN_TEST(test_empty_kill_not_recorded);
 	RUN_TEST(test_yank_rectangle_without_rect_kill);
-	RUN_TEST(test_yank_with_arg_selects_string_past_rectangle);
+	RUN_TEST(test_reverse_yank_leaves_point_before_text);
+	RUN_TEST(test_reverse_yank_pop_cycles_forward);
+	RUN_TEST(test_reverse_modifier_noop_combinations);
+	RUN_TEST(test_negative_arg_preserves_kill_ring_pos);
 	return TEST_END();
 }

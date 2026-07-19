@@ -43,7 +43,7 @@ maintains a ring of the 8 most recent mark positions. Setting the mark pushes th
 Deleted or copied text is stored in the
 .Sy kill ring
 (clipboard history).
-Yanking retrieves text from the kill ring and inserts it in the buffer ('paste'). Successive yanks can cycle through previous kills.
+Yanking retrieves text from the kill ring and inserts it in the buffer ('paste'). Successive yanks can cycle through previous kills, in either direction.
 .Ss Universal Argument
 The
 .Cm C-u
@@ -59,6 +59,17 @@ multiplies the argument by 4 (e.g.,
 Typing digits after
 .Cm C-u
 sets the argument to that number.
+Arguments are always positive; there are no negative numeric arguments.
+.Pp
+The
+.Cm M--
+prefix is a
+.Sy reverse modifier
+rather than a number: it flips the direction of the next command for the commands that understand it \(em yank pop, the transpose commands, and the word case commands.
+Other commands ignore it.
+Digits typed after
+.Cm M--
+are refused.
 .Sh COMMANDS
 Commands largely follow Emacs conventions.
 .Cm C-
@@ -158,8 +169,14 @@ Copy region or rectangle to kill ring.
 Copy region to system clipboard (OSC 52) and kill ring.
 .It Cm C-y
 Yank (paste) from kill ring.
+With
+.Cm C-u ,
+yank leaving the cursor before the inserted text and the mark after it.
 .It Cm M-y
 Yank pop: Cycle through previous kills after yanking.
+With
+.Cm M-- ,
+cycle in the opposite direction (toward newer kills).
 .It Cm C-k
 Kill to end of line.
 .It Cm M-d
@@ -170,12 +187,23 @@ Kill word backward.
 Zap to char: Kill up to and including a given character.
 .It Cm C-t
 Transpose characters.
+With
+.Cm M-- ,
+drag the character before the cursor backward instead.
 .It Cm M-t
 Transpose words.
+With
+.Cm M-- ,
+drag the word before the cursor backward instead.
 .It Cm C-x C-t
 Transpose sentences.
+With
+.Cm M-- ,
+drag the sentence before the cursor backward instead.
 .It Cm C-u
 Universal Prefix: Followed by a number it repeats the succeeding command.
+.It Cm M--
+Reverse modifier: Makes the next yank pop, transpose, or word case command act in the opposite direction. Ignored by other commands.
 .It Cm C-j
 Insert newline and indent (match previous line).
 .It Cm C-o
@@ -188,10 +216,19 @@ Convert region to lowercase.
 Convert region to uppercase.
 .It Cm M-c
 Capitalize word.
+With
+.Cm M-- ,
+capitalize the word before the cursor without moving.
 .It Cm M-u
 Upcase word.
+With
+.Cm M-- ,
+upcase the word before the cursor without moving.
 .It Cm M-l
 Downcase word.
+With
+.Cm M-- ,
+downcase the word before the cursor without moving.
 .It Cm DEL
 Delete character under cursor.
 .It Cm M-/

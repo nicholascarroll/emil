@@ -321,7 +321,47 @@ void copyRegion(void) {
 	E.buf->marky = origMarky;
 }
 
-void yank(int count) {
+/* Direction of the most recent user-level yank.  M-y cycling repeats
+ * the insertion in the same style, so "C-u C-y M-y M-y ..." keeps
+ * point before each candidate just as the initial yank did. */
+static int yank_style_reverse = 0;
+
+/* Insert the current kill at point.  Forward style leaves point after
+ * the inserted text; reverse style leaves point before it and sets
+ * the mark after it.  Does not touch E.kill_ring_pos — that is the
+ * caller's bookkeeping. */
+static void yankInsert(int reverse) {
+	if (E.kill.is_rectangle) {
+		/* Rectangles have their own geometry-driven point
+		 * placement; the reverse style does not apply. */
+		yankRectangle();
+		return;
+	}
+
+	int killLen = strlen((char *)E.kill.str);
+
+	int sx = E.buf->cx, sy = E.buf->cy;
+	int ex, ey;
+	mutateInsert(E.buf, sx, sy, E.kill.str, killLen, &ex, &ey);
+
+	if (reverse) {
+		E.buf->cx = sx;
+		E.buf->cy = sy;
+		E.buf->markx = ex;
+		E.buf->marky = ey;
+		E.buf->mark_active = 1;
+	} else {
+		E.buf->cx = ex;
+		E.buf->cy = ey;
+	}
+}
+
+void yank(int uarg) {
+	/* M-- C-y is undefined by design: the reverse modifier belongs
+	 * to M-y, transpose, and the case commands. */
+	if (uarg == UARG_REVERSE)
+		return;
+
 	if (rejectIfReadOnly(E.buf))
 		return;
 
@@ -330,64 +370,26 @@ void yank(int count) {
 		return;
 	}
 
-	/* Numeric argument selects which kill ring entry to yank.
-	 * 0 or 1 = most recent, 2 = second most recent, etc.
-	 * Matches GNU Emacs C-y behavior. */
-	if (count < 1)
-		count = 1;
-	if (count > 1) {
-		int idx = E.kill_history.count - count;
-		if (idx < 0)
-			idx = 0;
-		struct historyEntry *entry = getHistoryAt(&E.kill_history, idx);
-		if (!entry) {
-			setStatusMessage(msg_kill_ring_empty);
-			return;
-		}
-		clearText(&E.kill);
-		E.kill.str = (uint8_t *)xstrdup(entry->str);
-		E.kill.is_rectangle = entry->is_rectangle;
-		E.kill.rect_width = entry->rect_width;
-		E.kill.rect_height = entry->rect_height;
-
-		/* If the selected entry is a rectangle, delegate */
-		if (entry->is_rectangle) {
-			E.kill_ring_pos = idx;
-			yankRectangle();
-			return;
-		}
-	} else if (E.kill.is_rectangle) {
-		/* count == 1: the head of the kill ring is a rectangle,
-		 * so yank it as one rather than inserting the raw
-		 * rw*rh byte block inline.  Callers do not make this
-		 * decision — see the count > 1 path above, where the
-		 * entry selected by the argument may differ from the
-		 * head. */
-		yankRectangle();
-		return;
-	}
-
-	int killLen = strlen((char *)E.kill.str);
-
-	int ex, ey;
-	mutateInsert(E.buf, E.buf->cx, E.buf->cy, E.kill.str, killLen, &ex,
-		     &ey);
-
-	E.buf->cx = ex;
-	E.buf->cy = ey;
+	/* Any C-u prefix (there is no numeric meaning for yank) selects
+	 * the reverse style: point stays before the yanked text, mark
+	 * is set after it. */
+	yank_style_reverse = uarg > 0;
+	yankInsert(yank_style_reverse);
 
 	/* Set kill ring position so M-y continues from here */
-	if (count > 1) {
-		E.kill_ring_pos = E.kill_history.count - count;
-		if (E.kill_ring_pos < 0)
-			E.kill_ring_pos = 0;
-	} else {
-		E.kill_ring_pos =
-			E.kill_history.count > 0 ? E.kill_history.count - 1 : 0;
-	}
+	E.kill_ring_pos = E.kill_history.count > 0 ? E.kill_history.count - 1 :
+						     0;
 }
 
-void yankPop(void) {
+void yankPop(int uarg) {
+	/* C-u M-y is undefined by design: a repeat count has no meaning
+	 * for cycling, and numeric ring selection does not exist. */
+	if (uarg > 0)
+		return;
+
+	if (rejectIfReadOnly(E.buf))
+		return;
+
 	if (E.kill_history.count == 0) {
 		setStatusMessage(msg_kill_ring_empty);
 		return;
@@ -405,9 +407,15 @@ void yankPop(void) {
 
 	doUndo(E.buf, 1);
 
-	E.kill_ring_pos--;
-	if (E.kill_ring_pos < 0) {
-		E.kill_ring_pos = E.kill_history.count - 1;
+	if (uarg == UARG_REVERSE) {
+		/* M-- M-y: cycle toward newer kills. */
+		E.kill_ring_pos++;
+		if (E.kill_ring_pos >= E.kill_history.count)
+			E.kill_ring_pos = 0;
+	} else {
+		E.kill_ring_pos--;
+		if (E.kill_ring_pos < 0)
+			E.kill_ring_pos = E.kill_history.count - 1;
 	}
 
 	struct historyEntry *entry =
@@ -418,9 +426,7 @@ void yankPop(void) {
 		E.kill.is_rectangle = entry->is_rectangle;
 		E.kill.rect_width = entry->rect_width;
 		E.kill.rect_height = entry->rect_height;
-		int saved_pos = E.kill_ring_pos;
-		yank(1);
-		E.kill_ring_pos = saved_pos;
+		yankInsert(yank_style_reverse);
 	} else {
 		setStatusMessage(msg_no_more_kill_entries);
 	}

@@ -250,8 +250,20 @@ void checkFileModified(void) {
 		armTimer();
 		int rc = lockFile(E.buf, iopath);
 		disarmTimer();
-		if (rc == 0 && !file_check_timed_out) {
-			/* Acquired — warning clears. */
+		if (rc == 0) {
+			/* Acquired — warning clears.  Do NOT gate this
+			 * on !file_check_timed_out: on a slow filesystem
+			 * every syscall inside lockFile can succeed
+			 * individually while their sum exceeds the 50ms
+			 * deadline.  lock_fd is held either way, and
+			 * since this job only runs while lock_fd < 0,
+			 * skipping the clear here would latch the
+			 * contradictory state "lock held + blocked by
+			 * PID" (and its status-bar warning) for the
+			 * rest of the session.  The timeout flag only
+			 * says the probe was slow, not that its result
+			 * is invalid — an interrupted syscall makes
+			 * lockFile fail, landing in the rc != 0 path. */
 			E.buf->lock_blocked_pid = 0;
 			setStatusMessage(msg_warn_lock_acquired);
 		}
@@ -1251,13 +1263,21 @@ char *readAllFromFd(int fd, size_t *out_len) {
 	size_t cap = BUFSIZ;
 	size_t len = 0;
 	char *buf = xmalloc(cap);
-	ssize_t n;
-	while ((n = read(fd, buf + len, cap - len)) > 0) {
-		len += (size_t)n;
-		if (len >= cap) {
-			cap <<= 1;
-			buf = xrealloc(buf, cap);
+	for (;;) {
+		ssize_t n = read(fd, buf + len, cap - len);
+		if (n > 0) {
+			len += (size_t)n;
+			if (len >= cap) {
+				cap <<= 1;
+				buf = xrealloc(buf, cap);
+			}
+			continue;
 		}
+		/* A signal (SIGWINCH, SIGCONT, ...) landing mid-read
+		 * must not silently truncate the input. */
+		if (n < 0 && errno == EINTR)
+			continue;
+		break; /* EOF, or a real error: return what we have */
 	}
 	*out_len = len;
 	return buf;
@@ -1270,7 +1290,9 @@ char *readAllFromFd(int fd, size_t *out_len) {
  * marked read-only.
  *
  * Returns the new buffer, or NULL if the data contains null bytes
- * (which would indicate binary / non-UTF-8 content).
+ * or is not valid UTF-8.  editorOpen() enforces the same invariant
+ * for files; every load path must, because row primitives (see
+ * rowDelChar) assume all buffer content is valid UTF-8.
  */
 struct buffer *loadStdinBuffer(const char *data, size_t len) {
 	/* Reject binary data: null bytes can't be represented */
@@ -1300,6 +1322,13 @@ struct buffer *loadStdinBuffer(const char *data, size_t len) {
 			end--;
 		appendRowRaw(buf, (const uint8_t *)&data[start],
 			     (int)(end - start));
+	}
+
+	/* Validate UTF-8 encoding, mirroring editorOpen: the null-byte
+	 * check above only catches a subset of binary input. */
+	if (!checkUTF8Validity(buf)) {
+		destroyBuffer(buf);
+		return NULL;
 	}
 
 	/* Stdin content is read-only: the *stdin* pseudo-file has no

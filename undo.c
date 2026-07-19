@@ -227,7 +227,7 @@ void doUndo(struct buffer *buf, int count) {
 
 	buf->mark_active = 0;
 
-	int times = count ? count : 1;
+	int times = UARG_COUNT(count);
 	for (int j = 0; j < times; j++) {
 		if (buf->undo == NULL) {
 			setStatusMessage(msg_no_undo);
@@ -269,7 +269,7 @@ void doRedo(struct buffer *buf, int count) {
 
 	buf->mark_active = 0;
 
-	int times = count ? count : 1;
+	int times = UARG_COUNT(count);
 	for (int j = 0; j < times; j++) {
 		if (buf->redo == NULL) {
 			setStatusMessage(msg_no_redo);

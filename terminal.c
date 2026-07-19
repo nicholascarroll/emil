@@ -33,6 +33,15 @@ void install_handler(int signum, void (*handler)(int), int flags) {
 }
 
 void die(const char *s) {
+	/* die() ends in exit(), which runs the atexit handlers.  If
+	 * anything on that path (or editorCleanup below) routes back
+	 * here, calling exit() a second time — from within exit
+	 * processing — is undefined behavior.  Detect re-entry and
+	 * leave immediately without re-running any cleanup. */
+	static int dying = 0;
+	if (dying)
+		_exit(1);
+	dying = 1;
 	IGNORE_RETURN(write(STDOUT_FILENO, CSI "2J", 4));
 	IGNORE_RETURN(write(STDOUT_FILENO, CSI "H", 3));
 	perror(s);
@@ -41,11 +50,14 @@ void die(const char *s) {
 	exit(1);
 }
 
+/* Registered with atexit(); also called directly before printing
+ * fatal errors.  Best-effort by design: this runs during exit
+ * processing, where routing a failure through die() would call
+ * exit() inside exit() (undefined behavior).  If tcsetattr fails
+ * here the terminal is beyond saving anyway. */
 void disableRawMode(void) {
-	if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_termios) == -1)
-		die("disableRawMode tcsetattr");
-	if (write(STDOUT_FILENO, CSI "?1049l", 8) == -1)
-		die("disableRawMode write");
+	IGNORE_RETURN(tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_termios));
+	IGNORE_RETURN(write(STDOUT_FILENO, CSI "?1049l", 8));
 }
 
 /*
@@ -232,9 +244,23 @@ void copyToClipboard(const uint8_t *text) {
 }
 
 void deserializeUnicode(void) {
+	/* Guard every read: a truncated macro must not index past
+	 * nkeys into uninitialized key slots.  On truncation fall
+	 * back to a replacement character so callers still see a
+	 * valid (if wrong) UTF-8 sequence. */
+	if (E.playback >= E.macro.nkeys) {
+		E.unicode[0] = '?';
+		E.nunicode = 1;
+		return;
+	}
 	E.unicode[0] = E.macro.keys[E.playback++];
 	E.nunicode = utf8_nBytes(E.unicode[0]);
 	for (int i = 1; i < E.nunicode; i++) {
+		if (E.playback >= E.macro.nkeys) {
+			E.unicode[0] = '?';
+			E.nunicode = 1;
+			return;
+		}
 		E.unicode[i] = E.macro.keys[E.playback++];
 	}
 }
@@ -292,6 +318,13 @@ int terminalPushbackPending(void) {
  * Returns key tokens only — no binding policy. */
 int readKey(void) {
 	if (E.playback) {
+		/* A nested readKey (prefix sub-key, confirmation
+		 * prompt) can be reached with the macro already
+		 * exhausted if the recording missed a key.  Reading
+		 * past nkeys returns uninitialized ints from the
+		 * keys array; fail the read instead. */
+		if (E.playback >= E.macro.nkeys)
+			return -1;
 		int ret = E.macro.keys[E.playback++];
 		if (ret == KEY_UNICODE) {
 			deserializeUnicode();
