@@ -143,6 +143,10 @@ struct buffer {
 	int min_name_len;   /* Min chars to show without colliding */
 	uint8_t *query;
 	uint8_t match;
+	int match_len; /* bytes matched at (cx, cy) when match is set.
+			* For a regex this differs from the pattern
+			* length, so the highlight cannot be derived
+			* from strlen(query).  0 = not set. */
 	struct undo *undo;
 	struct undo *redo;
 	struct buffer *next;

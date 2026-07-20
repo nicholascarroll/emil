@@ -118,7 +118,12 @@ static void computeRowHighlightBounds(struct buffer *buf, int filerow,
 
 	/* Search match bounds */
 	if (buf->query && buf->query[0] && buf->match && filerow == buf->cy) {
-		int match_len = strlen((char *)buf->query);
+		/* Length of the text actually matched.  For a regex
+		 * this differs from the pattern length; fall back to
+		 * the pattern length if it was never recorded. */
+		int match_len = buf->match_len > 0 ?
+					buf->match_len :
+					(int)strlen((char *)buf->query);
 		hl->match_start = charsToDisplayColumn(row, buf->cx);
 		hl->match_end = charsToDisplayColumn(row, buf->cx + match_len);
 	}
@@ -333,6 +338,24 @@ static void renderLineWithHighlighting(erow *row, struct abuf *ab,
 		}
 	}
 
+	/* A tab or double-width character that straddles start_col is
+	 * consumed whole by the skip loop, leaving render_x past
+	 * start_col.  Emit that character's still-visible columns as
+	 * spaces; without this they are dropped, the rest of the line
+	 * shifts left, and the cursor no longer sits on its character.
+	 * No-op when the caller passed start_byte (word-wrap), since a
+	 * sub-line always begins on a character boundary. */
+	if (render_x > start_col) {
+		int pad_hl = 0;
+		for (int col = start_col; col < render_x && col < end_col;
+		     col++) {
+			updateHighlight(ab, &pad_hl,
+					isHighlighted(hl, col) ? 1 : 0);
+			abAppend(ab, " ", 1);
+		}
+		updateHighlight(ab, &pad_hl, 0);
+	}
+
 	/* Render visible portion */
 	while (char_idx < row->size && render_x < end_col) {
 		uint8_t c = row->chars[char_idx];
@@ -429,16 +452,22 @@ void setScxScy(struct window *win) {
 		win->scx = sub_col;
 	}
 
-	if (win->scy < 0)
-		win->scy = 0;
-	if (win->scy >= win->height)
-		win->scy = win->height - 1;
 	if (win->scx < 0)
 		win->scx = 0;
+	/* A cursor sitting exactly at the right edge of a wrapped
+	 * sub-line belongs on the next screen line.  This must happen
+	 * BEFORE the height clamp: applying it afterwards could push
+	 * scy back to win->height, i.e. onto the status bar row.
+	 * scroll() applies the same bump so the viewport has already
+	 * been scrolled to keep this line visible. */
 	if (buf->word_wrap && win->scx >= E.screencols) {
 		win->scy++;
 		win->scx = 0;
 	}
+	if (win->scy < 0)
+		win->scy = 0;
+	if (win->scy >= win->height)
+		win->scy = win->height - 1;
 }
 
 void scroll(void) {
@@ -482,6 +511,12 @@ void scroll(void) {
 			cursorScreenLine(&buf->row[buf->cy], render_pos,
 					 E.screencols, &cursor_sub_line,
 					 &sub_col);
+			/* Mirror the bump setScxScy() applies: a cursor
+			 * at the right edge of a sub-line is drawn on
+			 * the following screen line, so the scroll
+			 * decision must be made against that line. */
+			if (sub_col >= E.screencols)
+				cursor_sub_line++;
 			cursor_screen_line += cursor_sub_line;
 		}
 
@@ -975,8 +1010,6 @@ void drawMinibuffer(struct abuf *ab) {
 			int chunk = msglen - offset;
 			if (chunk > avail)
 				chunk = avail;
-			if (E.buf->query && !E.buf->match)
-				abAppend(ab, "\x1b[91m", 5);
 			abAppend(ab, msg + offset, chunk);
 			abAppend(ab, "\x1b[0m", 4);
 		}

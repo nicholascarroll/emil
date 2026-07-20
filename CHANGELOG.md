@@ -1,5 +1,8 @@
 ## [Unreleased]
-- Implemented read-only buffer protection at the mutation layer
+- Fixed #90 Read-only buffer corruption from kill-rectangle
+- Fixed columns dropped when horizontal scrolling stopped inside a tab.
+- Fixed regex search highlighting the pattern length. #92
+- Fixed cursor drawn on the status bar at an exact wrap boundary in wrap mode.
 
 ## [0.7.0] - 2026-07-20
 - Fixed crash yanking a rectangle into an empty buffer.

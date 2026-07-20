@@ -107,7 +107,12 @@ static char *re_cache_pat = NULL;
 static regex_t re_cache;
 static int re_cache_ok = 0;
 
-static uint8_t *regexSearch(uint8_t *text, uint8_t *pattern) {
+/* On a match, *match_len receives the byte length actually matched.
+ * This is what the display highlights: for a regex it differs from
+ * strlen(pattern), so discarding rm_eo here left the reverse-video
+ * region sized to the pattern rather than the match. */
+static uint8_t *regexSearch(uint8_t *text, uint8_t *pattern, int *match_len) {
+	*match_len = 0;
 	if (!pattern || !text || pattern[0] == '\0') {
 		return NULL;
 	}
@@ -125,12 +130,16 @@ static uint8_t *regexSearch(uint8_t *text, uint8_t *pattern) {
 
 	/* Invalid regex: fall back to literal search */
 	if (!re_cache_ok) {
-		return (uint8_t *)strstr((const char *)text,
-					 (const char *)pattern);
+		uint8_t *lit = (uint8_t *)strstr((const char *)text,
+						 (const char *)pattern);
+		if (lit)
+			*match_len = (int)strlen((const char *)pattern);
+		return lit;
 	}
 
 	regmatch_t match[1];
 	if (regexec(&re_cache, (const char *)text, 1, match, 0) == 0) {
+		*match_len = (int)(match[0].rm_eo - match[0].rm_so);
 		return text + match[0].rm_so;
 	}
 
@@ -213,6 +222,7 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 				      NULL;
 	}
 	bufr->match = 0;
+	bufr->match_len = 0;
 
 	if (key == CTRL('g') || key == CTRL('c') || key == '\r') {
 		last_match = -1;
@@ -240,17 +250,20 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 	if (current >= 0 && current < bufr->numrows) {
 		erow *row = &bufr->row[current];
 		uint8_t *match;
+		int mlen = 0;
 		if (bufr->cx + 1 >= row->size) {
 			match = NULL;
 		} else {
 			if (regex_mode) {
 				match = regexSearch(&(row->chars[bufr->cx + 1]),
-						    query);
+						    query, &mlen);
 			} else {
 				match = (uint8_t *)strstr(
 					(const char *)&(
 						row->chars[bufr->cx + 1]),
 					(const char *)query);
+				if (match)
+					mlen = (int)strlen((const char *)query);
 			}
 		}
 		if (match) {
@@ -261,6 +274,8 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 			       utf8_isCont(row->chars[bufr->cx])) {
 				bufr->cx--;
 			}
+			bufr->match_len =
+				mlen + (int)(match - row->chars) - bufr->cx;
 			scroll();
 			bufr->match = 1;
 			return;
@@ -281,11 +296,14 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 
 		erow *row = &bufr->row[current];
 		uint8_t *match;
+		int mlen = 0;
 		if (regex_mode) {
-			match = regexSearch(row->chars, query);
+			match = regexSearch(row->chars, query, &mlen);
 		} else {
 			match = (uint8_t *)strstr((const char *)row->chars,
 						  (const char *)query);
+			if (match)
+				mlen = (int)strlen((const char *)query);
 		}
 		if (match) {
 			last_match = current;
@@ -295,6 +313,8 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 			       utf8_isCont(row->chars[bufr->cx])) {
 				bufr->cx--;
 			}
+			bufr->match_len =
+				mlen + (int)(match - row->chars) - bufr->cx;
 			scroll();
 			bufr->match = 1;
 			break;

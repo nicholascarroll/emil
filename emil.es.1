@@ -41,7 +41,7 @@ mantiene un historial con las últimas 8 posiciones de marca. Al establecer la m
 .Ss El Historial de Cortes (Kill Ring)
 El texto cortado o copiado se almacena en el
 .Sy historial de cortes
-La operación de pegado (yank) recupera texto del historal de cortes y lo inserta en el búfer. Los pegados sucesivos permiten rotar a través de elementos cortados anteriormente.
+La operación de pegado (yank) recupera texto del historal de cortes y lo inserta en el búfer. Los pegados sucesivos permiten rotar a través de elementos cortados anteriormente, en cualquier dirección.
 .Ss Argumento Universal
 El comando
 .Cm C-u
@@ -57,6 +57,17 @@ multiplica el argumento por 4 (p. ej.,
 Escribir dígitos después de
 .Cm C-u
 establece el argumento en ese número.
+No se permiten argumentos negativos.
+.Pp
+El prefijo
+.Cm M--
+es un
+.Sy modificador de inversión
+en lugar de un número: invierte la dirección del siguiente comando para los comandos que lo admiten \(em recuperar marca (yank pop), los comandos de transposición y los comandos de mayúsculas y minúsculas de palabra.
+Los demás comandos lo ignoran.
+Los dígitos escritos después de
+.Cm M--
+son rechazados.
 .Sh COMANDOS
 Los comandos siguen mayoritariamente las convenciones de Emacs.
 .Cm C-
@@ -156,8 +167,14 @@ Copiar región o rectángulo al historial de cortes.
 Copiar región al portapapeles del sistema (OSC 52) y al historial de cortes.
 .It Cm C-y
 Pegar (yank) desde el historial de cortes.
+Con
+.Cm C-u ,
+pegar dejando el cursor antes del texto insertado y la marca después de él.
 .It Cm M-y
 Recuperar marca (Yank pop): Rotar por texto cortado previas tras pegar.
+Con
+.Cm M-- ,
+rotar en la dirección opuesta (hacia los cortes más recientes).
 .It Cm C-k
 Eliminar hasta el final de la línea.
 .It Cm M-d
@@ -168,12 +185,23 @@ Eliminar palabra hacia atrás.
 Cortar hast carácter (Zap to char): Cortar hasta incluir un carácter dado.
 .It Cm C-t
 Transponer caracteres.
+Con
+.Cm M-- ,
+arrastrar hacia atrás el carácter anterior al cursor.
 .It Cm M-t
 Transponer palabras.
+Con
+.Cm M-- ,
+arrastrar hacia atrás la palabra anterior al cursor.
 .It Cm C-x C-t
 Transponer oraciones.
+Con
+.Cm M-- ,
+arrastrar hacia atrás la oración anterior al cursor.
 .It Cm C-u
 Prefijo Universal: Seguido de un número, repite el comando siguiente.
+.It Cm M--
+Modificador de inversión: Hace que el siguiente comando de recuperar marca (yank pop), transposición o mayúsculas y minúsculas de palabra actúe en la dirección opuesta. Los demás comandos lo ignoran.
 .It Cm C-j
 Insertar salto de línea e indentar (coincidir con la línea anterior).
 .It Cm C-o
@@ -186,10 +214,19 @@ Convertir región a minúsculas.
 Convertir región a mayúsculas.
 .It Cm M-c
 Capitalizar palabra (primera letra en mayúscula).
+Con
+.Cm M-- ,
+capitalizar la palabra anterior al cursor sin mover el cursor.
 .It Cm M-u
 Convertir palabra a mayúsculas.
+Con
+.Cm M-- ,
+convertir a mayúsculas la palabra anterior al cursor sin mover el cursor.
 .It Cm M-l
 Convertir palabra a minúsculas.
+Con
+.Cm M-- ,
+convertir a minúsculas la palabra anterior al cursor sin mover el cursor.
 .It Cm DEL
 Suprimir carácter bajo el cursor.
 .It Cm M-/

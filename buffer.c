@@ -243,6 +243,7 @@ struct buffer *newBuffer(void) {
 	ret->display_name = NULL;
 	ret->min_name_len = 0;
 	ret->query = NULL;
+	ret->match_len = 0;
 	ret->dirty = 0;
 	ret->special_buffer = 0;
 	ret->undo = newUndo();

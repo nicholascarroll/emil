@@ -624,6 +624,32 @@ static int writeAtomic(const char *iopath, const char *buf, size_t len) {
 		return -1;
 	}
 
+	/* The fsync above got the file's contents onto stable storage;
+	 * rename() only altered the parent directory, whose entry is
+	 * still just dirty page cache.  Without this second sync a power
+	 * loss can lose the rename and leave the old file in place, so
+	 * the save silently reverts.  Errors are deliberately ignored:
+	 * the data is already durable and the rename has succeeded, so
+	 * the file is intact either way, and some filesystems reject
+	 * fsync on a directory fd with EINVAL.  Reporting failure here
+	 * would tell the user the save failed when it did not. */
+	char dirpath[PATH_MAX];
+	const char *slash = strrchr(target, '/');
+	if (slash == NULL) {
+		dirpath[0] = '.';
+		dirpath[1] = '\0';
+	} else {
+		size_t dlen = (slash == target) ? 1 : (size_t)(slash - target);
+		memcpy(dirpath, target, dlen);
+		dirpath[dlen] = '\0';
+	}
+
+	int dfd = open(dirpath, O_RDONLY);
+	if (dfd != -1) {
+		fsync(dfd);
+		close(dfd);
+	}
+
 	return 0;
 }
 
