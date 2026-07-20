@@ -155,6 +155,18 @@ void test_insert_newline_and_indent(void) {
 	TEST_ASSERT(buf->row[1].chars[3] == ' ');
 }
 
+/* Regression: C-j at line 0 of a read-only buffer read row[-1]
+ * (ASan crash); with the guard the buffer is simply untouched. */
+void test_newline_indent_readonly_line0(void) {
+	struct buffer *buf = make_test_buffer("\tHello");
+	buf->read_only = 1;
+	buf->cx = 0;
+	E.buf = buf;
+	insertNewlineAndIndent(1);
+	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
+	TEST_ASSERT_EQUAL_STRING("\tHello", row_str(buf, 0));
+}
+
 void test_open_line(void) {
 	struct buffer *buf = make_test_buffer("Hello");
 	buf->cx = 5;
@@ -210,24 +222,6 @@ void test_backspace_joins_lines(void) {
 
 /* ---- Indentation ---- */
 
-void test_indent_tab(void) {
-	struct buffer *buf = make_test_buffer("Hello");
-	buf->cx = 0;
-	buf->indent = 0;
-	E.buf = buf;
-	editorIndent(1);
-	TEST_ASSERT_EQUAL_STRING("\tHello", row_str(buf, 0));
-}
-
-void test_indent_spaces(void) {
-	struct buffer *buf = make_test_buffer("Hello");
-	buf->cx = 0;
-	buf->indent = 4;
-	E.buf = buf;
-	editorIndent(1);
-	TEST_ASSERT_EQUAL_STRING("    Hello", row_str(buf, 0));
-}
-
 void test_unindent(void) {
 	struct buffer *buf = make_test_buffer("\tHello");
 	buf->cx = 1;
@@ -235,6 +229,16 @@ void test_unindent(void) {
 	E.buf = buf;
 	unindent(1);
 	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
+}
+
+void test_unindent_readonly(void) {
+	struct buffer *buf = make_test_buffer("\tHello");
+	buf->read_only = 1;
+	buf->cx = 1;
+	buf->indent = 0;
+	E.buf = buf;
+	unindent(1);
+	TEST_ASSERT_EQUAL_STRING("\tHello", row_str(buf, 0));
 }
 
 /* ---- Paragraph boundary helpers ---- */
@@ -752,6 +756,7 @@ int main(void) {
 	RUN_TEST(test_insert_newline_at_beginning);
 	RUN_TEST(test_insert_newline_at_end);
 	RUN_TEST(test_insert_newline_and_indent);
+	RUN_TEST(test_newline_indent_readonly_line0);
 	RUN_TEST(test_open_line);
 
 	RUN_TEST(test_del_char_middle);
@@ -759,9 +764,8 @@ int main(void) {
 	RUN_TEST(test_backspace_middle);
 	RUN_TEST(test_backspace_joins_lines);
 
-	RUN_TEST(test_indent_tab);
-	RUN_TEST(test_indent_spaces);
 	RUN_TEST(test_unindent);
+	RUN_TEST(test_unindent_readonly);
 
 	/* Paragraph boundary helpers */
 	RUN_TEST(test_forward_para_boundary);

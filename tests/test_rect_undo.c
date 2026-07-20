@@ -501,6 +501,54 @@ void test_yank_rect_into_empty_buffer(void) {
 }
 
 /* ----------------------------------------------------------------
+ * Read-only refusal.  killRectangle previously corrupted read-only
+ * buffers (mixed accept/reject sub-operations); stringRectangle and
+ * replaceRegex prompted, then mutated.  All refuse before prompting,
+ * so the tests can call them directly.
+ * ---------------------------------------------------------------- */
+
+void test_kill_rectangle_readonly(void) {
+	const char *lines[] = { "ABCDE", "FGHIJ", "KLMNO" };
+	struct buffer *buf = make_test_buffer_lines(lines, 3);
+	buf->read_only = 1;
+	buf->cx = 1;
+	buf->cy = 0;
+	set_mark(buf, 4, 2);
+	killRectangle();
+	TEST_ASSERT_EQUAL_STRING("ABCDE", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_STRING("FGHIJ", row_str(buf, 1));
+	TEST_ASSERT_EQUAL_STRING("KLMNO", row_str(buf, 2));
+	TEST_ASSERT_EQUAL_INT(0, buf->dirty);
+	buf->read_only = 0;
+}
+
+void test_string_rectangle_readonly(void) {
+	const char *lines[] = { "ABCDE", "FGHIJ" };
+	struct buffer *buf = make_test_buffer_lines(lines, 2);
+	buf->read_only = 1;
+	buf->cx = 1;
+	buf->cy = 0;
+	set_mark(buf, 3, 1);
+	stringRectangle();
+	TEST_ASSERT_EQUAL_STRING("ABCDE", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_STRING("FGHIJ", row_str(buf, 1));
+	buf->read_only = 0;
+}
+
+void test_replace_regex_readonly(void) {
+	const char *lines[] = { "alpha beta", "gamma beta" };
+	struct buffer *buf = make_test_buffer_lines(lines, 2);
+	buf->read_only = 1;
+	buf->cx = 0;
+	buf->cy = 0;
+	set_mark(buf, 10, 1);
+	replaceRegex();
+	TEST_ASSERT_EQUAL_STRING("alpha beta", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_STRING("gamma beta", row_str(buf, 1));
+	buf->read_only = 0;
+}
+
+/* ----------------------------------------------------------------
  * Runner
  * ---------------------------------------------------------------- */
 
@@ -520,6 +568,11 @@ int main(void) {
 	RUN_TEST(test_kill_rect_multi_row_redo);
 	RUN_TEST(test_kill_rect_short_rows_undo);
 	RUN_TEST(test_kill_rect_swapped_columns_undo);
+
+	/* Read-only refusal */
+	RUN_TEST(test_kill_rectangle_readonly);
+	RUN_TEST(test_string_rectangle_readonly);
+	RUN_TEST(test_replace_regex_readonly);
 
 	/* Copy rectangle */
 	RUN_TEST(test_copy_rect_preserves_buffer);

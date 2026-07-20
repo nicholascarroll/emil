@@ -137,6 +137,9 @@ void openLine(int count) {
 }
 
 void insertNewlineAndIndent(int count) {
+	if (rejectIfReadOnly(E.buf))
+		return;
+
 	if (count <= 0)
 		count = 1;
 
@@ -155,28 +158,10 @@ void insertNewlineAndIndent(int count) {
 
 /* Indentation */
 
-void editorIndent(int rept) {
-	int ocx = E.buf->cx;
-	int indWidth = 1;
-	if (E.buf->indent) {
-		indWidth = E.buf->indent;
-	}
-	E.buf->cx = 0;
-	for (int i = 0; i < rept; i++) {
-		if (E.buf->indent) {
-			for (int j = 0; j < E.buf->indent; j++) {
-				undoAppendChar(E.buf, ' ');
-				insertChar(E.buf, ' ', 1);
-			}
-		} else {
-			undoAppendChar(E.buf, '\t');
-			insertChar(E.buf, '\t', 1);
-		}
-	}
-	E.buf->cx = ocx + indWidth * rept;
-}
-
 void unindent(int rept) {
+	if (rejectIfReadOnly(E.buf))
+		return;
+
 	if (E.buf->cy >= E.buf->numrows) {
 		setStatusMessage(msg_end_of_buffer);
 		return;

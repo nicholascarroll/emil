@@ -54,7 +54,7 @@ make && make install
 
 ### Internationalization Support
 
-`emil` edits text in any any left-to-right script encoded in valid UTF-8. Editing of right-to-left scripts such as Arabic and Hebrew is not supported. 
+`emil` edits text in any left-to-right script encoded in valid UTF-8. Editing of right-to-left scripts such as Arabic and Hebrew is not supported. 
 
 Application messages and the man page can be set to any of the following languages at build time. Default is English.
 
@@ -135,7 +135,7 @@ Shell integration is a compile-time option (enabled by default). It enables shel
   Takes the current region, feeds it to the shell command, and **replaces the region** with the output of the command.  
 
 - **`Alt-!`**   
-  Enter a shell command in the minibuffer and the output displays in *Shell Output*.
+  Enter a shell command in the minibuffer and the output displays in `*Shell Output*`.
 
 - **`Alt-x diff-buffer-with-file`**    
   Shows unsaved changes.

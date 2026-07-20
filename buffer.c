@@ -132,9 +132,6 @@ void freeRow(erow *row) {
 }
 
 void delRow(struct buffer *bufr, int at) {
-	if (rejectIfReadOnly(bufr))
-		return;
-
 	if (at < 0 || at >= bufr->numrows)
 		return;
 	freeRow(&bufr->row[at]);
@@ -172,9 +169,6 @@ void rowInsertChar(struct buffer *bufr, erow *row, int at, int c) {
 }
 
 void rowInsertUnicode(struct buffer *bufr, erow *row, int at) {
-	if (rejectIfReadOnly(bufr))
-		return;
-
 	if (at < 0 || at > row->size)
 		at = row->size;
 	int needed = row->size + 1 + E.nunicode;
@@ -351,11 +345,8 @@ struct buffer *findOrCreateSpecialBuffer(const char *name) {
 }
 
 void clearBuffer(struct buffer *buf) {
-	int was_read_only = buf->read_only;
-	buf->read_only = 0;
 	while (buf->numrows > 0)
 		delRow(buf, 0);
-	buf->read_only = was_read_only;
 }
 
 void closeSpecialBuffer(const char *name) {

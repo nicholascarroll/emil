@@ -4,6 +4,7 @@
 #include "test.h"
 #include "test_harness.h"
 #include "edit.h"
+#include "mutate.h"
 #include <stdint.h>
 
 /* ---- Basic undo/redo ---- */
@@ -183,6 +184,30 @@ void tearDown(void) {
 	cleanupTestEditor();
 }
 
+/* ---- Mutation-layer read-only choke point ---- */
+
+/* mutateReplace must refuse read-only buffers before clearRedos:
+ * buffer unchanged, no undo pushed, redo stack untouched. */
+void test_mutate_replace_readonly(void) {
+	struct buffer *buf = make_test_buffer("Hello");
+
+	/* Seed a redo record: one real insert, then undo it. */
+	buf->cx = 0;
+	undoAppendChar(buf, 'X');
+	insertChar(buf, 'X', 1);
+	doUndo(buf, 1);
+	TEST_ASSERT_NOT_NULL(buf->redo);
+
+	buf->read_only = 1;
+	mutateReplace(buf, 0, 0, 5, 0, (const uint8_t *)"Hello", 5,
+		      (const uint8_t *)"bye", 3, 0, NULL, NULL);
+
+	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
+	TEST_ASSERT_NULL(buf->undo);
+	TEST_ASSERT_NOT_NULL(buf->redo);
+	buf->read_only = 0;
+}
+
 int main(void) {
 	TEST_BEGIN();
 
@@ -199,6 +224,8 @@ int main(void) {
 	RUN_TEST(test_redo_cleared_after_new_edit);
 
 	RUN_TEST(test_undo_newline_insert);
+
+	RUN_TEST(test_mutate_replace_readonly);
 
 	return TEST_END();
 }

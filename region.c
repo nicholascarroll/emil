@@ -484,6 +484,9 @@ void transformRegion(uint8_t *(*transformer)(uint8_t *)) {
 }
 
 void replaceRegex(void) {
+	if (rejectIfReadOnly(E.buf))
+		return;
+
 	if (markInvalid())
 		return;
 	normalizeRegion();
@@ -589,6 +592,9 @@ void replaceRegex(void) {
 }
 
 void stringRectangle(void) {
+	if (rejectIfReadOnly(E.buf))
+		return;
+
 	if (markInvalid())
 		return;
 
@@ -706,6 +712,9 @@ void copyRectangle(void) {
 }
 
 void killRectangle(void) {
+	if (rejectIfReadOnly(E.buf))
+		return;
+
 	if (markInvalid())
 		return;
 	normalizeRegion();

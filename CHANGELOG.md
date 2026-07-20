@@ -1,3 +1,5 @@
+## [Unreleased]
+- Implemented read-only buffer protection at the mutation layer
 
 ## [0.7.0] - 2026-07-20
 - Fixed crash yanking a rectangle into an empty buffer.

@@ -123,6 +123,25 @@ void test_insert_file_nonexistent_returns_error(void) {
 	TEST_ASSERT_EQUAL_STRING("existing", row_str(buf, 0));
 }
 
+/* --- 4. insertFile refuses read-only buffers ---------------------- */
+
+void test_insert_file_readonly(void) {
+	char *path = make_temp_file("aaa\nbbb\n");
+	TEST_ASSERT_NOT_NULL(path);
+
+	struct buffer *buf = make_test_buffer("existing");
+	buf->read_only = 1;
+
+	int rc = insertFileAtPath(buf, path, path);
+	TEST_ASSERT_EQUAL_INT(1, rc);
+	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
+	TEST_ASSERT_EQUAL_STRING("existing", row_str(buf, 0));
+
+	buf->read_only = 0;
+	unlink(path);
+	free(path);
+}
+
 /* --- runner ------------------------------------------------------- */
 
 int main(void) {
@@ -130,5 +149,6 @@ int main(void) {
 	RUN_TEST(test_insert_file_is_dirty_and_undoable);
 	RUN_TEST(test_insert_file_empty_buffer_no_trailing_row);
 	RUN_TEST(test_insert_file_nonexistent_returns_error);
+	RUN_TEST(test_insert_file_readonly);
 	return TEST_END();
 }

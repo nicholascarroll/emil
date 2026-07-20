@@ -37,6 +37,13 @@ uint8_t *collectRegionText(struct buffer *buf, int startx, int starty, int endx,
  * immediately before.  This is how yankRectangle gets a rectangle
  * paste with row-extension to undo atomically.  Default usage is 0.
  *
+ * Refuses read-only buffers before any side effect (including
+ * clearRedos): this is the authoritative check for the mutation
+ * layer.  On refusal, *out_endx and *out_endy are NOT written —
+ * callers must not consume the out-params when the buffer is
+ * read-only.  (All current callers are guarded upstream; this is
+ * belt-and-braces.)
+ *
  * Calls clearRedos, records undo, performs mutation via
  * bulkInsert/bulkDelete, calls adjustAllPoints (inside bulk ops),
  * sets buf->dirty, calls updateBuffer.

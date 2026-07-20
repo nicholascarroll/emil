@@ -907,6 +907,9 @@ void findFile(int read_only) {
  * minibuffer prompt.  See fileio.h for contract. */
 int insertFileAtPath(struct buffer *buf, const char *path,
 		     const char *display_name) {
+	if (rejectIfReadOnly(buf))
+		return 1;
+
 	if (display_name == NULL)
 		display_name = path;
 
@@ -1036,6 +1039,13 @@ int insertFileAtPath(struct buffer *buf, const char *path,
 
 void insertFile(void) {
 	struct buffer *buf = E.buf;
+
+	/* Refuse before prompting for a filename.  insertFileAtPath
+	 * remains the load-bearing check; this one only spares the
+	 * user typing a path for an insertion that will be refused. */
+	if (rejectIfReadOnly(buf))
+		return;
+
 	uint8_t *filename =
 		editorPrompt(buf, "Insert file: ", PROMPT_FILES, NULL);
 	if (filename == NULL) {

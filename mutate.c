@@ -51,6 +51,12 @@ void mutateReplace(struct buffer *buf, int startx, int starty, int endx,
 		   int endy, const uint8_t *old_text, int old_len,
 		   const uint8_t *repl, int repl_len, int chain_to_prev,
 		   int *out_endx, int *out_endy) {
+	/* Authoritative read-only check for the mutation layer.  Must
+	 * precede clearRedos; on refusal the out-params are untouched
+	 * (see mutate.h). */
+	if (rejectIfReadOnly(buf))
+		return;
+
 	int is_replace = (old_len > 0 && repl_len > 0);
 
 	clearRedos(buf);
@@ -132,6 +138,9 @@ void mutateInsert(struct buffer *buf, int startx, int starty,
 }
 
 void mutateExtendRows(struct buffer *buf, int from_row, int n_rows) {
+	if (rejectIfReadOnly(buf))
+		return;
+
 	if (n_rows <= 0)
 		return;
 

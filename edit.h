@@ -15,7 +15,6 @@ void openLine(int count);
 void insertNewlineAndIndent(int count);
 
 /* Indentation */
-void editorIndent(int rept);
 void unindent(int rept);
 void indentTabs(void);
 void indentSpaces(void);
