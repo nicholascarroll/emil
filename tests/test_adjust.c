@@ -1,4 +1,4 @@
-/* test_adjust.c — Tests for adjustPoint and adjustAllPoints.
+/* test_adjust.c: Tests for adjustPoint and adjustAllPoints.
  *
  * adjustPoint is pure logic: given a tracked point and a mutation range,
  * compute the new point position.  These tests cover every branch for

@@ -1,13 +1,5 @@
-/* test_insert_file.c — characterisation for M-x insert-file.
- *
- * Before the Phase 3 refactor, insertFile used insertRow in a loop
- * with no undo records: the buffer was marked dirty but C-_ did
- * nothing.  This test documents the fix: after insert-file, the
- * insertion is undoable as a single atomic operation.
- *
- * Uses insertFileAtPath, the testable entry point that skips the
- * minibuffer prompt — same body as insertFile, just passed a path
- * directly instead of reading one from the user. */
+/* test_insert_file.c: characterisation for M-x insert-file.
+ */
 
 #include "test.h"
 #include "test_harness.h"

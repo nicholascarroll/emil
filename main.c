@@ -70,7 +70,14 @@ void handleSighup(int sig) {
 
 void setupHandlers(void) {
 #ifdef SIGWINCH
-	install_handler(SIGWINCH, sigwinchHandler, SA_RESTART);
+	/* No SA_RESTART: the blocking read in readKey must return
+	 * EINTR so the main loop sees got_sigwinch and repaints
+	 * immediately.  With SA_RESTART the read was restarted and a
+	 * resize produced no repaint until the next keypress.  All
+	 * blocking reads/waits elsewhere already retry on EINTR
+	 * (fileio, subprocess waitpid), matching how SIGCONT has
+	 * always been installed. */
+	install_handler(SIGWINCH, sigwinchHandler, 0);
 #endif
 	install_handler(SIGCONT, editorResume, 0);
 	install_handler(SIGTSTP, editorSuspend, SA_NODEFER);
@@ -113,7 +120,6 @@ void editorCleanup(void) {
 		E.registers[r].rtype = REGISTER_NULL;
 	}
 
-	/* Free macro keys */
 	free(E.macro.keys);
 	E.macro.keys = NULL;
 
@@ -225,7 +231,7 @@ int main(int argc, char *argv[]) {
 	/* Load piped stdin data if present */
 	if (stdin_data != NULL) {
 		if (stdin_len > 0) {
-			/* Hard limit — no prompt for stdin */
+			/* Hard limit: no prompt for stdin */
 			if (stdin_len > EMIL_MAX_FILE_SIZE) {
 				free(stdin_data);
 				disableRawMode();
@@ -236,7 +242,7 @@ int main(int argc, char *argv[]) {
 			struct buffer *stdinBuf =
 				loadStdinBuffer(stdin_data, stdin_len);
 			if (stdinBuf == NULL) {
-				/* Binary or invalid UTF-8 — bail out
+				/* Binary or invalid UTF-8: bail out
 				 * cleanly */
 				free(stdin_data);
 				disableRawMode();
@@ -267,7 +273,7 @@ int main(int argc, char *argv[]) {
 					/* Already loaded stdin above */
 					continue;
 				}
-				/* stdin was a tty and not piped —
+				/* stdin was a tty and not piped:
 				 * nothing to read */
 				setStatusMessage(msg_no_piped_input);
 				continue;
@@ -337,7 +343,7 @@ int main(int argc, char *argv[]) {
 
 		int key = readKey();
 		if (key == -1)
-			continue; /* signal interrupted — recheck flags */
+			continue; /* signal interrupted: recheck flags */
 
 		/*
 		 * Process this key and then drain any additional
@@ -360,7 +366,7 @@ int main(int argc, char *argv[]) {
 		 *
 		 * The first key is read with a blocking read();
 		 * subsequent keys are drained with a non-blocking
-		 * select() check — we only consume what is already
+		 * select() check: we only consume what is already
 		 * buffered, never wait for more.
 		 */
 		for (;;) {

@@ -116,7 +116,7 @@ int lockFile(struct buffer *bufr, const char *filename) {
 	int use_rdlck = 0;
 	if (fd < 0) {
 		if (errno == ENOENT)
-			return -2; /* file doesn't exist yet — nothing to lock */
+			return -2; /* file doesn't exist yet: nothing to lock */
 		fd = open(filename, O_RDONLY);
 		if (fd < 0)
 			return -2;
@@ -142,7 +142,7 @@ int lockFile(struct buffer *bufr, const char *filename) {
 		return 0;
 	}
 
-	/* Lock failed — find out who holds it, record on the buffer for
+	/* Lock failed: find out who holds it, record on the buffer for
 	 * the persistent status-bar warning. */
 	if (errno == EACCES || errno == EAGAIN) {
 		struct flock query;
@@ -169,9 +169,9 @@ int lockFile(struct buffer *bufr, const char *filename) {
  * Does NOT clear external_mod: that flag is a latch indicating
  * "disk content has diverged from what we loaded," and its only
  * legitimate exits are save (user chose to clobber) and revert
- * (user chose the disk copy).  Releasing a lock — which happens on
+ * (user chose the disk copy).  Releasing a lock: which happens on
  * clean→dirty transitions via markBufferClean, on saveAs, and on
- * buffer destruction — says nothing about whether the buffer still
+ * buffer destruction: says nothing about whether the buffer still
  * reflects disk.  In particular, undo-to-clean triggers
  * markBufferClean → releaseLock, and clearing external_mod there
  * would silently dismiss a warning the user hasn't resolved. */
@@ -200,7 +200,7 @@ void releaseLock(struct buffer *bufr) {
  * Two independent jobs:
  *
  *   1. Set bufr->external_mod if mtime has drifted since open/save.
- *      One-shot — skipped if the flag is already set.
+ *      One-shot: skipped if the flag is already set.
  *
  *   2. Re-probe the advisory lock when we know we have a stale
  *      warning to clear: the buffer is dirty, we previously tried
@@ -251,7 +251,7 @@ void checkFileModified(void) {
 		int rc = lockFile(E.buf, iopath);
 		disarmTimer();
 		if (rc == 0) {
-			/* Acquired — warning clears.  Do NOT gate this
+			/* Acquired: warning clears.  Do NOT gate this
 			 * on !file_check_timed_out: on a slow filesystem
 			 * every syscall inside lockFile can succeed
 			 * individually while their sum exceeds the 50ms
@@ -262,7 +262,7 @@ void checkFileModified(void) {
 			 * PID" (and its status-bar warning) for the
 			 * rest of the session.  The timeout flag only
 			 * says the probe was slow, not that its result
-			 * is invalid — an interrupted syscall makes
+			 * is invalid: an interrupted syscall makes
 			 * lockFile fail, landing in the rc != 0 path. */
 			E.buf->lock_blocked_pid = 0;
 			setStatusMessage(msg_warn_lock_acquired);
@@ -472,7 +472,7 @@ int editorOpen(struct buffer *bufr, char *filename) {
 	/* Record mtime for external-modification detection.  The lock
 	 * used to be acquired here as a side effect; under the "lock only
 	 * while dirty" policy (issue #49), the lock is deferred until the
-	 * buffer is actually modified — see markBufferDirty(). */
+	 * buffer is actually modified: see markBufferDirty(). */
 	{
 		struct stat st;
 		if (stat(iopath, &st) == 0)
@@ -518,7 +518,7 @@ void revert(void) {
 	struct buffer *buf = E.buf;
 	struct buffer *new = newBuffer();
 	if (editorOpen(new, buf->filename) < 0) {
-		/* Open/validation failed — keep the current buffer */
+		/* Open/validation failed: keep the current buffer */
 		destroyBuffer(new);
 		return;
 	}
@@ -861,7 +861,7 @@ void findFile(int read_only) {
 
 	/* If the input contains glob wildcards, expand and open all matches */
 	if (hasGlobChars((char *)prompt)) {
-		/* Expand ~ for glob — OS doesn't understand tilde */
+		/* Expand ~ for glob: OS doesn't understand tilde */
 		char *glob_input = expandTilde((char *)prompt);
 		glob_t gl;
 		int rc = glob(glob_input, GLOB_MARK, NULL, &gl);
@@ -1011,17 +1011,16 @@ int insertFileAtPath(struct buffer *buf, const char *path,
 		 * Trailing newline policy:
 		 *   - If buf->cy addresses an existing row, we want that row's
 		 *     content to remain a separate row after the inserted
-		 *     block — matching the pre-refactor behaviour of
-		 *     insertRow-in-a-loop.  Adding a trailing '\n' causes
+		 *     block.  Adding a trailing '\n' causes
 		 *     bulkInsert's "save suffix / insert last fragment / emit
 		 *     suffix as new row" path to leave the existing content on
 		 *     its own row below the insertion.
 		 *   - If buf->cy == buf->numrows (past-end virtual row, empty
 		 *     buffer case), there's no suffix to preserve and a
 		 *     trailing '\n' would manufacture an extra empty row that
-		 *     wasn't there before.  Omit it.
+		 *     wasn't there before, so omit it.
 		 *
-		 * Insert position is (0, buf->cy) — start of the current row —
+		 * Insert position is (0, buf->cy): start of the current row:
 		 * in both cases. */
 		int saved_cy = buf->cy;
 		int has_suffix_row = (saved_cy < buf->numrows);
@@ -1043,8 +1042,6 @@ int insertFileAtPath(struct buffer *buf, const char *path,
 		mutateInsert(buf, 0, saved_cy, bytes, byte_len, &ex, &ey);
 		free(bytes);
 
-		/* Match the pre-refactor cursor landing: end of the last
-		 * inserted line. */
 		(void)ex;
 		(void)ey;
 		buf->cy = saved_cy + lines_inserted - 1;
@@ -1118,7 +1115,7 @@ char *relativePath(const char *from, const char *to) {
 	if (from[split] != '\0')
 		ups++;
 
-	/* Tail of 'to' after split — careful not to read past end */
+	/* Tail of 'to' after split: careful not to read past end */
 	const char *to_tail = "";
 	if ((int)strlen(to) > split) {
 		to_tail = to + split;
@@ -1143,7 +1140,7 @@ char *relativePath(const char *from, const char *to) {
 }
 
 /* Canonicalize an absolute path by resolving . and .. segments.
- * Does NOT resolve symlinks — purely string-level.
+ * Does NOT resolve symlinks: purely string-level.
  * Modifies the string in place and returns it. */
 char *cleanPath(char *path) {
 	/* Stack of pointers to segment starts within path.
@@ -1263,7 +1260,7 @@ void changeDirectory(void) {
 
 	char new_cwd[PATH_MAX];
 	if (getcwd(new_cwd, sizeof(new_cwd)) == NULL) {
-		/* chdir succeeded but getcwd failed — unlikely but
+		/* chdir succeeded but getcwd failed: unlikely but
 		 * leave filenames as-is */
 		setStatusMessage(msg_changed_dir);
 		free(dir);
@@ -1368,10 +1365,8 @@ struct buffer *loadStdinBuffer(const char *data, size_t len) {
 	}
 
 	/* Stdin content is read-only: the *stdin* pseudo-file has no
-	 * disk backing to save to.  Mark it so after the load, not
-	 * before — the previous workaround set read_only up front to
-	 * make markBufferDirty short-circuit during load, which is no
-	 * longer needed now that appendRowRaw skips dirty semantics. */
+	 * disk backing to save to. 
+	 */
 	buf->read_only = 1;
 	invalidateScreenCache(buf);
 	buf->word_wrap = 1;

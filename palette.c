@@ -14,14 +14,9 @@
 
 extern struct config E;
 
-/* Functional design is issue #84 */
-
-/* If we stick to linear scan we don't have to worry about sort order.
- * TODO does this cache?
- */
 const PaletteEntry palette[] = {
 	/* Punctuation */
-	{ 0x2014, { 0xE2, 0x80, 0x94, 0x00 }, 3, 1, true },  // —
+	{ 0x2014, { 0xE2, 0x80, 0x94, 0x00 }, 3, 1, true },  //:
 	{ 0x2013, { 0xE2, 0x80, 0x93, 0x00 }, 3, 1, false }, // –
 	{ 0x2026, { 0xE2, 0x80, 0xA6, 0x00 }, 3, 1, false }, // …
 	{ 0x201C, { 0xE2, 0x80, 0x9C, 0x00 }, 3, 1, false }, // "
@@ -224,7 +219,7 @@ static void snapToSymbol(struct buffer *buf, int direction) {
 	if (row->size == 0)
 		return;
 
-	/* Already on a non-space character — nothing to do. */
+	/* Already on a non-space character: nothing to do. */
 	if (buf->cx < row->size && row->chars[buf->cx] != ' ')
 		return;
 
@@ -257,7 +252,7 @@ static void snapToSymbol(struct buffer *buf, int direction) {
  * If `origin` still inhabits a visible window, focus that window.
  * Otherwise (typically when the palette was invoked from the
  * minibuffer, which is not in any window) fall back to whichever
- * window held focus before the palette opened — clamped to the
+ * window held focus before the palette opened: clamped to the
  * current window count, since windows may have been closed.
  *
  * Updates E.windows[*]->focused and E.buf. */
@@ -365,7 +360,7 @@ void expandPalette(void) {
 					}
 				}
 			}
-			/* Nothing valid under cursor — just beep / ignore */
+			/* Nothing valid under cursor: just beep / ignore */
 			continue;
 		}
 
@@ -376,7 +371,7 @@ void expandPalette(void) {
 			return;
 		}
 
-		/* Navigation keys — dispatch normally then snap to symbol */
+		/* Navigation keys: dispatch normally then snap to symbol */
 		int cmd = resolveBinding(key);
 		int snap_dir = 0;
 		if (cmd != CMD_NONE) {

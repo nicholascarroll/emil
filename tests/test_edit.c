@@ -1,4 +1,4 @@
-/* test_edit.c — Parameterized edit primitives. */
+/* test_edit.c: Parameterized edit primitives. */
 
 #include "test.h"
 #include "test_harness.h"
@@ -47,9 +47,8 @@ void test_insert_char_readonly(void) {
 }
 
 /* Regression: a self-insert refused by a read-only buffer must not
- * record undo.  Previously processKeypress called undoSelfInsert
- * before insertChar's read-only check, so toggling the buffer
- * writable and undoing deleted text that was never inserted. */
+ * record undo. 
+ */
 void test_self_insert_readonly_records_no_undo(void) {
 	struct buffer *buf = make_test_buffer("Hello");
 	buf->read_only = 1;
@@ -91,9 +90,6 @@ void test_insert_unicode_readonly_records_no_undo(void) {
 	TEST_ASSERT_EQUAL_STRING("h\xC3\xA9llo", row_str(buf, 0));
 }
 
-/* Regression: a refused self-insert must not shift tracked points.
- * Previously undoAppendChar ran adjustAllPoints for the phantom
- * insertion, drifting the mark in a read-only buffer. */
 void test_self_insert_readonly_does_not_move_mark(void) {
 	struct buffer *buf = make_test_buffer("Hello");
 	buf->read_only = 1;
@@ -497,11 +493,10 @@ void test_backspace_at_origin(void) {
 }
 
 void test_backspace_stray_continuation_byte(void) {
-	/* Regression: a row beginning with a stray UTF-8 continuation
+	/* A row beginning with a stray UTF-8 continuation
 	 * byte (reachable via byte-column rectangle ops through
-	 * multi-byte text) must not walk cx below 0.  Previously the
-	 * continuation walk in backSpace had no lower bound and read
-	 * chars[-1]. */
+	 * multi-byte text) must not walk cx below 0.  
+	 */
 	struct buffer *buf = make_test_buffer("x");
 	E.buf = buf;
 	/* Replace row content with a lone continuation byte. */

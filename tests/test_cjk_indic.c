@@ -1,4 +1,4 @@
-/* test_cjk_indic.c — Tests for issues #71–#74:
+/* test_cjk_indic.c: Tests for issues #71–#74:
  *   #71  utf8Decode + codepoint classifiers
  *   #72  CJK word movement
  *   #73  CJK and Indic sentence boundaries
@@ -18,7 +18,7 @@
 extern struct config E;
 
 /* ================================================================
- * #71 — utf8Decode returns correct codepoints
+ * #71: utf8Decode returns correct codepoints
  * ================================================================ */
 
 void test_utf8Decode_ascii(void) {
@@ -51,13 +51,13 @@ void test_utf8Decode_cjk(void) {
 }
 
 void test_utf8Decode_at_offset(void) {
-	/* "A中" — decode the 中 at byte offset 1 */
+	/* "A中": decode the 中 at byte offset 1 */
 	uint8_t s[] = "A\xE4\xB8\xAD";
 	TEST_ASSERT_EQUAL(0x4E2D, (int)utf8Decode(s, 1));
 }
 
 /* ================================================================
- * #71 — isCJKChar classifier
+ * #71: isCJKChar classifier
  * ================================================================ */
 
 void test_isCJKChar_han(void) {
@@ -96,7 +96,7 @@ void test_isCJKChar_not_cjk(void) {
 }
 
 /* ================================================================
- * #71 — isCJKSentenceTerminator classifier
+ * #71: isCJKSentenceTerminator classifier
  * ================================================================ */
 
 void test_cjk_sentence_terminators(void) {
@@ -108,7 +108,7 @@ void test_cjk_sentence_terminators(void) {
 }
 
 /* ================================================================
- * #71 — isIndicSentenceTerminator classifier
+ * #71: isIndicSentenceTerminator classifier
  * ================================================================ */
 
 void test_indic_sentence_terminators(void) {
@@ -119,7 +119,7 @@ void test_indic_sentence_terminators(void) {
 }
 
 /* ================================================================
- * #72 — CJK word movement
+ * #72: CJK word movement
  * ================================================================ */
 
 void test_forward_word_cjk_each_char_is_word(void) {
@@ -200,7 +200,7 @@ void test_forward_word_latin_unchanged(void) {
 }
 
 /* ================================================================
- * #73 — CJK sentence boundaries
+ * #73: CJK sentence boundaries
  * ================================================================ */
 
 void test_forward_sentence_cjk(void) {
@@ -263,7 +263,7 @@ void test_forward_sentence_latin_unchanged(void) {
 }
 
 /* ================================================================
- * #74 — CJK word-wrap break points
+ * #74: CJK word-wrap break points
  * ================================================================ */
 
 void test_wordwrap_cjk_breaks_between_chars(void) {
@@ -337,7 +337,7 @@ void tearDown(void) {
 /* A break that would put 。 at the start of the next line must move
  * back one character, carrying 字。 over together. */
 void test_wordwrap_no_leading_close_punct(void) {
-	/* 中文字。测试 — 18 bytes, cols=7: 中文字 fits (6 cols) but
+	/* 中文字。测试: 18 bytes, cols=7: 中文字 fits (6 cols) but
 	 * the break after 字 is suppressed (。 would lead), so the
 	 * line breaks after 文. */
 	uint8_t text[] = "\xE4\xB8\xAD\xE6\x96\x87\xE5\xAD\x97"
@@ -358,7 +358,7 @@ void test_wordwrap_no_leading_close_punct(void) {
 /* The ideal break is right AFTER closing punctuation: 。 is itself a
  * break-after candidate. */
 void test_wordwrap_break_after_close_punct(void) {
-	/* 中文。字词 — cols=6: 中文。 exactly fills the line and the
+	/* 中文。字词: cols=6: 中文。 exactly fills the line and the
 	 * break lands after 。, not back at 中|文. */
 	uint8_t text[] = "\xE4\xB8\xAD\xE6\x96\x87\xE3\x80\x82"
 			 "\xE5\xAD\x97\xE8\xAF\x8D";
@@ -377,7 +377,7 @@ void test_wordwrap_break_after_close_punct(void) {
 
 /* Chained forbidden characters (」。) all travel together. */
 void test_wordwrap_close_punct_chain(void) {
-	/* 文字」。后 — cols=6: breaks after 字 and after 」 are both
+	/* 文字」。后: cols=6: breaks after 字 and after 」 are both
 	 * suppressed, so the line breaks after 文 and 字」。 wrap as
 	 * a unit. */
 	uint8_t text[] = "\xE6\x96\x87\xE5\xAD\x97\xE3\x80\x8D"
@@ -400,7 +400,7 @@ void test_wordwrap_close_punct_chain(void) {
  * the next line here, by design — better than an empty line or a
  * loop). */
 void test_wordwrap_all_forbidden_fallback(void) {
-	/* 。。。。 — cols=4: two fit, hard break before the third. */
+	/* 。。。。: cols=4: two fit, hard break before the third. */
 	uint8_t text[] = "\xE3\x80\x82\xE3\x80\x82\xE3\x80\x82"
 			 "\xE3\x80\x82";
 	erow row = { 0 };
@@ -420,7 +420,7 @@ void test_wordwrap_all_forbidden_fallback(void) {
  * not a break candidate, and the 。 (fitting at end of line) becomes
  * the break point instead. */
 void test_wordwrap_space_before_close_punct(void) {
-	/* "ab cd 。ef" — cols=8: break after the first space is
+	/* "ab cd 。ef": cols=8: break after the first space is
 	 * recorded, after the second suppressed, then 。 fits at
 	 * column 8 and the break lands after it. */
 	uint8_t text[] = "ab cd \xE3\x80\x82"
@@ -443,7 +443,7 @@ void test_wordwrap_space_before_close_punct(void) {
 /* Khmer sentences end at ។ (KHAN); sentence motion must recognise it
  * in both directions. */
 void test_sentence_khmer_khan(void) {
-	/* កខ។គឃ — terminator ។ at bytes 6..8 */
+	/* កខ។គឃ: terminator ។ at bytes 6..8 */
 	struct buffer *buf = make_test_buffer(
 		"\xE1\x9E\x80\xE1\x9E\x81\xE1\x9F\x94"
 		"\xE1\x9E\x82\xE1\x9E\x83");
@@ -465,7 +465,7 @@ void test_sentence_khmer_khan(void) {
  * Thai/Lao/Khmer text: word wrap must treat it as a break
  * opportunity. */
 void test_wordwrap_zwsp_break(void) {
-	/* กขค[ZWSP]งจฉ — cols=4: break falls at the ZWSP (consumed at
+	/* กขค[ZWSP]งจฉ: cols=4: break falls at the ZWSP (consumed at
 	 * end of line 1), next line starts งจฉ. */
 	uint8_t text[] = "\xE0\xB8\x81\xE0\xB8\x82\xE0\xB8\x84"
 			 "\xE2\x80\x8B"
@@ -508,7 +508,7 @@ void test_word_motion_zwsp(void) {
 /* Preposed vowels (เ แ โ ใ ไ) are written before their consonant; the
  * hard-break fallback must not strand one at end of line. */
 void test_wordwrap_no_split_after_preposed(void) {
-	/* กขคเงจ — cols=4: the raw hard break would fall between เ
+	/* กขคเงจ: cols=4: the raw hard break would fall between เ
 	 * and ง; it retreats to before เ instead. */
 	uint8_t text[] = "\xE0\xB8\x81\xE0\xB8\x82\xE0\xB8\x84"
 			 "\xE0\xB9\x80"
@@ -530,7 +530,7 @@ void test_wordwrap_no_split_after_preposed(void) {
  * combining mark: zero-width marks always "fit", so the break lands
  * after the whole cluster. */
 void test_wordwrap_combining_cluster_intact(void) {
-	/* กขกิค — cols=3: line 1 is exactly กขกิ (the SARA I stays
+	/* กขกิค: cols=3: line 1 is exactly กขกิ (the SARA I stays
 	 * glued to its base), line 2 is ค. */
 	uint8_t text[] = "\xE0\xB8\x81\xE0\xB8\x82\xE0\xB8\x81"
 			 "\xE0\xB8\xB4"
@@ -553,7 +553,7 @@ int main(void) {
 
 	TEST_BEGIN();
 
-	/* #71 — utf8Decode */
+	/* #71: utf8Decode */
 	RUN_TEST(test_utf8Decode_ascii);
 	RUN_TEST(test_utf8Decode_2byte);
 	RUN_TEST(test_utf8Decode_3byte);
@@ -561,7 +561,7 @@ int main(void) {
 	RUN_TEST(test_utf8Decode_cjk);
 	RUN_TEST(test_utf8Decode_at_offset);
 
-	/* #71 — classifiers */
+	/* #71: classifiers */
 	RUN_TEST(test_isCJKChar_han);
 	RUN_TEST(test_isCJKChar_hiragana);
 	RUN_TEST(test_isCJKChar_katakana);
@@ -571,20 +571,20 @@ int main(void) {
 	RUN_TEST(test_cjk_sentence_terminators);
 	RUN_TEST(test_indic_sentence_terminators);
 
-	/* #72 — CJK word movement */
+	/* #72: CJK word movement */
 	RUN_TEST(test_forward_word_cjk_each_char_is_word);
 	RUN_TEST(test_backward_word_cjk_each_char_is_word);
 	RUN_TEST(test_forward_word_cjk_mixed_with_ascii);
 	RUN_TEST(test_backward_word_cjk_mixed_with_ascii);
 	RUN_TEST(test_forward_word_latin_unchanged);
 
-	/* #73 — CJK and Indic sentence boundaries */
+	/* #73: CJK and Indic sentence boundaries */
 	RUN_TEST(test_forward_sentence_cjk);
 	RUN_TEST(test_backward_sentence_cjk);
 	RUN_TEST(test_forward_sentence_indic);
 	RUN_TEST(test_forward_sentence_latin_unchanged);
 
-	/* #74 — CJK word-wrap */
+	/* #74: CJK word-wrap */
 	RUN_TEST(test_wordwrap_cjk_breaks_between_chars);
 	RUN_TEST(test_wordwrap_cjk_no_hard_break);
 	RUN_TEST(test_wordwrap_no_leading_close_punct);

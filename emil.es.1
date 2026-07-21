@@ -59,15 +59,17 @@ Escribir dígitos después de
 establece el argumento en ese número.
 No se permiten argumentos negativos.
 .Pp
+Una tecla equivalente a
+.Cm C-u N
+(en que N es un numero) es
+.Cm M-N.
+.Pp
 El prefijo
 .Cm M--
 es un
-.Sy modificador de inversión
-en lugar de un número: invierte la dirección del siguiente comando para los comandos que lo admiten \(em recuperar marca (yank pop), los comandos de transposición y los comandos de mayúsculas y minúsculas de palabra.
+.Sy modificador de revés
+La dirección del siguiente comando funcione en revés para los comandos que lo admiten.
 Los demás comandos lo ignoran.
-Los dígitos escritos después de
-.Cm M--
-son rechazados.
 .Sh COMANDOS
 Los comandos siguen mayoritariamente las convenciones de Emacs.
 .Cm C-

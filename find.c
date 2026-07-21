@@ -27,8 +27,8 @@ extern struct config E;
 /* File-scope state for the replace family.  These are effectively
  * closure variables for transformerReplaceString, which is passed as
  * a function pointer to transformRegion (signature: uint8_t *(*)(uint8_t *),
- * no user-data slot).  Keeping them static confines the symbol and
- * makes the intent explicit. */
+ * no user-data slot).  Keeping them static confines the symbol.
+ */
 static uint8_t *replace_orig;
 static uint8_t *replace_repl;
 
@@ -43,7 +43,7 @@ static int search_poll_enabled = 0;
 /* Poll stdin between scanned rows so C-g can cancel a long search
  * scan (large file, expensive pattern) without waiting for the full
  * pass.  A single blown-up regexec call on one pathological line
- * cannot be interrupted — this bounds everything around it.
+ * cannot be interrupted: this bounds everything around it.
  *
  * Protocol (never loses or reorders type-ahead):
  *   - If a probed byte is already stashed, do not probe again.
@@ -413,7 +413,7 @@ void replaceString(void) {
 	}
 
 	/* Prompt is a plain prefix (see editorPrompt), so the search
-	 * string can be embedded verbatim — no percent escaping. */
+	 * string can be embedded verbatim: no percent escaping. */
 	size_t psz = strlen((const char *)replace_orig) + 20;
 	char *prompt = xmalloc(psz);
 	snprintf(prompt, psz, "Replace %s with: ", replace_orig);
@@ -517,15 +517,7 @@ void queryReplace(void) {
 			transformRegion(transformerReplaceString);
 			goto QR_CLEANUP;
 		case 'u':
-			/* Only undo replacements made in THIS session
-			 * (records newer than 'first').  An unguarded
-			 * doUndo here would (a) undo unrelated earlier
-			 * edits and (b) leave the cursor unmoved when
-			 * the undo stack is empty, after which the
-			 * unconditional cx -= len below drove cx
-			 * negative and the next 'y' passed negative
-			 * coordinates into transformRegion ->
-			 * collectRegionText (heap OOB read). */
+			/* Only undo replacements made in THIS session */
 			if (E.buf->undo != first) {
 				doUndo(E.buf, 1);
 				E.buf->markx = E.buf->cx;

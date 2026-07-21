@@ -1,13 +1,9 @@
-/* test_kill_ring.c — pin kill ring behaviours before Phase 6
- * restructures the data model.
+/* test_kill_ring.c
  *
  * Kill ring operations today touch three things in parallel:
  *   - E.kill (the "current" kill, used as a read cache)
  *   - E.kill_history (the ring itself)
  *   - E.kill_ring_pos (cursor within the ring for M-y)
- *
- * Phase 6 will collapse these into a single source of truth.  These
- * tests pin the observable contract so that collapse is safe:
  *
  *   1. Kill then yank returns the most recent kill.
  *   2. Kill, kill, yank, yank-pop returns the previous kill.

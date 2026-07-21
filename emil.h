@@ -22,7 +22,7 @@
 #define CSI ESC "["
 #define CRLF "\r\n"
 
-/* Universal argument encoding — see the uarg field in struct config.
+/* Universal argument encoding.
  * UARG_REVERSE is the M-- reverse modifier; UARG_COUNT extracts a
  * repeat count, treating "no argument" and "reverse" alike as 1. */
 #define UARG_REVERSE (-1)
@@ -48,9 +48,9 @@ enum promptType {
 /*** data ***/
 
 /* Type policy:
- * Positions (cx, cy, markx, marky) — int, signed for sentinels
- * Sizes (erow.size, abuf.len) — int, bounded by EMIL_MAX_FILE_SIZE
- * Accumulations to malloc — size_t (e.g. rowsToString totlen)  */
+ * Positions (cx, cy, markx, marky): int, signed for sentinels
+ * Sizes (erow.size, abuf.len): int, bounded by EMIL_MAX_FILE_SIZE
+ * Accumulations to malloc: size_t (e.g. rowsToString totlen)  */
 
 typedef struct erow {
 	int size;

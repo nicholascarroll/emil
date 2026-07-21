@@ -46,13 +46,10 @@ void killSexp(int count);
 void killParagraph(int count);
 void markParagraph(void);
 
-/* Sentence transposition */
 void transposeSentences(int uarg);
 
-/* Zap to char */
 void zapToChar(void);
 
-/* Quit */
 void quit(void);
 
 #endif

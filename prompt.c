@@ -1,4 +1,5 @@
 #include "prompt.h"
+#include "wrap.h"
 #include "buffer.h"
 #include "completion.h"
 #include "display.h"
@@ -51,9 +52,17 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 
 		refreshScreen();
 
-		/* Position cursor on bottom line */
+		/* Position cursor on bottom line.  cursorBottomLine
+		 * expects a display column; E.minibuf->cx is a byte
+		 * index, so convert (a CJK character is 3 bytes but 2
+		 * columns; passing bytes drifts the cursor right of
+		 * the text). */
 		int prompt_width = stringWidth((const uint8_t *)prompt);
-		cursorBottomLine(prompt_width + E.minibuf->cx + 1);
+		int content_cols = 0;
+		if (E.minibuf->numrows > 0)
+			content_cols = charsToDisplayColumn(&E.minibuf->row[0],
+							    E.minibuf->cx);
+		cursorBottomLine(prompt_width + content_cols + 1);
 
 		/* Read key */
 		int c = readKey();
@@ -100,12 +109,8 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 					 * append / if needed, and trigger completion. */
 					int elen = strlen(effective_path);
 					/* Read the last byte BEFORE the
-					 * replace/reset below: when
-					 * effective_path points into
-					 * cs->matches, resetCompletionState
-					 * frees it, and the old
-					 * effective_path[elen - 1] test was
-					 * a use-after-free read. */
+					 * replace/reset below.
+					 */
 					int ends_slash =
 						(elen > 0 &&
 						 effective_path[elen - 1] ==

@@ -1,4 +1,4 @@
-/* test_tilde.c — Tests for expandTilde(), collapseHome(), absolutePath().
+/* test_tilde.c: Tests for expandTilde(), collapseHome(), absolutePath().
  *
  * These are pure string functions.  We control $HOME via setenv()
  * so the tests are deterministic regardless of the real user. */

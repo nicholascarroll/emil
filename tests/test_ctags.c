@@ -1,13 +1,6 @@
-/* test_ctags.c — Tests for ctags tags-file discovery and path
+/* test_ctags.c: Tests for ctags tags-file discovery and path
  * resolution.
- *
- * These lock in the fix for the non-flat-project defect: previously
- * ctags only did fopen("tags") in the current working directory and
- * resolved tag paths against the CWD, so jumping to a definition only
- * worked when emil was launched from the exact directory the tags file
- * lived in.  Now findTagsDir() walks upward to locate the tags file
- * (like vim/emacs) and resolveTagPath() joins tag paths onto that
- * directory instead of the CWD. */
+ */
 
 #include "test.h"
 #include "test_harness.h"

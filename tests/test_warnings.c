@@ -1,18 +1,4 @@
-/* test_warnings.c — persistent status-bar warning state.
- *
- * Covers the persistent warnings that live in the status bar's
- * right-hand block:
- *   - buf->external_mod         (set by checkFileModified)
- *   - buf->lock_blocked_pid     (set by lockFile via markBufferDirty)
- *
- * The messages themselves are rendered by display.c, which isn't
- * exercised here (drawStatusBar writes to an abuf).  These tests
- * cover the state transitions: when does each flag set, when does
- * it clear, and what happens when multiple conditions interact —
- * particularly the rule that a buffer with external_mod set must
- * not acquire a lock on subsequent edits (would silently clobber
- * the other process's work on save).
- */
+/* test_warnings.c: persistent status-bar warning state. */
 
 #include "test.h"
 #include "test_harness.h"
@@ -293,13 +279,9 @@ void test_lock_blocked_cleared_on_successful_acquire(void) {
 	free(path);
 }
 
-/* Regression test: external_mod is a latch.  Once set, it must
- * only be cleared by save (user clobbers) or revert (user takes
- * disk version).  In particular, undo-to-clean triggers
- * markBufferClean → releaseLock, which previously also cleared
- * external_mod as a side effect.  That was a bug: the user hadn't
- * resolved the on-disk divergence, they just undid their edits.
- * The warning must persist. */
+/* External_mod is a latch.  Once set, it must only be cleared by save
+ * (user clobbers) or revert (user takes disk version). 
+ */
 
 void test_external_mod_persists_through_undo_to_clean(void) {
 	char *path = make_temp_file("original\n");

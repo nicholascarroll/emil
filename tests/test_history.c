@@ -1,4 +1,4 @@
-/* test_history.c — Tests for addHistory, getHistoryAt, freeHistory.
+/* test_history.c: Tests for addHistory, getHistoryAt, freeHistory.
  *
  * History is a doubly-linked list with duplicate suppression and
  * eviction at HISTORY_MAX_ENTRIES. */

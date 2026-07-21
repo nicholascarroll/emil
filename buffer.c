@@ -38,13 +38,11 @@ void markBufferDirty(struct buffer *buf) {
 	if (buf->lock_fd >= 0)
 		return; /* already locked (e.g. from previous session) */
 	if (buf->external_mod)
-		return; /* buffer no longer reflects on-disk content —
-		         * acquiring the lock now would let us silently
-		         * overwrite the other process's changes on save.
+		return; /* buffer no longer reflects on-disk content
 		         * User must revert or save-as to resolve. */
 	char *iopath = expandTilde(buf->filename);
 	if (lockFile(buf, iopath) == 0) {
-		/* Lock acquired — clear any prior "blocked by PID" state. */
+		/* Lock acquired: clear any prior "blocked by PID" state. */
 		buf->lock_blocked_pid = 0;
 	} else if (buf->lock_blocked_pid != 0) {
 		setStatusMessage(msg_warn_lock_blocked, buf->lock_blocked_pid);
@@ -96,16 +94,8 @@ void insertRow(struct buffer *bufr, int at, const uint8_t *s, size_t len) {
 }
 
 /* Append a row without side effects.  Used by `editorOpen` when the
- * buffer is being populated from disk: dirtying the buffer would be
- * wrong (the content on disk matches the content in memory by
- * definition) and would trigger the file-lock machinery, which is
- * reserved for user edits.  Callers are responsible for invalidating
- * the screen cache once, after the load finishes, rather than paying
- * the O(N) cost per row.
- *
- * Not used by `insertFile` — inserting a file into an open buffer IS
- * a user edit, so it goes through the mutation layer (mutateInsert)
- * which dirties the buffer and records undo. */
+ * buffer is being populated from disk.
+ */
 void appendRowRaw(struct buffer *bufr, const uint8_t *s, size_t len) {
 	if (bufr->numrows >= bufr->rowcap) {
 		int new_cap = bufr->rowcap ? bufr->rowcap * 2 : 16;
@@ -419,7 +409,7 @@ void switchToNamedBuffer(void) {
 	struct buffer *targetBuffer = NULL;
 
 	if (buffer_name[0] == '\0') {
-		/* User pressed Enter without typing — use default */
+		/* User pressed Enter without typing */
 		targetBuffer = defaultBuffer;
 		if (!targetBuffer) {
 			setStatusMessage(msg_no_buffer_switch);
@@ -632,20 +622,6 @@ char *leftTruncate(const char *s, int max_width) {
 
 /* How many display columns are available for a filename in a
  * status message?
- *
- * |name|           — the full filename
- * |formatted_len|  — the result of snprintf(NULL,0,fmt,...) with
- *                    the full name already included
- *
- * The caller measures the fully-formatted message, we subtract
- * the name to get the chrome width, then return screencols minus
- * that.  Exact, locale-proof, no magic numbers.
- *
- * Typical usage:
- *   int n = snprintf(NULL, 0, msg_wrote_bytes, len, filename);
- *   char *show = leftTruncate(filename, nameFit(filename, n));
- *   setStatusMessage(msg_wrote_bytes, len, show);
- *   free(show);
  */
 int nameFit(const char *name, int formatted_len) {
 	int chrome = formatted_len - (int)strlen(name);
@@ -723,7 +699,6 @@ static char *middleTruncate(const char *full, const char *other,
 		snprintf(mid, sizeof(mid), "%.*s/.../%.256s", prefix_len, full,
 			 base_a);
 	} else {
-		/* Differing dir is directly above basename — no gap. */
 		snprintf(mid, sizeof(mid), "%.*s/%.256s", prefix_len, full,
 			 base_a);
 	}

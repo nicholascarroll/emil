@@ -26,6 +26,7 @@ void clampCursorToViewport(struct window *win, struct buffer *buf);
 void setScxScy(struct window *win);
 void cursorBottomLine(int curs);
 void resizeScreen(int sig);
+void reprobeScreenSize(void);
 void recenter(struct window *win);
 void toggleVisualLineMode(void);
 void editorVersion(void);

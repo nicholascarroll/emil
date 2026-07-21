@@ -1,4 +1,4 @@
-/* test_rect_undo.c — Rectangle operation undo/redo tests.
+/* test_rect_undo.c: Rectangle operation undo/redo tests.
  *
  * Tests that every rectangle operation (copy, kill, yank, string-replace)
  * can be undone to restore the exact original buffer content, and that
@@ -462,8 +462,7 @@ void test_kill_rect_zero_width(void) {
 void test_yank_rect_into_empty_buffer(void) {
 	/* Regression: kill a rectangle in one buffer, then yank into a
 	 * buffer with numrows == 0 (e.g. a freshly opened empty file).
-	 * Previously mutateExtendRows built its undo record with
-	 * starty = -1 and read buf->row[-1]. */
+	 */
 	const char *lines[] = { "ABCDE", "FGHIJ" };
 	struct buffer *src = make_test_buffer_lines(lines, 2);
 
@@ -501,10 +500,7 @@ void test_yank_rect_into_empty_buffer(void) {
 }
 
 /* ----------------------------------------------------------------
- * Read-only refusal.  killRectangle previously corrupted read-only
- * buffers (mixed accept/reject sub-operations); stringRectangle and
- * replaceRegex prompted, then mutated.  All refuse before prompting,
- * so the tests can call them directly.
+ * Read-only refusal. All refuse before prompting,
  * ---------------------------------------------------------------- */
 
 void test_kill_rectangle_readonly(void) {

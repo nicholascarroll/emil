@@ -1,4 +1,4 @@
-/* test_relpath.c — Unit tests for relativePath(). */
+/* test_relpath.c: Unit tests for relativePath(). */
 
 #include "test.h"
 #include "test_harness.h"

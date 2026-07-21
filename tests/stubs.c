@@ -1,7 +1,7 @@
-/* stubs.c — Stubs for the terminal I/O boundary.
+/* stubs.c: Stubs for the terminal I/O boundary.
  *
- * Strategy C: the test binary links every .o file except main.o and
- * terminal.o. This file provides:
+ * The test binary links every .o file except main.o and terminal.o. 
+ * This file provides:
  * - The global E and page_overlap that main.o normally defines.
  * - No-op replacements for terminal.o functions (the only functions
  *   that physically touch the terminal: read/write fd 0/1, termios,
@@ -48,6 +48,17 @@ int getCursorPosition(int *rows, int *cols) {
 int getWindowSize(int *rows, int *cols) {
 	*rows = 24;
 	*cols = 80;
+	return 0;
+}
+
+/* Tests run on a pty-less stdin; the probe path is never taken. */
+int probeWindowSize(int *rows, int *cols) {
+	*rows = 24;
+	*cols = 80;
+	return 0;
+}
+
+int windowSizeWasProbed(void) {
 	return 0;
 }
 

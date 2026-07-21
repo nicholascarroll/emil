@@ -603,7 +603,7 @@ void quit(void) {
 		/* The unsaved-changes confirmation below reads a key;
 		 * during playback that read comes from the macro key
 		 * stream (now bounds-checked to return -1), so the
-		 * prompt could never be answered — block instead. */
+		 * prompt could never be answered: block instead. */
 		setStatusMessage(msg_macro_blocked);
 		return;
 	}
@@ -678,7 +678,7 @@ void killParagraph(int count) {
 	}
 }
 
-/* Mark paragraph (M-h) — Emacs behavior: put point at beginning of
+/* Mark paragraph (M-h): Emacs behavior: put point at beginning of
  * paragraph, mark at end. */
 
 void markParagraph(void) {
@@ -774,7 +774,7 @@ static void transposeSentencesBackward(void) {
 	free(repl);
 }
 
-/* Transpose sentences (C-x C-t) — swap sentence before point with
+/* Transpose sentences (C-x C-t): swap sentence before point with
  * sentence after point, leaving point after both. */
 
 void transposeSentences(int uarg) {
@@ -858,7 +858,7 @@ void transposeSentences(int uarg) {
 	free(repl);
 }
 
-/* Zap to char (M-z) — kill from point up to and including the next
+/* Zap to char (M-z): kill from point up to and including the next
  * occurrence of a prompted character. */
 
 void zapToChar(void) {

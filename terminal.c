@@ -4,9 +4,11 @@
 #include "message.h"
 #include "base64.h"
 #include <errno.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <termios.h>
+#include <time.h>
 #ifdef __sun
 #include <sys/types.h> /* This might be needed first */
 #include <sys/termios.h>
@@ -35,8 +37,8 @@ void install_handler(int signum, void (*handler)(int), int flags) {
 void die(const char *s) {
 	/* die() ends in exit(), which runs the atexit handlers.  If
 	 * anything on that path (or editorCleanup below) routes back
-	 * here, calling exit() a second time — from within exit
-	 * processing — is undefined behavior.  Detect re-entry and
+	 * here, calling exit() a second time: from within exit
+	 * processing: is undefined behavior.  Detect re-entry and
 	 * leave immediately without re-running any cleanup. */
 	static int dying = 0;
 	if (dying)
@@ -72,17 +74,17 @@ void disableRawModeKeepScreen(void) {
 }
 
 /*
- * Shell drawer — opens a small shell region at the bottom of the
+ * Shell drawer: opens a small shell region at the bottom of the
  * terminal while the editor content above stays frozen.
  *
  * Mechanism:
  *   1. Set the DECSTBM scrolling region to the bottom N rows.
  *   2. Move the cursor into the drawer area and print a header.
  *   3. Restore cooked mode (without leaving the alt screen).
- *   4. raise(SIGTSTP) — the parent shell prints its prompt inside the
+ *   4. raise(SIGTSTP): the parent shell prints its prompt inside the
  *      restricted scrolling region; everything above is protected.
  *   5. On SIGCONT (user typed `fg`), the handler resets the scrolling
- *      region, re-enters raw mode, and redraws — closing the drawer.
+ *      region, re-enters raw mode, and redraws: closing the drawer.
  */
 
 void openShellDrawer(void) {
@@ -167,6 +169,23 @@ void enableRawMode(void) {
 	applyRawMode();
 }
 
+/*
+ * Milliseconds to wait for the terminal's CSI 6n reply.
+ *
+ * This path only runs when TIOCGWINSZ told us nothing, which in
+ * practice means a serial console: the RS-232 line carries no
+ * out-of-band window size, so the kernel has none to report and we
+ * have to ask the terminal itself.
+ */
+#define CPR_TIMEOUT_MS 500
+
+/*
+ * After giving up, how long to keep discarding a reply that shows up
+ * late (total budget, and how long to wait for each further byte).
+ */
+#define CPR_DRAIN_MS 500
+#define CPR_DRAIN_IDLE_MS 200
+
 int getCursorPosition(int *rows, int *cols) {
 	char buf[32];
 	int i = 0;
@@ -174,9 +193,73 @@ int getCursorPosition(int *rows, int *cols) {
 	if (write(STDOUT_FILENO, "\x1b[6n", 4) != 4)
 		return -1;
 
+	/* One deadline for the whole reply, not per byte: a far end
+	 * that dribbles a byte just under the limit forever must not be
+	 * able to keep us here. */
+	struct timespec start;
+	if (clock_gettime(CLOCK_MONOTONIC, &start) == -1)
+		return -1;
+
 	while (i < (int)(sizeof(buf) - 1)) {
-		if (read(STDIN_FILENO, &buf[i], 1) != 1)
-			break;
+		struct timespec now;
+		if (clock_gettime(CLOCK_MONOTONIC, &now) == -1)
+			return -1;
+		long elapsed = (now.tv_sec - start.tv_sec) * 1000 +
+			       (now.tv_nsec - start.tv_nsec) / 1000000;
+		int remaining = (int)(CPR_TIMEOUT_MS - elapsed);
+		if (remaining <= 0)
+			return -1;
+
+		struct pollfd pfd;
+		pfd.fd = STDIN_FILENO;
+		pfd.events = POLLIN;
+		pfd.revents = 0;
+
+		int pr = poll(&pfd, 1, remaining);
+		if (pr == -1) {
+			if (errno == EINTR)
+				continue; /* SIGWINCH etc; deadline still holds */
+			return -1;
+		}
+		if (pr == 0) {
+			/* Gave up waiting. */
+			char drain;
+			struct pollfd d;
+			struct timespec dstart, dnow;
+			d.fd = STDIN_FILENO;
+			d.events = POLLIN;
+			d.revents = 0;
+			if (clock_gettime(CLOCK_MONOTONIC, &dstart) == -1)
+				return -1;
+			for (;;) {
+				if (clock_gettime(CLOCK_MONOTONIC, &dnow) == -1)
+					break;
+				long spent =
+					(dnow.tv_sec - dstart.tv_sec) * 1000 +
+					(dnow.tv_nsec - dstart.tv_nsec) /
+						1000000;
+				if (spent >= CPR_DRAIN_MS)
+					break;
+				int dp = poll(&d, 1, CPR_DRAIN_IDLE_MS);
+				if (dp == -1 && errno == EINTR)
+					continue; /* budget still bounds us */
+				if (dp != 1)
+					break;
+				ssize_t dn = read(STDIN_FILENO, &drain, 1);
+				if (dn == -1 && errno == EINTR)
+					continue;
+				if (dn != 1)
+					break;
+			}
+			return -1;
+		}
+
+		ssize_t rn = read(STDIN_FILENO, &buf[i], 1);
+		if (rn == -1 && errno == EINTR)
+			continue; /* signal between poll and read; deadline
+				   * still holds, go around again */
+		if (rn != 1)
+			return -1; /* 0 is EOF: the line dropped */
 		if (buf[i] == 'R')
 			break;
 		i++;
@@ -191,18 +274,60 @@ int getCursorPosition(int *rows, int *cols) {
 	return 0;
 }
 
+static int window_size_was_probed = 0;
+
+int windowSizeWasProbed(void) {
+	return window_size_was_probed;
+}
+
+/*
+ * Ask the terminal itself for its size: park the cursor at the
+ * bottom-right corner and read it back with CPR.  On success the
+ * kernel's idea of the size is updated too, so child processes
+ * (shell integration) inherit the right dimensions.  On failure the
+ * caller's rows/cols are left untouched, so a failed re-probe keeps
+ * the current geometry rather than resetting it.
+ */
+int probeWindowSize(int *rows, int *cols) {
+	int r, c;
+
+	if (write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12)
+		return -1;
+	if (getCursorPosition(&r, &c) != 0)
+		return -1;
+
+	struct winsize ws;
+	ws.ws_row = (unsigned short)r;
+	ws.ws_col = (unsigned short)c;
+	ws.ws_xpixel = 0;
+	ws.ws_ypixel = 0;
+	IGNORE_RETURN(ioctl(STDOUT_FILENO, TIOCSWINSZ, &ws));
+
+	*rows = r;
+	*cols = c;
+	return 0;
+}
+
+/*
+ * Always succeeds (returns 0): every failure path inside falls back
+ * to a usable size rather than reporting an error.
+ */
 int getWindowSize(int *rows, int *cols) {
 	struct winsize ws;
 
-	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
-		if (write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12)
-			return -1;
-		return getCursorPosition(rows, cols);
-	} else {
-		*cols = ws.ws_col;
-		*rows = ws.ws_row;
+	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0 ||
+	    ws.ws_row == 0) {
+		window_size_was_probed = 1;
+		if (probeWindowSize(rows, cols) != 0) {
+			*rows = 24;
+			*cols = 80;
+		}
 		return 0;
 	}
+
+	*cols = ws.ws_col;
+	*rows = ws.ws_row;
+	return 0;
 }
 
 void copyToClipboard(const uint8_t *text) {
@@ -315,7 +440,7 @@ int terminalPushbackPending(void) {
 
 /* Raw reading a keypress - terminal layer only handles raw byte
  * reading, escape sequence decoding, and UTF-8 assembly.
- * Returns key tokens only — no binding policy. */
+ * Returns key tokens only: no binding policy. */
 int readKey(void) {
 	if (E.playback) {
 		/* A nested readKey (prefix sub-key, confirmation
@@ -352,7 +477,7 @@ int readKey(void) {
 			goto ESC_UNKNOWN;
 
 		if (seq[0] == '[') {
-			/* CSI sequence — physical key decoding */
+			/* CSI sequence: physical key decoding */
 			if (read(STDIN_FILENO, &seq[1], 1) != 1)
 				goto ESC_UNKNOWN;
 			if (seq[1] >= '0' && seq[1] <= '9') {
@@ -375,14 +500,16 @@ int readKey(void) {
 					case '8':
 						return KEY_END;
 					}
-				} else if (seq[2] == '4') {
-					if (read(STDIN_FILENO, &seq[3], 1) != 1)
-						goto ESC_UNKNOWN;
-					if (seq[3] == '~') {
-						errno = EINTR;
-						die("Panic key");
-					}
 				}
+				/* Multi-digit CSI codes (\x1b[15~ .. \x1b[24~,
+				 * i.e. F5-F12 and friends) fall through to
+				 * ESC_UNKNOWN below, where drainCSI consumes
+				 * the rest of the sequence harmlessly. A
+				 * previous "panic key" branch here matched
+				 * \x1b[<digit>4~ and called die(), which
+				 * discarded unsaved buffers on F12 (\x1b[24~,
+				 * xterm/rxvt) and F4 (\x1b[14~, PuTTY/vt220
+				 * keyboards). */
 			} else {
 				switch (seq[1]) {
 				case 'A':
@@ -401,11 +528,53 @@ int readKey(void) {
 					return KEY_BACKTAB;
 				}
 			}
+		} else if (seq[0] == 'O') {
+			/* SS3: xterm-family F1-F4 (\x1bOP..\x1bOS), and
+			 * the cursor/Home/End keys when a previous
+			 * program left the terminal in application
+			 * cursor mode (\x1bOA-\x1bOD, \x1bOH, \x1bOF).
+			 * Without this branch the 'O' returned as
+			 * KEY_META('O') and the final byte leaked into
+			 * the buffer as typed text.
+			 *
+			 * A short poll distinguishes a real SS3
+			 * sequence (final byte already queued: terminals
+			 * send sequences atomically) from Alt+Shift+O
+			 * (nothing follows), which must keep returning
+			 * KEY_META('O') without eating the next key. */
+			fd_set fds;
+			struct timeval tv = { 0, 50000 }; /* 50 ms */
+			FD_ZERO(&fds);
+			FD_SET(STDIN_FILENO, &fds);
+			if (select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv) <=
+			    0)
+				return KEY_META((uint8_t)seq[0]);
+			if (read(STDIN_FILENO, &seq[1], 1) != 1)
+				return KEY_META((uint8_t)seq[0]);
+			switch (seq[1]) {
+			case 'A':
+				return KEY_ARROW_UP;
+			case 'B':
+				return KEY_ARROW_DOWN;
+			case 'C':
+				return KEY_ARROW_RIGHT;
+			case 'D':
+				return KEY_ARROW_LEFT;
+			case 'H':
+				return KEY_HOME;
+			case 'F':
+				return KEY_END;
+			}
+			/* F1-F4 and other SS3 finals: fall through to
+			 * ESC_UNKNOWN, which reports the unrecognized
+			 * key.  The final byte is already consumed, so
+			 * the SS3 drain there must not read another. */
+			goto ESC_UNKNOWN;
 		} else if ('0' <= seq[0] && seq[0] <= '9') {
 			/* Alt digit */
 			return KEY_ALT_0 + (seq[0] - '0');
 		} else {
-			/* Meta + character — return as KEY_META(ch) */
+			/* Meta + character: return as KEY_META(ch) */
 			return KEY_META((uint8_t)seq[0]);
 		}
 
@@ -425,8 +594,10 @@ ESC_UNKNOWN:
 			}
 			if (last)
 				drainCSI(last);
-		} else if (seq[0] == 'O') {
-			/* SS3: consume the single expected byte */
+		} else if (seq[0] == 'O' && seq[1] == 0) {
+			/* SS3 reached with the final byte not yet
+			 * consumed (read failure in the branch above):
+			 * consume the single expected byte */
 			fd_set fds;
 			struct timeval tv = { 0, 50000 };
 			FD_ZERO(&fds);

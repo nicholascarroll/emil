@@ -5,9 +5,9 @@ tempy
 emil
 unicodetest
 /build
-/config.h
 /tests/test_*
 !/tests/test_*.c
 !/tests/test_*.h
 !/tests/test_*.sh
 tags
+

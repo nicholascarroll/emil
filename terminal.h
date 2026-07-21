@@ -9,6 +9,8 @@ void enableRawMode(void);
 void applyRawMode(void);
 int getCursorPosition(int *rows, int *cols);
 int getWindowSize(int *rows, int *cols);
+int probeWindowSize(int *rows, int *cols);
+int windowSizeWasProbed(void);
 int readKey(void);
 void terminalPushbackByte(uint8_t c);
 int terminalPushbackPending(void);

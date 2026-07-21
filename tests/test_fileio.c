@@ -1,4 +1,4 @@
-/* test_fileio.c — File I/O, round-trip, UTF-8 validation, emil_getline. */
+/* test_fileio.c: File I/O, round-trip, UTF-8 validation, emil_getline. */
 
 #include "test.h"
 #include "test_harness.h"

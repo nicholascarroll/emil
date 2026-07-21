@@ -174,7 +174,6 @@ for suite in unicode wcwidth buffer undo edit fileio relpath visual_line utf8_va
         echo "$output" | grep -E ">>|run_shell|run_command|write_temp" | head -n 5 | sed 's/^/    /'
         ANY_FAIL=1
     elif echo "$output" | grep -q "FAIL"; then
-        # Defect 1 Fix: No test count on failure
         echo "FAIL" 
         echo "$output" | grep "FAIL:" | head -n 3 | sed 's/^/    /'
         ANY_FAIL=1

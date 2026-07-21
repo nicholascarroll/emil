@@ -1,4 +1,4 @@
-/* test_visual_line.c — Visual line movement, start/end, kill in wrap mode. */
+/* test_visual_line.c: Visual line movement, start/end, kill in wrap mode. */
 
 #include "test.h"
 #include "test_harness.h"
@@ -345,9 +345,7 @@ void tearDown(void) {
 /* ---- scrollViewport on an empty wrap buffer ---- */
 
 void test_scroll_viewport_empty_wrap_buffer(void) {
-	/* Regression: PageDown on an empty word-wrap buffer (e.g. an
-	 * existing empty .md file) previously computed last = -1 in the
-	 * wrap branch and dereferenced buf->row[-1] with row == NULL. */
+	/* PageDown on an empty word-wrap buffer */
 	struct buffer *b = make_test_buffer("");
 	TEST_ASSERT_EQUAL_INT(0, b->numrows);
 	E.screencols = 20;

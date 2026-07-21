@@ -1,4 +1,4 @@
-/* test_subprocess.c — Contract tests for the subprocess API surface
+/* test_subprocess.c: Contract tests for the subprocess API surface
  * that pipe.c depends on.
  *
  * These tests define the behaviour any replacement for subprocess.h

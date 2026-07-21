@@ -1,23 +1,4 @@
-/* test_shell.c — Integration tests for pipe.c shell operations.
- *
- * Tests the four user-facing operations that use subprocess:
- *
- *   1. Shell command (no region) — run command, capture output
- *   2. Shell command piping region — feed selected text, capture output
- *   3. Shell command replacing region — feed region, replace in buffer
- *   4. Diff buffer with file — compare dirty buffer against saved file
- *
- * Operations 1-3 go through the static transformerPipeCmd, which we
- * can't call directly.  We replicate the same subprocess + row-splitting
- * integration that pipeCmd performs.
- *
- * Operation 4 tests the early-return guards by calling diffBufferWithFile()
- * directly (no refreshScreen on those paths), and tests diff output via
- * run_command() which uses the same subprocess flags as diffBufferWithFile.
- *
- * Section 0 ("platform diagnostics") verifies each prerequisite so that
- * failures on any platform pinpoint the exact broken assumption rather
- * than cascading into opaque NULLs in later tests. */
+/* test_shell.c: Integration tests for pipe.c shell operations.*/
 
 #include "test.h"
 #include "test_harness.h"
@@ -259,7 +240,7 @@ static char *write_temp_file(const char *content) {
 }
 
 /* ================================================================
- * 0. Platform diagnostics — baby-step verification of prerequisites
+ * 0. Platform diagnostics: baby-step verification of prerequisites
  *
  * Each test isolates ONE assumption.  When something breaks on a
  * new platform, the first failing diagnostic identifies the cause.
@@ -394,7 +375,7 @@ void test_platform_diff_two_files(void) {
 }
 
 /* ================================================================
- * 1. Shell command (no region) — run command, capture output
+ * 1. Shell command (no region): run command, capture output
  * ================================================================ */
 
 void test_shell_echo_to_buffer(void) {
@@ -457,7 +438,7 @@ void test_shell_utf8_output(void) {
 }
 
 /* ================================================================
- * 2. Shell command piping region — feed selected text, capture output
+ * 2. Shell command piping region: feed selected text, capture output
  * ================================================================ */
 
 void test_shell_pipe_region(void) {
@@ -484,7 +465,7 @@ void test_shell_pipe_multiline_region(void) {
 }
 
 /* ================================================================
- * 3. Shell command replacing region — feed region, replace in buffer
+ * 3. Shell command replacing region: feed region, replace in buffer
  * ================================================================ */
 
 void test_shell_region_replacement_text(void) {
@@ -519,19 +500,6 @@ void test_shell_region_replace_multiline(void) {
 
 /* ================================================================
  * 4. Diff buffer with file
- *
- * test_diff_no_filename and test_diff_not_dirty call
- * diffBufferWithFile() directly — these hit early-return paths
- * that never reach refreshScreen.
- *
- * test_diff_identical also calls diffBufferWithFile() directly —
- * diff returns 0 so it returns before refreshScreen.
- *
- * test_diff_shows_differences and test_diff_multiline_changes
- * use run_command() with the exact same argv and flags that
- * diffBufferWithFile uses internally, then verify the output
- * parsing.  This avoids refreshScreen while testing the real
- * subprocess+diff integration.
  * ================================================================ */
 
 void test_diff_no_filename(void) {
@@ -673,11 +641,7 @@ void tearDown(void) {
 
 
 /* ---- Pipe deadlock regressions ------------------------------------ */
-/* The old transformerPipeCmd wrote all stdin, joined, then read
- * stdout; diffBufferWithFile joined before reading.  Both deadlocked
- * permanently once either pipe filled (~64 KB).
- *
- * Watchdog note: alarm() shares ITIMER_REAL with fileio.c's
+/*  Watchdog note: alarm() shares ITIMER_REAL with fileio.c's
  * timed_stat/timed_lockFile machinery, and the harness installs
  * fileCheckAlarm as the SIGALRM handler — which only sets a flag and
  * would NOT terminate a deadlocked test (the pump loop retries on

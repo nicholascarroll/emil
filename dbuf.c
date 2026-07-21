@@ -9,7 +9,7 @@ void dbuf_ensure(struct dbuf *d, int n) {
 		return;
 	/* Overflow check: can we even represent len + n? */
 	if (d->len > INT_MAX - n) {
-		/* Pathological — abort cleanly via xmalloc(impossible). */
+		/* Pathological: abort cleanly via xmalloc(impossible). */
 		xmalloc((size_t)INT_MAX + 1);
 	}
 	int need = d->len + n;

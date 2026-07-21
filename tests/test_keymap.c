@@ -1,20 +1,5 @@
-/* test_keymap.c — minimal characterisation tests for the keymap.
- *
- * Only pins behaviours later phases could silently break:
- *
- *   1. C-x C-s routes to CMD_SAVE (one assertion exercises the
- *      prefix state machine held as `static` inside resolveBinding).
- *   2. Universal argument: C-u 4 2 results in E.uarg == 42 before the
- *      next command dispatches, and E.uarg resets to 0 after dispatch.
- *      (2b pins the 4-then-2 case specifically; 2c pins the M--
- *      reverse modifier: digits refused, C-u overrides it.)
- *   3. E.micro redo micro-state: after CMD_REDO, a following CMD_UNDO
- *      invokes doRedo, not doUndo.  This is the Emacs convention that
- *      C-_ immediately after C-x C-_ continues redoing rather than
- *      flipping direction back into the undo history.
- *
- * The commands themselves remain indirectly tested through test_edit
- * and friends; this file is deliberately narrow. */
+/* test_keymap.c: minimal characterisation tests for the keymap.
+*/
 
 #include "test.h"
 #include "test_harness.h"

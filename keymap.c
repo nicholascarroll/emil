@@ -324,7 +324,7 @@ int resolveBinding(int key) {
 		case '=':
 			return CMD_WHAT_CURSOR;
 		case 'x':
-			/* C-x x sub-prefix — read another key.  The key
+			/* C-x x sub-prefix: read another key.  The key
 			 * must be recorded: the main loop only records
 			 * keys it read itself, and a macro missing this
 			 * key would desynchronize on playback. */
@@ -440,7 +440,7 @@ int resolveBinding(int key) {
 		int cmd = resolveMetaBinding(META_CHAR(key));
 		if (cmd != CMD_NONE)
 			return cmd;
-		/* Unknown Meta combination — already handled by terminal
+		/* Unknown Meta combination: already handled by terminal
 		 * layer's ESC_UNKNOWN path with status message */
 		return CMD_NONE;
 	}
@@ -537,10 +537,10 @@ int resolveBinding(int key) {
 	case '\t':
 		return CMD_TAB;
 	case 033:
-		return CMD_NONE; /* Bare ESC — already handled */
+		return CMD_NONE; /* Bare ESC: already handled */
 	}
 
-	/* Printable characters — check for digit accumulation after C-u */
+	/* Printable characters: check for digit accumulation after C-u */
 	if (key >= ' ' && key < KEY_ARROW_LEFT) {
 		if (E.uarg && key >= '0' && key <= '9') {
 			if (E.uarg == UARG_REVERSE) {
@@ -639,6 +639,11 @@ static int dispatchMove(int c, int uarg, struct window *win) {
 		backwardSentence(uarg);
 		return 1;
 	case CMD_RECENTER:
+		/* On consoles with no SIGWINCH (serial), C-l is also the
+		 * manual "the screen looks wrong" key: re-ask the
+		 * terminal for its size before recentering. */
+		if (windowSizeWasProbed())
+			reprobeScreenSize();
 		recenter(win);
 		return 1;
 	case CMD_GOTO_LINE:
@@ -919,6 +924,7 @@ static int dispatchRegion(int c, int uarg) {
 		return 1;
 	case CMD_REGION_REGISTER:
 		regionToRegister();
+		deactivateMark();
 		return 1;
 	case CMD_INC_REGISTER:
 		incrementRegister();
@@ -979,7 +985,7 @@ static int dispatchMacro(int c, int uarg) {
 	switch (c) {
 	case CMD_MACRO_RECORD:
 		if (E.playback) {
-			/* A replayed C-x ( would clobber E.macro.keys —
+			/* A replayed C-x ( would clobber E.macro.keys:
 			 * the very array being played back. */
 			setStatusMessage(msg_macro_blocked);
 			return 1;
@@ -1232,14 +1238,12 @@ void execMacro(struct macro *macro) {
 	struct macro tmp;
 	tmp.keys = NULL;
 	if (macro != &E.macro) {
-		/* HACK: Annoyance here with readkey needs us to futz
-		 * around with E.macro */
 		memcpy(&tmp, &E.macro, sizeof(struct macro));
 		memcpy(&E.macro, macro, sizeof(struct macro));
 	}
 	E.playback = 0;
 	while (E.playback < E.macro.nkeys) {
-		/* HACK: increment here, so that
+		/* Increment here, so that
 		 * readkey sees playback != 0 */
 		int key = E.macro.keys[E.playback++];
 		if (key == KEY_UNICODE) {

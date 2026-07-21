@@ -1,4 +1,4 @@
-/* test_unicode.c — UTF-8 classification and validation. */
+/* test_unicode.c: UTF-8 classification and validation. */
 
 #include "test.h"
 #include "test_harness.h"

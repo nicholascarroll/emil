@@ -28,10 +28,8 @@ int minibuffer_height = 1;
 const int statusbar_height = 1;
 
 /* Pre-computed highlight bounds for a single row.  Computed once per row
- * before rendering, then checked with simple integer comparisons in the
- * per-column loop.  This replaces the old isRenderPosInRegion /
- * isRenderPosCurrentSearchMatch calls that each walked the row from byte 0
- * via charsToDisplayColumn up to four times per column. */
+ * then checked with simple integer comparisons.
+ */
 struct rowHighlight {
 	int region_start; /* first highlighted display column, or -1 */
 	int region_end;	  /* one past last highlighted column, or -1 */
@@ -65,7 +63,6 @@ static void computeRowHighlightBounds(struct buffer *buf, int filerow,
 		return;
 	}
 
-	/* Region bounds — only highlight when mark is active */
 	if (buf->mark_active && !markInvalidSilent()) {
 		if (buf->rectangle_mode) {
 			int top = buf->cy < buf->marky ? buf->cy : buf->marky;
@@ -150,7 +147,6 @@ static void updateHighlight(struct abuf *ab, int *current, int desired) {
  * moves up), negative = up (content moves down).  Handles both wrap
  * and non-wrap modes, managing rowoff and skip_sublines.
  *
- * This is a pure viewport operation — it does NOT touch the cursor.
  * Callers are responsible for adjusting the cursor afterwards. */
 void scrollViewport(struct window *win, struct buffer *buf, int n) {
 	if (n == 0)
@@ -257,8 +253,8 @@ static int viewportTopScreenLine(struct window *win, struct buffer *buf) {
 }
 
 /* Ensure the cursor is within the visible viewport.  If it has fallen
- * outside, drag it to the nearest visible row.  Pure cursor fixup —
- * does not touch the viewport. */
+ * outside, drag it to the nearest visible row. Does not touch the viewport. 
+ */
 void clampCursorToViewport(struct window *win, struct buffer *buf) {
 	if (!buf->word_wrap) {
 		if (buf->cy < win->rowoff)
@@ -277,7 +273,6 @@ void clampCursorToViewport(struct window *win, struct buffer *buf) {
 			getScreenLineForRow(buf, buf->cy, E.screencols);
 
 		if (cursor_screen < top) {
-			/* Cursor above viewport — move down */
 			while (buf->cy < buf->numrows - 1) {
 				buf->cy++;
 				cursor_screen = getScreenLineForRow(
@@ -287,7 +282,6 @@ void clampCursorToViewport(struct window *win, struct buffer *buf) {
 			}
 			buf->cx = 0;
 		} else if (cursor_screen >= top + win->height) {
-			/* Cursor below viewport — move up */
 			while (buf->cy > 0) {
 				cursor_screen = getScreenLineForRow(
 					buf, buf->cy, E.screencols);
@@ -732,7 +726,7 @@ static int truncateToCols(char *out, size_t out_cap, const char *in,
 /* Status bar block renderers.  Each writes its content into a
  * caller-supplied buffer and returns the byte length written.
  * The BLOCK constant (15 columns) governs the fixed-width mid
- * and right blocks; the left block gets whatever remains. */
+ * and right blocks; the left block gets the remainder. */
 
 static const int STATUS_BLOCK = 15;
 
@@ -815,10 +809,11 @@ static int statusMid(const struct window *win, char *out, char fc) {
  * count.
  *
  * Precedence (highest first):
- *   1. [MEMORY OVER!]  — editor-wide
- *   2. [DISK CHANGED]  — this buffer's file
- *   3. [LOCK PID N]    — held by another process
- *   4. (Macro)/(Wrap)  — informational mode indicators */
+ *   1. [MEMORY OVER!] 
+ *   2. [DISK CHANGED] 
+ *   3. [LOCK PID N]   
+ *   4. (Macro)/(Wrap) 
+ */
 static void statusRight(const struct window *win, char *out, int *out_bytes,
 			int *out_cols, char fc) {
 	struct buffer *bufr = win->buf;
@@ -975,42 +970,77 @@ void drawMinibuffer(struct abuf *ab) {
 	int msglen = strlen(msg);
 	int valid = msglen && E.statusmsg_show;
 
-	/* Prefix takes space on the first line */
+	/* Prefix takes space on the first line; its screen footprint
+	 * is its display width, not its byte length */
 	int prefix_len = strlen(E.prefix_display);
+	int prefix_cols = stringWidth((const uint8_t *)E.prefix_display);
+
+	/* Byte offset into msg; advances line by line.  Lines are
+	 * filled by display columns, splitting only at character
+	 * boundaries: a byte-based split cuts multi-byte UTF-8
+	 * sequences in half at wrap points, sending invalid
+	 * fragments to the terminal. */
+	int offset = 0;
 
 	/* Draw each minibuffer line */
 	for (int line = 0; line < minibuffer_height; line++) {
 		abAppend(ab, "\x1b[K", 3); /* clear line */
 
 		if (!valid) {
-			/* No message — just emit blank lines */
 			if (line < minibuffer_height - 1)
 				abAppend(ab, "\r\n", 2);
 			continue;
 		}
 
-		int offset;
+		int avail;
 		if (line == 0) {
 			/* First line: prefix + start of message */
 			if (prefix_len > 0)
 				abAppend(ab, E.prefix_display, prefix_len);
-			offset = 0;
+			avail = E.screencols - prefix_cols;
 		} else {
 			/* Continuation lines: message continues */
-			offset = (E.screencols - prefix_len) +
-				 (line - 1) * E.screencols;
+			avail = E.screencols;
 		}
-
-		int avail = (line == 0) ? E.screencols - prefix_len :
-					  E.screencols;
 		if (avail < 0)
 			avail = 0;
 
 		if (offset < msglen) {
-			int chunk = msglen - offset;
-			if (chunk > avail)
-				chunk = avail;
-			abAppend(ab, msg + offset, chunk);
+			/* Take whole characters while they fit in the
+			 * remaining columns.  A wide character that
+			 * straddles the boundary is pushed to the next
+			 * line (the line comes up one column short). */
+			int start = offset;
+			int cols = 0;
+			while (offset < msglen) {
+				uint8_t c = (uint8_t)msg[offset];
+				int nb = (c < 0x80) ? 1 : utf8_nBytes(c);
+				if (nb < 1)
+					nb = 1;
+				int cw = (c < 0x80) ?
+						 1 :
+						 charInStringWidth(
+							 (const uint8_t *)msg,
+							 offset);
+				if (cw < 0)
+					cw = 1;
+				if (cols + cw > avail)
+					break;
+				cols += cw;
+				offset += nb;
+			}
+			/* Guarantee progress: if not even one character
+			 * fit (degenerate widths), force one through so
+			 * the message cannot stall across lines. */
+			if (offset == start && offset < msglen) {
+				uint8_t c = (uint8_t)msg[offset];
+				int nb = (c < 0x80) ? 1 : utf8_nBytes(c);
+				if (nb < 1)
+					nb = 1;
+				offset += nb;
+			}
+			if (offset > start)
+				abAppend(ab, msg + start, offset - start);
 			abAppend(ab, "\x1b[0m", 4);
 		}
 
@@ -1054,16 +1084,20 @@ void refreshScreen(void) {
 
 	/* Auto-size minibuffer to fit the current status message.
 	 * Layout matches drawMinibuffer(): the first line shares space
-	 * with prefix_display, continuation lines get full width. */
+	 * with prefix_display, continuation lines get full width.
+	 * Measured in display columns, not bytes: a CJK message is 3
+	 * bytes but 2 columns per character, so byte counts over-grow
+	 * the minibuffer. */
 	int needed_mb = 1;
 	if (E.statusmsg_show && E.statusmsg[0] && E.screencols > 0) {
-		int msglen = strlen(E.statusmsg);
-		int prefix_len = strlen(E.prefix_display);
-		int first_line = E.screencols - prefix_len;
+		int msg_cols = stringWidth((const uint8_t *)E.statusmsg);
+		int prefix_cols =
+			stringWidth((const uint8_t *)E.prefix_display);
+		int first_line = E.screencols - prefix_cols;
 		if (first_line < 1)
 			first_line = 1;
-		if (msglen > first_line)
-			needed_mb = 1 + (msglen - first_line + E.screencols -
+		if (msg_cols > first_line)
+			needed_mb = 1 + (msg_cols - first_line + E.screencols -
 					 1) / E.screencols;
 		if (needed_mb > 5)
 			needed_mb = 5;
@@ -1174,7 +1208,6 @@ void cursorBottomLine(int curs) {
 void resizeScreen(int UNUSED(sig)) {
 	if (getWindowSize(&E.screenrows, &E.screencols) == -1)
 		die("getWindowSize");
-	/* Screen width changed — all cached widths are stale for word-wrap */
 	for (struct buffer *b = E.headbuf; b != NULL; b = b->next) {
 		for (int i = 0; i < b->numrows; i++) {
 			b->row[i].cached_width = -1;
@@ -1221,6 +1254,38 @@ void whatCursor(void) {
 		"Line,col (buffer:%d,%d screen:%d,%d) Char='%s' LineLen=%d Window=%dx%d",
 		E.buf->cy + 1, E.buf->cx, screen_y, rx, ch, line_len,
 		E.screencols, E.screenrows);
+}
+
+/*
+ * Re-ask the terminal for its size, for consoles where no SIGWINCH
+ * can ever arrive.  
+ */
+void reprobeScreenSize(void) {
+	int rows, cols;
+
+	if (probeWindowSize(&rows, &cols) != 0)
+		return;
+	if (rows == E.screenrows && cols == E.screencols)
+		return;
+
+	E.screenrows = rows;
+	E.screencols = cols;
+	/* Same invalidation as resizeScreen: cached widths and
+	 * window heights are stale for the new geometry. */
+	for (struct buffer *b = E.headbuf; b != NULL; b = b->next) {
+		for (int i = 0; i < b->numrows; i++) {
+			b->row[i].cached_width = -1;
+			b->row[i].cached_sublines = -1;
+		}
+		b->screen_line_cache_valid = 0;
+	}
+	for (int i = 0; i < E.nwindows; i++) {
+		E.windows[i]->height = 0;
+	}
+	computeDisplayNames();
+	/* Repaint now so window heights are recomputed before the
+	 * caller recenters against them. */
+	refreshScreen();
 }
 
 void recenter(struct window *win) {

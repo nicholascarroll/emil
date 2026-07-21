@@ -1,4 +1,4 @@
-/* ctags.h — ctags jump (M-.), jump back (M-,), toggle .c/.h (M-/) */
+/* ctags.h: ctags jump (M-.), jump back (M-,), toggle .c/.h (M-/) */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -94,7 +94,7 @@ int findTagsDir(char *out_dir, size_t dirsz) {
 			return 0;
 		}
 
-		/* Not here — step up to the parent directory. */
+		/* Not here: step up to the parent directory. */
 		if (dir[0] == '/' && dir[1] == '\0')
 			break; /* already at root */
 		char *slash = strrchr(dir, '/');

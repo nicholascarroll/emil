@@ -1,8 +1,8 @@
 ## [Unreleased]
-- Fixed #90 Read-only buffer corruption from kill-rectangle
-- Fixed columns dropped when horizontal scrolling stopped inside a tab.
-- Fixed regex search highlighting the pattern length. #92
-- Fixed cursor drawn on the status bar at an exact wrap boundary in wrap mode.
+- Fixed F12 (and PuTTY F4) discarding unsaved work.
+- Fixed SS3 escape sequences inserting text.
+- Fixed terminal resize not repainting until the next keypress.
+- Fixed minibuffer sizing, wrapping, and prompt cursor position for multi-byte text.
 
 ## [0.7.0] - 2026-07-20
 - Fixed crash yanking a rectangle into an empty buffer.
