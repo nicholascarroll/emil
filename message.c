@@ -3,8 +3,6 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-extern struct config E;
-
 void setStatusMessage(const char *fmt, ...) {
 	va_list ap;
 	va_start(ap, fmt);

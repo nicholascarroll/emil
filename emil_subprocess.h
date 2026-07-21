@@ -1,4 +1,4 @@
-/* emil_subprocess.h — Minimal subprocess API for pipe.c.
+/* emil_subprocess.h
  *
  * Spawn a child process with three pipes (stdin, stdout, stderr)
  * wired to parent-side FILE*s.  Implemented over posix_spawn so the
@@ -43,10 +43,8 @@ FILE *subprocess_stdout(const struct subprocess_s *const process);
 int subprocess_join(struct subprocess_s *const process,
 		    int *const out_return_code);
 
-/* Send 'sig' to the child — to its whole process group when the
- * child was spawned grouped (see struct field), so every member of a
- * shell pipeline receives it.  Returns kill()'s result; 0 if there
- * is no live child. */
+/* Send 'sig' to the child process group.
+ *   Returns kill()'s result; 0 if there is no live child. */
 int subprocess_signal(struct subprocess_s *const process, int sig);
 
 /* Non-blocking join: 1 = reaped (exit code stored), 0 = still

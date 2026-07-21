@@ -1,4 +1,4 @@
-/* emil_subprocess.c — Implementation of the subprocess API.
+/* emil_subprocess.c: Implementation of the subprocess API.
  *
  * See emil_subprocess.h for the public interface.  When
  * EMIL_DISABLE_SHELL is defined, this translation unit compiles to
@@ -150,7 +150,7 @@ int subprocess_create(const char *const command_line[], int options,
 	out_process->grouped = grouped;
 
 	if (!out_process->stdin_file || !out_process->stdout_file) {
-		/* Critical streams failed — clean up everything */
+		/* Critical streams failed: clean up everything */
 		if (out_process->stdin_file)
 			fclose(out_process->stdin_file);
 		else
@@ -281,7 +281,7 @@ int subprocess_destroy(struct subprocess_s *const process) {
 
 #else /* EMIL_DISABLE_SHELL */
 
-/* Empty translation unit — ISO C forbids it, so provide a stub.
+/* Empty translation unit: ISO C forbids it, so provide a stub.
  * `typedef` is not a definition and satisfies pedantic compilers. */
 typedef int emil_subprocess_unused_t;
 

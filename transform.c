@@ -12,7 +12,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-extern struct config E;
 #define MKOUTPUT(in, l, o)          \
 	int l = strlen((char *)in); \
 	uint8_t *o = xmalloc(l + 1)

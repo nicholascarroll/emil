@@ -1,5 +1,3 @@
-/* ctags.h — ctags jump (M-.), jump back (M-,), toggle .c/.h (M-/) */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,8 +10,6 @@
 #include "display.h"
 #include "window.h"
 #include "util.h"
-
-extern struct config E;
 
 /* ---- jump-back stack ---- */
 
@@ -70,10 +66,8 @@ static char *wordAtPoint(void) {
 
 /* ---- ctags file lookup (prefers .c over .h) ---- */
 
-/* Walk from the current working directory up toward the filesystem
- * root looking for a "tags" file, mirroring how vim/emacs locate a
- * project's tag index.  See ctags.h for the contract.  The depth bound
- * keeps a pathological filesystem from spinning forever. */
+/* Walk from the current working directory up toward filesystem root.
+ *  The depth bound keeps a pathological filesystem from spinning forever. */
 int findTagsDir(char *out_dir, size_t dirsz) {
 	char dir[PATH_MAX];
 	if (getcwd(dir, sizeof(dir)) == NULL)
@@ -94,7 +88,7 @@ int findTagsDir(char *out_dir, size_t dirsz) {
 			return 0;
 		}
 
-		/* Not here — step up to the parent directory. */
+		/* Not here: step up to the parent directory. */
 		if (dir[0] == '/' && dir[1] == '\0')
 			break; /* already at root */
 		char *slash = strrchr(dir, '/');
@@ -322,8 +316,7 @@ void toggleHeaderBody(void) {
 	char other[PATH_MAX];
 	/* base_len is measured on the original string; if the filename
 	 * doesn't fit in 'other', the offset arithmetic below would
-	 * write past the buffer (glibc happens to reject the
-	 * underflowed snprintf size, but that's not portable). */
+	 * write past the buffer */
 	if (strlen(E.buf->filename) >= sizeof(other)) {
 		setStatusMessage(msg_no_ext_mapping, ext);
 		return;

@@ -33,15 +33,4 @@ char *absolutePath(const char *path); /* resolve to absolute; caller frees */
 /* Character classification */
 int isWordBoundary(uint8_t c);
 
-/* Read-only guard: if buf is read-only, post "buffer read-only" to the
- * status bar and return non-zero; otherwise return zero.  Callers that
- * mutate the buffer should early-return when this returns non-zero:
- *
- *     if (rejectIfReadOnly(buf)) return;
- *
- * Exists to keep mutation entry points scannable — the intent of the
- * function shows up on line 2, not after four lines of prelude. */
-struct buffer;
-int rejectIfReadOnly(struct buffer *buf);
-
 #endif /* EMIL_UTIL_H */

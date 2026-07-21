@@ -1,4 +1,4 @@
-/* test_undo.c — Undo/redo stack, coalescing, bulk replay.
+/* test_undo.c: Undo/redo stack, coalescing, bulk replay.
  * Highest-value test target: undo bugs silently corrupt files. */
 
 #include "test.h"

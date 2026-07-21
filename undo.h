@@ -19,7 +19,4 @@ void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
 void bulkDelete(struct buffer *buf, int startx, int starty, int endx, int endy);
 void undoSelfInsert(uint8_t c, int count);
 
-#ifdef EMIL_DEBUG_UNDO
-void debugUnpair(void);
-#endif
 #endif

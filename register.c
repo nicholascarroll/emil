@@ -14,8 +14,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-extern struct config E;
-
 static int getRegisterName(char *prompt) {
 	int key;
 	int psize = stringWidth((uint8_t *)prompt);

@@ -6,14 +6,6 @@
 /* Dynamic byte buffer for building mutation text, replacement
  * strings, and subprocess output.  Owns its allocation.
  *
- * Usage:
- *   struct dbuf d = DBUF_INIT;
- *   dbuf_append(&d, data, len);
- *   dbuf_byte(&d, '\n');
- *   dbuf_pad(&d, ' ', count);
- *   uint8_t *result = dbuf_detach(&d, &out_len);
- *   // caller frees result
- *
  * All growth is overflow-checked: if the buffer would exceed
  * INT_MAX bytes, the process aborts via xmalloc/xrealloc. */
 

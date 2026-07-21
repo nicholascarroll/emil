@@ -11,8 +11,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-extern struct config E;
-
 /* Boundary detection */
 
 int isParaBoundary(erow *row) {

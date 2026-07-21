@@ -1,4 +1,4 @@
-/* test_transform.c — Latin Extended case mapping in transform functions. */
+/* test_transform.c: Latin Extended case mapping in transform functions. */
 
 #include "test.h"
 #include "test_harness.h"

@@ -18,8 +18,6 @@
 #include "window.h"
 #include <regex.h>
 
-extern struct config E;
-
 void resetCompletionState(struct completion_state *state) {
 	free(state->last_completed_text);
 	state->last_completed_text = NULL;

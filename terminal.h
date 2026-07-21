@@ -7,7 +7,6 @@ void die(const char *s);
 void disableRawMode(void);
 void enableRawMode(void);
 void applyRawMode(void);
-int getCursorPosition(int *rows, int *cols);
 int getWindowSize(int *rows, int *cols);
 int readKey(void);
 void terminalPushbackByte(uint8_t c);

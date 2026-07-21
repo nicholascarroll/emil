@@ -9,16 +9,6 @@
 #include <pwd.h>
 #include <sys/types.h>
 
-extern struct config E;
-
-int rejectIfReadOnly(struct buffer *buf) {
-	if (buf->read_only) {
-		setStatusMessage(msg_read_only);
-		return 1;
-	}
-	return 0;
-}
-
 /* Never returns NULL for size > 0: allocation failure aborts.
  * (Static analyzers that flag callers for NULL dereference are
  * reasoning about the size == 0 case, which callers never hit with

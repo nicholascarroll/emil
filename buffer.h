@@ -2,6 +2,15 @@
 #define EMIL_BUFFER_H
 #include "emil.h"
 #include "wrap.h"
+
+/* Read-only guard: if buf is read-only, post "buffer read-only" to the
+ * status bar and return non-zero; otherwise return zero.  Callers that
+ * mutate the buffer should early-return when this returns non-zero.
+ * e.g.    if (rejectIfReadOnly(buf)) return;
+ */
+struct buffer;
+int rejectIfReadOnly(struct buffer *buf);
+
 void insertRow(struct buffer *bufr, int at, const uint8_t *s, size_t len);
 void appendRowRaw(struct buffer *bufr, const uint8_t *s, size_t len);
 void freeRow(erow *row);

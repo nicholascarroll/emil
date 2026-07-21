@@ -5,8 +5,6 @@
 #include "util.h"
 #include <stdlib.h>
 
-extern struct config E;
-
 int windowFocusedIdx(void) {
 	for (int i = 0; i < E.nwindows; i++) {
 		if (E.windows[i]->focused) {

@@ -1,8 +1,5 @@
-/* test_status_bar.c — Characterisation tests for drawStatusBar.
- *
- * These pin the visible content of the status bar under various
- * buffer states.  They exist to catch regressions during the Phase 8
- * decomposition; the tests were written first and must stay green. */
+/* test_status_bar.c: Characterisation tests for drawStatusBar.
+ */
 
 #include "test.h"
 #include "test_harness.h"

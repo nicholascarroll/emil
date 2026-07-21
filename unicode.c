@@ -16,9 +16,8 @@ uint32_t utf8Decode(const uint8_t *str, int idx) {
 	 * never a continuation byte, so decoding stops at the
 	 * terminator for truncated sequences (which can reach a buffer
 	 * via byte-column rectangle operations on multibyte text)
-	 * instead of reading past the allocation.  An invalid sequence
-	 * decodes as its lead byte, matching the pre-existing handling
-	 * of stray non-UTF-8 bytes. */
+	 * instead of reading past the allocation.  
+	 */
 	uint32_t ret = 0;
 	uint8_t ch = str[idx];
 	if (utf8_is2Char(ch)) {
@@ -46,110 +45,6 @@ uint32_t utf8Decode(const uint8_t *str, int idx) {
 		ret = str[idx];
 	}
 	return ret;
-}
-
-/* Convert a 32 bit value to UTF-8, assuming that dest is big enough
- * to store it. returns number of bytes (1-4) written. */
-static ssize_t rune_to_utf8(uint8_t *dest, uint32_t ru) {
-	/*
-	 * for continuation bytes
-	 * 00111111 = 3F
-	 * 10000000 = 80
-	 * 10111111 = BF
-	 *
-	 * for 2-bytes
-	 * 00011111 = 1F
-	 * 11000000 = C0
-	 * 11011111 = DF
-	 *
-	 * for 3-bytes
-	 * 00001111 = 0F
-	 * 11100000 = E0
-	 * 11101111 = EF
-	 *
-	 * for 4-bytes
-	 * 00000111 = 07
-	 * 11110000 = F0
-	 * 11110111 = F7
-	 */
-	if (ru < 0x80) {
-		/* ASCII */
-		dest[0] = (uint8_t)ru;
-		return 1;
-	} else if (ru < 0x0800) {
-		/* 2 bytes */
-		dest[0] = ((uint8_t)(ru >> 6) & 0x1F) | 0xC0;
-		dest[1] = ((uint8_t)ru & 0x3F) | 0x80;
-		return 2;
-	} else if (ru < 0x10000) {
-		/* 3 bytes */
-		dest[0] = ((uint8_t)(ru >> 12) & 0x0F) | 0xE0;
-		dest[1] = ((uint8_t)(ru >> 6) & 0x3F) | 0x80;
-		dest[2] = ((uint8_t)ru & 0x3F) | 0x80;
-		return 3;
-	} else {
-		/* 4 bytes */
-		dest[0] = ((uint8_t)(ru >> 18) & 0x07) | 0xF0;
-		dest[1] = ((uint8_t)(ru >> 12) & 0x3F) | 0x80;
-		dest[2] = ((uint8_t)(ru >> 6) & 0x3F) | 0x80;
-		dest[3] = ((uint8_t)ru & 0x3F) | 0x80;
-		return 4;
-	}
-}
-
-static int testCaseUCS(char *testCh, int expected) {
-	int ucs = utf8Decode((const uint8_t *)testCh, 0);
-	printf("%s\tgot %04x\texpected %04x\n", testCh, ucs, expected);
-	return expected != ucs;
-}
-
-static int testCaseReverseUCS(char *expectedChars, int expectedWidth,
-			      int input) {
-	uint8_t result[4];
-	ssize_t actualWidth;
-	int resultsNotMatch = 0;
-	int i = 0;
-
-	actualWidth = rune_to_utf8(result, input);
-
-	while (expectedChars[i] != 0) {
-		printf("%i actual: %02x expected: %02x\n", i, result[i],
-		       (uint8_t)expectedChars[i]);
-		resultsNotMatch += result[i] != (uint8_t)expectedChars[i];
-		i++;
-	}
-	printf("expected width %i actual %zd\n", expectedWidth, actualWidth);
-
-	return (actualWidth != expectedWidth) + resultsNotMatch;
-}
-
-static int testCaseStringWidth(char *str, int expected) {
-	int actual = stringWidth((const uint8_t *)str);
-	printf("%s\tgot %i\texpected %i\n", str, actual, expected);
-	return actual != expected;
-}
-
-int unicodeTest(void) {
-	printf("UTF8 -> UCS conversion test\n");
-	int retval = testCaseUCS("$", 0x24);
-	retval = retval + testCaseUCS("\xC2\xA2", 0xA2);
-	retval = retval + testCaseUCS("\xE0\xA4\xB9", 0x939);
-	retval = retval + testCaseUCS("\xE2\x82\xAC", 0x20AC);
-	retval = retval + testCaseUCS("\xED\x95\x9C", 0xD55C);
-	retval = retval + testCaseUCS("\xF0\x90\x8D\x88", 0x10348);
-	retval = retval + testCaseUCS("\xF0\x9f\x98\x87", 0x1f607);
-	printf("Rune width test\n");
-	retval += testCaseStringWidth("bruh", 4);
-	retval += testCaseStringWidth("生存戦略", 8);
-	retval += testCaseStringWidth("😇", 2);
-	printf("UCS -> UTF8 conversion test\n");
-	retval = retval + testCaseReverseUCS("\xC2\xA2", 2, 0xA2);
-	retval = retval + testCaseReverseUCS("\xE0\xA4\xB9", 3, 0x939);
-	retval = retval + testCaseReverseUCS("\xE2\x82\xAC", 3, 0x20AC);
-	retval = retval + testCaseReverseUCS("\xED\x95\x9C", 3, 0xD55C);
-	retval = retval + testCaseReverseUCS("\xF0\x90\x8D\x88", 4, 0x10348);
-	retval = retval + testCaseReverseUCS("\xF0\x9f\x98\x87", 4, 0x1f607);
-	return retval;
 }
 
 int stringWidth(const uint8_t *str) {
@@ -235,7 +130,7 @@ int isCJKChar(uint32_t cp) {
 	       || (cp >= 0xD7B0 && cp <= 0xD7FF); /* Hangul Jamo Extended-B */
 }
 
-/* 行首禁则 — characters forbidden at the start of a wrapped line.
+/* 行首禁则 are the characters forbidden at the start of a wrapped line.
  * Initial set: closing punctuation that must stay attached to the
  * character it follows.  Word wrap consults this to avoid recording
  * a break point immediately before any of these.  Extend the table
@@ -266,10 +161,8 @@ int isCJKSentenceTerminator(uint32_t cp) {
 
 /* Southeast Asian sentence terminators: Khmer ។ (U+17D4 KHAN, full
  * stop) and ៕ (U+17D5 BARIYOOSAN, end of section); Thai ๚ (U+0E5A
- * ANGKHANKHU) and ๛ (U+0E5B KHOMUT) for classical texts.  Modern
- * Thai and Lao mark sentence ends with spaces only — inherently
- * ambiguous without a dictionary — so those fall back to the
- * end-of-line invariant in sentence motion. */
+ * ANGKHANKHU) and ๛ (U+0E5B KHOMUT) for classical texts.  
+ */
 int isSEAsianSentenceTerminator(uint32_t cp) {
 	return cp == 0x17D4 || cp == 0x17D5 || cp == 0x0E5A || cp == 0x0E5B;
 }

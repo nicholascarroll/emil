@@ -1,4 +1,4 @@
-/* test_wcwidth.c — Character and string width calculations. */
+/* test_wcwidth.c: Character and string width calculations. */
 
 #ifndef _XOPEN_SOURCE
 #define _XOPEN_SOURCE 700

@@ -1,13 +1,9 @@
-/* test_kill_ring.c — pin kill ring behaviours before Phase 6
- * restructures the data model.
+/* test_kill_ring.c
  *
  * Kill ring operations today touch three things in parallel:
  *   - E.kill (the "current" kill, used as a read cache)
  *   - E.kill_history (the ring itself)
  *   - E.kill_ring_pos (cursor within the ring for M-y)
- *
- * Phase 6 will collapse these into a single source of truth.  These
- * tests pin the observable contract so that collapse is safe:
  *
  *   1. Kill then yank returns the most recent kill.
  *   2. Kill, kill, yank, yank-pop returns the previous kill.
@@ -25,7 +21,7 @@
 #include "keymap.h"
 #include <string.h>
 
-extern struct config E;
+
 
 void setUp(void) {
 	initTestEditor();
@@ -207,12 +203,14 @@ void test_reverse_yank_leaves_point_before_text(void) {
 	processKeypress(CMD_YANK);
 	TEST_ASSERT_EQUAL_STRING("hello world", row_str(buf, 0));
 
-	/* Point stayed before the yanked text; mark sits after it. */
+	/* Point stayed before the yanked text; the mark position is
+	 * set after it, but the mark is left inactive (yank no longer
+	 * activates a region around the inserted text). */
 	TEST_ASSERT_EQUAL_INT(6, buf->cx);
 	TEST_ASSERT_EQUAL_INT(0, buf->cy);
 	TEST_ASSERT_EQUAL_INT(11, buf->markx);
 	TEST_ASSERT_EQUAL_INT(0, buf->marky);
-	TEST_ASSERT_TRUE(buf->mark_active);
+	TEST_ASSERT_FALSE(buf->mark_active);
 }
 
 /* --- 7. M-- M-y: cycle the kill ring toward newer kills ----------- */

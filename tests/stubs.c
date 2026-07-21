@@ -1,7 +1,7 @@
-/* stubs.c — Stubs for the terminal I/O boundary.
+/* stubs.c: Stubs for the terminal I/O boundary.
  *
- * Strategy C: the test binary links every .o file except main.o and
- * terminal.o. This file provides:
+ * The test binary links every .o file except main.o and terminal.o. 
+ * This file provides:
  * - The global E and page_overlap that main.o normally defines.
  * - No-op replacements for terminal.o functions (the only functions
  *   that physically touch the terminal: read/write fd 0/1, termios,
@@ -21,9 +21,12 @@ void die(const char *s) {
 	abort();
 }
 
-void enableRawMode(void) {}
-void disableRawMode(void) {}
-void disableRawModeKeepScreen(void) {}
+void enableRawMode(void) {
+}
+void disableRawMode(void) {
+}
+void disableRawModeKeepScreen(void) {
+}
 
 int readKey(void) {
 	return 0;
@@ -39,12 +42,6 @@ int terminalPushbackPending(void) {
 	return stub_pushback >= 0;
 }
 
-int getCursorPosition(int *rows, int *cols) {
-	*rows = 24;
-	*cols = 80;
-	return 0;
-}
-
 int getWindowSize(int *rows, int *cols) {
 	*rows = 24;
 	*cols = 80;
@@ -55,6 +52,8 @@ void copyToClipboard(const uint8_t *text) {
 	(void)text;
 }
 
-void deserializeUnicode(void) {}
+void deserializeUnicode(void) {
+}
 
-void openShellDrawer(void) {}
+void openShellDrawer(void) {
+}

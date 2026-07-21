@@ -1,4 +1,4 @@
-/* test_harness.h — Shared setup for Strategy C fat-binary tests.
+/* test_harness.h — Shared setup for fat-binary tests.
  *
  * Provides initTestEditor() which mirrors main.c's initEditor()
  * but uses fixed screen dimensions and skips terminal setup.

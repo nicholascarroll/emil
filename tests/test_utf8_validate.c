@@ -1,4 +1,4 @@
-/* test_utf8_validate.c — Tests for the utf8_validate() utility. */
+/* test_utf8_validate.c: Tests for the utf8_validate() utility. */
 
 #include "test.h"
 #include "test_harness.h"

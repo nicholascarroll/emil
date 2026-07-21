@@ -12,7 +12,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-extern struct config E;
 /* Bulk-insert text from 'data' (length 'datalen') into 'buf' starting
  * at buffer position (startx, starty).  Uses direct memmove/memcpy and
  * insertRow — no character-at-a-time primitives.  Does NOT record
@@ -245,23 +244,6 @@ void doUndo(struct buffer *buf, int count) {
 		}
 	}
 }
-
-#ifdef EMIL_DEBUG_UNDO
-void debugUnpair(void) {
-	struct buffer *buf = E.buf;
-	int undos = 0;
-	int redos = 0;
-	for (struct undo *i = buf->undo; i; i = i->prev) {
-		i->paired = 0;
-		undos++;
-	}
-	for (struct undo *i = buf->redo; i; i = i->prev) {
-		i->paired = 0;
-		redos++;
-	}
-	setStatusMessage(msg_unpaired_undo_redo, undos, redos);
-}
-#endif
 
 void doRedo(struct buffer *buf, int count) {
 	if (rejectIfReadOnly(buf))

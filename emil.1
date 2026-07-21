@@ -38,7 +38,7 @@ The
 .Sy mark
 defines one end of a selected region (the other end is the cursor).
 .Nm
-maintains a ring of the 8 most recent mark positions. Setting the mark pushes the current position onto the ring. These positions can then be returned to later.
+maintains a ring of the 8 most recent mark positions. Setting the mark pushes the current position onto the ring.  These positions can then be returned to later.
 .Ss The Kill Ring
 Deleted or copied text is stored in the
 .Sy kill ring
@@ -61,15 +61,16 @@ Typing digits after
 sets the argument to that number.
 Negative arguments are not permitted.
 .Pp
+An alternative key that is equivalent to
+.Cm C-u N
+(where N is a number) is 
+.Cm M-N.
+.Pp
 The
 .Cm M--
-prefix is a
+is the
 .Sy reverse modifier
-rather than a number: it flips the direction of the next command for the commands that understand it \(em yank pop, the transpose commands, and the word case commands.
-Other commands ignore it.
-Digits typed after
-.Cm M--
-are refused.
+prefix.  Commands that accept this prefix operate in reverse direction when it is provided.  Other commands ignore it.
 .Sh COMMANDS
 Commands largely follow Emacs conventions.
 .Cm C-
@@ -150,6 +151,8 @@ Scroll up one line.
 Scroll down one line.
 .It Cm C-l
 Centre the screen on the cursor's current line.
+On terminals where the operating system cannot report the window size
+(such as serial consoles), also re-queries the terminal for its size.
 .It Cm M-g
 Go to specific line number.
 .It Cm C-x =

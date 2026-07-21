@@ -1,8 +1,6 @@
 #include "adjust.h"
 #include "emil.h"
 
-extern struct config E;
-
 int adjustPoint(int *px, int *py, int startx, int starty, int endx, int endy,
 		int is_delete) {
 	int lines_delta = endy - starty;

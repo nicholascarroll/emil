@@ -6,10 +6,7 @@
 #define CTRL(x) ((x) & 0x1f)
 #endif
 
-/*
- * Key tokens — physical key identities returned by the terminal layer.
- * These represent what key was pressed, not what it means.
- */
+/* Key tokens. */
 enum keyToken {
 	KEY_BACKSPACE = 127,
 	KEY_ARROW_LEFT = 1000,
@@ -45,10 +42,7 @@ enum keyToken {
 #define IS_META_KEY(k) ((k) >= KEY_META_BASE && (k) < KEY_ALT_0)
 #define META_CHAR(k) ((k) - KEY_META_BASE)
 
-/*
- * Command tokens — editor actions produced by the binding layer.
- * These represent what the editor should do.
- */
+/* Command tokens  */
 enum command_t {
 	/* Returned when binding is incomplete (need more keys) */
 	CMD_NONE = 0,
@@ -170,7 +164,6 @@ enum command_t {
 	CMD_SHELL_CMD,
 	CMD_KILL_LINE_BACKWARDS,
 	CMD_EXPAND,
-	/* Internal: unknown command — argument is the key */
 	CMD_UNKNOWN,
 };
 

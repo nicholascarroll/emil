@@ -16,8 +16,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-extern struct config E;
-
 void addToKillRing(const char *text, int is_rect, int rect_width,
 		   int rect_height) {
 	if (!text || strlen(text) == 0)
@@ -94,19 +92,6 @@ void setMarkSilent(void) {
 	E.buf->marky = E.buf->cy;
 	/* mark_active intentionally left unchanged (typically 0) */
 	clampToBuffer(E.buf, &E.buf->markx, &E.buf->marky);
-}
-
-static void clearMarkQuiet(void) {
-	E.buf->mark_active = 0;
-}
-
-void deactivateMark(void) {
-	E.buf->mark_active = 0;
-}
-
-void clearMark(void) {
-	clearMarkQuiet();
-	setStatusMessage(msg_mark_cleared);
 }
 
 void popMark(void) {
@@ -349,7 +334,7 @@ static void yankInsert(int reverse) {
 		E.buf->cy = sy;
 		E.buf->markx = ex;
 		E.buf->marky = ey;
-		E.buf->mark_active = 1;
+		E.buf->mark_active = 0;
 	} else {
 		E.buf->cx = ex;
 		E.buf->cy = ey;
@@ -662,7 +647,8 @@ void stringRectangle(void) {
 	free(old_text);
 	free(out);
 	free(string);
-	clearMarkQuiet();
+	E.buf->mark_active = 0;
+	;
 	restoreKill(okill);
 }
 
@@ -708,7 +694,8 @@ void copyRectangle(void) {
 	E.kill.rect_height = rh;
 
 	addToKillRing((char *)E.kill.str, 1, rw, rh);
-	clearMarkQuiet();
+	E.buf->mark_active = 0;
+	;
 }
 
 void killRectangle(void) {
@@ -779,7 +766,8 @@ void killRectangle(void) {
 
 	free(old_text);
 	free(out);
-	clearMarkQuiet();
+	E.buf->mark_active = 0;
+	;
 	clearText(&saved);
 }
 
@@ -866,7 +854,8 @@ void yankRectangle(void) {
 
 	free(old_text);
 	free(out);
-	clearMarkQuiet();
+	E.buf->mark_active = 0;
+	;
 	clearText(&E.kill);
 	E.kill = saved;
 }

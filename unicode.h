@@ -1,7 +1,5 @@
 #include <stdint.h>
 
-int unicodeTest(void);
-
 int stringWidth(const uint8_t *str);
 
 int charInStringWidth(const uint8_t *str, int idx);

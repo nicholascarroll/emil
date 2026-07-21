@@ -95,7 +95,7 @@ void mutateReplace(struct buffer *buf, int startx, int starty, int endx,
 
 	/* Insert undo record.  paired=1 if this pairs to the del just
 	 * above (is_replace), or if chain_to_prev is set and the del was
-	 * empty — in the latter case this ins is the "first record" and
+	 * empty: in the latter case this ins is the "first record" and
 	 * takes the chain. */
 	if (repl_len > 0) {
 		struct undo *ins = newUndo();
@@ -150,8 +150,7 @@ void mutateExtendRows(struct buffer *buf, int from_row, int n_rows) {
 	for (int i = 0; i < n_rows; i++)
 		insertRow(buf, buf->numrows, (const uint8_t *)"", 0);
 
-	/* Build a pure-insert undo record matching the shape yankRectangle
-	 * hand-built before this helper existed:
+	/* Build a pure-insert undo record:
 	 *   starty = last row of original buffer
 	 *   startx = end of that row (i.e. where the first newline was
 	 *            appended)
@@ -159,7 +158,7 @@ void mutateExtendRows(struct buffer *buf, int from_row, int n_rows) {
 	 *   endx   = 0 (cursor sits at start of the last empty row)
 	 *   data   = n_rows '\n' bytes
 	 *
-	 * paired=0 — this is the head of a chain; a following
+	 * paired=0: this is the head of a chain; a following
 	 * mutateReplace with chain_to_prev=1 pairs onto it. */
 	struct undo *ext = newUndo();
 	int n_newlines;
@@ -167,7 +166,7 @@ void mutateExtendRows(struct buffer *buf, int from_row, int n_rows) {
 		/* Extending a rowless buffer: there is no preceding row
 		 * to anchor to, so the record starts at the origin and
 		 * the n inserted rows read as n-1 joining newlines.
-		 * Undoing restores a single empty row — the closest
+		 * Undoing restores a single empty row: the closest
 		 * representable state to a rowless buffer.  Without
 		 * this case starty would be -1 and the buf->row[]
 		 * read below is out of bounds. */

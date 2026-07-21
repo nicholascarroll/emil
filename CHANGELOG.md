@@ -1,8 +1,12 @@
 ## [Unreleased]
-- Fixed #90 Read-only buffer corruption from kill-rectangle
-- Fixed columns dropped when horizontal scrolling stopped inside a tab.
-- Fixed regex search highlighting the pattern length. #92
-- Fixed cursor drawn on the status bar at an exact wrap boundary in wrap mode.
+- Rewrote the escape-sequence decoder as an explicit state machine.
+- Fixed ESC-arrow up "[A") into the buffer as text #95.
+- Fixed getCursorPostion hanging. #94
+- Deactivate mark after region to register #93
+- Fixed F12 (and PuTTY F4) discarding unsaved work via an undocumented panic.
+- Fixed SS3 escape sequences inserting text.
+- Fixed minibuffer sizing, wrapping, and prompt cursor position for multi-byte text.
+- Removed probe that tries to get the screen size if kernel doesn't know
 
 ## [0.7.0] - 2026-07-20
 - Fixed crash yanking a rectangle into an empty buffer.

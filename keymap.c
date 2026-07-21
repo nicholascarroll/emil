@@ -32,8 +32,6 @@
 #include <time.h>
 #include <unistd.h>
 
-extern struct config E;
-
 /* Helper functions for state machine */
 void showPrefix(const char *prefix) {
 	setStatusMessage("%s", prefix);
@@ -61,9 +59,6 @@ void setupCommands(void) {
 		{ "visual-line-mode", toggleVisualLineMode },
 		{ "version", editorVersion },
 		{ "view-register", viewRegister },
-#ifdef EMIL_DEBUG_UNDO
-		{ "debug-unpair", debugUnpair },
-#endif
 	};
 
 	E.cmd = commands;
@@ -324,7 +319,7 @@ int resolveBinding(int key) {
 		case '=':
 			return CMD_WHAT_CURSOR;
 		case 'x':
-			/* C-x x sub-prefix — read another key.  The key
+			/* C-x x sub-prefix: read another key.  The key
 			 * must be recorded: the main loop only records
 			 * keys it read itself, and a macro missing this
 			 * key would desynchronize on playback. */
@@ -440,8 +435,11 @@ int resolveBinding(int key) {
 		int cmd = resolveMetaBinding(META_CHAR(key));
 		if (cmd != CMD_NONE)
 			return cmd;
-		/* Unknown Meta combination — already handled by terminal
-		 * layer's ESC_UNKNOWN path with status message */
+		/* No binding for this Meta character: ignore it
+		 * silently.  (Unrecognized escape *sequences* never
+		 * reach here: the decoder reports them via
+		 * unknownEscape() in terminal.c and delivers a bare
+		 * ESC token, handled above.) */
 		return CMD_NONE;
 	}
 
@@ -537,10 +535,10 @@ int resolveBinding(int key) {
 	case '\t':
 		return CMD_TAB;
 	case 033:
-		return CMD_NONE; /* Bare ESC — already handled */
+		return CMD_NONE; /* Bare ESC: already handled */
 	}
 
-	/* Printable characters — check for digit accumulation after C-u */
+	/* Printable characters: check for digit accumulation after C-u */
 	if (key >= ' ' && key < KEY_ARROW_LEFT) {
 		if (E.uarg && key >= '0' && key <= '9') {
 			if (E.uarg == UARG_REVERSE) {
@@ -867,19 +865,22 @@ static int dispatchRegion(int c, int uarg) {
 			killRectangle();
 		else
 			killRegion();
-		deactivateMark();
+		E.buf->mark_active = 0;
+		;
 		return 1;
 	case CMD_COPY:
 		if (E.buf->rectangle_mode)
 			copyRectangle();
 		else
 			copyRegion();
-		deactivateMark();
+		E.buf->mark_active = 0;
+		;
 		return 1;
 	case CMD_COPY_CLIPBOARD:
 		if (!E.buf->rectangle_mode) {
 			copyRegion();
-			deactivateMark();
+			E.buf->mark_active = 0;
+			;
 			copyToClipboard(E.kill.str);
 		} else {
 			setStatusMessage(
@@ -903,7 +904,8 @@ static int dispatchRegion(int c, int uarg) {
 		} else {
 			killRectangle();
 		}
-		deactivateMark();
+		E.buf->mark_active = 0;
+		;
 		return 1;
 	case CMD_UPCASE_REGION:
 		transformRegion(transformerUpcase);
@@ -919,6 +921,8 @@ static int dispatchRegion(int c, int uarg) {
 		return 1;
 	case CMD_REGION_REGISTER:
 		regionToRegister();
+		E.buf->mark_active = 0;
+		;
 		return 1;
 	case CMD_INC_REGISTER:
 		incrementRegister();
@@ -934,11 +938,13 @@ static int dispatchRegion(int c, int uarg) {
 		return 1;
 	case CMD_COPY_RECT:
 		copyRectangle();
-		deactivateMark();
+		E.buf->mark_active = 0;
+		;
 		return 1;
 	case CMD_KILL_RECT:
 		killRectangle();
-		deactivateMark();
+		E.buf->mark_active = 0;
+		;
 		return 1;
 	case CMD_YANK_RECT:
 		yankRectangle();
@@ -979,7 +985,7 @@ static int dispatchMacro(int c, int uarg) {
 	switch (c) {
 	case CMD_MACRO_RECORD:
 		if (E.playback) {
-			/* A replayed C-x ( would clobber E.macro.keys —
+			/* A replayed C-x ( would clobber E.macro.keys:
 			 * the very array being played back. */
 			setStatusMessage(msg_macro_blocked);
 			return 1;
@@ -1091,7 +1097,8 @@ static int dispatchMisc(int c, int uarg) {
 		killLineBackwards();
 		return 1;
 	case CMD_CANCEL:
-		deactivateMark();
+		E.buf->mark_active = 0;
+		;
 		setStatusMessage(msg_quit);
 		return 1;
 	case CMD_UNIVERSAL_ARG:
@@ -1232,14 +1239,12 @@ void execMacro(struct macro *macro) {
 	struct macro tmp;
 	tmp.keys = NULL;
 	if (macro != &E.macro) {
-		/* HACK: Annoyance here with readkey needs us to futz
-		 * around with E.macro */
 		memcpy(&tmp, &E.macro, sizeof(struct macro));
 		memcpy(&E.macro, macro, sizeof(struct macro));
 	}
 	E.playback = 0;
 	while (E.playback < E.macro.nkeys) {
-		/* HACK: increment here, so that
+		/* Increment here, so that
 		 * readkey sees playback != 0 */
 		int key = E.macro.keys[E.playback++];
 		if (key == KEY_UNICODE) {

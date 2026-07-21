@@ -3,10 +3,9 @@
 
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/11997/badge)](https://www.bestpractices.dev/projects/11997)
 
-`emil` is a small, portable text editor for UTF-8 files, providing a core subset of emacs commands in the terminal.
+`emil` is a small, portable text editor for UTF-8 files, providing a core subset of *emacs* commands in the terminal.
 
 Written in C99, `emil` is single-threaded and runs on any system providing POSIX.1-2001 and a VT100-compatible terminal. It eschews common sources of complexity: scripting, plugins, configuration files, background network activity, and auto-save files.
-
 
 ## Capabilities
 
@@ -56,7 +55,7 @@ make && make install
 
 ### Localization
 
-The user interface language is fixed at compile time. `emil` cannot switch language at runtime or follow the locale. Default is English.
+The user interface language is English by default and fixed at compile time; `emil` cannot switch language at runtime or according to the locale. Users who build from source can bake in one of the following languages instead of English:
 
 | Language                 | Macro        | Man Dir |
 | ------------------------ | ------------ |-------- |

@@ -1,4 +1,4 @@
-/* test_buffer.c — Row operations, screen cache, coordinate mapping. */
+/* test_buffer.c: Row operations, screen cache, coordinate mapping. */
 
 #include "test.h"
 #include "test_harness.h"

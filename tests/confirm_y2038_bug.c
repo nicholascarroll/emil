@@ -1,5 +1,5 @@
 /*
- * confirm_y2038_bug.c — Y2038 platform canary + emil immunity check
+ * confirm_y2038_bug.c: Y2038 platform canary + emil immunity check
  *
  * Confirms that this platform has a 32-bit time_t that will overflow on
  * 2038-01-19 03:14:07 UTC. Then verifies that mtime equality comparison 
@@ -43,9 +43,9 @@ static int mtime_detects_change(time_t open_time, time_t check_time) {
 /* ---- main ---- */
 
 int main(void) {
-	printf("Y2038 test — sizeof(time_t) = %zu bytes\n", sizeof(time_t));
+	printf("Y2038 test: sizeof(time_t) = %zu bytes\n", sizeof(time_t));
 
-	/* Platform canary — does this platform have the bug? */
+	/* Platform canary: does this platform have the bug? */
 
 	if (sizeof(time_t) > 4) {
 		printf("SKIP: time_t is 64-bit, no Y2038 overflow on this platform.\n");
@@ -60,7 +60,7 @@ int main(void) {
 	if (wrapped >= 0) {
 		printf("UNEXPECTED: 32-bit time_t but no sign wrap.\n");
 		printf("  (Unsigned time_t or compiler optimised away the overflow.)\n");
-		/* Not a failure — just means we can't demonstrate the bug. */
+		/* Not a failure; just means we can't demonstrate the bug. */
 		return 0;
 	}
 

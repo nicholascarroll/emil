@@ -39,8 +39,6 @@
 #include "util.h"
 #include <errno.h>
 
-extern struct config E;
-
 static uint8_t *cmd;
 
 /* Interrupt source watched during a running command.  The editor

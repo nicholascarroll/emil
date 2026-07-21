@@ -4,8 +4,6 @@
 #include "history.h"
 #include "util.h"
 
-extern struct config E;
-
 void initHistory(struct history *hist) {
 	hist->head = NULL;
 	hist->tail = NULL;

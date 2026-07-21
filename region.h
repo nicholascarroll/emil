@@ -9,9 +9,7 @@ int markInvalidSilent(void);
 
 void setMark(void);
 void setMarkSilent(void);
-void deactivateMark(void);
 void popMark(void);
-void clearMark(void);
 void toggleRectangleMode(void);
 void markBuffer(void);
 void deleteRange(int startx, int starty, int endx, int endy,

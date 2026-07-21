@@ -45,9 +45,6 @@ void buildScreenCache(struct buffer *buf, int screencols) {
 		} else {
 			/* Recompute the subline count only for rows
 			 * marked stale (-1) by a mutation site.
-			 * Previously countScreenLines re-scanned every
-			 * row's bytes on every rebuild, making each
-			 * keystroke O(total file bytes) in wrap mode.
 			 *
 			 * The width-stale check below is a safety net
 			 * only, NOT the invalidation mechanism: it
@@ -191,16 +188,7 @@ int wordWrapBreak(erow *row, int screencols, int line_start_col,
 				wb_byte = bidx + utf8_nBytes(c);
 			}
 		} else if (c >= 0x80) {
-			/* CJK characters are each a valid line-break
-			 * point, as is CJK closing punctuation (the
-			 * ideal break is right after 。 ！ 」 etc.) —
-			 * both subject to 行首禁则 on the following
-			 * character. */
 			uint32_t cp = utf8Decode(row->chars, bidx);
-			/* Break candidates: CJK characters, CJK
-			 * closing punctuation, and ZWSP (the explicit
-			 * Thai/Lao/Khmer word separator) — all subject
-			 * to 行首禁则 on the following character. */
 			if ((isCJKChar(cp) || isLineStartForbidden(cp) ||
 			     isWordSeparatorCP(cp)) &&
 			    !breakForbiddenBefore(row, bidx + utf8_nBytes(c))) {
@@ -225,12 +213,9 @@ int wordWrapBreak(erow *row, int screencols, int line_start_col,
 		*break_col = wb_col;
 		*break_byte = wb_byte;
 	} else if (hard_byte > line_start_byte && hard_byte < bidx) {
-		/* No word boundary — hard break, retreated off any
-		 * preposed-vowel/consonant seam. */
 		*break_col = hard_col;
 		*break_byte = hard_byte;
 	} else {
-		/* No word boundary — hard break at column limit. */
 		*break_col = col;
 		*break_byte = bidx;
 	}
@@ -294,7 +279,7 @@ void cursorScreenLine(erow *row, int cursor_col, int screencols, int *out_line,
 		line_start_byte = break_byte;
 	}
 
-	/* Cursor is past the end — place on the last sub-line */
+	/* Cursor is past the end */
 	*out_col = cursor_col - line_start_col;
 }
 

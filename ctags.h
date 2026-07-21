@@ -13,7 +13,7 @@ void ctagsBack(void);
 void toggleHeaderBody(void);
 
 /* Search from the current working directory upward toward the
- * filesystem root for a "tags" file (as vim/emacs do).  On success
+ * filesystem root for a "tags" file.
  * writes the absolute directory containing it (no trailing slash, "/"
  * for root) into out_dir and returns 0.  Returns -1 if no tags file is
  * found before the root or if out_dir is too small.  Exposed for
