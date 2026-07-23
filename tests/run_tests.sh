@@ -144,7 +144,7 @@ $CC $TEST_CFLAGS $SANITIZER_FLAGS -c tests/stubs.c -o tests/stubs.o 2>&1 || {
 }
 
 # All objects except main.o and terminal.o
-TEST_OBJECTS="unicode.o buffer.o region.o undo.o transform.o \
+TEST_OBJECTS="decoder.o unicode.o buffer.o region.o undo.o transform.o \
     find.o pipe.o register.o fileio.o display.o message.o keymap.o \
     edit.o prompt.o util.o completion.o history.o base64.o abuf.o \
     window.o ctags.o adjust.o mutate.o wrap.o motion.o dbuf.o \
@@ -152,7 +152,7 @@ TEST_OBJECTS="unicode.o buffer.o region.o undo.o transform.o \
 
 echo "Unit tests:"
 
-for suite in unicode wcwidth buffer undo edit fileio relpath visual_line utf8_validate rect_undo transform subprocess shell adjust history abuf tilde keymap kill_ring insert_file status_bar cjk_indic warnings ctags; do
+for suite in decoder unicode wcwidth buffer undo edit fileio relpath visual_line utf8_validate rect_undo transform subprocess shell adjust history abuf tilde keymap kill_ring insert_file status_bar cjk_indic warnings ctags; do
     src="tests/test_${suite}.c"
     bin="tests/test_${suite}"
     printf "  %-12s " "$suite"
@@ -193,6 +193,24 @@ for suite in unicode wcwidth buffer undo edit fileio relpath visual_line utf8_va
 done
 
 rm -f tests/stubs.o
+
+# Terminal-level integration: drive the built binary under a pty.
+# decoder_pty_test skips itself (exit 0) if no pty is available.
+if [ -x ./emil ]; then
+    printf '%-14s ' "  decoder_pty"
+    if $CC $TEST_CFLAGS tests/decoder_pty_test.c -o tests/decoder_pty_test \
+        && ./tests/decoder_pty_test ./emil > /tmp/pty_test_out 2>&1; then
+        pty_scenarios=$(grep -c '^  .*PASS$' /tmp/pty_test_out)
+        echo "PASS ($pty_scenarios scenarios)"
+    else
+        echo "FAIL"
+        cat /tmp/pty_test_out
+        ANY_FAIL=1
+    fi
+    rm -f tests/decoder_pty_test /tmp/pty_test_out
+else
+    echo "  decoder_pty   SKIP (emil binary not built)"
+fi
 
 # Print the last line of the report
 echo ""

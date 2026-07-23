@@ -375,7 +375,16 @@ int main(int argc, char *argv[]) {
 			if (key >= ' ' && key < KEY_ARROW_LEFT)
 				E.self_insert_key = key;
 
-			E.statusmsg_show = 0;
+			/* A keypress clears the previous status message,
+			 * with one exception: a bare-ESC token (033) is
+			 * produced only by the escape decoder's unknown-
+			 * sequence path, which has just set the
+			 * "Unknown command M-..." message.  Clearing on
+			 * 033 would gag the decoder's only feedback
+			 * channel: the message was set during readKey,
+			 * i.e. before this line runs. */
+			if (key != 033)
+				E.statusmsg_show = 0;
 
 			int cmd = resolveBinding(key);
 			if (cmd != CMD_NONE)

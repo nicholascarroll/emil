@@ -440,8 +440,11 @@ int resolveBinding(int key) {
 		int cmd = resolveMetaBinding(META_CHAR(key));
 		if (cmd != CMD_NONE)
 			return cmd;
-		/* Unknown Meta combination: already handled by terminal
-		 * layer's ESC_UNKNOWN path with status message */
+		/* No binding for this Meta character: ignore it
+		 * silently.  (Unrecognized escape *sequences* never
+		 * reach here: the decoder reports them via
+		 * unknownEscape() in terminal.c and delivers a bare
+		 * ESC token, handled above.) */
 		return CMD_NONE;
 	}
 

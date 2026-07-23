@@ -1,4 +1,8 @@
 ## [Unreleased]
+- Rewrote the escape-sequence decoder as an explicit state machine with a uniform 50ms timeout policy for in-flight sequences.
+- Fixed a lone ESC keypress followed by an arrow or navigation key inserting the sequence body (e.g. "[A") into the buffer as text.
+- Fixed unknown-key status messages being hidden by key batching; unrecognized sequences now report "Unknown command M-..." again.
+- Alt+[ no longer swallows the following keypress; it decodes as Meta-[ like Alt+Shift+O decodes as Meta-O.
 - Fixed F12 (and PuTTY F4) discarding unsaved work.
 - Fixed SS3 escape sequences inserting text.
 - Fixed terminal resize not repainting until the next keypress.

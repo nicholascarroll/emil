@@ -29,7 +29,7 @@ MAN_BASEDIR = $(PREFIX)/man
 DOCDIR = $(PREFIX)/share/doc/emil
 
 # Source files
-OBJECTS = main.o unicode.o buffer.o region.o undo.o transform.o \
+OBJECTS = main.o unicode.o decoder.o buffer.o region.o undo.o transform.o \
           find.o pipe.o register.o fileio.o terminal.o display.o message.o \
           keymap.o edit.o prompt.o util.o completion.o history.o base64.o \
           abuf.o window.o ctags.o adjust.o mutate.o wrap.o motion.o dbuf.o \
@@ -151,3 +151,10 @@ help:
 	@echo "  hal       HAL-9000 compliance"
 
 .PHONY: all install uninstall clean test check sanitize hal debug format android msys2 minimal solaris darwin help
+
+# Terminal-level integration tests: drives the real binary under a
+# pseudo-terminal (also run at the end of `make test`).
+test-pty: $(PROGNAME)
+	$(CC) $(ALL_CFLAGS) -o tests/decoder_pty_test tests/decoder_pty_test.c
+	./tests/decoder_pty_test ./$(PROGNAME)
+	rm -f tests/decoder_pty_test

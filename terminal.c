@@ -1,5 +1,6 @@
 #include "util.h"
 #include "terminal.h"
+#include "decoder.h"
 #include "emil.h"
 #include "message.h"
 #include "base64.h"
@@ -391,34 +392,87 @@ void deserializeUnicode(void) {
 }
 
 /*
- * Drain the remainder of an unrecognized CSI (ESC [) sequence.
- *
- * CSI sequences follow the ECMA-48 grammar:
- *   CSI  P..P  I..I  F
- * where P (parameter bytes) are 0x30-0x3F, I (intermediate bytes) are
- * 0x20-0x2F, and F (final byte) is 0x40-0x7E.  We read and discard
- * bytes until we consume the final byte or the input dries up.
- *
- * last_read is the most recent byte already consumed by the caller;
- * if it is itself a final byte there is nothing left to drain.
+ * Escape-sequence input: the grammar and key mapping live in the
+ * pure state machine in decoder.c; this file supplies only the byte
+ * source (the clock and signal policy) and the reporting of
+ * unrecognized sequences.
  */
-static void drainCSI(uint8_t last_read) {
-	if (last_read >= 0x40 && last_read <= 0x7E)
-		return;
+#define ESC_BYTE_TIMEOUT_MS 50
+
+/* Byte source for the decoder (see decoder.h for the contract).
+ *
+ * wait_indefinitely: the byte after a raw ESC.  ESC is the Meta
+ * prefix, so block until the user continues.  A signal (EINTR)
+ * abandons the wait: the main loop must regain control to handle
+ * resize/suspend flags, and the pending ESC decodes as an empty
+ * unknown sequence, matching historical behavior.
+ *
+ * Brief wait: a byte inside a terminal-generated sequence.  One
+ * monotonic deadline covers the whole wait, and EINTR retries with
+ * the remaining time: the sequence bytes are already in flight (or
+ * already queued), so a signal must not abandon them -- an abandoned
+ * sequence leaves its tail queued to be misread as typed text, which
+ * is the exact bug class this decoder exists to close.  The pattern
+ * matches getCursorPosition() above. */
+static int terminalEscByte(uint8_t *out, int wait_indefinitely) {
+	if (wait_indefinitely) {
+		ssize_t n = read(STDIN_FILENO, out, 1);
+		return n == 1;
+	}
+
+	struct timespec start;
+	if (clock_gettime(CLOCK_MONOTONIC, &start) == -1)
+		return 0;
 
 	for (;;) {
-		fd_set fds;
-		struct timeval tv = { 0, 50000 }; /* 50 ms */
-		FD_ZERO(&fds);
-		FD_SET(STDIN_FILENO, &fds);
-		if (select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv) <= 0)
-			break;
-		uint8_t discard;
-		if (read(STDIN_FILENO, &discard, 1) != 1)
-			break;
-		if (discard >= 0x40 && discard <= 0x7E)
-			break;
+		struct timespec now;
+		if (clock_gettime(CLOCK_MONOTONIC, &now) == -1)
+			return 0;
+		long elapsed = (now.tv_sec - start.tv_sec) * 1000 +
+			       (now.tv_nsec - start.tv_nsec) / 1000000;
+		int remaining = (int)(ESC_BYTE_TIMEOUT_MS - elapsed);
+		if (remaining <= 0)
+			return 0;
+
+		struct pollfd pfd;
+		pfd.fd = STDIN_FILENO;
+		pfd.events = POLLIN;
+		pfd.revents = 0;
+
+		int pr = poll(&pfd, 1, remaining);
+		if (pr == -1) {
+			if (errno == EINTR)
+				continue; /* deadline still holds */
+			return 0;
+		}
+		if (pr == 0)
+			return 0; /* timeout: no byte is coming */
+
+		ssize_t n = read(STDIN_FILENO, out, 1);
+		if (n == 1)
+			return 1;
+		if (n == -1 && errno == EINTR)
+			continue;
+		return 0;
 	}
+}
+
+/* Report an unrecognized escape sequence in the status line, then
+ * decode it as a bare ESC token (which the keymap ignores).  Control
+ * bytes render as C-<letter>, matching the keymap's own notation. */
+static int unknownEscape(const uint8_t *bytes, int n) {
+	char seqR[32];
+	char buf[8];
+	seqR[0] = 0;
+	for (int i = 0; i < n; i++) {
+		if (bytes[i] < ' ')
+			snprintf(buf, sizeof(buf), "C-%c ", bytes[i] + '`');
+		else
+			snprintf(buf, sizeof(buf), "%c ", bytes[i]);
+		emil_strlcat(seqR, buf, sizeof(seqR));
+	}
+	setStatusMessage(msg_unknown_meta, seqR);
+	return 033;
 }
 
 /* Single-byte input pushback.  The incremental-search scan probes
@@ -472,162 +526,12 @@ int readKey(void) {
 		}
 	}
 	if (c == 033) {
-		char seq[5] = { 0, 0, 0, 0, 0 };
-		if (read(STDIN_FILENO, &seq[0], 1) != 1)
-			goto ESC_UNKNOWN;
-
-		if (seq[0] == '[') {
-			/* CSI sequence: physical key decoding */
-			if (read(STDIN_FILENO, &seq[1], 1) != 1)
-				goto ESC_UNKNOWN;
-			if (seq[1] >= '0' && seq[1] <= '9') {
-				if (read(STDIN_FILENO, &seq[2], 1) != 1)
-					goto ESC_UNKNOWN;
-				if (seq[2] == '~') {
-					switch (seq[1]) {
-					case '1':
-						return KEY_HOME;
-					case '3':
-						return KEY_DEL;
-					case '4':
-						return KEY_END;
-					case '5':
-						return KEY_PAGE_UP;
-					case '6':
-						return KEY_PAGE_DOWN;
-					case '7':
-						return KEY_HOME;
-					case '8':
-						return KEY_END;
-					}
-				}
-				/* Multi-digit CSI codes (\x1b[15~ .. \x1b[24~,
-				 * i.e. F5-F12 and friends) fall through to
-				 * ESC_UNKNOWN below, where drainCSI consumes
-				 * the rest of the sequence harmlessly. A
-				 * previous "panic key" branch here matched
-				 * \x1b[<digit>4~ and called die(), which
-				 * discarded unsaved buffers on F12 (\x1b[24~,
-				 * xterm/rxvt) and F4 (\x1b[14~, PuTTY/vt220
-				 * keyboards). */
-			} else {
-				switch (seq[1]) {
-				case 'A':
-					return KEY_ARROW_UP;
-				case 'B':
-					return KEY_ARROW_DOWN;
-				case 'C':
-					return KEY_ARROW_RIGHT;
-				case 'D':
-					return KEY_ARROW_LEFT;
-				case 'F':
-					return KEY_END;
-				case 'H':
-					return KEY_HOME;
-				case 'Z':
-					return KEY_BACKTAB;
-				}
-			}
-		} else if (seq[0] == 'O') {
-			/* SS3: xterm-family F1-F4 (\x1bOP..\x1bOS), and
-			 * the cursor/Home/End keys when a previous
-			 * program left the terminal in application
-			 * cursor mode (\x1bOA-\x1bOD, \x1bOH, \x1bOF).
-			 * Without this branch the 'O' returned as
-			 * KEY_META('O') and the final byte leaked into
-			 * the buffer as typed text.
-			 *
-			 * A short poll distinguishes a real SS3
-			 * sequence (final byte already queued: terminals
-			 * send sequences atomically) from Alt+Shift+O
-			 * (nothing follows), which must keep returning
-			 * KEY_META('O') without eating the next key. */
-			fd_set fds;
-			struct timeval tv = { 0, 50000 }; /* 50 ms */
-			FD_ZERO(&fds);
-			FD_SET(STDIN_FILENO, &fds);
-			if (select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv) <=
-			    0)
-				return KEY_META((uint8_t)seq[0]);
-			if (read(STDIN_FILENO, &seq[1], 1) != 1)
-				return KEY_META((uint8_t)seq[0]);
-			switch (seq[1]) {
-			case 'A':
-				return KEY_ARROW_UP;
-			case 'B':
-				return KEY_ARROW_DOWN;
-			case 'C':
-				return KEY_ARROW_RIGHT;
-			case 'D':
-				return KEY_ARROW_LEFT;
-			case 'H':
-				return KEY_HOME;
-			case 'F':
-				return KEY_END;
-			}
-			/* F1-F4 and other SS3 finals: fall through to
-			 * ESC_UNKNOWN, which reports the unrecognized
-			 * key.  The final byte is already consumed, so
-			 * the SS3 drain there must not read another. */
-			goto ESC_UNKNOWN;
-		} else if ('0' <= seq[0] && seq[0] <= '9') {
-			/* Alt digit */
-			return KEY_ALT_0 + (seq[0] - '0');
-		} else {
-			/* Meta + character: return as KEY_META(ch) */
-			return KEY_META((uint8_t)seq[0]);
-		}
-
-ESC_UNKNOWN:
-		/*
-		 * Drain any remaining bytes that belong to this
-		 * escape sequence so they are not misinterpreted
-		 * as individual keypresses.
-		 */
-		if (seq[0] == '[') {
-			uint8_t last = 0;
-			for (int i = 4; i >= 1; i--) {
-				if (seq[i]) {
-					last = (uint8_t)seq[i];
-					break;
-				}
-			}
-			if (last)
-				drainCSI(last);
-		} else if (seq[0] == 'O' && seq[1] == 0) {
-			/* SS3 reached with the final byte not yet
-			 * consumed (read failure in the branch above):
-			 * consume the single expected byte */
-			fd_set fds;
-			struct timeval tv = { 0, 50000 };
-			FD_ZERO(&fds);
-			FD_SET(STDIN_FILENO, &fds);
-			if (select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv) >
-			    0) {
-				uint8_t discard;
-				if (read(STDIN_FILENO, &discard, 1) < 1) {
-					/* nothing to do */
-				}
-			}
-		}
-
-		{
-			char seqR[32];
-			seqR[0] = 0;
-			char buf[8];
-			for (int i = 0; seq[i]; i++) {
-				if (seq[i] < ' ') {
-					snprintf(buf, sizeof(buf), "C-%c ",
-						 seq[i] + '`');
-				} else {
-					snprintf(buf, sizeof(buf), "%c ",
-						 seq[i]);
-				}
-				emil_strlcat(seqR, buf, sizeof(seqR));
-			}
-			setStatusMessage(msg_unknown_meta, seqR);
-		}
-		return 033;
+		uint8_t seen[ESC_SEEN_MAX];
+		int n_seen;
+		int key = decodeEscapeSequence(terminalEscByte, seen, &n_seen);
+		if (key == 033)
+			return unknownEscape(seen, n_seen);
+		return key;
 	} else if (utf8_is2Char(c)) {
 		E.nunicode = 2;
 		E.unicode[0] = c;
