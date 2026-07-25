@@ -162,8 +162,7 @@ void initEditor(void) {
 
 	E.render_buf = (struct abuf){ NULL, 0, 0 };
 
-	if (getWindowSize(&E.screenrows, &E.screencols) == -1)
-		die("getWindowSize");
+	getWindowSize(&E.screenrows, &E.screencols);
 }
 
 int main(int argc, char *argv[]) {

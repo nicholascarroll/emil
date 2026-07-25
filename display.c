@@ -1204,8 +1204,7 @@ void cursorBottomLine(int curs) {
 }
 
 void resizeScreen(int UNUSED(sig)) {
-	if (getWindowSize(&E.screenrows, &E.screencols) == -1)
-		die("getWindowSize");
+	getWindowSize(&E.screenrows, &E.screencols);
 	for (struct buffer *b = E.headbuf; b != NULL; b = b->next) {
 		for (int i = 0; i < b->numrows; i++) {
 			b->row[i].cached_width = -1;
