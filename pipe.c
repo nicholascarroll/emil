@@ -308,18 +308,20 @@ uint8_t *pipeCommandCaptureIntr(const uint8_t *command, uint8_t *input,
 
 uint8_t *editorPipe(int useRegion) {
 	cmd = NULL;
+	int u = E.uarg;
+	E.uarg = 0;
 	cmd = editorPrompt(E.buf, "Shell: ", PROMPT_BASIC, NULL);
 
 	if (cmd == NULL) {
 		setStatusMessage(msg_shell_canceled);
 	} else if (useRegion) {
-		if (E.uarg) {
-			E.uarg = 0;
+		if (u) {
 			transformRegion(transformerPipeCmd);
 			// unmark region
 			E.buf->markx = -1;
 			E.buf->marky = -1;
 			free(cmd);
+			free(u);
 			return NULL;
 		} else {
 			// 1. Extract the selected region
