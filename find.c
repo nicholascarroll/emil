@@ -4,7 +4,7 @@
 #include "emil.h"
 #include "history.h"
 #include "keymap.h"
-#include "message.h"
+
 #include "prompt.h"
 #include "region.h"
 #include "terminal.h"
@@ -406,7 +406,7 @@ static int findNextMatch(uint8_t *needle, int skip_current) {
 void replaceString(void) {
 	replace_orig = editorPrompt(E.buf, "Replace: ", PROMPT_BASIC, NULL);
 	if (replace_orig == NULL) {
-		setStatusMessage(msg_canceled_replace);
+		setStatusMessage("Canceled replace-string.");
 		return;
 	}
 
@@ -420,7 +420,7 @@ void replaceString(void) {
 	if (replace_repl == NULL) {
 		free(replace_orig);
 		replace_orig = NULL;
-		setStatusMessage(msg_canceled_replace);
+		setStatusMessage("Canceled replace-string.");
 		return;
 	}
 
@@ -436,7 +436,7 @@ void queryReplace(void) {
 	replace_orig =
 		editorPrompt(E.buf, "Query replace: ", PROMPT_BASIC, NULL);
 	if (replace_orig == NULL) {
-		setStatusMessage(msg_canceled_query_replace);
+		setStatusMessage("Canceled query-replace.");
 		return;
 	}
 
@@ -450,7 +450,7 @@ void queryReplace(void) {
 	if (replace_repl == NULL) {
 		free(replace_orig);
 		replace_orig = NULL;
-		setStatusMessage(msg_canceled_query_replace);
+		setStatusMessage("Canceled query-replace.");
 		return;
 	}
 

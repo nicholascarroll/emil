@@ -2,7 +2,7 @@
 #include "terminal.h"
 #include "decoder.h"
 #include "emil.h"
-#include "message.h"
+
 #include "base64.h"
 #include <errno.h>
 #include <stdio.h>
@@ -191,7 +191,9 @@ void copyToClipboard(const uint8_t *text) {
 
 	size_t textlen = strlen((const char *)text);
 	if (textlen > 74993) {
-		setStatusMessage(msg_osc52_too_large, (int)textlen, 74993);
+		setStatusMessage(
+			"Selection too large for OSC 52 clipboard (%d bytes, limit %d)",
+			(int)textlen, 74993);
 		return;
 	}
 
@@ -282,7 +284,7 @@ static int unknownEscape(const uint8_t *bytes, int n) {
 			snprintf(buf, sizeof(buf), "%c ", bytes[i]);
 		emil_strlcat(seqR, buf, sizeof(seqR));
 	}
-	setStatusMessage(msg_unknown_meta, seqR);
+	setStatusMessage("Unknown command M-%s", seqR);
 	return 033;
 }
 

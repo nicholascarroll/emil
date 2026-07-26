@@ -7,7 +7,7 @@
 #include "emil.h"
 #include "history.h"
 #include "keymap.h"
-#include "message.h"
+
 #include "terminal.h"
 #include "unicode.h"
 #include "util.h"

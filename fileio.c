@@ -4,7 +4,7 @@
 #include "display.h"
 #include "emil.h"
 #include "keymap.h"
-#include "message.h"
+
 #include "mutate.h"
 #include "prompt.h"
 #include "terminal.h"
@@ -235,7 +235,7 @@ void checkFileModified(void) {
 		if (rc == 0 && !file_check_timed_out) {
 			if (st.st_mtime != E.buf->open_mtime) {
 				E.buf->external_mod = 1;
-				setStatusMessage(msg_warn_file_changed,
+				setStatusMessage("Warning: %s modified on disk",
 						 E.buf->filename);
 			}
 		}
@@ -264,7 +264,7 @@ void checkFileModified(void) {
 			 * is invalid: an interrupted syscall makes
 			 * lockFile fail, landing in the rc != 0 path. */
 			E.buf->lock_blocked_pid = 0;
-			setStatusMessage(msg_warn_lock_acquired);
+			setStatusMessage("File lock acquired");
 		}
 		/* On failure lockFile has already refreshed
 		 * lock_blocked_pid to reflect the current holder
@@ -346,18 +346,18 @@ int editorOpen(struct buffer *bufr, char *filename) {
 			 * don't offer it as a "new file". */
 			size_t plen = strlen(iopath);
 			if (plen > 0 && iopath[plen - 1] == '/') {
-				setStatusMessage(msg_cant_open,
+				setStatusMessage("Can't open file: %s",
 						 strerror(EISDIR));
 				free(bufr->filename);
 				bufr->filename = NULL;
 				free(iopath);
 				return -1;
 			}
-			setStatusMessage(msg_new_file, bufr->filename);
+			setStatusMessage("%s (New file)", bufr->filename);
 			free(iopath);
 			return 0;
 		}
-		setStatusMessage(msg_cant_open, strerror(errno));
+		setStatusMessage("Can't open file: %s", strerror(errno));
 		free(bufr->filename);
 		bufr->filename = NULL;
 		free(iopath);
@@ -373,7 +373,7 @@ int editorOpen(struct buffer *bufr, char *filename) {
 		if (fstat(fileno(fp), &st) == 0) {
 			if (S_ISDIR(st.st_mode)) {
 				fclose(fp);
-				setStatusMessage(msg_cant_open,
+				setStatusMessage("Can't open file: %s",
 						 strerror(EISDIR));
 				free(bufr->filename);
 				bufr->filename = NULL;
@@ -383,7 +383,7 @@ int editorOpen(struct buffer *bufr, char *filename) {
 			if (S_ISREG(st.st_mode) &&
 			    (size_t)st.st_size > EMIL_MAX_FILE_SIZE) {
 				fclose(fp);
-				setStatusMessage(msg_memory_limit);
+				setStatusMessage("Exceeds 1 GB limit");
 				free(bufr->filename);
 				bufr->filename = NULL;
 				free(iopath);
@@ -396,7 +396,7 @@ int editorOpen(struct buffer *bufr, char *filename) {
 	 * emil_getline (fgets/strlen) silently truncates at '\0'. */
 	if (fileContainsNullBytes(fp)) {
 		fclose(fp);
-		setStatusMessage(msg_binary_file);
+		setStatusMessage("File contains null bytes (binary file?)");
 		free(bufr->filename);
 		bufr->filename = NULL;
 		free(iopath);
@@ -451,7 +451,7 @@ int editorOpen(struct buffer *bufr, char *filename) {
 		bufr->rowcap = 0;
 		free(bufr->filename);
 		bufr->filename = NULL;
-		setStatusMessage(msg_invalid_utf8);
+		setStatusMessage("Failed UTF-8 validation");
 		free(iopath);
 		return -1;
 	}
@@ -504,11 +504,14 @@ int editorOpen(struct buffer *bufr, char *filename) {
 		bufr->read_only = 1;
 		bufr->lock_blocked_pid = lock_pid;
 		if (lock_pid > 0)
-			setStatusMessage(msg_read_only_locked, lock_pid);
+			setStatusMessage("Read only: advisory lock by PID %d",
+					 lock_pid);
 		else
-			setStatusMessage(msg_read_only_locked_unknown);
+			setStatusMessage(
+				"Read only: advisory lock by another process");
 	} else {
-		setStatusMessage(msg_lines_columns, bufr->numrows, max_width);
+		setStatusMessage("%d lines, %d columns", bufr->numrows,
+				 max_width);
 	}
 	return 0;
 }
@@ -707,7 +710,7 @@ static int confirmOverwriteDirect(const char *msg) {
 
 void save(void) {
 	if (E.recording || E.playback) {
-		setStatusMessage(msg_macro_blocked);
+		setStatusMessage("Not available during macro");
 		return;
 	}
 
@@ -715,7 +718,7 @@ void save(void) {
 		char *input = (char *)editorPrompt(
 			E.buf, "Save as: ", PROMPT_FILES, NULL);
 		if (input == NULL) {
-			setStatusMessage(msg_save_aborted);
+			setStatusMessage("Save aborted.");
 			return;
 		}
 		E.buf->filename = collapseHome(input);
@@ -732,17 +735,18 @@ void save(void) {
 	/* Try atomic write first */
 	if (writeAtomic(iopath, buf, len) == -1) {
 		if (errno == ENOSPC) {
-			if (!confirmOverwriteDirect(msg_save_directly_prompt)) {
+			if (!confirmOverwriteDirect(
+				    "Atomic save failed (disk space). Overwrite directly? (y/N)")) {
 				free(buf);
 				free(iopath);
-				setStatusMessage(msg_save_aborted);
+				setStatusMessage("Save aborted.");
 				return;
 			}
 
 			if (writeDirect(iopath, buf, len) == -1) {
 				free(buf);
 				free(iopath);
-				setStatusMessage(msg_save_failed,
+				setStatusMessage("Save failed: %s",
 						 strerror(errno));
 				return;
 			}
@@ -750,7 +754,7 @@ void save(void) {
 		} else {
 			free(buf);
 			free(iopath);
-			setStatusMessage(msg_save_failed, strerror(errno));
+			setStatusMessage("Save failed: %s", strerror(errno));
 			return;
 		}
 	}
@@ -777,10 +781,11 @@ void save(void) {
 	/* Lock is released on clean by markBufferClean above; reacquired
 	 * on the next clean→dirty transition. */
 
-	int n = snprintf(NULL, 0, msg_wrote_bytes, (int)len, E.buf->filename);
+	int n = snprintf(NULL, 0, "Wrote %d bytes to %s", (int)len,
+			 E.buf->filename);
 	char *showName =
 		leftTruncate(E.buf->filename, nameFit(E.buf->filename, n));
-	setStatusMessage(msg_wrote_bytes, (int)len, showName);
+	setStatusMessage("Wrote %d bytes to %s", (int)len, showName);
 	free(showName);
 
 	free(iopath);
@@ -789,13 +794,13 @@ void save(void) {
 void saveAs(void) {
 	/* Not allowed during macro record/playback */
 	if (E.recording || E.playback) {
-		setStatusMessage(msg_macro_blocked);
+		setStatusMessage("Not available during macro");
 		return;
 	}
 	char *new_filename =
 		(char *)editorPrompt(E.buf, "Save as: ", PROMPT_FILES, NULL);
 	if (new_filename == NULL) {
-		setStatusMessage(msg_save_aborted);
+		setStatusMessage("Save aborted.");
 		return;
 	}
 	free(E.buf->filename);
@@ -845,16 +850,16 @@ static int hasGlobChars(const char *s) {
 void findFile(int read_only) {
 	/* Not allowed during macro record/playback */
 	if (E.recording || E.playback) {
-		setStatusMessage(msg_macro_blocked);
+		setStatusMessage("Not available during macro");
 		return;
 	}
 
 	uint8_t *prompt = editorPrompt(
-		E.buf, read_only ? msg_find_file_read_only : msg_find_file,
+		E.buf, read_only ? "Find File Read Only: " : "Find File: ",
 		PROMPT_FILES, NULL);
 
 	if (prompt == NULL) {
-		setStatusMessage(msg_canceled);
+		setStatusMessage("Canceled.");
 		return;
 	}
 
@@ -868,7 +873,7 @@ void findFile(int read_only) {
 		if (rc != 0 || gl.gl_pathc == 0) {
 			if (rc == 0)
 				globfree(&gl);
-			setStatusMessage(msg_no_glob_match, prompt);
+			setStatusMessage("No matching files: %s", prompt);
 			free(prompt);
 			return;
 		}
@@ -884,7 +889,7 @@ void findFile(int read_only) {
 			if (buf) {
 				if (read_only) {
 					buf->read_only = 1;
-					setStatusMessage(msg_read_only);
+					setStatusMessage("Buffer is read-only");
 				}
 				last = buf;
 				opened++;
@@ -909,7 +914,7 @@ void findFile(int read_only) {
 	struct stat st;
 	char *stat_path = expandTilde((char *)prompt);
 	if (stat(stat_path, &st) == 0 && S_ISDIR(st.st_mode)) {
-		setStatusMessage(msg_dir_not_supported);
+		setStatusMessage("Directory editing not supported.");
 		free(stat_path);
 		free(prompt);
 		return;
@@ -922,7 +927,7 @@ void findFile(int read_only) {
 	if (buf) {
 		if (read_only) {
 			buf->read_only = 1;
-			setStatusMessage(msg_read_only);
+			setStatusMessage("Buffer is read-only");
 		}
 		refreshScreen();
 	}
@@ -942,12 +947,12 @@ int insertFileAtPath(struct buffer *buf, const char *path,
 	struct stat ist;
 	if (stat(path, &ist) == 0) {
 		if (S_ISDIR(ist.st_mode)) {
-			setStatusMessage(msg_dir_not_supported);
+			setStatusMessage("Directory editing not supported.");
 			return 1;
 		}
 		if (S_ISREG(ist.st_mode) &&
 		    (size_t)ist.st_size > EMIL_MAX_FILE_SIZE) {
-			setStatusMessage(msg_memory_limit);
+			setStatusMessage("Exceeds 1 GB limit");
 			return 1;
 		}
 	}
@@ -955,15 +960,16 @@ int insertFileAtPath(struct buffer *buf, const char *path,
 	FILE *fp = fopen(path, "r");
 	if (!fp) {
 		if (errno == ENOENT) {
-			int n = snprintf(NULL, 0, msg_file_not_found,
+			int n = snprintf(NULL, 0, "File not found: %s",
 					 display_name);
 			char *showName =
 				leftTruncate((char *)display_name,
 					     nameFit((char *)display_name, n));
-			setStatusMessage(msg_file_not_found, showName);
+			setStatusMessage("File not found: %s", showName);
 			free(showName);
 		} else {
-			setStatusMessage(msg_error_opening, strerror(errno));
+			setStatusMessage("Error opening file: %s",
+					 strerror(errno));
 		}
 		return 1;
 	}
@@ -971,7 +977,7 @@ int insertFileAtPath(struct buffer *buf, const char *path,
 	/* Pre-scan for null bytes */
 	if (fileContainsNullBytes(fp)) {
 		fclose(fp);
-		setStatusMessage(msg_binary_file);
+		setStatusMessage("File contains null bytes (binary file?)");
 		return 1;
 	}
 
@@ -997,7 +1003,7 @@ int insertFileAtPath(struct buffer *buf, const char *path,
 	/* Validate UTF-8 before inserting */
 	if (!checkUTF8Validity(tmpbuf)) {
 		destroyBuffer(tmpbuf);
-		setStatusMessage(msg_invalid_utf8);
+		setStatusMessage("Failed UTF-8 validation");
 		return 1;
 	}
 
@@ -1049,11 +1055,11 @@ int insertFileAtPath(struct buffer *buf, const char *path,
 
 	destroyBuffer(tmpbuf);
 
-	int n = snprintf(NULL, 0, msg_inserted_lines, lines_inserted,
+	int n = snprintf(NULL, 0, "Inserted %d lines from %s", lines_inserted,
 			 display_name);
 	char *showName = leftTruncate((char *)display_name,
 				      nameFit((char *)display_name, n));
-	setStatusMessage(msg_inserted_lines, lines_inserted, showName);
+	setStatusMessage("Inserted %d lines from %s", lines_inserted, showName);
 	free(showName);
 
 	return 0;
@@ -1236,14 +1242,14 @@ char *rebaseFilename(const char *filename, const char *old_cwd,
 void changeDirectory(void) {
 	uint8_t *dir = editorPrompt(E.buf, "Directory: ", PROMPT_DIR, NULL);
 	if (dir == NULL) {
-		setStatusMessage(msg_canceled);
+		setStatusMessage("Canceled.");
 		return;
 	}
 
 	/* Grab the old cwd before changing */
 	char old_cwd[PATH_MAX];
 	if (getcwd(old_cwd, sizeof(old_cwd)) == NULL) {
-		setStatusMessage(msg_indeterminate_cd);
+		setStatusMessage("cd: cannot determine current directory");
 		free(dir);
 		return;
 	}
@@ -1261,7 +1267,7 @@ void changeDirectory(void) {
 	if (getcwd(new_cwd, sizeof(new_cwd)) == NULL) {
 		/* chdir succeeded but getcwd failed: unlikely but
 		 * leave filenames as-is */
-		setStatusMessage(msg_changed_dir);
+		setStatusMessage("Changed directory");
 		free(dir);
 		return;
 	}
@@ -1280,7 +1286,7 @@ void changeDirectory(void) {
 		computeDisplayNames();
 	}
 
-	setStatusMessage(msg_current_dir, new_cwd);
+	setStatusMessage("Current directory: %s", new_cwd);
 	free(dir);
 }
 

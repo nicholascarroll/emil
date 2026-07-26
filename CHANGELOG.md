@@ -7,6 +7,7 @@
 - Fixed SS3 escape sequences inserting text.
 - Fixed minibuffer sizing, wrapping, and prompt cursor position for multi-byte text.
 - Removed probe that tries to get the screen size if kernel doesn't know
+- Hardcoded English for messages and man pages and removed Spanish and Chinese
 
 ## [0.7.0] - 2026-07-20
 - Fixed crash yanking a rectangle into an empty buffer.

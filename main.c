@@ -9,7 +9,7 @@
 #include "fileio.h"
 #include "history.h"
 #include "keymap.h"
-#include "message.h"
+
 #include "terminal.h"
 #include "util.h"
 #include <errno.h>
@@ -235,7 +235,7 @@ int main(int argc, char *argv[]) {
 				free(stdin_data);
 				disableRawMode();
 				fprintf(stderr, "stdin: %s\n",
-					msg_memory_limit);
+					"Exceeds 1 GB limit");
 				exit(1);
 			}
 			struct buffer *stdinBuf =
@@ -246,7 +246,7 @@ int main(int argc, char *argv[]) {
 				free(stdin_data);
 				disableRawMode();
 				fprintf(stderr, "stdin: %s\n",
-					msg_invalid_utf8);
+					"Failed UTF-8 validation");
 				exit(1);
 			}
 			stdinBuf->next = E.headbuf;
@@ -274,7 +274,7 @@ int main(int argc, char *argv[]) {
 				}
 				/* stdin was a tty and not piped:
 				 * nothing to read */
-				setStatusMessage(msg_no_piped_input);
+				setStatusMessage("stdin: no piped input");
 				continue;
 			}
 
@@ -315,7 +315,7 @@ int main(int argc, char *argv[]) {
 
 #ifdef EMIL_DISABLE_SHELL
 	if (!E.statusmsg_show)
-		setStatusMessage(msg_shell_disabled);
+		setStatusMessage("Shell integration disabled at build time.");
 #endif /* EMIL_DISABLE_SHELL */
 	for (;;) {
 		if (got_sigterm || got_sighup) {

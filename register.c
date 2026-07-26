@@ -2,7 +2,7 @@
 #include "buffer.h"
 #include "display.h"
 #include "emil.h"
-#include "message.h"
+
 #include "region.h"
 #include "terminal.h"
 #include "unicode.h"
@@ -31,7 +31,7 @@ static int getRegisterName(char *prompt) {
 #define GET_REGISTER(vname, prompt)          \
 	int vname = getRegisterName(prompt); \
 	if (vname == 0x07) {                 \
-		setStatusMessage(msg_quit);  \
+		setStatusMessage("Quit");    \
 		return;                      \
 	}
 
@@ -395,7 +395,7 @@ void viewRegister(void) {
 	int reg = getRegisterName("View register");
 	if (reg == 0x07) {
 		closeRegisterPreview();
-		setStatusMessage(msg_quit);
+		setStatusMessage("Quit");
 		return;
 	}
 

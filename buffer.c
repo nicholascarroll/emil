@@ -3,7 +3,7 @@
 #include <string.h>
 #include <stdio.h>
 #include "emil.h"
-#include "message.h"
+
 #include "buffer.h"
 #include "fileio.h"
 #include "unicode.h"
@@ -18,7 +18,7 @@
 
 int rejectIfReadOnly(struct buffer *buf) {
 	if (buf->read_only) {
-		setStatusMessage(msg_read_only);
+		setStatusMessage("Buffer is read-only");
 		return 1;
 	}
 	return 0;
@@ -51,7 +51,8 @@ void markBufferDirty(struct buffer *buf) {
 		/* Lock acquired: clear any prior "blocked by PID" state. */
 		buf->lock_blocked_pid = 0;
 	} else if (buf->lock_blocked_pid != 0) {
-		setStatusMessage(msg_warn_lock_blocked, buf->lock_blocked_pid);
+		setStatusMessage("Warning: file locked by PID %d",
+				 buf->lock_blocked_pid);
 	}
 	free(iopath);
 }
@@ -408,7 +409,7 @@ void switchToNamedBuffer(void) {
 	uint8_t *buffer_name = editorPrompt(E.buf, prompt, PROMPT_BUFFER, NULL);
 
 	if (buffer_name == NULL) {
-		setStatusMessage(msg_buffer_switch_canceled);
+		setStatusMessage("Buffer switch canceled");
 		return;
 	}
 
@@ -418,7 +419,7 @@ void switchToNamedBuffer(void) {
 		/* User pressed Enter without typing */
 		targetBuffer = defaultBuffer;
 		if (!targetBuffer) {
-			setStatusMessage(msg_no_buffer_switch);
+			setStatusMessage("No buffer to switch to");
 			free(buffer_name);
 			return;
 		}
@@ -464,7 +465,7 @@ void switchToNamedBuffer(void) {
 		}
 
 		if (!targetBuffer) {
-			setStatusMessage(msg_no_buffer_named, buffer_name);
+			setStatusMessage("No buffer named '%s'", buffer_name);
 			free(buffer_name);
 			return;
 		}
@@ -475,9 +476,9 @@ void switchToNamedBuffer(void) {
 	resetFileCheckThrottle();
 
 	const char *full = E.buf->filename ? E.buf->filename : "*scratch*";
-	int n = snprintf(NULL, 0, msg_switched_to, full);
+	int n = snprintf(NULL, 0, "Switched to buffer %s", full);
 	char *switchedName = leftTruncate(full, nameFit(full, n));
-	setStatusMessage(msg_switched_to, switchedName);
+	setStatusMessage("Switched to buffer %s", switchedName);
 	free(switchedName);
 
 	for (int i = 0; i < E.nwindows; i++) {
@@ -532,9 +533,12 @@ void killBuffer(void) {
 	if (bufr->dirty && bufr->filename != NULL && !bufr->special_buffer) {
 		const char *fname = bufr->filename ? bufr->filename :
 						     "*scratch*";
-		int n = snprintf(NULL, 0, msg_buffer_modified_kill, fname);
+		int n = snprintf(NULL, 0,
+				 "Buffer %s modified; kill anyway? (y or n)",
+				 fname);
 		char *killName = leftTruncate(fname, nameFit(fname, n));
-		setStatusMessage(msg_buffer_modified_kill, killName);
+		setStatusMessage("Buffer %s modified; kill anyway? (y or n)",
+				 killName);
 		free(killName);
 		refreshScreen();
 		int c = readKey();

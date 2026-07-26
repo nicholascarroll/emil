@@ -5,7 +5,7 @@
 #include "display.h"
 #include "emil.h"
 #include "history.h"
-#include "message.h"
+
 #include "mutate.h"
 #include "prompt.h"
 #include "undo.h"
@@ -71,14 +71,14 @@ void setMark(void) {
 	if (E.buf->mark_active && E.buf->markx == E.buf->cx &&
 	    E.buf->marky == E.buf->cy) {
 		E.buf->mark_active = 0;
-		setStatusMessage(msg_mark_cleared);
+		setStatusMessage("Mark deactivated");
 		return;
 	}
 	markRingPush();
 	E.buf->markx = E.buf->cx;
 	E.buf->marky = E.buf->cy;
 	E.buf->mark_active = 1;
-	setStatusMessage(msg_mark_set);
+	setStatusMessage("Mark set.");
 	clampToBuffer(E.buf, &E.buf->markx, &E.buf->marky);
 }
 
@@ -108,7 +108,7 @@ void popMark(void) {
 
 	/* Step 1: goto mark */
 	if (E.buf->markx < 0 || E.buf->marky < 0) {
-		setStatusMessage(msg_no_mark_set);
+		setStatusMessage("No mark set in this buffer.");
 		return;
 	}
 
@@ -160,15 +160,15 @@ void popMark(void) {
 	E.buf->mark_active = 0;
 
 	if (E.buf->cx == old_cx && E.buf->cy == old_cy)
-		setStatusMessage(msg_mark_popped);
+		setStatusMessage("Mark popped.");
 }
 
 void toggleRectangleMode(void) {
 	E.buf->rectangle_mode = !E.buf->rectangle_mode;
 	if (E.buf->rectangle_mode) {
-		setStatusMessage(msg_rectangle_on);
+		setStatusMessage("Rectangle mode ON");
 	} else {
-		setStatusMessage(msg_rectangle_off);
+		setStatusMessage("Rectangle mode OFF");
 	}
 }
 
@@ -193,7 +193,7 @@ int markInvalid(void) {
 	int ret = markInvalidSilent();
 
 	if (ret) {
-		setStatusMessage(msg_mark_invalid);
+		setStatusMessage("Mark invalid.");
 	}
 
 	return ret;
@@ -351,7 +351,7 @@ void yank(int uarg) {
 		return;
 
 	if (E.kill.str == NULL) {
-		setStatusMessage(msg_kill_ring_empty);
+		setStatusMessage("Kill ring empty.");
 		return;
 	}
 
@@ -376,17 +376,17 @@ void yankPop(int uarg) {
 		return;
 
 	if (E.kill_history.count == 0) {
-		setStatusMessage(msg_kill_ring_empty);
+		setStatusMessage("Kill ring empty.");
 		return;
 	}
 
 	if (E.kill_ring_pos < 0) {
-		setStatusMessage(msg_not_after_yank);
+		setStatusMessage("Previous command was not a yank");
 		return;
 	}
 
 	if (E.buf->undo == NULL || E.buf->undo->delete != 0) {
-		setStatusMessage(msg_not_after_yank);
+		setStatusMessage("Previous command was not a yank");
 		return;
 	}
 
@@ -413,7 +413,7 @@ void yankPop(int uarg) {
 		E.kill.rect_height = entry->rect_height;
 		yankInsert(yank_style_reverse);
 	} else {
-		setStatusMessage(msg_no_more_kill_entries);
+		setStatusMessage("No more kill ring entries to yank!");
 	}
 }
 
@@ -505,7 +505,7 @@ void replaceRegex(void) {
 		char error_msg[256];
 		regerror(regcomp_result, &pattern, error_msg,
 			 sizeof(error_msg));
-		setStatusMessage(msg_regex_error, error_msg);
+		setStatusMessage("Regex error: %s", error_msg);
 		free(regex);
 		free(repl);
 		return;
@@ -573,7 +573,7 @@ void replaceRegex(void) {
 	free(regex);
 	free(repl);
 	restoreKill(okill);
-	setStatusMessage(msg_replaced_n, made);
+	setStatusMessage("Replaced %d instances", made);
 }
 
 void stringRectangle(void) {
@@ -586,7 +586,7 @@ void stringRectangle(void) {
 	uint8_t *string =
 		editorPrompt(E.buf, "String rectangle: ", PROMPT_BASIC, NULL);
 	if (string == NULL) {
-		setStatusMessage(msg_canceled);
+		setStatusMessage("Canceled.");
 		return;
 	}
 
@@ -781,7 +781,7 @@ void yankRectangle(void) {
 	 * row[-1] at the top of the buffer. */
 	if (E.kill.str == NULL || !E.kill.is_rectangle ||
 	    E.kill.rect_width <= 0 || E.kill.rect_height <= 0) {
-		setStatusMessage(msg_no_rect_kill);
+		setStatusMessage("Last kill is not a rectangle.");
 		return;
 	}
 

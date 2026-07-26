@@ -4,7 +4,7 @@
 #include "emil.h"
 #include "fileio.h"
 #include "history.h"
-#include "message.h"
+
 #include "region.h"
 #include "terminal.h"
 #include "unicode.h"
@@ -822,11 +822,10 @@ static void statusRight(const struct window *win, char *out, int *out_bytes,
 	char warn_buf[64];
 	const char *warn = NULL;
 	if (bufr->external_mod) {
-		snprintf(warn_buf, sizeof(warn_buf), "%s",
-			 msg_file_changed_on_disk);
+		snprintf(warn_buf, sizeof(warn_buf), "%s", "FILE MODIFIED");
 		warn = warn_buf;
 	} else if (bufr->lock_blocked_pid != 0) {
-		snprintf(warn_buf, sizeof(warn_buf), msg_file_locked,
+		snprintf(warn_buf, sizeof(warn_buf), "%d LOCK",
 			 bufr->lock_blocked_pid);
 		warn = warn_buf;
 	}
@@ -1273,5 +1272,23 @@ void editorVersion(void) {
 }
 
 void help(void) {
-	setStatusMessage(msg_help);
+	setStatusMessage(
+		"Open:C-x C-f   Save:C-x C-s   Quit:C-x C-c   "
+		"Mark:C-SPC   Kill:C-w   Copy:M-w   Yank:C-y   "
+		"Undo:C-_   Search:C-s   Cancel:C-g   "
+		"where C- denotes the Control key, M- denotes the Meta (Alt) key.  "
+		"For the complete command reference, see the man page.");
+}
+
+void setStatusMessage(const char *fmt, ...) {
+	va_list ap;
+	va_start(ap, fmt);
+	vsnprintf(E.statusmsg, sizeof(E.statusmsg), fmt, ap);
+	va_end(ap);
+	E.statusmsg_show = 1;
+}
+
+void clearStatusMessage(void) {
+	E.statusmsg[0] = '\0';
+	E.statusmsg_show = 0;
 }

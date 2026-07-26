@@ -4,6 +4,7 @@
 #include "abuf.h"
 #include "window.h"
 #include <stddef.h>
+#include <stdarg.h>
 
 /* Forward declarations */
 struct window;
@@ -31,5 +32,10 @@ void toggleVisualLineMode(void);
 void editorVersion(void);
 void help(void);
 void whatCursor(void);
+
+/* Status message display */
+void setStatusMessage(const char *fmt, ...)
+	__attribute__((format(printf, 1, 2)));
+void clearStatusMessage(void);
 
 #endif /* EMIL_DISPLAY_H */

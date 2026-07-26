@@ -2,7 +2,7 @@
 #include "buffer.h"
 #include "display.h"
 #include "emil.h"
-#include "message.h"
+
 #include "region.h"
 #include "undo.h"
 #include "unicode.h"

@@ -1,4 +1,4 @@
-#include "message.h"
+
 #include "util.h"
 
 #ifndef EMIL_DISABLE_SHELL
@@ -149,7 +149,7 @@ static int pumpSubprocessIO(struct subprocess_s *sp, uint8_t *input,
 						subprocess_signal(sp, SIGINT);
 						if (intr_fd == STDIN_FILENO) {
 							setStatusMessage(
-								msg_shell_interrupted);
+								"Interrupt sent — C-g again to force kill.");
 							refreshScreen();
 						}
 					} else if (cancel_stage == 2) {
@@ -233,7 +233,7 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 		}
 		subprocess_destroy(&subprocess);
 		dbuf_free(&d);
-		setStatusMessage(msg_canceled);
+		setStatusMessage("Canceled.");
 		return NULL;
 	}
 
@@ -249,13 +249,14 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 
 	/* Check if subprocess exited with error */
 	if (sub_ret != 0) {
-		setStatusMessage(msg_shell_exit_status, sub_ret);
+		setStatusMessage("Shell command exited with status %d",
+				 sub_ret);
 		/* Continue anyway to show any output/errors */
 	}
 
 	/* Only show byte count if subprocess succeeded */
 	if (sub_ret == 0) {
-		setStatusMessage(msg_shell_read_bytes, d.len);
+		setStatusMessage("Read %d bytes", d.len);
 	}
 
 	/* Reject output containing NUL bytes.  Both consumers of this
@@ -313,7 +314,7 @@ uint8_t *editorPipe(int useRegion) {
 	cmd = editorPrompt(E.buf, "Shell: ", PROMPT_BASIC, NULL);
 
 	if (cmd == NULL) {
-		setStatusMessage(msg_shell_canceled);
+		setStatusMessage("Canceled shell command.");
 	} else if (useRegion) {
 		if (u) {
 			transformRegion(transformerPipeCmd);
@@ -321,12 +322,11 @@ uint8_t *editorPipe(int useRegion) {
 			E.buf->markx = -1;
 			E.buf->marky = -1;
 			free(cmd);
-			free(u);
 			return NULL;
 		} else {
 			// 1. Extract the selected region
 			if (markInvalid()) {
-				setStatusMessage(msg_mark_invalid);
+				setStatusMessage("Mark invalid.");
 				free(cmd);
 				return NULL;
 			}
@@ -352,7 +352,7 @@ uint8_t *editorPipe(int useRegion) {
 void pipeCmd(int useRegion) {
 	/* Not allowed during macro record/playback */
 	if (E.recording || E.playback) {
-		setStatusMessage(msg_macro_blocked);
+		setStatusMessage("Not available during macro");
 		return;
 	}
 	uint8_t *pipeOutput = editorPipe(useRegion);
@@ -434,12 +434,12 @@ void pipeCmd(int useRegion) {
 void diffBufferWithFile(void) {
 	struct buffer *bufr = E.buf;
 	if (bufr->filename == NULL) {
-		setStatusMessage(msg_buffer_without_file);
+		setStatusMessage("Buffer has no file");
 		return;
 	}
 
 	if (!bufr->dirty) {
-		setStatusMessage(msg_diff_buffer_matches_file);
+		setStatusMessage("Buffer matches file");
 		return;
 	}
 
@@ -460,7 +460,7 @@ void diffBufferWithFile(void) {
 	int fd = mkstemp(tmpname);
 	if (fd == -1) {
 		free(tmpname);
-		setStatusMessage(msg_diff_cannot_create_temp);
+		setStatusMessage("Diff failed: cannot create temp file");
 		return;
 	}
 
@@ -476,7 +476,7 @@ void diffBufferWithFile(void) {
 			unlink(tmpname);
 			free(tmpname);
 			free(bufstr);
-			setStatusMessage(msg_diff_cannot_write);
+			setStatusMessage("Diff failed: write error");
 			return;
 		}
 		total += n;
@@ -497,7 +497,7 @@ void diffBufferWithFile(void) {
 		unlink(tmpname);
 		free(tmpname);
 		free(iopath);
-		setStatusMessage(msg_diff_cannot_subprocess);
+		setStatusMessage("Diff failed: cannot create subprocess");
 		return;
 	}
 	free(iopath);
@@ -521,13 +521,13 @@ void diffBufferWithFile(void) {
 	/* diff returns 0 = identical, 1 = differences, 2 = error */
 	if (sub_ret == 0) {
 		free(output);
-		setStatusMessage(msg_diff_no_differences);
+		setStatusMessage("No differences");
 		return;
 	}
 
 	if (sub_ret >= 2 || output_len == 0) {
 		free(output);
-		setStatusMessage(msg_diff_failed, sub_ret);
+		setStatusMessage("Diff failed (exit status %d)", sub_ret);
 		return;
 	}
 
@@ -593,17 +593,17 @@ void diffBufferWithFile(void) {
 
 void pipeCmd(int useRegion) {
 	(void)useRegion; /* unused parameter */
-	setStatusMessage(msg_shell_disabled);
+	setStatusMessage("Shell integration disabled at build time.");
 }
 
 void diffBufferWithFile(void) {
-	setStatusMessage(msg_shell_disabled);
+	setStatusMessage("Shell integration disabled at build time.");
 }
 
 uint8_t *pipeCommandCapture(const uint8_t *command, uint8_t *input) {
 	(void)command;
 	(void)input;
-	setStatusMessage(msg_shell_disabled);
+	setStatusMessage("Shell integration disabled at build time.");
 	return NULL;
 }
 
@@ -614,7 +614,7 @@ uint8_t *pipeCommandCaptureIntr(const uint8_t *command, uint8_t *input,
 	(void)intr_fd;
 	if (out_canceled)
 		*out_canceled = 0;
-	setStatusMessage(msg_shell_disabled);
+	setStatusMessage("Shell integration disabled at build time.");
 	return NULL;
 }
 

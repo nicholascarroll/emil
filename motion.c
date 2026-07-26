@@ -1,6 +1,6 @@
 #include "motion.h"
 #include "display.h"
-#include "message.h"
+
 #include "prompt.h"
 #include "region.h"
 #include "unicode.h"
@@ -575,7 +575,7 @@ void backwardSexp(int count) {
 
 		/* Step back once then skip whitespace and newlines */
 		if (!stepBackward(&cx, &cy)) {
-			setStatusMessage(msg_beginning_of_buffer);
+			setStatusMessage("Beginning of buffer");
 			return;
 		}
 		while (1) {
@@ -583,7 +583,7 @@ void backwardSexp(int count) {
 			if (ch != ' ' && ch != '\t' && ch != '\n')
 				break;
 			if (!stepBackward(&cx, &cy)) {
-				setStatusMessage(msg_beginning_of_buffer);
+				setStatusMessage("Beginning of buffer");
 				return;
 			}
 		}

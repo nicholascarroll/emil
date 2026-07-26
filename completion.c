@@ -4,7 +4,7 @@
 #include <string.h>
 #include <stdio.h>
 #include "emil.h"
-#include "message.h"
+
 #include "completion.h"
 #include "buffer.h"
 #include "util.h"
@@ -278,7 +278,8 @@ static void showCompletionsBuffer(char **matches, int n_matches,
 
 	/* Add header */
 	char header[100];
-	snprintf(header, sizeof(header), msg_possible_completions, n_matches);
+	snprintf(header, sizeof(header),
+		 "Possible completions (%d):", n_matches);
 	insertRow(comp_buf, 0, (const uint8_t *)header, strlen(header));
 	insertRow(comp_buf, 1, (const uint8_t *)"", 0);
 
@@ -450,7 +451,7 @@ void handleMinibufferCompletion(struct buffer *minibuf, enum promptType type) {
 
 	/* Handle based on number of matches */
 	if (result.n_matches == 0) {
-		setStatusMessage(msg_no_match_bracket);
+		setStatusMessage("[No match]");
 		minibuf->completion_state.preserve_message = 1;
 	} else if (result.n_matches == 1) {
 		/* Complete fully */
@@ -469,7 +470,7 @@ void handleMinibufferCompletion(struct buffer *minibuf, enum promptType type) {
 				showCompletionsBuffer(result.matches,
 						      result.n_matches, type);
 			} else {
-				setStatusMessage(msg_complete_not_unique);
+				setStatusMessage("[complete, but not unique]");
 				minibuf->completion_state.preserve_message = 1;
 			}
 		}

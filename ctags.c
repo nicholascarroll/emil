@@ -5,7 +5,7 @@
 #include <unistd.h>
 #include "ctags.h"
 #include "emil.h"
-#include "message.h"
+
 #include "fileio.h"
 #include "display.h"
 #include "window.h"
@@ -212,7 +212,7 @@ static int ctagsLookup(const char *sym, char *out_file, size_t filesz,
 void ctagsJump(void) {
 	char *sym = wordAtPoint();
 	if (!sym) {
-		setStatusMessage(msg_no_symbol_at_point);
+		setStatusMessage("No symbol at point");
 		return;
 	}
 
@@ -222,7 +222,7 @@ void ctagsJump(void) {
 	int tagline;
 	if (ctagsLookup(sym, tagfile, sizeof(tagfile), &tagline, tagpat,
 			sizeof(tagpat), tagsdir, sizeof(tagsdir)) < 0) {
-		setStatusMessage(msg_tag_not_found, sym);
+		setStatusMessage("Tag not found: %s", sym);
 		free(sym);
 		return;
 	}
@@ -232,7 +232,7 @@ void ctagsJump(void) {
 	 * the jump works no matter where emil was launched from. */
 	char resolved[PATH_MAX];
 	if (resolveTagPath(tagsdir, tagfile, resolved, sizeof(resolved)) != 0) {
-		setStatusMessage(msg_tag_not_found, sym);
+		setStatusMessage("Tag not found: %s", sym);
 		free(sym);
 		return;
 	}
@@ -258,13 +258,13 @@ void ctagsJump(void) {
 		}
 		recenter(E.windows[windowFocusedIdx()]);
 	}
-	setStatusMessage(msg_tag, sym);
+	setStatusMessage("Tag: %s", sym);
 	free(sym);
 }
 
 void ctagsBack(void) {
 	if (jsp == 0) {
-		setStatusMessage(msg_tag_stack_empty);
+		setStatusMessage("Tag stack empty");
 		return;
 	}
 	jsp--;
@@ -283,7 +283,7 @@ void toggleHeaderBody(void) {
 
 	char *ext = strrchr(E.buf->filename, '.');
 	if (!ext) {
-		setStatusMessage(msg_no_file_extension);
+		setStatusMessage("No file extension");
 		return;
 	}
 
@@ -309,7 +309,7 @@ void toggleHeaderBody(void) {
 	}
 
 	if (!target_ext) {
-		setStatusMessage(msg_no_ext_mapping, ext);
+		setStatusMessage("No header/body mapping for %s", ext);
 		return;
 	}
 
@@ -318,7 +318,7 @@ void toggleHeaderBody(void) {
 	 * doesn't fit in 'other', the offset arithmetic below would
 	 * write past the buffer */
 	if (strlen(E.buf->filename) >= sizeof(other)) {
-		setStatusMessage(msg_no_ext_mapping, ext);
+		setStatusMessage("No header/body mapping for %s", ext);
 		return;
 	}
 	emil_strlcpy(other, E.buf->filename, sizeof(other));
@@ -328,7 +328,7 @@ void toggleHeaderBody(void) {
 
 	char *ioother = expandTilde(other);
 	if (access(ioother, F_OK) != 0) {
-		setStatusMessage(msg_no_ext_file, other);
+		setStatusMessage("No counterpart file: %s", other);
 		free(ioother);
 		return;
 	}

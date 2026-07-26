@@ -8,7 +8,7 @@
 #include "emil.h"
 #include "fileio.h"
 #include "find.h"
-#include "message.h"
+
 #include "palette.h"
 #include "pipe.h"
 #include "prompt.h"
@@ -87,7 +87,7 @@ void runCommand(char *cmd) {
 	if (found) {
 		found->cmd();
 	} else {
-		setStatusMessage(msg_no_command);
+		setStatusMessage("No command found");
 	}
 }
 
@@ -331,8 +331,9 @@ int resolveBinding(int key) {
 				if (nextkey == 't') {
 					return CMD_VISUAL_LINE_MODE;
 				} else {
-					setStatusMessage(msg_unknown_cx_x,
-							 nextkey);
+					setStatusMessage(
+						"Unknown command C-x x %c",
+						nextkey);
 					return CMD_NONE;
 				}
 			}
@@ -352,10 +353,10 @@ int resolveBinding(int key) {
 			return CMD_NONE;
 		default:
 			if (key < ' ') {
-				setStatusMessage(msg_unknown_cx_ctrl,
+				setStatusMessage("Unknown command C-x C-%c",
 						 key + '`');
 			} else {
-				setStatusMessage(msg_unknown_cx, key);
+				setStatusMessage("Unknown command C-x %c", key);
 			}
 			return CMD_NONE;
 		}
@@ -663,7 +664,7 @@ static int dispatchEdit(int c, int uarg) {
 		delChar(uarg);
 		return 1;
 	case CMD_UNICODE_ERROR:
-		setStatusMessage(msg_invalid_utf8);
+		setStatusMessage("Failed UTF-8 validation");
 		return 1;
 	case CMD_UNICODE:
 		insertUnicode(uarg);
@@ -694,7 +695,7 @@ static int dispatchEdit(int c, int uarg) {
 						E.buf->cy, E.buf->cx, E.buf->cy,
 						0);
 		} else {
-			setStatusMessage(msg_invalid_utf8);
+			setStatusMessage("Failed UTF-8 validation");
 		}
 	}
 		return 1;
@@ -823,7 +824,7 @@ static int dispatchBuffer(int c, int uarg) {
 		return 1;
 	case CMD_TOGGLE_READ_ONLY:
 		E.buf->read_only = !E.buf->read_only;
-		setStatusMessage(E.buf->read_only ? msg_read_only :
+		setStatusMessage(E.buf->read_only ? "Buffer is read-only" :
 						    "Buffer set to writable");
 		return 1;
 	case CMD_REDO:
@@ -987,7 +988,7 @@ static int dispatchMacro(int c, int uarg) {
 		if (E.playback) {
 			/* A replayed C-x ( would clobber E.macro.keys:
 			 * the very array being played back. */
-			setStatusMessage(msg_macro_blocked);
+			setStatusMessage("Not available during macro");
 			return 1;
 		}
 		if (!E.recording) {
@@ -998,21 +999,22 @@ static int dispatchMacro(int c, int uarg) {
 				free(E.macro.keys);
 			}
 			E.macro.keys = xmalloc(E.macro.skeys * sizeof(int));
-			setStatusMessage(msg_recording);
+			setStatusMessage("Recording macro...");
 		} else {
-			setStatusMessage(msg_already_recording);
+			setStatusMessage("Already recording");
 		}
 		return 1;
 	case CMD_MACRO_END:
 		if (E.playback) {
-			setStatusMessage(msg_macro_blocked);
+			setStatusMessage("Not available during macro");
 			return 1;
 		}
 		if (E.recording) {
 			E.recording = 0;
-			setStatusMessage(msg_macro_recorded, E.macro.nkeys);
+			setStatusMessage("Macro recorded (%d keys)",
+					 E.macro.nkeys);
 		} else {
-			setStatusMessage(msg_not_recording);
+			setStatusMessage("Not recording");
 		}
 		return 1;
 	case CMD_MACRO_EXEC:
@@ -1022,7 +1024,7 @@ static int dispatchMacro(int c, int uarg) {
 			 * that replays the (by then different) macro,
 			 * and nested playback re-enters execMacro on
 			 * the same E.playback cursor. */
-			setStatusMessage(msg_macro_blocked);
+			setStatusMessage("Not available during macro");
 			return 1;
 		}
 		if (E.macro.nkeys > 0) {
@@ -1030,7 +1032,7 @@ static int dispatchMacro(int c, int uarg) {
 				execMacro(&E.macro);
 			}
 		} else {
-			setStatusMessage(msg_no_macro);
+			setStatusMessage("No macro recorded");
 		}
 		return 1;
 	default:
@@ -1067,7 +1069,7 @@ static int dispatchMisc(int c, int uarg) {
 		return 1;
 	case CMD_EXEC_CMD: {
 		if (E.recording || E.playback) {
-			setStatusMessage(msg_macro_blocked);
+			setStatusMessage("Not available during macro");
 			return 1;
 		}
 		uint8_t *cmd =
@@ -1099,7 +1101,7 @@ static int dispatchMisc(int c, int uarg) {
 	case CMD_CANCEL:
 		E.buf->mark_active = 0;
 		;
-		setStatusMessage(msg_quit);
+		setStatusMessage("Quit");
 		return 1;
 	case CMD_UNIVERSAL_ARG:
 	case CMD_NEGATIVE_ARG:
@@ -1230,7 +1232,7 @@ done:
 void execMacro(struct macro *macro) {
 	const int MAX_MACRO_DEPTH = 100;
 	if (E.macro_depth >= MAX_MACRO_DEPTH) {
-		setStatusMessage(msg_macro_depth);
+		setStatusMessage("Macro recursion depth exceeded");
 		return;
 	}
 

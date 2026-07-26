@@ -4,7 +4,7 @@
 #include "emil.h"
 #include "history.h"
 #include "keymap.h"
-#include "message.h"
+
 #include "motion.h"
 #include "mutate.h"
 #include "prompt.h"
@@ -67,7 +67,7 @@ void insertUnicode(int count) {
 
 void indentTabs(void) {
 	E.buf->indent = 0;
-	setStatusMessage(msg_indent_tabs);
+	setStatusMessage("Indentation set to tabs");
 }
 
 void indentSpaces(void) {
@@ -80,11 +80,11 @@ void indentSpaces(void) {
 	free(indentS);
 	if (indent <= 0) {
 cancel:
-		setStatusMessage(msg_canceled);
+		setStatusMessage("Canceled.");
 		return;
 	}
 	E.buf->indent = indent;
-	setStatusMessage(msg_indent_spaces, indent);
+	setStatusMessage("Indentation set to %i spaces", indent);
 }
 
 void splitLineAtPoint(void) {
@@ -161,7 +161,7 @@ void unindent(int rept) {
 		return;
 
 	if (E.buf->cy >= E.buf->numrows) {
-		setStatusMessage(msg_end_of_buffer);
+		setStatusMessage("End of buffer");
 		return;
 	}
 
@@ -367,7 +367,7 @@ static void transposeWordsBackward(void) {
 
 	E.buf->mark_active = 0;
 	if (E.buf->numrows == 0) {
-		setStatusMessage(msg_buffer_empty);
+		setStatusMessage("Buffer is empty");
 		return;
 	}
 
@@ -377,7 +377,7 @@ static void transposeWordsBackward(void) {
 	int s2x = icx, s2y = icy;
 	backwardWordEnd(&s2x, &s2y);
 	if (s2x == icx && s2y == icy) {
-		setStatusMessage(msg_cannot_transpose);
+		setStatusMessage("Cannot transpose here");
 		return;
 	}
 
@@ -390,7 +390,7 @@ static void transposeWordsBackward(void) {
 	if (s1x == s2x && s1y == s2y) {
 		E.buf->cx = icx;
 		E.buf->cy = icy;
-		setStatusMessage(msg_cannot_transpose);
+		setStatusMessage("Cannot transpose here");
 		return;
 	}
 
@@ -415,17 +415,17 @@ void transposeWords(int uarg) {
 
 	E.buf->mark_active = 0;
 	if (E.buf->numrows == 0) {
-		setStatusMessage(msg_buffer_empty);
+		setStatusMessage("Buffer is empty");
 		return;
 	}
 
 	if (E.buf->cx == 0 && E.buf->cy == 0) {
-		setStatusMessage(msg_beginning_of_buffer);
+		setStatusMessage("Beginning of buffer");
 		return;
 	} else if (E.buf->cy >= E.buf->numrows ||
 		   (E.buf->cy == E.buf->numrows - 1 &&
 		    E.buf->cx == E.buf->row[E.buf->cy].size)) {
-		setStatusMessage(msg_end_of_buffer);
+		setStatusMessage("End of buffer");
 		return;
 	}
 
@@ -434,7 +434,7 @@ void transposeWords(int uarg) {
 	forwardWordEnd(&endcx, &endcy);
 	if ((startcx == E.buf->cx && E.buf->cy == startcy) ||
 	    (endcx == E.buf->cx && E.buf->cy == endcy)) {
-		setStatusMessage(msg_cannot_transpose);
+		setStatusMessage("Cannot transpose here");
 		return;
 	}
 
@@ -453,12 +453,12 @@ static void transposeCharsBackward(void) {
 
 	E.buf->mark_active = 0;
 	if (E.buf->numrows == 0) {
-		setStatusMessage(msg_buffer_empty);
+		setStatusMessage("Buffer is empty");
 		return;
 	}
 
 	if (E.buf->cy >= E.buf->numrows) {
-		setStatusMessage(msg_end_of_buffer);
+		setStatusMessage("End of buffer");
 		return;
 	}
 
@@ -466,7 +466,7 @@ static void transposeCharsBackward(void) {
 
 	/* Need two characters before point on this line. */
 	if (E.buf->cx == 0) {
-		setStatusMessage(msg_cannot_transpose);
+		setStatusMessage("Cannot transpose here");
 		return;
 	}
 
@@ -475,7 +475,7 @@ static void transposeCharsBackward(void) {
 	while (c2x > 0 && utf8_isCont(row->chars[c2x]))
 		c2x--;
 	if (c2x == 0) {
-		setStatusMessage(msg_cannot_transpose);
+		setStatusMessage("Cannot transpose here");
 		return;
 	}
 
@@ -502,12 +502,12 @@ void transposeChars(int uarg) {
 
 	E.buf->mark_active = 0;
 	if (E.buf->numrows == 0) {
-		setStatusMessage(msg_buffer_empty);
+		setStatusMessage("Buffer is empty");
 		return;
 	}
 
 	if (E.buf->cy >= E.buf->numrows) {
-		setStatusMessage(msg_end_of_buffer);
+		setStatusMessage("End of buffer");
 		return;
 	}
 
@@ -517,7 +517,7 @@ void transposeChars(int uarg) {
 	if (E.buf->cx >= row->size) {
 		if (E.buf->cx == 0) {
 			/* Empty line */
-			setStatusMessage(msg_cannot_transpose);
+			setStatusMessage("Cannot transpose here");
 			return;
 		}
 		E.buf->cx--;
@@ -527,7 +527,7 @@ void transposeChars(int uarg) {
 
 	/* Need a character before and after point. */
 	if (E.buf->cx == 0 || E.buf->cx >= row->size) {
-		setStatusMessage(msg_cannot_transpose);
+		setStatusMessage("Cannot transpose here");
 		return;
 	}
 
@@ -602,7 +602,7 @@ void quit(void) {
 		 * during playback that read comes from the macro key
 		 * stream (now bounds-checked to return -1), so the
 		 * prompt could never be answered: block instead. */
-		setStatusMessage(msg_macro_blocked);
+		setStatusMessage("Not available during macro");
 		return;
 	}
 	if (E.recording) {
@@ -621,7 +621,8 @@ void quit(void) {
 	}
 
 	if (hasUnsavedChanges) {
-		setStatusMessage(msg_unsaved_quit);
+		setStatusMessage(
+			"There are unsaved changes. Really quit? (y or n)");
 		refreshScreen();
 		int c = readKey();
 		if (c == 'y' || c == 'Y') {
@@ -696,7 +697,7 @@ void markParagraph(void) {
 	E.buf->cx = startx;
 	E.buf->cy = starty;
 
-	setStatusMessage(msg_mark_set);
+	setStatusMessage("Mark set.");
 }
 
 /* M-- C-x C-t: drag the sentence ending at or before point backward
@@ -710,21 +711,21 @@ static void transposeSentencesBackward(void) {
 	E.buf->mark_active = 0;
 
 	if (E.buf->numrows == 0) {
-		setStatusMessage(msg_buffer_empty);
+		setStatusMessage("Buffer is empty");
 		return;
 	}
 
 	/* Sentence B: ends at or before point. */
 	int b_start_x = E.buf->cx, b_start_y = E.buf->cy;
 	if (backwardSentenceStart(&b_start_x, &b_start_y) < 0) {
-		setStatusMessage(msg_beginning_of_buffer);
+		setStatusMessage("Beginning of buffer");
 		return;
 	}
 
 	/* Sentence A: the one before B. */
 	int a_start_x = b_start_x, a_start_y = b_start_y;
 	if (backwardSentenceStart(&a_start_x, &a_start_y) < 0) {
-		setStatusMessage(msg_beginning_of_buffer);
+		setStatusMessage("Beginning of buffer");
 		return;
 	}
 
@@ -736,7 +737,7 @@ static void transposeSentencesBackward(void) {
 	/* B end: forward from B start. */
 	int b_end_x = b_start_x, b_end_y = b_start_y;
 	if (forwardSentenceEnd(&b_end_x, &b_end_y) < 0) {
-		setStatusMessage(msg_end_of_buffer);
+		setStatusMessage("End of buffer");
 		return;
 	}
 
@@ -787,7 +788,7 @@ void transposeSentences(int uarg) {
 	E.buf->mark_active = 0;
 
 	if (E.buf->numrows == 0) {
-		setStatusMessage(msg_buffer_empty);
+		setStatusMessage("Buffer is empty");
 		return;
 	}
 
@@ -801,14 +802,14 @@ void transposeSentences(int uarg) {
 	/* Sentence A: ends at or before point */
 	int a_start_x = E.buf->cx, a_start_y = E.buf->cy;
 	if (backwardSentenceStart(&a_start_x, &a_start_y) < 0) {
-		setStatusMessage(msg_beginning_of_buffer);
+		setStatusMessage("Beginning of buffer");
 		return;
 	}
 
 	/* Sentence B end: forward from point */
 	int b_end_x = E.buf->cx, b_end_y = E.buf->cy;
 	if (forwardSentenceEnd(&b_end_x, &b_end_y) < 0) {
-		setStatusMessage(msg_end_of_buffer);
+		setStatusMessage("End of buffer");
 		return;
 	}
 
@@ -870,11 +871,11 @@ void zapToChar(void) {
 
 	int c = readKey();
 	if (c == CTRL('g')) {
-		setStatusMessage(msg_canceled);
+		setStatusMessage("Canceled.");
 		return;
 	}
 	if (c == 033) {
-		setStatusMessage(msg_canceled);
+		setStatusMessage("Canceled.");
 		return;
 	}
 

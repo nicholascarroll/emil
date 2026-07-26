@@ -3,7 +3,7 @@
 #include "buffer.h"
 #include "display.h"
 #include "emil.h"
-#include "message.h"
+
 #include "region.h"
 #include "unicode.h"
 #include "unused.h"
@@ -229,7 +229,7 @@ void doUndo(struct buffer *buf, int count) {
 	int times = UARG_COUNT(count);
 	for (int j = 0; j < times; j++) {
 		if (buf->undo == NULL) {
-			setStatusMessage(msg_no_undo);
+			setStatusMessage("No further undo information.");
 			if (!buf->internal_mod) {
 				markBufferClean(buf);
 			}
@@ -237,7 +237,7 @@ void doUndo(struct buffer *buf, int count) {
 		}
 		int paired = buf->undo->paired;
 		undoStep(buf, 0);
-		setStatusMessage(msg_undo);
+		setStatusMessage("Undo.");
 
 		if (paired) {
 			doUndo(buf, 1);
@@ -254,11 +254,11 @@ void doRedo(struct buffer *buf, int count) {
 	int times = UARG_COUNT(count);
 	for (int j = 0; j < times; j++) {
 		if (buf->redo == NULL) {
-			setStatusMessage(msg_no_redo);
+			setStatusMessage("No further redo information.");
 			return;
 		}
 		undoStep(buf, 1);
-		setStatusMessage(msg_redo);
+		setStatusMessage("Redo.");
 
 		if (buf->redo != NULL && buf->redo->paired) {
 			doRedo(buf, 1);

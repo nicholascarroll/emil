@@ -1,7 +1,6 @@
 #include "util.h"
 #include "emil.h"
 #include "fileio.h"
-#include "message.h"
 #include <errno.h>
 #include <limits.h>
 #include <string.h>

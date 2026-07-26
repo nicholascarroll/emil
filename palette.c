@@ -3,7 +3,7 @@
 #include "display.h"
 #include "emil.h"
 #include "keymap.h"
-#include "message.h"
+
 #include "motion.h"
 #include "terminal.h"
 #include "undo.h"
@@ -365,7 +365,7 @@ void expandPalette(void) {
 		/* Cancel */
 		if (key == CTRL('g')) {
 			restoreFocusTo(origin, origin_win);
-			setStatusMessage(msg_canceled);
+			setStatusMessage("Canceled.");
 			return;
 		}
 

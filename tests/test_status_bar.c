@@ -5,7 +5,6 @@
 #include "test_harness.h"
 #include "display.h"
 #include "abuf.h"
-#include "message.h"
 #include "util.h"
 #include <string.h>
 #include <stdlib.h>

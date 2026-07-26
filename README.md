@@ -52,30 +52,6 @@ pacman -S msys2-devel msys2-runtime-devel
 make && make install
 ```
 
-
-### Localization
-
-The user interface language is English by default and fixed at compile time; `emil` cannot switch language at runtime or according to the locale. Users who build from source can bake in one of the following languages instead of English:
-
-| Language                 | Macro        | Man Dir |
-| ------------------------ | ------------ |-------- |
-| Chinese (Simplified)     | EMIL_LANG_ZH | zh      |
-| Spanish (Latin American) | EMIL_LANG_ES | es      |
-
-To build (for example, Spanish):
-
-```bash
-make CFLAGS="-DEMIL_LANG_ES"
-sudo make install MAN_SOURCE=emil.es.1 MAN_SUBDIR=es
-```
-
-and to uninstall:
-
-```bash
-sudo make uninstall MAN_SUBDIR=es
-```
-
-
 ## Getting Started
 
 Open a file:

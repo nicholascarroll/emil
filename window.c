@@ -1,7 +1,7 @@
 #include "window.h"
 #include "display.h"
 #include "emil.h"
-#include "message.h"
+
 #include "util.h"
 #include <stdlib.h>
 
@@ -39,7 +39,7 @@ void synchronizeBufferCursor(struct buffer *buf, struct window *win) {
 
 void switchWindow(void) {
 	if (E.nwindows == 1) {
-		setStatusMessage(msg_no_other_windows);
+		setStatusMessage("No other windows to select");
 		return;
 	}
 
@@ -87,7 +87,7 @@ void createWindow(void) {
 
 void destroyWindow(int window_idx) {
 	if (E.nwindows == 1) {
-		setStatusMessage(msg_cant_kill_last_window);
+		setStatusMessage("Can't kill last window");
 		return;
 	}
 
@@ -119,7 +119,7 @@ void destroyWindow(int window_idx) {
 
 void destroyOtherWindows(void) {
 	if (E.nwindows == 1) {
-		setStatusMessage(msg_no_windows_delete);
+		setStatusMessage("No other windows to delete");
 		return;
 	}
 	int idx = windowFocusedIdx();
