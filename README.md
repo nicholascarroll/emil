@@ -14,7 +14,7 @@ Written in C99, `emil` is single-threaded and runs on any system providing POSIX
 - Edit rectangular text regions
 - Kill ring ("clipboard history")
 - Snippets (as session-local registers)
-- Regular expression search and replace (POSIX ERE)
+- Regular expression search (POSIX ERE)
 - Keystroke macros
 - Shell integration
 - Word wrap
