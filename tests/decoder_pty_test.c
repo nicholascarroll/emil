@@ -19,6 +19,10 @@
  */
 
 #define _XOPEN_SOURCE 600
+#ifdef __sun
+/* Solaris/illumos hide the STREAMS declarations behind this. */
+#define __EXTENSIONS__ 1
+#endif
 
 #include <errno.h>
 #include <fcntl.h>
@@ -27,6 +31,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __sun
+#include <stropts.h>
+#endif
 #include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <termios.h>
@@ -137,6 +144,29 @@ static int spawnEmil(struct child *c) {
 		int sfd = open(slave_name, O_RDWR);
 		if (sfd == -1)
 			_exit(127);
+#ifdef __sun
+		/* On Solaris/illumos a pty is a STREAMS device and the
+		 * freshly opened slave is a bare stream: no terminal
+		 * semantics at all until ptem (termios ioctls, window
+		 * size) and ldterm (the line discipline) are pushed
+		 * onto it, in that order.  Without them every termios
+		 * ioctl is unrecognized, so the stream head forwards
+		 * it to the master as an M_IOCTL that nothing ever
+		 * answers, and the caller blocks for the STREAMS ioctl
+		 * timeout instead of failing.  Solaris 11.4 autopushes
+		 * these; illumos does not, so the push is done here
+		 * (I_FIND guards against a double push if the platform
+		 * did it for us). */
+		if (ioctl(sfd, I_FIND, "ldterm") == 0) {
+			if (ioctl(sfd, I_PUSH, "ptem") == -1 ||
+			    ioctl(sfd, I_PUSH, "ldterm") == -1)
+				_exit(126);
+			/* BSD/XENIX ioctl compatibility: not required
+			 * by the editor, pushed to match what a login
+			 * session's pty looks like. */
+			(void)ioctl(sfd, I_PUSH, "ttcompat");
+		}
+#endif
 		struct winsize ws;
 		ws.ws_row = 24;
 		ws.ws_col = 80;
