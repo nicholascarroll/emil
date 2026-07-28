@@ -241,6 +241,18 @@ void backSpace(int count) {
 	if (rejectIfReadOnly(E.buf))
 		return;
 
+	if (E.buf->mark_active && !markInvalidSilent()) {
+		if (E.buf->rectangle_mode) {
+			killRectangle();
+			E.buf->rectangle_mode = 0;
+		} else {
+			deleteRange(E.buf->cx, E.buf->cy, E.buf->markx,
+				    E.buf->marky, 0);
+		}
+		E.buf->mark_active = 0;
+		return;
+	}
+
 	E.buf->mark_active = 0;
 	int times = UARG_COUNT(count);
 	for (int i = 0; i < times; i++) {

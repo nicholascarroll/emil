@@ -2,7 +2,7 @@
 - Rewrote the escape-sequence decoder as an explicit state machine.
 - Fixed ESC-arrow up "[A") into the buffer as text #95.
 - Fixed getCursorPostion hanging. #94
-- Deactivate mark after region to register #93
+- Deactivate mark after region to register and backspace selection #93
 - Fixed F12 (and PuTTY F4) discarding unsaved work via an undocumented panic.
 - Fixed SS3 escape sequences inserting text.
 - Fixed minibuffer sizing, wrapping, and prompt cursor position for multi-byte text.
