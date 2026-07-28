@@ -1,4 +1,5 @@
-## [Unreleased]
+## [0.8.0] - 2026-07-28
+- replace-regexp now more conformant to Emacs behaviour
 - Rewrote the escape-sequence decoder as an explicit state machine.
 - Fixed ESC-arrow up "[A") into the buffer as text #95.
 - Fixed getCursorPostion hanging. #94

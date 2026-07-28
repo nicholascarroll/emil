@@ -9,6 +9,7 @@
 #include "mutate.h"
 #include "prompt.h"
 #include "undo.h"
+#include "unicode.h"
 #include "util.h"
 #include <regex.h>
 #include <stdint.h>
@@ -35,11 +36,7 @@ void addToKillRing(const char *text, int is_rect, int rect_width,
 }
 
 /* Save and restore the kill text around operations that temporarily
- * overwrite E.kill (transforms, rectangle ops).  The whole struct is
- * preserved: restoring only the string would leave the rectangle
- * metadata from the internal operation attached to the restored
- * text, so a saved rectangle kill could yank back as plain text (or
- * vice versa). */
+ * overwrite E.kill (transforms, rectangle ops). */
 static struct text saveKill(void) {
 	struct text saved = E.kill;
 	if (saved.str != NULL)
@@ -468,16 +465,194 @@ void transformRegion(uint8_t *(*transformer)(uint8_t *)) {
 		       transformer);
 }
 
+/* Replacement-template escapes.  Only \& (the whole match), \1-\9
+ * (capture groups) and \\ (a literal backslash) are recognised;
+ * every other escape is an error, as in Emacs, which signals
+ * "Invalid use of `\' in replacement text".
+ *
+ * Returns NULL when 'tmpl' is well formed, else a static string
+ * naming the fault.  'nsub' is the pattern's capture-group count
+ * (regex_t.re_nsub); a reference past it gets rejected.
+ *
+ * Checked up front, before any match is attempted, so a bad
+ * template is reported even when the pattern matches nothing.
+ * Exposed for tests/test_replace.c. */
+const char *replacementTemplateError(const uint8_t *tmpl, size_t nsub) {
+	for (int i = 0; tmpl[i]; i++) {
+		if (tmpl[i] != '\\')
+			continue;
+		uint8_t c = tmpl[i + 1];
+		if (c == '\0')
+			return "Trailing backslash in replacement";
+		if (c == '\\' || c == '&') {
+			i++;
+			continue;
+		}
+		if (c >= '1' && c <= '9') {
+			if ((size_t)(c - '0') > nsub)
+				return "Replacement refers to nonexistent group";
+			i++;
+			continue;
+		}
+		return "Invalid use of backslash in replacement";
+	}
+	return NULL;
+}
+
+/* Expand 'tmpl' for a single match into 'out'.  'm' holds offsets
+ * absolute to 'subject'.  replacementTemplateError has already
+ * passed, so nothing is validated here. */
+static void expandTemplate(struct dbuf *out, const uint8_t *tmpl,
+			   const uint8_t *subject, const regmatch_t *m) {
+	for (int i = 0; tmpl[i]; i++) {
+		if (tmpl[i] != '\\') {
+			dbuf_byte(out, tmpl[i]);
+			continue;
+		}
+		uint8_t c = tmpl[++i];
+		if (c == '\\') {
+			dbuf_byte(out, '\\');
+			continue;
+		}
+		int g = (c == '&') ? 0 : c - '0';
+		/* A group that did not participate in the match
+		 * contributes nothing, as in Emacs. */
+		if (m[g].rm_so >= 0)
+			dbuf_append(out, subject + m[g].rm_so,
+				    (int)(m[g].rm_eo - m[g].rm_so));
+	}
+}
+
+/* Substitute every match of 're' in 'subject' (NUL-terminated,
+ * 'len' bytes) using template 'tmpl'.
+ *
+ * The caller compiles with REG_NEWLINE, so ^ and $ anchor at
+ * embedded newlines and . does not cross one.  'notbol' / 'noteol'
+ * cover the ends: a region starting mid-line must not let ^ match
+ * at its first byte, nor one ending mid-line let $ match at its
+ * last.
+ *
+ * Returns the match count; on 0 the out-params are untouched.
+ * Exposed for tests/test_replace.c. */
+int regexSubstituteAll(const regex_t *re, const uint8_t *subject, int len,
+		       const uint8_t *tmpl, int notbol, int noteol,
+		       struct dbuf *out, int *first_off, int *last_off) {
+	size_t nmatch = re->re_nsub + 1;
+	regmatch_t *m = xmalloc(nmatch * sizeof(*m));
+	regmatch_t *abs = xmalloc(nmatch * sizeof(*abs));
+	int pos = 0, count = 0, first = 0, copied = 0, prev_end = -1;
+
+	while (pos <= len) {
+		int eflags = noteol ? REG_NOTEOL : 0;
+		/* Restarting mid-subject makes regexec see a fresh
+		 * string, so ^ would match at the restart point.
+		 * Suppress it unless the restart really does follow a
+		 * newline. */
+		if (pos == 0 ? notbol : subject[pos - 1] != '\n')
+			eflags |= REG_NOTBOL;
+
+		if (regexec(re, (const char *)subject + pos, nmatch, m,
+			    eflags) != 0)
+			break;
+
+		int so = pos + (int)m[0].rm_so;
+		int eo = pos + (int)m[0].rm_eo;
+
+		for (size_t g = 0; g < nmatch; g++) {
+			abs[g].rm_so = m[g].rm_so < 0 ? -1 : pos + m[g].rm_so;
+			abs[g].rm_eo = m[g].rm_eo < 0 ? -1 : pos + m[g].rm_eo;
+		}
+
+		/* An empty match butted against the end of the previous
+		 * match is not a new occurrence. */
+		int adjacent_empty = (eo == so && so == prev_end);
+
+		if (!adjacent_empty) {
+			if (count == 0)
+				first = copied = so;
+			else
+				dbuf_append(out, subject + copied, so - copied);
+
+			expandTemplate(out, tmpl, subject, abs);
+			copied = eo;
+			prev_end = eo;
+			count++;
+		}
+
+		if (eo != so) {
+			pos = eo;
+			continue;
+		}
+
+		if (so >= len)
+			break;
+		int n = utf8_nBytes(subject[so]);
+		if (n < 1 || so + n > len)
+			n = 1;
+		dbuf_append(out, subject + copied, so - copied);
+		dbuf_append(out, subject + so, n);
+		copied = pos = so + n;
+	}
+
+	free(m);
+	free(abs);
+
+	if (count > 0) {
+		*first_off = first;
+		*last_off = copied;
+	}
+	return count;
+}
+
+/* Map a byte offset within region text back to buffer coordinates.
+ * The region string joins rows with '\n' (see collectRegionText), so
+ * walking it reproduces the row/column the offset came from. */
+static void offsetToCoords(int startx, int starty, const uint8_t *s, int off,
+			   int *x, int *y) {
+	int cx = startx, cy = starty;
+	for (int i = 0; i < off; i++) {
+		if (s[i] == '\n') {
+			cy++;
+			cx = 0;
+		} else {
+			cx++;
+		}
+	}
+	*x = cx;
+	*y = cy;
+}
+
 void replaceRegex(void) {
 	if (rejectIfReadOnly(E.buf))
 		return;
 
-	if (markInvalid())
+	struct buffer *buf = E.buf;
+	if (buf->numrows == 0) {
+		setStatusMessage("Buffer is empty.");
 		return;
-	normalizeRegion();
+	}
+
+	/* Emacs scoping: the region when it is active, otherwise from
+	 * point to end of buffer. */
+	int use_region = buf->mark_active && !markInvalidSilent();
+	if (use_region)
+		normalizeRegion();
+
+	int startx = buf->cx, starty = buf->cy, endx, endy;
+	if (use_region) {
+		endx = buf->markx;
+		endy = buf->marky;
+	} else {
+		endy = buf->numrows - 1;
+		endx = buf->row[endy].size;
+	}
+
+	if (starty > endy || (starty == endy && startx >= endx)) {
+		setStatusMessage("Nothing to replace.");
+		return;
+	}
 
 	const char *cancel = "Canceled regex-replace.";
-	struct buffer *buf = E.buf;
 
 	uint8_t *regex =
 		editorPrompt(buf, "Regex replace: ", PROMPT_BASIC, NULL);
@@ -497,72 +672,63 @@ void replaceRegex(void) {
 		setStatusMessage("%s", cancel);
 		return;
 	}
-	int replen = strlen((char *)repl);
 
+	/* REG_NEWLINE keeps ^ and $ anchored to line boundaries and
+	 * stops . crossing a newline, so matching the region as one
+	 * string still behaves per-line. */
 	regex_t pattern;
-	int regcomp_result = regcomp(&pattern, (char *)regex, REG_EXTENDED);
-	if (regcomp_result != 0) {
+	int rc = regcomp(&pattern, (char *)regex, REG_EXTENDED | REG_NEWLINE);
+	if (rc != 0) {
 		char error_msg[256];
-		regerror(regcomp_result, &pattern, error_msg,
-			 sizeof(error_msg));
+		regerror(rc, &pattern, error_msg, sizeof(error_msg));
 		setStatusMessage("Regex error: %s", error_msg);
 		free(regex);
 		free(repl);
 		return;
 	}
 
-	/* Collect old region text */
-	int old_len;
-	uint8_t *old_text = collectRegionText(buf, buf->cx, buf->cy, buf->markx,
-					      buf->marky, &old_len);
-
-	/* Build replacement text line by line */
-	struct dbuf d = DBUF_INIT;
-	int made = 0;
-
-	for (int i = buf->cy; i <= buf->marky; i++) {
-		erow *row = &buf->row[i];
-		regmatch_t m[1];
-		int matched =
-			(regexec(&pattern, (char *)row->chars, 1, m, 0) == 0);
-
-		/* Region slice boundaries for this row */
-		int rstart = (i == buf->cy) ? buf->cx : 0;
-		int rend = (i == buf->marky) ? buf->markx : row->size;
-
-		/* Check match is within region bounds */
-		int do_replace = 0;
-		int mstart = 0, mlen = 0;
-		if (matched) {
-			mstart = m[0].rm_so;
-			mlen = m[0].rm_eo - m[0].rm_so;
-			if (mstart >= rstart && mstart + mlen <= rend)
-				do_replace = 1;
-		}
-
-		if (i > buf->cy)
-			dbuf_byte(&d, '\n');
-
-		if (!do_replace) {
-			dbuf_append(&d, &row->chars[rstart], rend - rstart);
-		} else {
-			made++;
-			int pre = mstart - rstart;
-			int post_src = mstart + mlen;
-			int post_n = rend - post_src;
-			dbuf_append(&d, &row->chars[rstart], pre);
-			dbuf_append(&d, repl, replen);
-			dbuf_append(&d, &row->chars[post_src], post_n);
-		}
+	const char *terr = replacementTemplateError(repl, pattern.re_nsub);
+	if (terr != NULL) {
+		setStatusMessage("%s", terr);
+		regfree(&pattern);
+		free(regex);
+		free(repl);
+		return;
 	}
+
+	int old_len;
+	uint8_t *old_text =
+		collectRegionText(buf, startx, starty, endx, endy, &old_len);
+
+	struct dbuf d = DBUF_INIT;
+	int first_off = 0, last_off = 0;
+	int made = regexSubstituteAll(&pattern, old_text, old_len, repl,
+				      startx > 0, endx < buf->row[endy].size,
+				      &d, &first_off, &last_off);
+
+	if (made == 0) {
+		/* No mutateReplace: the predecessor rewrote the region
+		 * with itself even at zero matches, which left a
+		 * pointless undo record and a dirty flag behind. */
+		dbuf_free(&d);
+		free(old_text);
+		regfree(&pattern);
+		free(regex);
+		free(repl);
+		setStatusMessage("Replaced 0 occurrences");
+		return;
+	}
+
 	int out_len;
 	uint8_t *out = dbuf_detach(&d, &out_len);
 
-	struct text okill = saveKill();
+	int fx, fy, lx, ly;
+	offsetToCoords(startx, starty, old_text, first_off, &fx, &fy);
+	offsetToCoords(startx, starty, old_text, last_off, &lx, &ly);
 
 	int ex, ey;
-	mutateReplace(buf, buf->cx, buf->cy, buf->markx, buf->marky, old_text,
-		      old_len, out, out_len, 0, &ex, &ey);
+	mutateReplace(buf, fx, fy, lx, ly, old_text + first_off,
+		      last_off - first_off, out, out_len, 0, &ex, &ey);
 
 	buf->cx = ex;
 	buf->cy = ey;
@@ -572,8 +738,7 @@ void replaceRegex(void) {
 	regfree(&pattern);
 	free(regex);
 	free(repl);
-	restoreKill(okill);
-	setStatusMessage("Replaced %d instances", made);
+	setStatusMessage("Replaced %d occurrences", made);
 }
 
 void stringRectangle(void) {

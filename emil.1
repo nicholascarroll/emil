@@ -339,8 +339,6 @@ Incremental regex search forward.
 Incremental regex search backward.
 .It Cm M-%
 Query replace (string).
-.It Cm C-M-%
-Query replace regex.
 .It Cm M-x query-replace
 Replace string interactively.
 .It Cm M-x replace-string
@@ -348,6 +346,42 @@ Replace all occurrences (non-interactive).
 .It Cm M-x replace-regexp
 Replace using regular expressions.
 .El
+.Ss Regular Expressions
+Patterns are POSIX extended regular expressions, not Emacs or GNU
+syntax.
+Grouping and alternation are written
+.Ql ()
+and
+.Ql \&| ,
+unescaped.
+The GNU and Emacs shorthands
+.Ql \ew ,
+.Ql \eb ,
+.Ql \e< ,
+non-greedy operators such as
+.Ql *? ,
+and backreferences within the pattern itself are not available.
+.Pp
+.Cm replace-regexp
+acts on the region while the region is active, and otherwise from 
+point to the end of the buffer.
+.Ql ^
+and
+.Ql $
+anchor at line boundaries 
+.Pp
+Within the replacement text:
+.Bl -tag -width Ds
+.It Ql \&\e&
+The text matched by the whole pattern.
+.It Ql \&\eN
+The text matched by the Nth parenthesised group, for N from 1 to 9.
+A group that did not participate in the match contributes nothing.
+.It Ql \&\e\e
+A literal backslash.
+.El
+.Pp
+An invalid pattern is reported and nothing is replaced.
 .Ss Shell Integration
 When enabled at compile time:
 .Bl -tag -width Ds

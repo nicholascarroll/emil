@@ -92,29 +92,15 @@ static int searchInterrupted(void) {
 }
 static int initial_direction = 1;
 
-/* Helper function to search for regex match in a string */
-/* Compiled-pattern cache for regexSearch.  Incremental regex search
- * calls regexSearch once per scanned row per keystroke; compiling
- * per call made the scan ~38x slower than the regexec itself.  The
- * cache holds one compiled pattern (the current search string) and
- * recompiles only when the pattern text changes.  re_cache_ok == 0
- * caches "this pattern does not compile" so invalid patterns fall
- * back to literal search without re-attempting regcomp per row.
- * The one live regex_t is intentionally left allocated at exit. */
+/* Compiled-pattern cache for regexSearch. The one live regex_t is 
+ * intentionally left allocated at exit. */
 static char *re_cache_pat = NULL;
 static regex_t re_cache;
 static int re_cache_ok = 0;
 
-/* On a match, *match_len receives the byte length actually matched.
- * This is what the display highlights: for a regex it differs from
- * strlen(pattern), so discarding rm_eo here left the reverse-video
- * region sized to the pattern rather than the match. */
-static uint8_t *regexSearch(uint8_t *text, uint8_t *pattern, int *match_len) {
-	*match_len = 0;
-	if (!pattern || !text || pattern[0] == '\0') {
-		return NULL;
-	}
-
+/* Compile 'pattern' if it is not already the cached one.  Returns
+ * nonzero when the cached pattern is usable. */
+static int regexCacheEnsure(const uint8_t *pattern) {
 	if (!re_cache_pat || strcmp(re_cache_pat, (const char *)pattern) != 0) {
 		if (re_cache_pat) {
 			if (re_cache_ok)
@@ -125,15 +111,18 @@ static uint8_t *regexSearch(uint8_t *text, uint8_t *pattern, int *match_len) {
 		re_cache_ok = (regcomp(&re_cache, (const char *)pattern,
 				       REG_EXTENDED) == 0);
 	}
+	return re_cache_ok;
+}
 
-	/* Invalid regex: fall back to literal search */
-	if (!re_cache_ok) {
-		uint8_t *lit = (uint8_t *)strstr((const char *)text,
-						 (const char *)pattern);
-		if (lit)
-			*match_len = (int)strlen((const char *)pattern);
-		return lit;
+/* On a match, *match_len receives the byte length actually matched. */
+static uint8_t *regexSearch(uint8_t *text, uint8_t *pattern, int *match_len) {
+	*match_len = 0;
+	if (!pattern || !text || pattern[0] == '\0') {
+		return NULL;
 	}
+
+	if (!regexCacheEnsure(pattern))
+		return NULL;
 
 	regmatch_t match[1];
 	if (regexec(&re_cache, (const char *)text, 1, match, 0) == 0) {
@@ -237,6 +226,17 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 	}
 
 	if (!query || strlen((const char *)query) == 0) {
+		return;
+	}
+
+	/* editorPrompt rebuilds the status line from the prompt
+	 * on every pass, so preserve_message is needed to
+	 * keep this visible; the pattern is echoed back into the
+	 * message so what was typed stays on screen. */
+	if (regex_mode && !regexCacheEnsure(query)) {
+		setStatusMessage("Invalid regexp: %s", query);
+		if (E.minibuf)
+			E.minibuf->completion_state.preserve_message = 1;
 		return;
 	}
 
