@@ -300,7 +300,7 @@ void destroyBuffer(struct buffer *);
 void recordKey(int c);
 void execMacro(struct macro *macro);
 void editorCleanup(void);
-
 extern struct config E;
+void handlePendingSignals(void);
 
 #endif

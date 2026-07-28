@@ -288,27 +288,13 @@ static int unknownEscape(const uint8_t *bytes, int n) {
 	return 033;
 }
 
-/* Single-byte input pushback.  The incremental-search scan probes
- * stdin between rows so C-g can cancel a long scan; a probed byte
- * that is NOT C-g is legitimate type-ahead and is returned here so
- * readKey delivers it in order.  One byte suffices: the probe never
- * reads past the first pending byte, so any escape-sequence
- * continuation bytes are still queued on the fd where readKey's
- * sequence reads expect them. */
-static int input_pushback = -1;
-
-void terminalPushbackByte(uint8_t c) {
-	input_pushback = c;
-}
-
-int terminalPushbackPending(void) {
-	return input_pushback >= 0;
-}
-
 /* Raw reading a keypress - terminal layer only handles raw byte
  * reading, escape sequence decoding, and UTF-8 assembly.
  * Returns key tokens only: no binding policy. */
 int readKey(void) {
+	/* Repair terminal/screen state after an asynchronous signal. */
+	handlePendingSignals();
+
 	if (E.playback) {
 		/* A nested readKey (prefix sub-key, confirmation
 		 * prompt) can be reached with the macro already
@@ -325,18 +311,17 @@ int readKey(void) {
 	}
 	int nread;
 	uint8_t c;
-	if (input_pushback >= 0) {
-		/* Byte probed (and preserved) by the search-scan
-		 * interrupt poll. */
-		c = (uint8_t)input_pushback;
-		input_pushback = -1;
-	} else {
-		while ((nread = read(STDIN_FILENO, &c, 1)) != 1) {
-			if (nread == -1 && errno == EINTR)
-				return -1;
-			if (nread == -1 && errno != EAGAIN)
-				die("read");
+	while ((nread = read(STDIN_FILENO, &c, 1)) != 1) {
+		if (nread == -1 && errno == EINTR) {
+			/* Repair before yielding to the caller: every
+			 * read loop treats -1 as "retry", and a retry
+			 * into a cooked-mode terminal is what produced
+			 * the literal ^G after C-z / fg. */
+			handlePendingSignals();
+			return -1;
 		}
+		if (nread == -1 && errno != EAGAIN)
+			die("read");
 	}
 	if (c == 033) {
 		uint8_t seen[ESC_SEEN_MAX];

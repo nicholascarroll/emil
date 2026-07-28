@@ -14,8 +14,6 @@
 #include "unused.h"
 #include "util.h"
 #include <regex.h>
-#include <sys/select.h>
-#include <unistd.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -32,64 +30,6 @@ static uint8_t *replace_repl;
 
 static int regex_mode = 0;
 
-/* Nonzero only while searchInteractive's prompt is live: the
- * between-rows interrupt poll must not run when findCallback is
- * driven by tests or any non-interactive caller, where stdin does
- * not carry key input. */
-static int search_poll_enabled = 0;
-
-/* Poll stdin between scanned rows so C-g can cancel a long search
- * scan (large file, expensive pattern) without waiting for the full
- * pass.  A single blown-up regexec call on one pathological line
- * cannot be interrupted: this bounds everything around it.
- *
- * Protocol (never loses or reorders type-ahead):
- *   - If a probed byte is already stashed, do not probe again.
- *   - Probe at most ONE pending byte.
- *   - C-g: drain all further pending input (panic mashing must not
- *     replay into the buffer), then push the C-g back so readKey
- *     delivers it to the prompt loop and the search cancels through
- *     the existing CTRL('g') path.
- *   - Any other byte: push it back for readKey and stop probing.
- *     Sequence continuation bytes are still queued on the fd where
- *     readKey's escape parsing expects them.
- * Returns 1 if the scan should abort. */
-static int searchInterrupted(void) {
-	if (!search_poll_enabled || terminalPushbackPending())
-		return 0;
-
-	fd_set rfds;
-	struct timeval tv = { 0, 0 };
-	FD_ZERO(&rfds);
-	FD_SET(STDIN_FILENO, &rfds);
-	if (select(STDIN_FILENO + 1, &rfds, NULL, NULL, &tv) <= 0)
-		return 0;
-
-	uint8_t c;
-	if (read(STDIN_FILENO, &c, 1) != 1)
-		return 0; /* EOF/error: nothing to deliver */
-
-	if (c != CTRL('g')) {
-		terminalPushbackByte(c);
-		return 0;
-	}
-
-	/* Drain whatever was mashed after the C-g. */
-	while (1) {
-		FD_ZERO(&rfds);
-		FD_SET(STDIN_FILENO, &rfds);
-		tv.tv_sec = 0;
-		tv.tv_usec = 0;
-		if (select(STDIN_FILENO + 1, &rfds, NULL, NULL, &tv) <= 0)
-			break;
-		uint8_t discard;
-		if (read(STDIN_FILENO, &discard, 1) != 1)
-			break;
-	}
-
-	terminalPushbackByte(CTRL('g'));
-	return 1;
-}
 static int initial_direction = 1;
 
 /* Compiled-pattern cache for regexSearch. The one live regex_t is 
@@ -280,12 +220,6 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 		}
 	}
 	for (int i = 0; i < bufr->numrows; i++) {
-		/* Every 256 rows, give C-g a chance to cancel the
-		 * scan; the pushed-back C-g then cancels the search
-		 * through the prompt loop's normal path. */
-		if ((i & 0xFF) == 0xFF && searchInterrupted())
-			return;
-
 		current += direction;
 		if (current == -1)
 			current = bufr->numrows - 1;
@@ -328,10 +262,8 @@ static void searchInteractive(int direction, int regex,
 	int saved_cx = E.buf->cx;
 	int saved_cy = E.buf->cy;
 
-	search_poll_enabled = 1;
 	uint8_t *query =
 		editorPrompt(E.buf, prompt_fmt, PROMPT_SEARCH, findCallback);
-	search_poll_enabled = 0;
 
 	free(E.buf->query);
 	E.buf->query = NULL;

@@ -158,3 +158,4 @@ test-pty: $(PROGNAME)
 	$(CC) $(ALL_CFLAGS) -o tests/decoder_pty_test tests/decoder_pty_test.c
 	./tests/decoder_pty_test ./$(PROGNAME)
 	rm -f tests/decoder_pty_test
+

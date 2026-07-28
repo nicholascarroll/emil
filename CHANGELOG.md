@@ -1,3 +1,8 @@
+## [Unreleased]
+- Removed the between-rows interrupt poll from interactive search. 
+- Rules for punctuation at right edge of screen in word wrap mode
+- Cope with background/foregrounding and terminal resize while in the minibuffer
+
 ## [0.8.0] - 2026-07-28
 - replace-regexp now more conformant to Emacs behaviour
 - Rewrote the escape-sequence decoder as an explicit state machine.

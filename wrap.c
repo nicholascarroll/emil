@@ -136,6 +136,65 @@ static int breakForbiddenBefore(erow *row, int next_bidx) {
 	return isLineStartForbidden(utf8Decode(row->chars, next_bidx));
 }
 
+/* Word material for the purpose of the intra-word rule below: an
+ * ASCII alphanumeric, or any non-ASCII byte.  Lead and continuation
+ * bytes are both >= 0x80, so "café.txt" is treated exactly like
+ * "file.txt" without decoding the codepoint. */
+static int isWordMaterial(uint8_t c) {
+	return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') ||
+	       ('0' <= c && c <= '9') || c >= 0x80;
+}
+
+/* 行末禁则: the mirror of breakForbiddenBefore().  A break must not
+ * be recorded when the character that would END the current line is
+ * forbidden there.  isWordBoundary() treats nearly every ASCII
+ * punctuation mark as a break opportunity, and wordWrapBreak()
+ * records the break to its RIGHT, which strands two families of
+ * character at the end of a line:
+ *
+ *   1. Openers ( [ { < and opening quotes.  An opener stranded at
+ *      the end of a line is cut off from what it opens.
+ *   2. Intra-word punctuation ' . , : — a break opportunity only
+ *      when NOT glued to word material on both sides, so "it's",
+ *      "file.txt", "1,000" and "12:30" stay whole while ordinary
+ *      sentence punctuation ("end. Next", "a, b") still breaks.
+ *
+ * The ASCII quotes ' and " serve as both opener and closer, so they
+ * count as openers exactly when they start the row or follow a space,
+ * a tab, or another opener.
+ *
+ * Suppressing a candidate makes the break fall earlier, carrying the
+ * punctuation to the next line attached to what follows it.  If every
+ * candidate on a segment is suppressed, the hard-break fallback in
+ * wordWrapBreak() still applies, so a pathological line of pure
+ * openers ("((((((((") can neither loop nor produce an empty line.
+ *
+ * This is a wrap-local rule.  isWordBoundary() itself must not change:
+ * motion.c depends on its semantics for word movement and transform.c
+ * for case transforms. */
+static int breakForbiddenAfter(erow *row, int bidx) {
+	uint8_t c = row->chars[bidx];
+
+	if (c == '(' || c == '[' || c == '{' || c == '<')
+		return 1;
+
+	if (c == '"' || c == '\'') {
+		if (bidx == 0)
+			return 1;
+		uint8_t p = row->chars[bidx - 1];
+		if (p == ' ' || p == '\t' || p == '(' || p == '[' || p == '{' ||
+		    p == '<')
+			return 1;
+	}
+
+	if (c == '\'' || c == '.' || c == ',' || c == ':')
+		return bidx > 0 && isWordMaterial(row->chars[bidx - 1]) &&
+		       bidx + 1 < row->size &&
+		       isWordMaterial(row->chars[bidx + 1]);
+
+	return 0;
+}
+
 /* Find the next word-wrap break point for a single screen line.
  *
  * Given a row, a screen width, and a starting position (column and byte
@@ -183,7 +242,8 @@ int wordWrapBreak(erow *row, int screencols, int line_start_col,
 
 		int this_preposed = 0;
 		if (isWordBoundary(c)) {
-			if (!breakForbiddenBefore(row, bidx + utf8_nBytes(c))) {
+			if (!breakForbiddenAfter(row, bidx) &&
+			    !breakForbiddenBefore(row, bidx + utf8_nBytes(c))) {
 				wb_col = col + cwidth;
 				wb_byte = bidx + utf8_nBytes(c);
 			}

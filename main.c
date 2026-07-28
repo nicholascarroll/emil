@@ -66,17 +66,47 @@ void handleSighup(int sig) {
 	got_sighup = 1;
 }
 
+/* Recover from a signal that its handler could only flag.
+ *
+ * SIGCONT (resume) and SIGWINCH (resize) both leave the editor in a
+ * state that must be repaired before the next key is read, and both
+ * arrive asynchronously, so the handlers do nothing but set a flag. */
+void handlePendingSignals(void) {
+	if (got_sigterm || got_sighup) {
+		/* Previously only checked by the main loop, so a
+		 * SIGTERM arriving while a prompt was open was
+		 * never acted on and the editor ignored it. */
+		disableRawMode();
+		_exit(1);
+	}
+
+	if (got_sigcont) {
+		got_sigcont = 0;
+		/* Restore terminal state after resume */
+		IGNORE_RETURN(write(STDOUT_FILENO, CSI "r", 3));
+		IGNORE_RETURN(write(STDOUT_FILENO, ESC "8", 2));
+		setupHandlers();
+		applyRawMode();
+		for (int i = 0; i < E.nwindows; i++)
+			E.windows[i]->height = 0;
+		resizeScreen(0);
+		resetFileCheckThrottle();
+		/* resizeScreen() above already re-measured the
+		 * terminal, so a resize that landed while we were
+		 * stopped needs no second pass. */
+		got_sigwinch = 0;
+	}
+
+	if (got_sigwinch) {
+		got_sigwinch = 0;
+		resizeScreen(0);
+	}
+}
+
 /*** init ***/
 
 void setupHandlers(void) {
 #ifdef SIGWINCH
-	/* No SA_RESTART: the blocking read in readKey must return
-	 * EINTR so the main loop sees got_sigwinch and repaints
-	 * immediately.  With SA_RESTART the read was restarted and a
-	 * resize produced no repaint until the next keypress.  All
-	 * blocking reads/waits elsewhere already retry on EINTR
-	 * (fileio, subprocess waitpid), matching how SIGCONT has
-	 * always been installed. */
 	install_handler(SIGWINCH, sigwinchHandler, 0);
 #endif
 	install_handler(SIGCONT, editorResume, 0);
@@ -318,26 +348,10 @@ int main(int argc, char *argv[]) {
 		setStatusMessage("Shell integration disabled at build time.");
 #endif /* EMIL_DISABLE_SHELL */
 	for (;;) {
-		if (got_sigterm || got_sighup) {
-			disableRawMode();
-			_exit(1);
-		}
-		if (got_sigwinch) {
-			got_sigwinch = 0;
-			resizeScreen(0);
-		}
-		if (got_sigcont) {
-			got_sigcont = 0;
-			/* Restore terminal state after resume */
-			IGNORE_RETURN(write(STDOUT_FILENO, CSI "r", 3));
-			IGNORE_RETURN(write(STDOUT_FILENO, ESC "8", 2));
-			setupHandlers();
-			applyRawMode();
-			for (int i = 0; i < E.nwindows; i++)
-				E.windows[i]->height = 0;
-			resizeScreen(0);
-			resetFileCheckThrottle();
-		}
+		/* Also called from readKey(); repeated here so a flag
+		 * raised before the first read (or between drained
+		 * keys) is acted on without waiting for a keypress. */
+		handlePendingSignals();
 		refreshScreen();
 
 		int key = readKey();
@@ -347,21 +361,7 @@ int main(int argc, char *argv[]) {
 		/*
 		 * Process this key and then drain any additional
 		 * keys already queued in the input buffer before
-		 * repainting.  This avoids a full refreshScreen()
-		 * between every single keystroke, which fixes two
-		 * classes of bugs:
-		 *
-		 *  1. Perceived command reordering (#51): rapid
-		 *     C-SPC C-a appears to move-then-mark because
-		 *     the expensive refresh between the two keys
-		 *     delays the visual feedback.
-		 *
-		 *  2. Modifier key desync (#52): the large write()
-		 *     in refreshScreen() floods the terminal
-		 *     emulator with output, creating a window where
-		 *     modifier key state (Ctrl) can fall out of sync
-		 *     with the next keypress, causing literal a/e to
-		 *     be inserted instead of C-a/C-e.
+		 * repainting.
 		 *
 		 * The first key is read with a blocking read();
 		 * subsequent keys are drained with a non-blocking
