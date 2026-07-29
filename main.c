@@ -212,10 +212,9 @@ int main(int argc, char *argv[]) {
 		if (strcmp(argv[1], "--version") == 0) {
 			printf("emil %s\n", EMIL_VERSION);
 			return 0;
-		} else {
-			printf("Unknown option argument %s\n", argv[1]);
-			return 0;
 		}
+		fprintf(stderr, "emil: unrecognised option '%s'\n", argv[1]);
+		return 1;
 	}
 
 	/*

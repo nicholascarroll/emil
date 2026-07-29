@@ -225,7 +225,6 @@ void rowDelChar(struct buffer *bufr, erow *row, int at) {
 
 struct buffer *newBuffer(void) {
 	struct buffer *ret = xmalloc(sizeof(struct buffer));
-	ret->indent = 0;
 	ret->markx = -1;
 	ret->marky = -1;
 	ret->mark_active = 0;

@@ -221,7 +221,6 @@ void test_backspace_joins_lines(void) {
 void test_unindent(void) {
 	struct buffer *buf = make_test_buffer("\tHello");
 	buf->cx = 1;
-	buf->indent = 0;
 	E.buf = buf;
 	unindent(1);
 	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
@@ -231,7 +230,6 @@ void test_unindent_readonly(void) {
 	struct buffer *buf = make_test_buffer("\tHello");
 	buf->read_only = 1;
 	buf->cx = 1;
-	buf->indent = 0;
 	E.buf = buf;
 	unindent(1);
 	TEST_ASSERT_EQUAL_STRING("\tHello", row_str(buf, 0));

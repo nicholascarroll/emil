@@ -46,8 +46,6 @@ static int compare_commands(const void *a, const void *b) {
 void setupCommands(void) {
 	static struct command commands[] = {
 		{ "capitalize-region", capitalizeRegion },
-		//		{ "indent-spaces", indentSpaces },
-		//		{ "indent-tabs", indentTabs },
 		{ "insert-file", insertFile },
 		{ "cd", changeDirectory },
 		{ "diff-buffer-with-file", diffBufferWithFile },

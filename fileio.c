@@ -542,7 +542,6 @@ void revert(void) {
 			E.windows[i]->buf = new;
 		}
 	}
-	new->indent = buf->indent;
 	new->cx = buf->cx;
 	new->cy = buf->cy;
 	if (new->numrows == 0) {

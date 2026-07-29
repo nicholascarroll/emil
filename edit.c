@@ -65,28 +65,6 @@ void insertUnicode(int count) {
 
 /* Line operations */
 
-void indentTabs(void) {
-	E.buf->indent = 0;
-	setStatusMessage("Indentation set to tabs");
-}
-
-void indentSpaces(void) {
-	uint8_t *indentS =
-		editorPrompt(E.buf, "Set indentation to: ", PROMPT_BASIC, NULL);
-	if (indentS == NULL) {
-		goto cancel;
-	}
-	int indent = atoi((char *)indentS);
-	free(indentS);
-	if (indent <= 0) {
-cancel:
-		setStatusMessage("Canceled.");
-		return;
-	}
-	E.buf->indent = indent;
-	setStatusMessage("Indentation set to %i spaces", indent);
-}
-
 void splitLineAtPoint(void) {
 	if (rejectIfReadOnly(E.buf))
 		return;
@@ -167,34 +145,24 @@ void unindent(int rept) {
 
 	E.buf->mark_active = 0;
 
-	/* Setup for indent mode */
-	int indWidth = 1;
-	char indCh = '\t';
 	struct erow *row = &E.buf->row[E.buf->cy];
-	if (E.buf->indent) {
-		indWidth = E.buf->indent;
-		indCh = ' ';
-	}
 
 	/* Calculate size of unindent */
 	/* NB: trunc is bounded by the NUL terminator at chars[size],
-	 * which always mismatches indCh (' ' or '\t'). */
+	 * which always mismatches '\t'. */
 	int trunc = 0;
 	for (int i = 0; i < rept; i++) {
-		for (int j = 0; j < indWidth; j++) {
-			if (row->chars[trunc] != indCh)
-				goto UNINDENT_PERFORM;
-			trunc++;
-		}
+		if (row->chars[trunc] != '\t')
+			break;
+		trunc++;
 	}
 
-UNINDENT_PERFORM:
 	if (trunc == 0)
 		return;
 
 	/* Build old_text for mutateDelete */
 	uint8_t *old_text = xmalloc(trunc + 1);
-	memset(old_text, indCh, trunc);
+	memset(old_text, '\t', trunc);
 	old_text[trunc] = 0;
 
 	mutateDelete(E.buf, 0, E.buf->cy, trunc, E.buf->cy, old_text, trunc);

@@ -16,8 +16,6 @@ void insertNewlineAndIndent(int count);
 
 /* Indentation */
 void unindent(int rept);
-void indentTabs(void);
-void indentSpaces(void);
 
 /* Character deletion */
 void delChar(int count);

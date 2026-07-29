@@ -111,7 +111,6 @@ struct markRingEntry {
 };
 
 struct buffer {
-	int indent;
 	int cx, cy;
 	int markx, marky;
 	int mark_active;

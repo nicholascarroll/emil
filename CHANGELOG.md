@@ -2,6 +2,14 @@
 - Removed the between-rows interrupt poll from interactive search. 
 - Rules for punctuation at right edge of screen in word wrap mode
 - Cope with background/foregrounding and terminal resize while in the minibuffer
+- Unrecognised command-line options now report to stderr and exit nonzero
+- Documented exit status in emil(1).
+
+### Correction to 0.7.0
+- #90 (read-only buffer corruption from kill-rectangle) was listed under Known
+  Bugs in 0.7.0 and fixed during 0.8.0 by the `rejectIfReadOnly` guard at the
+  rectangle command entry points, but was never recorded as closed. It is
+  fixed.
 
 ## [0.8.0] - 2026-07-28
 - replace-regexp now more conformant to Emacs behaviour
