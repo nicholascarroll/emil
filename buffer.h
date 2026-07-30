@@ -13,6 +13,8 @@ int rejectIfReadOnly(struct buffer *buf);
 
 void insertRow(struct buffer *bufr, int at, const uint8_t *s, size_t len);
 void appendRowRaw(struct buffer *bufr, const uint8_t *s, size_t len);
+int killBufferNeedsConfirm(const struct buffer *bufr);
+void rowEnsureCap(erow *row, int needed);
 void freeRow(erow *row);
 void delRow(struct buffer *bufr, int at);
 void rowInsertChar(struct buffer *bufr, erow *row, int at, int c);

@@ -20,9 +20,7 @@
 #include "keymap.h"
 #include "display.h"
 
-void deserializeUnicode(void);
-
-void install_handler(int signum, void (*handler)(int), int flags) {
+void installHandler(int signum, void (*handler)(int), int flags) {
 	struct sigaction sa;
 	memset(&sa, 0, sizeof(sa));
 	sa.sa_handler = handler;

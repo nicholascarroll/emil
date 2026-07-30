@@ -18,7 +18,6 @@
 #include "transform.h"
 #include "undo.h"
 #include "unicode.h"
-#include "unused.h"
 #include "util.h"
 #include <errno.h>
 #include <signal.h>
@@ -37,9 +36,25 @@ void showPrefix(const char *prefix) {
 	setStatusMessage("%s", prefix);
 }
 
+/* Append one decimal digit to a pending universal argument, saturating
+ * at UARG_MAX.*/
+static int uargPushDigit(int uarg, int digit) {
+	if (uarg > (UARG_MAX - digit) / 10)
+		return UARG_MAX;
+	return uarg * 10 + digit;
+}
+
+/* Multiply a pending universal argument by four for a repeated C-u,
+ * saturating at UARG_MAX. */
+static int uargScale(int uarg) {
+	if (uarg > UARG_MAX / 4)
+		return UARG_MAX;
+	return uarg * 4;
+}
+
 // Forward declarations for command functions
 
-static int compare_commands(const void *a, const void *b) {
+static int compareCommands(const void *a, const void *b) {
 	return strcmp(((struct command *)a)->key, ((struct command *)b)->key);
 }
 
@@ -63,7 +78,7 @@ void setupCommands(void) {
 	E.cmd_count = sizeof(commands) / sizeof(commands[0]);
 
 	// Sort the commands array
-	qsort(E.cmd, E.cmd_count, sizeof(struct command), compare_commands);
+	qsort(E.cmd, E.cmd_count, sizeof(struct command), compareCommands);
 }
 
 void runCommand(char *cmd) {
@@ -80,7 +95,7 @@ void runCommand(char *cmd) {
 	struct command key = { cmd, NULL };
 	struct command *found = bsearch(&key, E.cmd, E.cmd_count,
 					sizeof(struct command),
-					compare_commands);
+					compareCommands);
 
 	if (found) {
 		found->cmd();
@@ -550,7 +565,7 @@ int resolveBinding(int key) {
 			if (was_fresh) {
 				E.uarg = key - '0';
 			} else {
-				E.uarg = E.uarg * 10 + (key - '0');
+				E.uarg = uargPushDigit(E.uarg, key - '0');
 			}
 			setStatusMessage("C-u %d", E.uarg);
 			return CMD_NONE;
@@ -678,10 +693,47 @@ static int dispatchEdit(int c, int uarg) {
 		return 1;
 	case CMD_QUOTED_INSERT: {
 		int key = readKey();
+		/* The quoted key is consumed here, so the outer loop never
+		 * sees it.  Record it or a macro replays C-q swallowing
+		 * whatever key follows on playback (cf. CMD_PREFIX_CX). */
+		recordKey(key);
 		if (key == KEY_UNICODE) {
 			int count = UARG_COUNT(uarg);
 			insertUnicode(count);
-		} else if (key != KEY_UNICODE_ERROR && key < KEY_ARROW_LEFT) {
+		} else if (key == '\n' && E.buf == E.minibuf &&
+			   E.prompt_type != PROMPT_REPLACE &&
+			   E.prompt_type != PROMPT_SHELL) {
+			/* A quoted newline is honoured only in prompts whose
+			 * value path preserves it: the replace prompts (the
+			 * feature) and the shell prompt (sh takes multi-line
+			 * commands).  Elsewhere it would be silently wrong:
+			 * isearch matches row-by-row and its callback sees
+			 * only row 0; string-rectangle would multiply rows
+			 * mid-rectangle; the completion prompts assume one
+			 * row.  Refuse with a reason instead of accepting
+			 * input that cannot work. */
+			setStatusMessage(
+				E.prompt_type == PROMPT_SEARCH ?
+					"Search cannot cross lines; use replace-regexp" :
+					"Cannot use a newline in this prompt");
+			E.minibuf->completionState.preserve_message = 1;
+		} else if (key == '\n') {
+			/* '\n' is emil's row separator, never a byte stored
+			 * inside a row: insertChar would write 0x0A into the
+			 * row while undoAppendChar records a row split, and
+			 * the two would then disagree.  Split instead.
+			 *
+			 * Note this behaves like RET, not like unquoted C-j:
+			 * quoting strips the command and leaves the character,
+			 * and the character is a plain newline.  emil binds
+			 * RET -> CMD_NEWLINE and C-j -> CMD_NEWLINE_INDENT,
+			 * so the auto-indent is deliberately not applied.
+			 *
+			 * insertNewline does its own read-only rejection and
+			 * its own UARG_COUNT, and must not fall through to
+			 * the same-row adjustAllPoints below. */
+			insertNewline(uarg);
+		} else if (key < KEY_ARROW_LEFT) {
 			/* Reject BEFORE recording undo (see CMD_SELF_INSERT). */
 			if (rejectIfReadOnly(E.buf))
 				return 1;
@@ -1142,8 +1194,7 @@ void processKeypress(int c) {
 			setStatusMessage("M--");
 			return;
 		}
-		E.uarg *= 10;
-		E.uarg += c - KEY_ALT_0;
+		E.uarg = uargPushDigit(E.uarg, c - KEY_ALT_0);
 		setStatusMessage("uarg: %i", E.uarg);
 		return;
 	}
@@ -1154,7 +1205,7 @@ void processKeypress(int c) {
 		if (E.uarg <= 0) {
 			E.uarg = 4;
 		} else {
-			E.uarg *= 4;
+			E.uarg = uargScale(E.uarg);
 		}
 		setStatusMessage("C-u %d", E.uarg);
 		return;

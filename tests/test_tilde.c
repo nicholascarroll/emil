@@ -6,6 +6,7 @@
 #include "test.h"
 #include "test_harness.h"
 #include "util.h"
+#include "fileio.h"
 #include <stdlib.h>
 #include <string.h>
 

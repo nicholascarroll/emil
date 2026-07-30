@@ -11,7 +11,6 @@
 #include "transform.h"
 #include "undo.h"
 #include "unicode.h"
-#include "unused.h"
 #include "util.h"
 #include <regex.h>
 #include <stdbool.h>
@@ -75,7 +74,7 @@ static uint8_t *regexSearch(uint8_t *text, uint8_t *pattern, int *match_len) {
 
 /* Replace all occurrences of 'rep' in 'text' with 'with'.
  * Returns a newly allocated string.  Caller frees. */
-static uint8_t *str_replace(uint8_t *text, uint8_t *rep, uint8_t *with) {
+static uint8_t *strReplace(uint8_t *text, uint8_t *rep, uint8_t *with) {
 	uint8_t *ins;
 	uint8_t *tmp;
 	size_t len_rep;
@@ -176,7 +175,7 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 	if (regex_mode && !regexCacheEnsure(query)) {
 		setStatusMessage("Invalid regexp: %s", query);
 		if (E.minibuf)
-			E.minibuf->completion_state.preserve_message = 1;
+			E.minibuf->completionState.preserve_message = 1;
 		return;
 	}
 
@@ -297,7 +296,7 @@ void backwardRegexFind(void) {
 /* Transformer callback for transformRegion.  Uses file-scope
  * replace_orig / replace_repl as the search/replace pair. */
 static uint8_t *transformerReplaceString(uint8_t *input) {
-	return str_replace(input, replace_orig, replace_repl);
+	return strReplace(input, replace_orig, replace_repl);
 }
 
 /* Find the next occurrence of 'needle' in the buffer, starting from
@@ -336,18 +335,21 @@ static int findNextMatch(uint8_t *needle, int skip_current) {
 }
 
 void replaceString(void) {
-	replace_orig = editorPrompt(E.buf, "Replace: ", PROMPT_BASIC, NULL);
+	replace_orig = editorPrompt(E.buf, "Replace: ", PROMPT_REPLACE, NULL);
 	if (replace_orig == NULL) {
 		setStatusMessage("Canceled replace-string.");
 		return;
 	}
 
-	/* Prompt is a plain prefix (see editorPrompt), so the search
-	 * string can be embedded verbatim: no percent escaping. */
-	size_t psz = strlen((const char *)replace_orig) + 20;
+	/* Prompt is a plain prefix (see editorPrompt), so no percent
+	 * escaping -- but a literal newline in the pattern must be
+	 * shown as ^J, not fed raw to the terminal. */
+	char *esc = caretEscapeNewlines(replace_orig);
+	size_t psz = strlen(esc) + 20;
 	char *prompt = xmalloc(psz);
-	snprintf(prompt, psz, "Replace %s with: ", replace_orig);
-	replace_repl = editorPrompt(E.buf, prompt, PROMPT_BASIC, NULL);
+	snprintf(prompt, psz, "Replace %s with: ", esc);
+	free(esc);
+	replace_repl = editorPrompt(E.buf, prompt, PROMPT_REPLACE, NULL);
 	free(prompt);
 	if (replace_repl == NULL) {
 		free(replace_orig);
@@ -364,11 +366,39 @@ void replaceString(void) {
 	replace_repl = NULL;
 }
 
+/* Build the "Query replacing X with Y:" status line shown during the
+ * y/n loop.  The pattern is newline-free (rejected up front), but the
+ * replacement may contain one and must be shown as ^J.  Returns a
+ * malloc'd string; caller frees. */
+static char *qrStatusPrompt(void) {
+	char *esc_repl = caretEscapeNewlines(replace_repl);
+	size_t sz = strlen((const char *)replace_orig) + strlen(esc_repl) + 32;
+	char *prompt = xmalloc(sz);
+	snprintf(prompt, sz, "Query replacing %s with %s:", replace_orig,
+		 esc_repl);
+	free(esc_repl);
+	return prompt;
+}
+
 void queryReplace(void) {
 	replace_orig =
-		editorPrompt(E.buf, "Query replace: ", PROMPT_BASIC, NULL);
+		editorPrompt(E.buf, "Query replace: ", PROMPT_REPLACE, NULL);
 	if (replace_orig == NULL) {
 		setStatusMessage("Canceled query-replace.");
+		return;
+	}
+
+	/* findNextMatch locates matches with per-row strstr, so a
+	 * pattern containing a newline can never match.  The replace
+	 * ring is shared with replace-regexp (as query-replace-history
+	 * is in Emacs), so a multi-line entry is one M-p away; without
+	 * this check it would exit silently with no message at all.
+	 * Refuse up front, before asking for a replacement. */
+	if (strchr((const char *)replace_orig, '\n')) {
+		free(replace_orig);
+		replace_orig = NULL;
+		setStatusMessage(
+			"query-replace cannot match across lines; use replace-regexp");
 		return;
 	}
 
@@ -378,7 +408,7 @@ void queryReplace(void) {
 	char prompt_buf[192];
 	snprintf(prompt_buf, sizeof(prompt_buf),
 		 "Query replace %.78s with: ", replace_orig);
-	replace_repl = editorPrompt(E.buf, prompt_buf, PROMPT_BASIC, NULL);
+	replace_repl = editorPrompt(E.buf, prompt_buf, PROMPT_REPLACE, NULL);
 	if (replace_repl == NULL) {
 		free(replace_orig);
 		replace_orig = NULL;
@@ -387,12 +417,7 @@ void queryReplace(void) {
 	}
 
 	/* Status prompt shown during the y/n loop */
-	char *prompt = xmalloc(strlen((const char *)replace_orig) +
-			       strlen((const char *)replace_repl) + 32);
-	snprintf(prompt,
-		 strlen((const char *)replace_orig) +
-			 strlen((const char *)replace_repl) + 32,
-		 "Query replacing %s with %s:", replace_orig, replace_repl);
+	char *prompt = qrStatusPrompt();
 	int bufwidth = stringWidth((const uint8_t *)prompt);
 
 	int savedMx = E.buf->markx;
@@ -473,7 +498,7 @@ void queryReplace(void) {
 			snprintf(rprompt, sizeof(rprompt),
 				 "Replace this %.78s with: ", replace_orig);
 			uint8_t *newStr = editorPrompt(E.buf, rprompt,
-						       PROMPT_BASIC, NULL);
+						       PROMPT_REPLACE, NULL);
 			if (newStr != NULL) {
 				uint8_t *tmp = replace_repl;
 				replace_repl = newStr;
@@ -485,15 +510,7 @@ void queryReplace(void) {
 			}
 			/* Rebuild status prompt */
 			free(prompt);
-			prompt = xmalloc(strlen((const char *)replace_orig) +
-					 strlen((const char *)replace_repl) +
-					 32);
-			snprintf(prompt,
-				 strlen((const char *)replace_orig) +
-					 strlen((const char *)replace_repl) +
-					 32,
-				 "Query replacing %s with %s:", replace_orig,
-				 replace_repl);
+			prompt = qrStatusPrompt();
 			bufwidth = stringWidth((const uint8_t *)prompt);
 			break;
 		}
@@ -503,7 +520,7 @@ void queryReplace(void) {
 			snprintf(eprompt, sizeof(eprompt),
 				 "Query replace %.78s with: ", replace_orig);
 			uint8_t *newStr = editorPrompt(E.buf, eprompt,
-						       PROMPT_BASIC, NULL);
+						       PROMPT_REPLACE, NULL);
 			if (newStr != NULL) {
 				free(replace_repl);
 				replace_repl = newStr;
@@ -512,15 +529,7 @@ void queryReplace(void) {
 					goto QR_CLEANUP;
 			}
 			free(prompt);
-			prompt = xmalloc(strlen((const char *)replace_orig) +
-					 strlen((const char *)replace_repl) +
-					 32);
-			snprintf(prompt,
-				 strlen((const char *)replace_orig) +
-					 strlen((const char *)replace_repl) +
-					 32,
-				 "Query replacing %s with %s:", replace_orig,
-				 replace_repl);
+			prompt = qrStatusPrompt();
 			bufwidth = stringWidth((const uint8_t *)prompt);
 			break;
 		}

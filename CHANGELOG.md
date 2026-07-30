@@ -3,7 +3,17 @@
 - Rules for punctuation at right edge of screen in word wrap mode
 - Cope with background/foregrounding and terminal resize while in the minibuffer
 - Unrecognised command-line options now report to stderr and exit nonzero
-- Documented exit status in emil(1).
+- man page updates.
+- The man page installs to `$(PREFIX)/share/man` rather than `$(PREFIX)/man`,
+  and LICENSE installs to `$(PREFIX)/share/licenses/emil`. Upgrading from
+  0.8.0 leaves an orphaned `/usr/local/man/man1/emil.1` that `make uninstall`
+  will not remove; delete it by hand.
+- `make hal` builds with an expanded warning set as errors, and runs the
+  test suite under `-D_FORTIFY_SOURCE=3` so the fortified build is actually
+  executed rather than only compiled.
+- In atomic write, preserve owner. #98.
+- Clamp universal argument at 1 million #99.
+- Allow entry of newline with `C-q C-j` in `replace-regexp` #96.
 
 ### Correction to 0.7.0
 - #90 (read-only buffer corruption from kill-rectangle) was listed under Known

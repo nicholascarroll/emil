@@ -142,9 +142,6 @@ void destroyOtherWindows(void) {
 /* Resize windows so that the popup at win_idx fits its content while
  * the remaining windows share the leftover space fairly. */
 static void sizePopupWindow(int win_idx) {
-	extern int minibuffer_height;
-	extern const int statusbar_height;
-
 	struct buffer *buf = E.windows[win_idx]->buf;
 	int total_height = E.screenrows - minibuffer_height -
 			   (statusbar_height * E.nwindows);

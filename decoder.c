@@ -35,7 +35,7 @@ static void note(uint8_t *seen, int *n, uint8_t b) {
 }
 
 /* A recognized key: discard the report bytes and return the token. */
-static int dec_key(int *n_seen, int key) {
+static int decKey(int *n_seen, int key) {
 	*n_seen = 0;
 	return key;
 }
@@ -93,35 +93,35 @@ static int decodeCSI(escByteSourceFn next, uint8_t *seen, int *n_seen) {
 			if (body == 0) {
 				switch (b) {
 				case 'A':
-					return dec_key(n_seen, KEY_ARROW_UP);
+					return decKey(n_seen, KEY_ARROW_UP);
 				case 'B':
-					return dec_key(n_seen, KEY_ARROW_DOWN);
+					return decKey(n_seen, KEY_ARROW_DOWN);
 				case 'C':
-					return dec_key(n_seen, KEY_ARROW_RIGHT);
+					return decKey(n_seen, KEY_ARROW_RIGHT);
 				case 'D':
-					return dec_key(n_seen, KEY_ARROW_LEFT);
+					return decKey(n_seen, KEY_ARROW_LEFT);
 				case 'F':
-					return dec_key(n_seen, KEY_END);
+					return decKey(n_seen, KEY_END);
 				case 'H':
-					return dec_key(n_seen, KEY_HOME);
+					return decKey(n_seen, KEY_HOME);
 				case 'Z':
-					return dec_key(n_seen, KEY_BACKTAB);
+					return decKey(n_seen, KEY_BACKTAB);
 				}
 			} else if (body == 1 && b == '~' && seen[1] >= '0' &&
 				   seen[1] <= '9') {
 				switch (seen[1]) {
 				case '1': /* vt220 Home */
 				case '7': /* rxvt Home */
-					return dec_key(n_seen, KEY_HOME);
+					return decKey(n_seen, KEY_HOME);
 				case '4': /* vt220 End */
 				case '8': /* rxvt End */
-					return dec_key(n_seen, KEY_END);
+					return decKey(n_seen, KEY_END);
 				case '3':
-					return dec_key(n_seen, KEY_DEL);
+					return decKey(n_seen, KEY_DEL);
 				case '5':
-					return dec_key(n_seen, KEY_PAGE_UP);
+					return decKey(n_seen, KEY_PAGE_UP);
 				case '6':
-					return dec_key(n_seen, KEY_PAGE_DOWN);
+					return decKey(n_seen, KEY_PAGE_DOWN);
 				}
 			}
 			note(seen, n_seen, b);

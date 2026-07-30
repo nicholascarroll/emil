@@ -655,7 +655,7 @@ void replaceRegex(void) {
 	const char *cancel = "Canceled regex-replace.";
 
 	uint8_t *regex =
-		editorPrompt(buf, "Regex replace: ", PROMPT_BASIC, NULL);
+		editorPrompt(buf, "Regex replace: ", PROMPT_REPLACE, NULL);
 	if (regex == NULL) {
 		setStatusMessage("%s", cancel);
 		return;
@@ -663,10 +663,14 @@ void replaceRegex(void) {
 
 	/* Cap the displayed pattern to 35 chars.  The prompt is a plain
 	 * prefix (see editorPrompt), so no percent escaping is needed
-	 * and %.35s truncation is safe. */
+	 * and %.35s truncation is safe.  A literal newline in the
+	 * pattern is shown as ^J; embedded raw it would reach the
+	 * terminal as a line feed and split the minibuffer. */
+	char *esc = caretEscapeNewlines(regex);
 	char prompt[128];
-	snprintf(prompt, sizeof(prompt), "Regex replace %.35s with: ", regex);
-	uint8_t *repl = editorPrompt(buf, prompt, PROMPT_BASIC, NULL);
+	snprintf(prompt, sizeof(prompt), "Regex replace %.35s with: ", esc);
+	free(esc);
+	uint8_t *repl = editorPrompt(buf, prompt, PROMPT_REPLACE, NULL);
 	if (repl == NULL) {
 		free(regex);
 		setStatusMessage("%s", cancel);
@@ -749,7 +753,7 @@ void stringRectangle(void) {
 		return;
 
 	uint8_t *string =
-		editorPrompt(E.buf, "String rectangle: ", PROMPT_BASIC, NULL);
+		editorPrompt(E.buf, "String rectangle: ", PROMPT_RECT, NULL);
 	if (string == NULL) {
 		setStatusMessage("Canceled.");
 		return;

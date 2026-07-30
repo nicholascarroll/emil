@@ -41,6 +41,9 @@ static void cleanupTestEditor(void) {
 	freeHistory(&E.command_history);
 	freeHistory(&E.shell_history);
 	freeHistory(&E.search_history);
+	freeHistory(&E.replace_history);
+	freeHistory(&E.rect_history);
+	freeHistory(&E.buffer_history);
 	freeHistory(&E.kill_history);
 
 	/* Free the kill text */

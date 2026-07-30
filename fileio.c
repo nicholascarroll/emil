@@ -10,7 +10,6 @@
 #include "terminal.h"
 #include "undo.h"
 #include "unicode.h"
-#include "unused.h"
 #include "util.h"
 #include <errno.h>
 #include <fcntl.h>
@@ -27,9 +26,6 @@
 #include <unistd.h>
 
 /* Access global editor state */
-
-/* External functions we need */
-extern void die(const char *s);
 
 /*** timed syscall support ***/
 
@@ -163,17 +159,7 @@ int lockFile(struct buffer *bufr, const char *filename) {
 	return -1;
 }
 
-/* Release the advisory lock held by this buffer.
- *
- * Does NOT clear external_mod: that flag is a latch indicating
- * "disk content has diverged from what we loaded," and its only
- * legitimate exits are save (user chose to clobber) and revert
- * (user chose the disk copy).  Releasing a lock: which happens on
- * clean→dirty transitions via markBufferClean, on saveAs, and on
- * buffer destruction: says nothing about whether the buffer still
- * reflects disk.  In particular, undo-to-clean triggers
- * markBufferClean → releaseLock, and clearing external_mod there
- * would silently dismiss a warning the user hasn't resolved. */
+/* Release the advisory lock held by this buffer.*/
 
 void releaseLock(struct buffer *bufr) {
 	if (bufr->lock_fd >= 0) {
@@ -578,11 +564,13 @@ static int writeAtomic(const char *iopath, const char *buf, size_t len) {
 	if (fd == -1)
 		return -1;
 
-	/* Preserve the existing file's permissions; for a new file,
-	 * use 0644 masked by the umask (mkstemp creates 0600) to
-	 * match writeDirect's open(..., 0644) semantics. */
 	struct stat st;
 	if (stat(target, &st) == 0) {
+		if (fchown(fd, st.st_uid, st.st_gid) == -1 && errno != EPERM) {
+			close(fd);
+			unlink(tmpname);
+			return -1;
+		}
 		fchmod(fd, st.st_mode);
 	} else {
 		mode_t um = umask(0);
@@ -735,7 +723,7 @@ void save(void) {
 	if (writeAtomic(iopath, buf, len) == -1) {
 		if (errno == ENOSPC) {
 			if (!confirmOverwriteDirect(
-				    "Atomic save failed (disk space). Overwrite directly? (y/N)")) {
+				    "Atomic save failed (disk space). Overwrite directly (risky)? (y/N)")) {
 				free(buf);
 				free(iopath);
 				setStatusMessage("Save aborted.");
@@ -909,7 +897,7 @@ void findFile(int read_only) {
 	}
 
 	/* Safety net: if a directory path somehow gets through the prompt,
-	 * don't try to open it as a file. * TODO review with suspicion */
+	 * don't try to open it as a file. */
 	struct stat st;
 	char *stat_path = expandTilde((char *)prompt);
 	if (stat(stat_path, &st) == 0 && S_ISDIR(st.st_mode)) {
@@ -1180,8 +1168,7 @@ char *cleanPath(char *path) {
 			}
 			segs[depth++] = seg;
 			/* null-terminate this segment for later copy */
-			if (seg[len] != '\0')
-				seg[len] = '\0';
+			seg[len] = '\0';
 		}
 	}
 
@@ -1200,6 +1187,39 @@ char *cleanPath(char *path) {
 	}
 	*out = '\0';
 	return path;
+}
+
+/* Resolve a path to absolute form for comparison purposes.
+ * Normalizes . and .. segments.  Does NOT resolve symlinks.
+ * Returns a new string; caller frees. */
+char *absolutePath(const char *path) {
+	if (!path || !*path)
+		return xstrdup("");
+
+	if (path[0] == '/') {
+		char *out = xstrdup(path);
+		cleanPath(out);
+		return out;
+	}
+
+	if (path[0] == '~' && (path[1] == '\0' || path[1] == '/')) {
+		char *out = expandTilde(path);
+		cleanPath(out);
+		return out;
+	}
+
+	char cwd[PATH_MAX];
+	if (getcwd(cwd, sizeof(cwd)) == NULL)
+		return xstrdup(path);
+
+	size_t clen = strlen(cwd);
+	size_t plen = strlen(path);
+	char *out = xmalloc(clen + 1 + plen + 1);
+	memcpy(out, cwd, clen);
+	out[clen] = '/';
+	memcpy(out + clen + 1, path, plen + 1);
+	cleanPath(out);
+	return out;
 }
 
 /* Rebase a relative filename from old_cwd to new_cwd.

@@ -228,13 +228,48 @@ void test_dot_does_not_cross_newline(void) {
 	free(r);
 }
 
-/* A pattern containing a literal newline.  No UI path can produce
- * one today, so this documents the engine's behaviour rather than a
- * reachable feature — and pins it down for whenever newline entry
- * is added. */
+/* Patterns containing a literal newline.  Reachable since C-q C-j:
+ * these are the portability surface, because REG_NEWLINE is where
+ * libc implementations could plausibly differ.  Verified identical on
+ * glibc and musl; run the suite on macOS, MSYS2 and bionic to confirm
+ * the POSIX guarantee holds there too. */
 void test_literal_newline_in_pattern_matches(void) {
 	int n;
 	char *r = sub_all("b\nc", "ab\ncd", "X", &n);
+	TEST_ASSERT_EQUAL_INT(1, n);
+	TEST_ASSERT_EQUAL_STRING("X", r);
+	free(r);
+}
+
+void test_newline_in_bracket_expression(void) {
+	int n;
+	char *r = sub_all("b[\n]c", "ab\ncd", "X", &n);
+	TEST_ASSERT_EQUAL_INT(1, n);
+	TEST_ASSERT_EQUAL_STRING("X", r);
+	free(r);
+}
+
+/* Under REG_NEWLINE a negated class must NOT match a newline, which is
+ * what stops a replace running away across lines. */
+void test_negated_class_does_not_match_newline(void) {
+	int n;
+	char *r = sub_all("b[^x]c", "ab\ncd", "X", &n);
+	TEST_ASSERT_EQUAL_INT(0, n);
+	free(r);
+}
+
+void test_blank_line_pattern(void) {
+	int n;
+	char *r = sub_all("\n\n", "a\n\nb", "X", &n);
+	TEST_ASSERT_EQUAL_INT(1, n);
+	/* sub_all returns the rewritten span, not the whole subject. */
+	TEST_ASSERT_EQUAL_STRING("X", r);
+	free(r);
+}
+
+void test_newline_under_repetition(void) {
+	int n;
+	char *r = sub_all("a\n+b", "a\n\n\nb", "X", &n);
 	TEST_ASSERT_EQUAL_INT(1, n);
 	TEST_ASSERT_EQUAL_STRING("X", r);
 	free(r);
@@ -334,6 +369,10 @@ int main(void) {
 	RUN_TEST(test_noteol_suppresses_dollar_at_subject_end);
 	RUN_TEST(test_dot_does_not_cross_newline);
 	RUN_TEST(test_literal_newline_in_pattern_matches);
+	RUN_TEST(test_newline_in_bracket_expression);
+	RUN_TEST(test_negated_class_does_not_match_newline);
+	RUN_TEST(test_blank_line_pattern);
+	RUN_TEST(test_newline_under_repetition);
 
 	RUN_TEST(test_zero_width_match_terminates);
 	RUN_TEST(test_zero_width_mixed_with_real_match);

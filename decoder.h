@@ -4,16 +4,7 @@
 #include <stdint.h>
 
 /*
- * Escape-sequence decoder: a pure state machine over a byte source.
- *
- * The decoder owns the grammar and the key mapping; it performs no
- * I/O, reads no editor state, and produces no messages.  The byte
- * source owns the blocking and signal policy, entirely behind
- * escByteSourceFn.  This split is what
- * makes the machine unit-testable and fuzzable (tests/test_decoder.c
- * drives it from byte arrays) while the live editor drives it from
- * the terminal (terminal.c).
- */
+ * Escape-sequence decoder: a pure state machine over a byte source.*/
 
 /* Byte source.  Returns 1 with a byte in *out, or 0 if no byte will
  * come.  The wait class says what a signal means, not how long to

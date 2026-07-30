@@ -6,7 +6,6 @@
 #include "region.h"
 #include "undo.h"
 #include "unicode.h"
-#include "unused.h"
 #include "util.h"
 #include <stdint.h>
 #include <stdlib.h>

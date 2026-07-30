@@ -742,7 +742,7 @@ void endOfLine(int count) {
 
 void gotoLine(void) {
 	setMarkSilent();
-	uint8_t *nls = editorPrompt(E.buf, "Goto line: ", PROMPT_BASIC, NULL);
+	uint8_t *nls = editorPrompt(E.buf, "Goto line: ", PROMPT_PLAIN, NULL);
 	if (!nls)
 		return;
 
@@ -764,7 +764,7 @@ void gotoLine(void) {
 
 /* Sentence movement */
 
-static int is_punct(char c) {
+static int isPunct(char c) {
 	return c == '.' || c == '!' || c == '?';
 }
 
@@ -782,12 +782,12 @@ int isSentenceBoundary(erow *row, int x) {
 		return 0;
 
 	/* Short pattern: [Punct][Space][Upper] */
-	if (is_punct(row->chars[x - 2]) && row->chars[x - 1] == ' ' &&
+	if (isPunct(row->chars[x - 2]) && row->chars[x - 1] == ' ' &&
 	    isupper((unsigned char)row->chars[x]))
 		return 1;
 
 	/* Long pattern: [Punct][Space][Space][Upper] — needs 3 bytes back */
-	if (x >= 3 && is_punct(row->chars[x - 3]) && row->chars[x - 2] == ' ' &&
+	if (x >= 3 && isPunct(row->chars[x - 3]) && row->chars[x - 2] == ' ' &&
 	    row->chars[x - 1] == ' ' && isupper((unsigned char)row->chars[x]))
 		return 1;
 
@@ -826,7 +826,7 @@ int forwardSentenceEnd(int *cx, int *cy) {
 			}
 
 			// Check for [Punct][Space][Upper] pattern
-			if (is_punct(row->chars[x]) &&
+			if (isPunct(row->chars[x]) &&
 			    (isSentenceBoundary(row, x + 2) ||
 			     isSentenceBoundary(row, x + 3))) {
 				int pot_x = x + 1; // Target is the space

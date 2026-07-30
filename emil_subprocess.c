@@ -253,13 +253,8 @@ int subprocess_signal(struct subprocess_s *const process, int sig) {
 		return 0;
 	/* Group signalling can fail with ESRCH in a narrow window:
 	 * glibc's posix_spawn normally vfork-blocks until the child
-	 * has run its setpgid, but under QEMU user-mode emulation
-	 * (big-endian CI: PowerPC, s390x) vfork degrades to fork and
-	 * posix_spawn can return before the process group exists.
-	 * The child's PID exists from fork time, so signalling it
-	 * directly always reaches at least the immediate child; for
-	 * a pipeline caught mid-setup the window is microseconds and
-	 * any subsequent signal reaches the by-then-existing group. */
+	 * has run its setpgid, but under QEMU user-mode  vfork degrades to 
+	 * fork and posix_spawn can return before the process group exists.*/
 	return kill(process->child, sig);
 }
 

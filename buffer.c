@@ -69,17 +69,35 @@ void markBufferClean(struct buffer *buf) {
 	buf->lock_blocked_pid = 0;
 }
 
+/* Grow row->chars so it can hold at least `needed` bytes.  Doubling
+ * from a floor of 16, jumping straight to `needed` when that is larger.
+ */
+void rowEnsureCap(erow *row, int needed) {
+	if (needed <= row->charcap)
+		return;
+	int new_cap = row->charcap < 16 ? 16 : row->charcap * 2;
+	if (new_cap < needed)
+		new_cap = needed;
+	row->chars = xrealloc(row->chars, new_cap);
+	row->charcap = new_cap;
+}
+
+/* Grow the buffer's row array by one, zeroing the new slots. */
+static void bufEnsureRowCap(struct buffer *bufr) {
+	if (bufr->numrows < bufr->rowcap)
+		return;
+	int new_cap = bufr->rowcap ? bufr->rowcap * 2 : 16;
+	bufr->row = xrealloc(bufr->row, sizeof(erow) * new_cap);
+	memset(&bufr->row[bufr->rowcap], 0,
+	       sizeof(erow) * (new_cap - bufr->rowcap));
+	bufr->rowcap = new_cap;
+}
+
 void insertRow(struct buffer *bufr, int at, const uint8_t *s, size_t len) {
 	if (at < 0 || at > bufr->numrows)
 		return;
 
-	if (bufr->numrows >= bufr->rowcap) {
-		int new_cap = bufr->rowcap ? bufr->rowcap * 2 : 16;
-		bufr->row = xrealloc(bufr->row, sizeof(erow) * new_cap);
-		memset(&bufr->row[bufr->rowcap], 0,
-		       sizeof(erow) * (new_cap - bufr->rowcap));
-		bufr->rowcap = new_cap;
-	}
+	bufEnsureRowCap(bufr);
 
 	if (at < bufr->numrows) {
 		memmove(&bufr->row[at + 1], &bufr->row[at],
@@ -104,13 +122,7 @@ void insertRow(struct buffer *bufr, int at, const uint8_t *s, size_t len) {
  * buffer is being populated from disk.
  */
 void appendRowRaw(struct buffer *bufr, const uint8_t *s, size_t len) {
-	if (bufr->numrows >= bufr->rowcap) {
-		int new_cap = bufr->rowcap ? bufr->rowcap * 2 : 16;
-		bufr->row = xrealloc(bufr->row, sizeof(erow) * new_cap);
-		memset(&bufr->row[bufr->rowcap], 0,
-		       sizeof(erow) * (new_cap - bufr->rowcap));
-		bufr->rowcap = new_cap;
-	}
+	bufEnsureRowCap(bufr);
 
 	int at = bufr->numrows;
 	bufr->row[at].size = len;
@@ -149,13 +161,7 @@ void rowInsertChar(struct buffer *bufr, erow *row, int at, int c) {
 		at = row->size;
 
 	int needed = row->size + 2;
-	if (needed > row->charcap) {
-		int new_cap = row->charcap < 16 ? 16 : row->charcap * 2;
-		if (new_cap < needed)
-			new_cap = needed;
-		row->chars = xrealloc(row->chars, new_cap);
-		row->charcap = new_cap;
-	}
+	rowEnsureCap(row, needed);
 	memmove(&row->chars[at + 1], &row->chars[at], row->size - at + 1);
 	row->size++;
 	row->chars[at] = c;
@@ -169,13 +175,7 @@ void rowInsertUnicode(struct buffer *bufr, erow *row, int at) {
 	if (at < 0 || at > row->size)
 		at = row->size;
 	int needed = row->size + 1 + E.nunicode;
-	if (needed > row->charcap) {
-		int new_cap = row->charcap < 16 ? 16 : row->charcap * 2;
-		if (new_cap < needed)
-			new_cap = needed;
-		row->chars = xrealloc(row->chars, new_cap);
-		row->charcap = new_cap;
-	}
+	rowEnsureCap(row, needed);
 	memmove(&row->chars[at + E.nunicode], &row->chars[at],
 		row->size - at + 1);
 	row->size += E.nunicode;
@@ -192,13 +192,7 @@ void rowAppendString(struct buffer *bufr, erow *row, const uint8_t *s,
 	if (len > (size_t)(INT_MAX - row->size - 1))
 		return;
 	int needed = row->size + (int)len + 1;
-	if (needed > row->charcap) {
-		int new_cap = row->charcap < 16 ? 16 : row->charcap * 2;
-		if (new_cap < needed)
-			new_cap = needed;
-		row->chars = xrealloc(row->chars, new_cap);
-		row->charcap = new_cap;
-	}
+	rowEnsureCap(row, needed);
 	memcpy(&row->chars[row->size], s, len);
 	row->size += len;
 	row->chars[row->size] = '\0';
@@ -244,18 +238,17 @@ struct buffer *newBuffer(void) {
 	ret->special_buffer = 0;
 	ret->undo = newUndo();
 	ret->redo = NULL;
-	ret->completion_state.last_completed_text = NULL;
-	ret->completion_state.completion_start_pos = 0;
-	ret->completion_state.successive_tabs = 0;
-	ret->completion_state.last_completion_count = 0;
-	ret->completion_state.preserve_message = 0;
-	ret->completion_state.selected = -1;
-	ret->completion_state.matches = NULL;
-	ret->completion_state.n_matches = 0;
+	ret->completionState.last_completed_text = NULL;
+	ret->completionState.completion_start_pos = 0;
+	ret->completionState.successive_tabs = 0;
+	ret->completionState.last_completion_count = 0;
+	ret->completionState.preserve_message = 0;
+	ret->completionState.selected = -1;
+	ret->completionState.matches = NULL;
+	ret->completionState.n_matches = 0;
 	ret->next = NULL;
 	ret->word_wrap = 0;
 	ret->rectangle_mode = 0;
-	ret->single_line = 0;
 	ret->screen_line_start = NULL;
 	ret->screen_line_cache_size = 0;
 	ret->screen_line_cache_valid = 0;
@@ -280,11 +273,11 @@ void destroyBuffer(struct buffer *buf) {
 	free(buf->display_name);
 	free(buf->query);
 	free(buf->screen_line_start);
-	free(buf->completion_state.last_completed_text);
-	if (buf->completion_state.matches) {
-		for (int i = 0; i < buf->completion_state.n_matches; i++)
-			free(buf->completion_state.matches[i]);
-		free(buf->completion_state.matches);
+	free(buf->completionState.last_completed_text);
+	if (buf->completionState.matches) {
+		for (int i = 0; i < buf->completionState.n_matches; i++)
+			free(buf->completionState.matches[i]);
+		free(buf->completionState.matches);
 	}
 	for (int i = 0; i < buf->numrows; i++) {
 		freeRow(&buf->row[i]);
@@ -525,13 +518,17 @@ void nextBuffer(void) {
 	resetFileCheckThrottle();
 }
 
+/* Confirm only for a modified buffer that is visiting a file, matching
+ * kill-buffer in Emacs.*/
+int killBufferNeedsConfirm(const struct buffer *bufr) {
+	return bufr->dirty && bufr->filename != NULL && !bufr->special_buffer;
+}
+
 void killBuffer(void) {
 	struct buffer *bufr = E.buf;
 
-	// Bypass confirmation for special buffers
-	if (bufr->dirty && bufr->filename != NULL && !bufr->special_buffer) {
-		const char *fname = bufr->filename ? bufr->filename :
-						     "*scratch*";
+	if (killBufferNeedsConfirm(bufr)) {
+		const char *fname = bufr->filename;
 		int n = snprintf(NULL, 0,
 				 "Buffer %s modified; kill anyway? (y or n)",
 				 fname);
@@ -556,11 +553,6 @@ void killBuffer(void) {
 		}
 	}
 
-	/* If this is the sole buffer, create the replacement scratch
-	 * buffer once, outside the window loop: with the killed buffer
-	 * shown in multiple windows, creating it per-window replaced
-	 * E.headbuf on each iteration, leaking the earlier scratch and
-	 * leaving windows pointing at buffers no longer in the list. */
 	struct buffer *scratch = NULL;
 	if (bufr->next == NULL && prevBuf == NULL) {
 		scratch = newBuffer();
@@ -610,7 +602,6 @@ static const char *baseName(const char *path) {
 }
 
 /* Left-truncate a string to fit in max_width, prepending "...".
- * Always returns a string that fits in max_width.
  * Returns a newly allocated string. */
 char *leftTruncate(const char *s, int max_width) {
 	if (max_width < 1)
@@ -823,9 +814,7 @@ void clampToBuffer(struct buffer *buf, int *px, int *py) {
 	}
 }
 
-/* Clamp cursor and mark to valid buffer positions.
- * Called after every command to prevent out-of-bounds
- * row access in rendering or subsequent commands. */
+/* Clamp cursor and mark to valid buffer positions. Called after every command.*/
 void clampPositions(struct buffer *buf) {
 	if (buf->numrows == 0) {
 		buf->cy = 0;

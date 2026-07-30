@@ -28,7 +28,6 @@ size_t emil_strlcat(char *dst, const char *src, size_t dsize);
 /* Tilde / home-directory helpers */
 char *expandTilde(const char *path);  /* ~/foo → /home/u/foo; caller frees */
 char *collapseHome(const char *path); /* /home/u/foo → ~/foo; caller frees */
-char *absolutePath(const char *path); /* resolve to absolute; caller frees */
 
 /* Character classification */
 int isWordBoundary(uint8_t c);

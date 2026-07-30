@@ -9,7 +9,7 @@ Please navigate to the [Security tab](https://github.com/nicholascarroll/emil/se
 
 ### Response Times
 
-You will receive an initial response within 14 days.
+Best effort; no promise.
 
 ---
 

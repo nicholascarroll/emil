@@ -311,7 +311,7 @@ uint8_t *editorPipe(int useRegion) {
 	cmd = NULL;
 	int u = E.uarg;
 	E.uarg = 0;
-	cmd = editorPrompt(E.buf, "Shell: ", PROMPT_BASIC, NULL);
+	cmd = editorPrompt(E.buf, "Shell: ", PROMPT_SHELL, NULL);
 
 	if (cmd == NULL) {
 		setStatusMessage("Canceled shell command.");

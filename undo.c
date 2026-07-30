@@ -6,7 +6,6 @@
 
 #include "region.h"
 #include "unicode.h"
-#include "unused.h"
 #include "util.h"
 #include <stdint.h>
 #include <stdlib.h>
@@ -32,13 +31,7 @@ void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
 		/* Single-line insert: memmove tail right, memcpy data in */
 		struct erow *row = &buf->row[starty];
 		int needed = row->size + datalen + 1;
-		if (needed > row->charcap) {
-			int new_cap = row->charcap < 16 ? 16 : row->charcap * 2;
-			if (new_cap < needed)
-				new_cap = needed;
-			row->chars = xrealloc(row->chars, new_cap);
-			row->charcap = new_cap;
-		}
+		rowEnsureCap(row, needed);
 		memmove(&row->chars[startx + datalen], &row->chars[startx],
 			row->size - startx + 1); /* +1 for NUL */
 		memcpy(&row->chars[startx], data, datalen);
@@ -435,9 +428,21 @@ void undoBackSpace(struct buffer *buf, uint8_t c) {
 	int old_startx = buf->undo->startx;
 	int old_starty = buf->undo->starty;
 
+	/* A '\n' here means a row join: the separator between row
+	 * starty-1 and starty was deleted, so the record's start moves to
+	 * the end of the preceding row.  Editable rows never hold a
+	 * literal 0x0A -- quoted C-q C-j splits the row instead of
+	 * inserting the byte -- so backSpace can only reach this branch
+	 * via edit.c's cx == 0 path, where starty >= 1 is guaranteed by
+	 * the (cy == 0 && cx == 0) early return.
+	 *
+	 * The starty > 0 test is belt-and-braces: were that invariant ever
+	 * violated, the old code read buf->row[-1]. */
 	if (c == '\n') {
-		buf->undo->starty--;
-		buf->undo->startx = buf->row[buf->undo->starty].size;
+		if (buf->undo->starty > 0) {
+			buf->undo->starty--;
+			buf->undo->startx = buf->row[buf->undo->starty].size;
+		}
 	} else {
 		buf->undo->startx--;
 	}

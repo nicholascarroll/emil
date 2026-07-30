@@ -39,6 +39,7 @@ void changeDirectory(void);
 
 char *relativePath(const char *from, const char *to);
 char *cleanPath(char *path);
+char *absolutePath(const char *path); /* resolve to absolute; caller frees */
 char *rebaseFilename(const char *filename, const char *old_cwd,
 		     const char *new_cwd);
 

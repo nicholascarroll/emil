@@ -2,7 +2,52 @@
 
 #include "test.h"
 #include "test_harness.h"
+#include "prompt.h"
+#include "completion.h"
+#include "buffer.h"
+#include "util.h"
 #include <stdint.h>
+
+/* ---- Kill-buffer confirmation ----
+ *
+ * Matches kill-buffer in Emacs: confirm only for a modified buffer
+ * that is visiting a file.  A modified buffer with no filename is
+ * scratch space and is killed without a prompt. */
+
+void test_kill_confirm_dirty_named_buffer(void) {
+	struct buffer *buf = make_test_buffer("unsaved work");
+	buf->dirty = 1;
+	buf->filename = xstrdup("/tmp/notes.txt");
+	buf->special_buffer = 0;
+	TEST_ASSERT_TRUE(killBufferNeedsConfirm(buf));
+}
+
+void test_kill_no_confirm_dirty_unnamed_buffer(void) {
+	struct buffer *buf = make_test_buffer("scratch jottings");
+	buf->dirty = 1;
+	buf->filename = NULL;
+	buf->special_buffer = 0;
+	TEST_ASSERT_FALSE(killBufferNeedsConfirm(buf));
+}
+
+void test_kill_no_confirm_clean_named_buffer(void) {
+	struct buffer *buf = make_test_buffer("saved");
+	buf->dirty = 0;
+	buf->filename = xstrdup("/tmp/notes.txt");
+	buf->special_buffer = 0;
+	TEST_ASSERT_FALSE(killBufferNeedsConfirm(buf));
+}
+
+/* A special buffer carries a filename ("*scratch*", "*Completions*"),
+ * so special_buffer is what suppresses the prompt here, not the
+ * filename test. */
+void test_kill_no_confirm_special_buffer_with_name(void) {
+	struct buffer *buf = make_test_buffer("completions");
+	buf->dirty = 1;
+	buf->filename = xstrdup("*scratch*");
+	buf->special_buffer = 1;
+	TEST_ASSERT_FALSE(killBufferNeedsConfirm(buf));
+}
 
 /* ---- Row operations ---- */
 
@@ -235,6 +280,93 @@ void tearDown(void) {
 	cleanupTestEditor();
 }
 
+/* ---- Minibuffer serialization ----
+ *
+ * The minibuffer holds rows like any other buffer; no row ever contains
+ * a literal 0x0A.  Text crosses the boundary in two forms: joined with
+ * "\n" for the caller, joined with "^J" for the screen. */
+
+void test_minibuf_roundtrip_multiline(void) {
+	struct buffer *mb = newBuffer();
+	replaceMinibufferText(mb, "foo\nbar");
+
+	TEST_ASSERT_EQUAL_INT(2, mb->numrows);
+	TEST_ASSERT_EQUAL_STRING("foo", row_str(mb, 0));
+	TEST_ASSERT_EQUAL_STRING("bar", row_str(mb, 1));
+
+	char *out = minibufJoin(mb, "\n");
+	TEST_ASSERT_EQUAL_STRING("foo\nbar", out);
+	free(out);
+	destroyBuffer(mb);
+}
+
+void test_minibuf_display_uses_caret(void) {
+	struct buffer *mb = newBuffer();
+	replaceMinibufferText(mb, "a\nb\nc");
+
+	TEST_ASSERT_EQUAL_INT(3, mb->numrows);
+	char *shown = minibufJoin(mb, "^J");
+	TEST_ASSERT_EQUAL_STRING("a^Jb^Jc", shown);
+	free(shown);
+	destroyBuffer(mb);
+}
+
+void test_minibuf_single_line_unchanged(void) {
+	struct buffer *mb = newBuffer();
+	replaceMinibufferText(mb, "plain");
+
+	TEST_ASSERT_EQUAL_INT(1, mb->numrows);
+	char *out = minibufJoin(mb, "\n");
+	TEST_ASSERT_EQUAL_STRING("plain", out);
+	free(out);
+	destroyBuffer(mb);
+}
+
+/* Typing only C-q C-j: two rows, both empty, value "\n".  This is
+ * the line-join entry; editorPrompt must not submit it as "". */
+void test_minibuf_bare_newline_is_not_empty(void) {
+	struct buffer *mb = newBuffer();
+	replaceMinibufferText(mb, "\n");
+
+	TEST_ASSERT_EQUAL_INT(2, mb->numrows);
+	char *out = minibufJoin(mb, "\n");
+	TEST_ASSERT_EQUAL_STRING("\n", out);
+	free(out);
+	destroyBuffer(mb);
+}
+
+/* User text embedded into a prompt or status string must never carry
+ * a raw 0x0A to the terminal; it is rewritten in caret notation. */
+void test_caret_escape_newlines(void) {
+	char *out = caretEscapeNewlines((const uint8_t *)"a\nb");
+	TEST_ASSERT_EQUAL_STRING("a^Jb", out);
+	free(out);
+
+	out = caretEscapeNewlines((const uint8_t *)"\n");
+	TEST_ASSERT_EQUAL_STRING("^J", out);
+	free(out);
+
+	out = caretEscapeNewlines((const uint8_t *)"plain");
+	TEST_ASSERT_EQUAL_STRING("plain", out);
+	free(out);
+
+	out = caretEscapeNewlines((const uint8_t *)"");
+	TEST_ASSERT_EQUAL_STRING("", out);
+	free(out);
+}
+
+void test_minibuf_trailing_newline(void) {
+	struct buffer *mb = newBuffer();
+	replaceMinibufferText(mb, "x\n");
+
+	/* A pattern ending in a row break: two rows, the second empty. */
+	TEST_ASSERT_EQUAL_INT(2, mb->numrows);
+	char *out = minibufJoin(mb, "\n");
+	TEST_ASSERT_EQUAL_STRING("x\n", out);
+	free(out);
+	destroyBuffer(mb);
+}
+
 int main(void) {
 	TEST_BEGIN();
 
@@ -264,11 +396,25 @@ int main(void) {
 	RUN_TEST(test_word_wrap_break);
 	RUN_TEST(test_cursor_screen_line);
 
+	/* Minibuffer serialization */
+	RUN_TEST(test_minibuf_roundtrip_multiline);
+	RUN_TEST(test_minibuf_display_uses_caret);
+	RUN_TEST(test_minibuf_single_line_unchanged);
+	RUN_TEST(test_minibuf_trailing_newline);
+	RUN_TEST(test_minibuf_bare_newline_is_not_empty);
+	RUN_TEST(test_caret_escape_newlines);
+
 	/* Boundary tests */
 	RUN_TEST(test_del_row_only_row);
 	RUN_TEST(test_row_append_string_zero_len);
 	RUN_TEST(test_row_del_char_at_start);
 	RUN_TEST(test_row_del_char_at_end);
+
+	/* Kill-buffer confirmation */
+	RUN_TEST(test_kill_confirm_dirty_named_buffer);
+	RUN_TEST(test_kill_no_confirm_dirty_unnamed_buffer);
+	RUN_TEST(test_kill_no_confirm_clean_named_buffer);
+	RUN_TEST(test_kill_no_confirm_special_buffer_with_name);
 
 	return TEST_END();
 }

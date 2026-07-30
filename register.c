@@ -6,7 +6,6 @@
 #include "region.h"
 #include "terminal.h"
 #include "unicode.h"
-#include "unused.h"
 #include "util.h"
 #include "window.h"
 #include <stdint.h>

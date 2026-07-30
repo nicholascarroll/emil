@@ -208,6 +208,50 @@ void test_mutate_replace_readonly(void) {
 	buf->read_only = 0;
 }
 
+/* ---- Quoted newline (C-q C-j) ----
+ *
+ * '\n' is emil's row separator, never a byte stored inside a row.
+ * CMD_QUOTED_INSERT therefore splits the row rather than calling
+ * insertChar, which would have written a literal 0x0A while
+ * undoAppendChar recorded a row split -- coordinates and buffer then
+ * disagreed, and undo destroyed the rest of the line plus the row
+ * below.  These two pin the invariant from both directions. */
+
+void test_quoted_newline_undo_preserves_following_row(void) {
+	const char *lines[] = { "abcdef", "ghi" };
+	struct buffer *buf = make_test_buffer_lines(lines, 2);
+	buf->cx = 3;
+	buf->cy = 0;
+	clearUndosAndRedos(buf);
+
+	insertNewline(1);
+	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
+	TEST_ASSERT_EQUAL_STRING("abc", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_STRING("def", row_str(buf, 1));
+	TEST_ASSERT_EQUAL_STRING("ghi", row_str(buf, 2));
+
+	/* Previously produced a single row, "abcghi". */
+	doUndo(buf, 1);
+	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
+	TEST_ASSERT_EQUAL_STRING("abcdef", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_STRING("ghi", row_str(buf, 1));
+}
+
+void test_backspace_newline_at_row_zero_does_not_read_oob(void) {
+	struct buffer *buf = make_test_buffer("ab");
+	buf->cx = 1;
+	buf->cy = 0;
+	clearUndosAndRedos(buf);
+
+	/* Unreachable while the invariant holds: backSpace only passes
+	 * '\n' from its cx == 0 row-join path, where cy >= 1.  Reaching
+	 * it with starty == 0 previously read buf->row[-1]; run under
+	 * `make asan` to check this stays fixed. */
+	undoBackSpace(buf, '\n');
+
+	TEST_ASSERT_EQUAL_INT(0, buf->undo->starty);
+}
+
 int main(void) {
 	TEST_BEGIN();
 
@@ -224,6 +268,8 @@ int main(void) {
 	RUN_TEST(test_redo_cleared_after_new_edit);
 
 	RUN_TEST(test_undo_newline_insert);
+	RUN_TEST(test_quoted_newline_undo_preserves_following_row);
+	RUN_TEST(test_backspace_newline_at_row_zero_does_not_read_oob);
 
 	RUN_TEST(test_mutate_replace_readonly);
 

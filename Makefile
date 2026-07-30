@@ -6,10 +6,6 @@ PREFIX = /usr/local
 DESTDIR =
 SHELL = /bin/sh
 
-# Documentation defaults
-MAN_SOURCE = emil.1
-MAN_SUBDIR = .
-
 # Standard C99 compiler settings
 CC = cc
 
@@ -24,9 +20,10 @@ LDFLAGS =
 ALL_CFLAGS = $(DEFAULT_CFLAGS) $(CFLAGS)
 
 # Installation directories
-BINDIR = $(PREFIX)/bin
-MAN_BASEDIR = $(PREFIX)/man
-DOCDIR = $(PREFIX)/share/doc/emil
+BINDIR  = $(PREFIX)/bin
+MANDIR  = $(PREFIX)/share/man
+DOCDIR  = $(PREFIX)/share/doc/emil
+LICDIR  = $(PREFIX)/share/licenses/emil
 
 # Source files
 OBJECTS = main.o unicode.o decoder.o buffer.o region.o undo.o transform.o \
@@ -35,8 +32,21 @@ OBJECTS = main.o unicode.o decoder.o buffer.o region.o undo.o transform.o \
           abuf.o window.o ctags.o adjust.o mutate.o wrap.o motion.o dbuf.o \
           emil_subprocess.o palette.o
 
+HEADERS = abuf.h adjust.h base64.h buffer.h completion.h ctags.h \
+          dbuf.h decoder.h display.h edit.h emil.h emil_subprocess.h \
+          fileio.h find.h history.h keymap.h motion.h mutate.h \
+          palette.h pipe.h prompt.h region.h register.h terminal.h \
+          transform.h undo.h unicode.h util.h window.h \
+          wrap.h
+
 # Default target
 all: $(PROGNAME)
+
+# Every object depends on every header. emil.h alone reaches 25 of 30
+# translation units, and a full build is ~4s, so precise per-object
+# dependency tracking would save ~1s at the cost of correctness risk.
+$(OBJECTS): $(HEADERS)
+
 
 # Link the executable
 $(PROGNAME): $(OBJECTS)
@@ -52,30 +62,26 @@ $(PROGNAME): $(OBJECTS)
 # Installation
 
 install: $(PROGNAME)
-	-mkdir -p $(DESTDIR)$(BINDIR) 
-	-mkdir -p $(DESTDIR)$(MAN_BASEDIR)/$(MAN_SUBDIR)/man1
-	-mkdir -p $(DESTDIR)$(DOCDIR)
-	cp $(PROGNAME) $(DESTDIR)$(BINDIR)/
-	-cp $(MAN_SOURCE) $(DESTDIR)$(MAN_BASEDIR)/$(MAN_SUBDIR)/man1/$(PROGNAME).1 2>/dev/null
-	-cp README*.md $(DESTDIR)$(DOCDIR)/ 2>/dev/null
+	mkdir -p $(DESTDIR)$(BINDIR)
+	mkdir -p $(DESTDIR)$(MANDIR)/man1
+	mkdir -p $(DESTDIR)$(DOCDIR)
+	mkdir -p $(DESTDIR)$(LICDIR)
+	cp $(PROGNAME) $(DESTDIR)$(BINDIR)/$(PROGNAME)
 	chmod 755 $(DESTDIR)$(BINDIR)/$(PROGNAME)
+	cp $(PROGNAME).1 $(DESTDIR)$(MANDIR)/man1/$(PROGNAME).1
+	chmod 644 $(DESTDIR)$(MANDIR)/man1/$(PROGNAME).1
+	cp README.md $(DESTDIR)$(DOCDIR)/README.md
+	chmod 644 $(DESTDIR)$(DOCDIR)/README.md
+	cp LICENSE $(DESTDIR)$(LICDIR)/LICENSE
+	chmod 644 $(DESTDIR)$(LICDIR)/LICENSE
 
 uninstall:
-	# Remove the binary
 	rm -f $(DESTDIR)$(BINDIR)/$(PROGNAME)
-	
-	# Remove the specific man page installed
-	# This uses the current MAN_SUBDIR to find the right file
-	rm -f $(DESTDIR)$(MAN_BASEDIR)/$(MAN_SUBDIR)/man1/$(PROGNAME).1
-	
-	# Clean up documentation
-	rm -f $(DESTDIR)$(DOCDIR)/README*.md
-	
-	# Attempt to remove directories only if they are empty
-	# We use '-' to ignore errors if other files exist in these dirs
+	rm -f $(DESTDIR)$(MANDIR)/man1/$(PROGNAME).1
+	rm -f $(DESTDIR)$(DOCDIR)/README.md
+	rm -f $(DESTDIR)$(LICDIR)/LICENSE
 	-rmdir $(DESTDIR)$(DOCDIR) 2>/dev/null
-	-rmdir $(DESTDIR)$(MAN_BASEDIR)/$(MAN_SUBDIR)/man1 2>/dev/null
-	-rmdir $(DESTDIR)$(MAN_BASEDIR)/$(MAN_SUBDIR) 2>/dev/null
+	-rmdir $(DESTDIR)$(LICDIR) 2>/dev/null
 
 # Cleanup
 clean:
@@ -95,11 +101,27 @@ sanitize:
 	        LDFLAGS="-fsanitize=address,undefined" test
 
 # Sorry Dave
+HAL_WARNINGS = -Wall -Wextra -Wpedantic \
+	-Wduplicated-cond -Wduplicated-branches -Wlogical-op \
+	-Wshadow -Wnull-dereference -Wjump-misses-init \
+	-Wredundant-decls -Wmissing-prototypes -Wstrict-prototypes \
+	-Wold-style-definition -Wswitch-enum -Wvla \
+	-Wformat=2 -Wno-format-nonliteral
+ 
 hal:
 	$(MAKE) format
 	$(MAKE) clean
 	for f in *.c; do clang-tidy $$f -- -I. ; done
-	$(MAKE) CFLAGS="$(CFLAGS) -D_POSIX_C_SOURCE=200112L -D_FORTIFY_SOURCE=2 -Werror" $(PROGNAME)
+	$(MAKE) CFLAGS="$(CFLAGS) -D_POSIX_C_SOURCE=200112L -D_FORTIFY_SOURCE=3 -Werror" $(PROGNAME)
+	$(MAKE) CFLAGS="$(CFLAGS) -D_POSIX_C_SOURCE=200112L -D_FORTIFY_SOURCE=3" test
+	$(MAKE) clean
+	$(MAKE) CC=gcc CFLAGS="$(HAL_WARNINGS) -O2 -Werror" $(PROGNAME)
+	@echo "--- gcc -fanalyzer (advisory) ---"
+	@for f in *.c; do \
+		gcc $(DEFAULT_CFLAGS) -DEMIL_VERSION='"$(VERSION)"' \
+		    -fanalyzer -c $$f -o /dev/null 2>&1 || true; \
+	done
+	$(MAKE) clean
 	$(MAKE) test
 
 # Development targets

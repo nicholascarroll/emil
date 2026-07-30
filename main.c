@@ -36,7 +36,7 @@ static volatile sig_atomic_t got_sigcont = 0;
 static volatile sig_atomic_t got_sigterm = 0;
 static volatile sig_atomic_t got_sighup = 0;
 
-void editorSuspend(int sig) {
+static void editorSuspend(int sig) {
 	(void)sig;
 	IGNORE_RETURN(tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_termios));
 	IGNORE_RETURN(write(STDOUT_FILENO, CSI "?1049l", 8));
@@ -44,24 +44,24 @@ void editorSuspend(int sig) {
 	raise(SIGTSTP);
 }
 
-void editorResume(int sig) {
+static void editorResume(int sig) {
 	(void)sig;
 	got_sigcont = 1;
 }
 
 #ifdef SIGWINCH
-void sigwinchHandler(int sig) {
+static void sigwinchHandler(int sig) {
 	(void)sig;
 	got_sigwinch = 1;
 }
 #endif
 
-void handleSigterm(int sig) {
+static void handleSigterm(int sig) {
 	(void)sig;
 	got_sigterm = 1;
 }
 
-void handleSighup(int sig) {
+static void handleSighup(int sig) {
 	(void)sig;
 	got_sighup = 1;
 }
@@ -107,12 +107,12 @@ void handlePendingSignals(void) {
 
 void setupHandlers(void) {
 #ifdef SIGWINCH
-	install_handler(SIGWINCH, sigwinchHandler, 0);
+	installHandler(SIGWINCH, sigwinchHandler, 0);
 #endif
-	install_handler(SIGCONT, editorResume, 0);
-	install_handler(SIGTSTP, editorSuspend, SA_NODEFER);
-	install_handler(SIGTERM, handleSigterm, 0);
-	install_handler(SIGHUP, handleSighup, 0);
+	installHandler(SIGCONT, editorResume, 0);
+	installHandler(SIGTSTP, editorSuspend, SA_NODEFER);
+	installHandler(SIGTERM, handleSigterm, 0);
+	installHandler(SIGHUP, handleSighup, 0);
 }
 
 void editorCleanup(void) {
@@ -141,6 +141,9 @@ void editorCleanup(void) {
 	freeHistory(&E.command_history);
 	freeHistory(&E.shell_history);
 	freeHistory(&E.search_history);
+	freeHistory(&E.replace_history);
+	freeHistory(&E.rect_history);
+	freeHistory(&E.buffer_history);
 	freeHistory(&E.kill_history);
 
 	/* Free registers */
@@ -165,7 +168,7 @@ void editorCleanup(void) {
 	E.render_buf.b = NULL;
 }
 
-void initEditor(void) {
+static void initEditor(void) {
 	E.statusmsg[0] = 0;
 	E.kill = (struct text){ 0 };
 	E.windows = xmalloc(sizeof(struct window *) * 1);
@@ -187,6 +190,9 @@ void initEditor(void) {
 	initHistory(&E.command_history);
 	initHistory(&E.shell_history);
 	initHistory(&E.search_history);
+	initHistory(&E.replace_history);
+	initHistory(&E.rect_history);
+	initHistory(&E.buffer_history);
 	initHistory(&E.kill_history);
 	E.kill_ring_pos = -1;
 
@@ -219,12 +225,7 @@ int main(int argc, char *argv[]) {
 
 	/*
 	 * Detect piped stdin: if stdin is not a terminal, slurp the
-	 * data before entering raw mode, then reopen /dev/tty so the
-	 * terminal works normally.  This enables:
-	 *   git diff | emil
-	 *   curl ... | emil
-	 *   grep -rn foo | emil
-	 */
+	 * data before entering raw mode, then reopen /dev/tty.*/
 	char *stdin_data = NULL;
 	size_t stdin_len = 0;
 	int stdin_buf_used = 0;
@@ -335,7 +336,6 @@ int main(int argc, char *argv[]) {
 
 	/* Initialize minibuffer */
 	E.minibuf = newBuffer();
-	E.minibuf->single_line = 1;
 	E.minibuf->word_wrap = 0;
 	E.minibuf->filename = xstrdup("*minibuffer*");
 	E.minibuf->special_buffer = 1;
@@ -344,7 +344,7 @@ int main(int argc, char *argv[]) {
 
 #ifdef EMIL_DISABLE_SHELL
 	if (!E.statusmsg_show)
-		setStatusMessage("Shell integration disabled at build time.");
+		setStatusMessage("Shell integration excluded from build.");
 #endif /* EMIL_DISABLE_SHELL */
 	for (;;) {
 		/* Also called from readKey(); repeated here so a flag
@@ -357,32 +357,12 @@ int main(int argc, char *argv[]) {
 		if (key == -1)
 			continue; /* signal interrupted: recheck flags */
 
-		/*
-		 * Process this key and then drain any additional
-		 * keys already queued in the input buffer before
-		 * repainting.
-		 *
-		 * The first key is read with a blocking read();
-		 * subsequent keys are drained with a non-blocking
-		 * select() check: we only consume what is already
-		 * buffered, never wait for more.
-		 */
 		for (;;) {
 			recordKey(key);
 
 			if (key >= ' ' && key < KEY_ARROW_LEFT)
 				E.self_insert_key = key;
 
-			/* A keypress clears the previous status message,
-			 * with one exception: a bare-ESC token (033)
-			 * comes from the escape decoder, either for an
-			 * unrecognized sequence (which has just set the
-			 * "Unknown command M-..." message during
-			 * readKey, before this line runs) or for a
-			 * signal-abandoned Meta wait (no new message; the
-			 * prior one should survive the interruption
-			 * rather than be cleared by it).  Either way, 033
-			 * must not clear. */
 			if (key != 033)
 				E.statusmsg_show = 0;
 

@@ -1,4 +1,4 @@
-.Dd February 10, 2026
+.Dd July 31, 2026
 .Dt EMIL 1
 .Os
 .Sh NAME
@@ -7,7 +7,7 @@
 .Sh SYNOPSIS
 .Nm
 .Op Ar options
-.Op Ar file
+.Op Ar file ...
 .Sh DESCRIPTION
 .Nm
 is a small, portable text editor for UTF-8 encoded files.
@@ -17,14 +17,15 @@ a subset of the operational conventions found in the
 editor.
 .Sh OPTIONS
 .Bl -tag -width Ds
-.It +N
-Position the cursor at line number N when opening the file.
-.It --version
-Display version information.
-.El
+.It Cm + Ns Ar N
+Position the cursor at line
+.Ar N
+of the first file.
+.It Cm --version
+Display version information and exit.
 .Sh CONCEPTS
 .Nm
-follows Emacs-style paradigms.
+follows Emacs paradigms.
 .Ss Buffers and Windows
 A
 .Sy buffer
@@ -63,7 +64,7 @@ Negative arguments are not permitted.
 .Pp
 An alternative key that is equivalent to
 .Cm C-u N
-(where N is a number) is 
+(where N is a number) is
 .Cm M-N.
 .Pp
 The
@@ -122,9 +123,9 @@ Move cursor forward word.
 .It Cm M-b
 Move cursor backward word.
 .It Cm C-M-f
-Move cursor forward sexp (expression).
+Move cursor forward s-expression (a word or parenthesised string). 
 .It Cm C-M-b
-Move cursor backward sexp (expression).
+Move cursor backward s-expression.
 .It Cm M-a
 Move cursor backward sentence.
 .It Cm M-e
@@ -316,7 +317,7 @@ Open rectangle (insert whitespace).
 .El
 .Ss Macros
 Keyboard macros record a sequence of keystrokes for later playback.
-Macros cannot be viewed, edited, exported nor saved. 
+Macros cannot be viewed, edited, exported nor saved.
 The commands Find File, Save File and shell commands cannot be executed by macros.
 .Bl -tag -width Ds
 .It Cm C-x (
@@ -331,9 +332,9 @@ Execute last macro N times.
 .Ss Search and Replace
 .Bl -tag -width Ds
 .It Cm C-M-s
-Incremental regex search forward.
+Incremental regular expression search forward.
 .It Cm C-M-r
-Incremental regex search backward.
+Incremental regular expression search backward.
 .It Cm M-%
 Query replace (string).
 .It Cm M-x query-replace
@@ -341,7 +342,27 @@ Replace string interactively.
 .It Cm M-x replace-string
 Replace all occurrences (non-interactive).
 .It Cm M-x replace-regexp
-Replace using regular expressions.
+Replace using regular expressions.  Acts on the region while the region is active, and otherwise from
+point to the end of the buffer.
+.Ql ^
+and
+.Ql $
+anchor at line boundaries.  A newline is entered into either prompt with
+.Ic C-q C-j 
+.Pp
+Within the replacement text:
+.Bl -tag -width Ds
+.It Ql \&\e&
+The text matched by the whole pattern.
+.It Ql \&\eN
+The text matched by the Nth parenthesised group, for N from 1 to 9.
+.It Ql \&\en
+Not a newline escape; it is rejected as an invalid backslash sequence.
+.It Ql \&\e\e
+A literal backslash.
+.El
+.Pp
+An invalid pattern is reported and nothing is replaced.
 .El
 .Ss Regular Expressions
 Patterns are POSIX extended regular expressions, not Emacs or GNU
@@ -358,27 +379,6 @@ The GNU and Emacs shorthands
 non-greedy operators such as
 .Ql *? ,
 and backreferences within the pattern itself are not available.
-.Pp
-.Cm replace-regexp
-acts on the region while the region is active, and otherwise from 
-point to the end of the buffer.
-.Ql ^
-and
-.Ql $
-anchor at line boundaries 
-.Pp
-Within the replacement text:
-.Bl -tag -width Ds
-.It Ql \&\e&
-The text matched by the whole pattern.
-.It Ql \&\eN
-The text matched by the Nth parenthesised group, for N from 1 to 9.
-A group that did not participate in the match contributes nothing.
-.It Ql \&\e\e
-A literal backslash.
-.El
-.Pp
-An invalid pattern is reported and nothing is replaced.
 .Ss Shell Integration
 When enabled at compile time:
 .Bl -tag -width Ds
@@ -464,12 +464,12 @@ When saving,
 .Nm
 writes the complete buffer to the associated file.
 The editor attempts an atomic write operation to prevent data corruption.
-If an atomic write is not possible, the user is prompted to overwrite the file directly.
-No automatic backup or "auto-save" files are generated.
+If an atomic write is not possible, the user is prompted to overwrite the file directly, which risks a partial write if space is insufficient or data corruption if the write is interrupted.
+Hard links are lost. No automatic backup or "auto-save" files are generated.
 .Ss Advisory Locking
-While having unsaved edits to a file, 
+While having unsaved edits to a file,
 .Nm
-will keep an advisory lock on the file. If another instance of 
+will keep an advisory lock on the file. If another instance of
 .Nm
 begins to edit the file, it receives a warning. The lock does not prevent other processes from writing to the file.
 .Ss File Size Limit
@@ -477,18 +477,20 @@ begins to edit the file, it receives a warning. The lock does not prevent other 
 is not designed for editing very large files. Files larger than 1 GiB cannot be opened.
 .Sh EXIT STATUS
 .Nm
-exits 0 on success and >0 if an error occurs.
+exits 0 on success and 1 if a file cannot be opened or an unrecognised
+option is given.
 .Sh SEE ALSO
 .Xr emacs 1
+.Sh AUTHORS
+The
+.Nm
+editor was developed by
+.An Nicholas Carroll .
+It is a derivative of
+.Em emsys
+by
+.An japanoise .
+.Lk https://github.com/japanoise/emsys
 .Sh BUGS
 Please report defects to the project repository at:
 .Lk https://github.com/nicholascarroll/emil
-.Sh AUTHOR
-The
-.Nm
-editor was developed by Nicholas Carroll.
-It is a derivative of
-.Em emsys
-by japanoise.
-.Lk https://github.com/japanoise/emsys
-

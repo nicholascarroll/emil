@@ -18,6 +18,117 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+/* The minibuffer is a real buffer.  C-q C-j splits it into rows exactly
+ * as in any other buffer, so no row anywhere in emil ever holds a
+ * literal 0x0A -- the invariant that keeps undo's row arithmetic and
+ * every serialization ('\n' as row separator) honest.
+ *
+ * It is *drawn* on one line, with row breaks in caret notation, which
+ * is what Emacs shows when a multi-line entry is recalled into a
+ * replace prompt.  Model and rendering are separate choices here.
+ *
+ * Hence two serializations, both returning malloc'd strings:
+ *   minibufJoin(mb, "\n")  the value handed back to the caller
+ *   minibufJoin(mb, "^J")  what the user sees
+ */
+char *minibufJoin(struct buffer *mb, const char *sep) {
+	size_t seplen = strlen(sep);
+	size_t total = 1;
+	for (int i = 0; i < mb->numrows; i++) {
+		total += mb->row[i].size;
+		if (i + 1 < mb->numrows)
+			total += seplen;
+	}
+	char *out = xmalloc(total);
+	size_t at = 0;
+	for (int i = 0; i < mb->numrows; i++) {
+		if (mb->row[i].chars && mb->row[i].size > 0) {
+			memcpy(out + at, mb->row[i].chars, mb->row[i].size);
+			at += mb->row[i].size;
+		}
+		if (i + 1 < mb->numrows) {
+			memcpy(out + at, sep, seplen);
+			at += seplen;
+		}
+	}
+	out[at] = '\0';
+	return out;
+}
+
+/* Empty means the *joined value* has zero length: exactly the state
+ * where RET should submit "".  Two or more rows is a real entry even
+ * when every row is blank -- typing only C-q C-j means the string
+ * "\n", the canonical way to join lines in a replace command.  The
+ * per-row test used here before swallowed that entry as "". */
+static int minibufEmpty(struct buffer *mb) {
+	if (mb->numrows > 1)
+		return 0;
+	return mb->numrows == 0 || mb->row[0].size == 0;
+}
+
+/* Copy 's' with each '\n' rewritten as the two bytes "^J", the same
+ * caret notation minibufJoin uses for display.  For embedding user
+ * text into a prompt or status string: E.statusmsg reaches the
+ * terminal raw, so a literal 0x0A there executes as a line feed while
+ * stringWidth charges it two columns -- the display and the cursor
+ * math disagree, and the minibuffer visibly breaks in two.  Returns a
+ * malloc'd string; caller frees. */
+char *caretEscapeNewlines(const uint8_t *s) {
+	size_t len = 0, extra = 0;
+	for (const uint8_t *p = s; *p; p++, len++)
+		if (*p == '\n')
+			extra++;
+	char *out = xmalloc(len + extra + 1);
+	char *o = out;
+	for (const uint8_t *p = s; *p; p++) {
+		if (*p == '\n') {
+			*o++ = '^';
+			*o++ = 'J';
+		} else {
+			*o++ = (char)*p;
+		}
+	}
+	*o = '\0';
+	return out;
+}
+
+/* The one place a prompt type maps to a history ring.  NULL means the
+ * prompt keeps no history.  No default: -Wswitch turns a new enum
+ * value into a build break here. */
+static struct history *histFor(enum promptType t) {
+	switch (t) {
+	case PROMPT_FILES:
+	case PROMPT_DIR:
+		return &E.file_history;
+	case PROMPT_COMMAND:
+		return &E.command_history;
+	case PROMPT_BUFFER:
+		return &E.buffer_history;
+	case PROMPT_REPLACE:
+		return &E.replace_history;
+	case PROMPT_SHELL:
+		return &E.shell_history;
+	case PROMPT_RECT:
+		return &E.rect_history;
+	case PROMPT_SEARCH:
+		return &E.search_history;
+	case PROMPT_PLAIN:
+		return NULL;
+	}
+	return NULL;
+}
+
+/* Display column of point, charging each row break the two columns its
+ * "^J" occupies on screen. */
+static int minibufCursorCols(struct buffer *mb) {
+	int cols = 0;
+	for (int i = 0; i < mb->cy && i < mb->numrows; i++)
+		cols += stringWidth(mb->row[i].chars) + 2;
+	if (mb->cy >= 0 && mb->cy < mb->numrows)
+		cols += charsToDisplayColumn(&mb->row[mb->cy], mb->cx);
+	return cols;
+}
+
 uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 		      enum promptType t,
 		      void (*callback)(struct buffer *, uint8_t *, int)) {
@@ -28,6 +139,13 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 	uint8_t *result = NULL;
 	int history_pos = -1;
 
+	/* Publish the prompt type for keymap.c (quoted-newline
+	 * refusal).  Saved and restored so a nested prompt -- e.g.
+	 * query-replace's C-r opening a replacement prompt -- does
+	 * not clobber its parent's type. */
+	enum promptType saved_prompt_type = E.prompt_type;
+	E.prompt_type = t;
+
 	replaceMinibufferText(E.minibuf, "");
 
 	/* Save editor buffer and switch to minibuffer */
@@ -36,13 +154,12 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 
 	while (1) {
 		/* Display prompt with minibuffer content */
-		char *content = E.minibuf->numrows > 0 ?
-					(char *)E.minibuf->row[0].chars :
-					"";
-		if (!E.minibuf->completion_state.preserve_message) {
-			setStatusMessage("%s%s", prompt, content);
+		char *shown = minibufJoin(E.minibuf, "^J");
+		if (!E.minibuf->completionState.preserve_message) {
+			setStatusMessage("%s%s", prompt, shown);
 		}
-		E.minibuf->completion_state.preserve_message = 0;
+		free(shown);
+		E.minibuf->completionState.preserve_message = 0;
 
 		refreshScreen();
 
@@ -52,11 +169,8 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 		 * columns; passing bytes drifts the cursor right of
 		 * the text). */
 		int prompt_width = stringWidth((const uint8_t *)prompt);
-		int content_cols = 0;
-		if (E.minibuf->numrows > 0)
-			content_cols = charsToDisplayColumn(&E.minibuf->row[0],
-							    E.minibuf->cx);
-		cursorBottomLine(prompt_width + content_cols + 1);
+		cursorBottomLine(prompt_width + minibufCursorCols(E.minibuf) +
+				 1);
 
 		/* Read key */
 		int c = readKey();
@@ -73,16 +187,21 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 
 		/* Handle special minibuffer keys */
 		switch (c) {
-		case '\r': {
-			if (E.minibuf->numrows > 0 &&
-			    E.minibuf->row[0].size > 0) {
+		case '\r':
+		case CTRL('j'): {
+			/* C-j submits: minibuffer-local-map binds both \r
+			 * and \n to exit-minibuffer.  Emacs's RET/C-j
+			 * divergence exists only in completion maps, and
+			 * emil's completion model is its own.  A literal
+			 * newline is entered with C-q C-j. */
+			if (!minibufEmpty(E.minibuf)) {
 				char *current_text =
-					(char *)E.minibuf->row[0].chars;
+					minibufJoin(E.minibuf, "\n");
 
 				/* Determine the effective path: if a completion is selected,
 				 * use that; otherwise use the minibuffer text. */
-				struct completion_state *cs =
-					&E.minibuf->completion_state;
+				struct completionState *cs =
+					&E.minibuf->completionState;
 				char *effective_path = current_text;
 				if (cs->matches && cs->selected >= 0 &&
 				    cs->selected < cs->n_matches) {
@@ -126,6 +245,7 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 
 					handleMinibufferCompletion(E.minibuf,
 								   t);
+					free(current_text);
 					break; /* Do NOT return; keep the user in the prompt */
 				}
 
@@ -138,14 +258,13 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 						    current_text) {
 							current_text[len - 1] =
 								'\0';
-							E.minibuf->row[0].size =
-								len - 1;
 						}
 					}
 				}
 
 				/* Return the effective path */
 				result = (uint8_t *)xstrdup(effective_path);
+				free(current_text);
 			} else {
 				result = (uint8_t *)xstrdup("");
 			}
@@ -200,31 +319,14 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 			/* If completions are visible, cycle selection
 			 * instead of history. */
 			int down = (c == KEY_ARROW_DOWN || c == KEY_META('n'));
-			if (E.minibuf->completion_state.matches &&
-			    E.minibuf->completion_state.n_matches > 0) {
+			if (E.minibuf->completionState.matches &&
+			    E.minibuf->completionState.n_matches > 0) {
 				cycleCompletion(E.minibuf, down ? 1 : -1);
 				break;
 			}
 
-			struct history *hist = NULL;
+			struct history *hist = histFor(t);
 			char *history_str = NULL;
-
-			switch (t) {
-			case PROMPT_FILES:
-			case PROMPT_DIR:
-				hist = &E.file_history;
-				break;
-			case PROMPT_COMMAND:
-				hist = &E.command_history;
-				break;
-			case PROMPT_BASIC:
-			case PROMPT_BUFFER:
-				hist = &E.shell_history;
-				break;
-			case PROMPT_SEARCH:
-				hist = &E.search_history;
-				break;
-			}
 
 			if (hist && hist->count > 0) {
 				if (!down) {
@@ -266,10 +368,10 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 					      cmd_peek == CMD_NEXT_LINE);
 
 			if (!is_cursor_move &&
-			    E.minibuf->completion_state.last_completed_text !=
+			    E.minibuf->completionState.last_completed_text !=
 				    NULL) {
 				resetCompletionState(
-					&E.minibuf->completion_state);
+					&E.minibuf->completionState);
 			}
 
 			/* Dispatch */
@@ -278,29 +380,11 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 			if (cmd_peek != CMD_NONE)
 				processKeypress(cmd_peek);
 
-			/* Ensure single line */
-			if (E.minibuf->numrows > 1) {
-				/* Join all rows into first row */
-				int total_len = 0;
-				for (int i = 0; i < E.minibuf->numrows; i++) {
-					total_len += E.minibuf->row[i].size;
-				}
-
-				char *joined = xmalloc(total_len + 1);
-				joined[0] = 0;
-				for (int i = 0; i < E.minibuf->numrows; i++) {
-					if (E.minibuf->row[i].chars) {
-						strncat(joined,
-							(char *)E.minibuf
-								->row[i]
-								.chars,
-							E.minibuf->row[i].size);
-					}
-				}
-
-				replaceMinibufferText(E.minibuf, joined);
-				free(joined);
-			}
+			/* No single-row collapse here.  It concatenated
+			 * rows with no separator, so C-y of a multi-line
+			 * kill silently ran the lines together, and it
+			 * dropped point at end-of-line.  Rows are now the
+			 * model; minibufJoin serializes at the edges. */
 		}
 		}
 
@@ -314,23 +398,7 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 
 done:
 	if (result && strlen((char *)result) > 0) {
-		struct history *hist = NULL;
-		switch (t) {
-		case PROMPT_FILES:
-		case PROMPT_DIR:
-			hist = &E.file_history;
-			break;
-		case PROMPT_COMMAND:
-			hist = &E.command_history;
-			break;
-		case PROMPT_BASIC:
-		case PROMPT_BUFFER:
-			hist = &E.shell_history;
-			break;
-		case PROMPT_SEARCH:
-			hist = &E.search_history;
-			break;
-		}
+		struct history *hist = histFor(t);
 		if (hist) {
 			addHistory(hist, (char *)result);
 		}
@@ -339,6 +407,7 @@ done:
 	closeCompletionsBuffer();
 
 	E.buf = E.edbuf;
+	E.prompt_type = saved_prompt_type;
 
 	clearStatusMessage();
 

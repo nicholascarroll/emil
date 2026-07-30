@@ -13,6 +13,6 @@ void deserializeUnicode(void);
 void copyToClipboard(const uint8_t *text);
 void disableRawModeKeepScreen(void);
 void openShellDrawer(void);
-void install_handler(int signum, void (*handler)(int), int flags);
+void installHandler(int signum, void (*handler)(int), int flags);
 
 #endif /* EMIL_TERMINAL_H */

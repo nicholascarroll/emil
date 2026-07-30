@@ -16,8 +16,7 @@ void toggleHeaderBody(void);
  * filesystem root for a "tags" file.
  * writes the absolute directory containing it (no trailing slash, "/"
  * for root) into out_dir and returns 0.  Returns -1 if no tags file is
- * found before the root or if out_dir is too small.  Exposed for
- * testing and reuse. */
+ * found before the root or if out_dir is too small. Exposed for testing.*/
 int findTagsDir(char *out_dir, size_t dirsz);
 
 /* Resolve a path taken from a tags file (which is relative to the

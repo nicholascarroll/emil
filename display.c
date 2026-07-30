@@ -8,7 +8,6 @@
 #include "region.h"
 #include "terminal.h"
 #include "unicode.h"
-#include "unused.h"
 #include "util.h"
 #include "window.h"
 #include <errno.h>
@@ -973,10 +972,7 @@ void drawMinibuffer(struct abuf *ab) {
 	int prefix_cols = stringWidth((const uint8_t *)E.prefix_display);
 
 	/* Byte offset into msg; advances line by line.  Lines are
-	 * filled by display columns, splitting only at character
-	 * boundaries: a byte-based split cuts multi-byte UTF-8
-	 * sequences in half at wrap points, sending invalid
-	 * fragments to the terminal. */
+	 * filled by display columns, splitting only at character boundaries.*/
 	int offset = 0;
 
 	/* Draw each minibuffer line */
@@ -1157,8 +1153,8 @@ void refreshScreen(void) {
 
 	// Ensure cursor doesn't go beyond the window's bottom
 	if (cursor_y > cumulative_height) {
-		struct buffer *buf = focusedWin->buf;
-		if (buf->cy >= buf->numrows) {
+		struct buffer *fbuf = focusedWin->buf;
+		if (fbuf->cy >= fbuf->numrows) {
 			cursor_y = cumulative_height;
 		} else {
 			cursor_y = cumulative_height - statusbar_height;
@@ -1172,8 +1168,6 @@ void refreshScreen(void) {
 	abAppend(ab, "\x1b[?25h", 6); // Show cursor
 
 	IGNORE_RETURN(write(STDOUT_FILENO, ab->b, ab->len));
-
-	//	usleep(100000); // 100ms delay for simulating slow network or screen
 }
 
 void cursorBottomLine(int curs) {
@@ -1202,7 +1196,8 @@ void cursorBottomLine(int curs) {
 	IGNORE_RETURN(write(STDOUT_FILENO, cbuf, strlen(cbuf)));
 }
 
-void resizeScreen(int UNUSED(sig)) {
+void resizeScreen(int sig) {
+	(void)sig; /* SIGWINCH handler: signature fixed by sigaction(2) */
 	getWindowSize(&E.screenrows, &E.screencols);
 	for (struct buffer *b = E.headbuf; b != NULL; b = b->next) {
 		for (int i = 0; i < b->numrows; i++) {

@@ -1,6 +1,5 @@
 #include "util.h"
 #include "emil.h"
-#include "fileio.h"
 #include <errno.h>
 #include <limits.h>
 #include <string.h>
@@ -214,38 +213,5 @@ char *collapseHome(const char *path) {
 	char *out = xmalloc(1 + tlen + 1);
 	out[0] = '~';
 	memcpy(out + 1, path + hlen, tlen + 1);
-	return out;
-}
-
-/* Resolve a path to absolute form for comparison purposes.
- * Normalizes . and .. segments.  Does NOT resolve symlinks.
- * Returns a new string; caller frees. */
-char *absolutePath(const char *path) {
-	if (!path || !*path)
-		return xstrdup("");
-
-	if (path[0] == '/') {
-		char *out = xstrdup(path);
-		cleanPath(out);
-		return out;
-	}
-
-	if (path[0] == '~' && (path[1] == '\0' || path[1] == '/')) {
-		char *out = expandTilde(path);
-		cleanPath(out);
-		return out;
-	}
-
-	char cwd[PATH_MAX];
-	if (getcwd(cwd, sizeof(cwd)) == NULL)
-		return xstrdup(path);
-
-	size_t clen = strlen(cwd);
-	size_t plen = strlen(path);
-	char *out = xmalloc(clen + 1 + plen + 1);
-	memcpy(out, cwd, clen);
-	out[clen] = '/';
-	memcpy(out + clen + 1, path, plen + 1);
-	cleanPath(out);
 	return out;
 }

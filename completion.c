@@ -18,7 +18,7 @@
 #include "window.h"
 #include <regex.h>
 
-void resetCompletionState(struct completion_state *state) {
+void resetCompletionState(struct completionState *state) {
 	free(state->last_completed_text);
 	state->last_completed_text = NULL;
 	state->completion_start_pos = 0;
@@ -35,7 +35,7 @@ void resetCompletionState(struct completion_state *state) {
 	state->selected = -1;
 }
 
-static void freeCompletionResult(struct completion_result *result) {
+static void freeCompletionResult(struct completionResult *result) {
 	if (result->matches) {
 		for (int i = 0; i < result->n_matches; i++) {
 			free(result->matches[i]);
@@ -80,14 +80,13 @@ static char *findCommonPrefix(char **strings, int count) {
 }
 
 static void getFileCompletions(const char *prefix,
-			       struct completion_result *result) {
+			       struct completionResult *result) {
 	glob_t globlist;
 	result->matches = NULL;
 	result->n_matches = 0;
 	result->common_prefix = NULL;
 	result->prefix_len = strlen(prefix);
 
-	char *glob_pattern = NULL;
 	const char *pattern_to_use = prefix;
 
 	/* Manual tilde expansion */
@@ -105,10 +104,9 @@ static void getFileCompletions(const char *prefix,
 		pattern_to_use = expanded;
 	}
 
-#ifndef EMIL_NO_SIMPLE_GLOB
-	/* Add * for globbing */
+	/* Append '*' so the prefix matches as a prefix. */
 	int len = strlen(pattern_to_use);
-	glob_pattern = xmalloc(len + 2);
+	char *glob_pattern = xmalloc(len + 2);
 	emil_strlcpy(glob_pattern, pattern_to_use, len + 2);
 	glob_pattern[len] = '*';
 	glob_pattern[len + 1] = '\0';
@@ -117,7 +115,6 @@ static void getFileCompletions(const char *prefix,
 		free((void *)pattern_to_use);
 	}
 	pattern_to_use = glob_pattern;
-#endif
 
 	int glob_result = glob(pattern_to_use, GLOB_MARK, NULL, &globlist);
 	if (glob_result == 0) {
@@ -144,17 +141,12 @@ static void getFileCompletions(const char *prefix,
 		result->n_matches = 0;
 	}
 
-	if (glob_pattern) {
-		free(glob_pattern);
-	}
-	if (pattern_to_use != prefix && pattern_to_use != glob_pattern) {
-		free((void *)pattern_to_use);
-	}
+	free(glob_pattern);
 }
 
 static void getBufferCompletions(const char *prefix,
 				 struct buffer *currentBuffer,
-				 struct completion_result *result) {
+				 struct completionResult *result) {
 	result->matches = NULL;
 	result->n_matches = 0;
 	result->common_prefix = NULL;
@@ -212,7 +204,7 @@ static void getBufferCompletions(const char *prefix,
 }
 
 static void getCommandCompletions(const char *prefix,
-				  struct completion_result *result) {
+				  struct completionResult *result) {
 	result->matches = NULL;
 	result->n_matches = 0;
 	result->common_prefix = NULL;
@@ -262,10 +254,21 @@ void replaceMinibufferText(struct buffer *minibuf, const char *text) {
 		delRow(minibuf, 0);
 	}
 
-	/* Insert new text */
-	insertRow(minibuf, 0, (const uint8_t *)text, strlen(text));
-	minibuf->cx = strlen(text);
-	minibuf->cy = 0;
+	/* Split on newlines rather than storing the byte: a history
+	 * entry can contain one (C-q C-j in a replace pattern).*/
+	int at = 0;
+	const char *p = text;
+	for (;;) {
+		const char *nl = strchr(p, '\n');
+		size_t len = nl ? (size_t)(nl - p) : strlen(p);
+		insertRow(minibuf, at, (const uint8_t *)p, len);
+		minibuf->cx = (int)len;
+		minibuf->cy = at;
+		at++;
+		if (!nl)
+			break;
+		p = nl + 1;
+	}
 }
 
 static void showCompletionsBuffer(char **matches, int n_matches,
@@ -306,7 +309,7 @@ static void showCompletionsBuffer(char **matches, int n_matches,
 		}
 
 		/* Store match list for M-n/M-p navigation. */
-		struct completion_state *cs = &E.minibuf->completion_state;
+		struct completionState *cs = &E.minibuf->completionState;
 		if (cs->matches) {
 			for (int i = 0; i < cs->n_matches; i++)
 				free(cs->matches[i]);
@@ -388,17 +391,20 @@ void handleMinibufferCompletion(struct buffer *minibuf, enum promptType type) {
 		minibuf->numrows > 0 ? (char *)minibuf->row[0].chars : "";
 
 	/* Check if text changed since last completion */
-	if (minibuf->completion_state.last_completed_text == NULL ||
+	if (minibuf->completionState.last_completed_text == NULL ||
 	    strcmp(current_text,
-		   minibuf->completion_state.last_completed_text) != 0) {
+		   minibuf->completionState.last_completed_text) != 0) {
 		/* Text changed - reset completion state */
-		resetCompletionState(&minibuf->completion_state);
+		resetCompletionState(&minibuf->completionState);
 	}
 
 	/* Get matches based on type */
-	struct completion_result result = { 0 };
+	struct completionResult result = { 0 };
 	switch (type) {
-	case PROMPT_BASIC:
+	case PROMPT_PLAIN:
+	case PROMPT_REPLACE:
+	case PROMPT_SHELL:
+	case PROMPT_RECT:
 		break;
 	case PROMPT_FILES:
 		getFileCompletions(current_text, &result);
@@ -452,7 +458,7 @@ void handleMinibufferCompletion(struct buffer *minibuf, enum promptType type) {
 	/* Handle based on number of matches */
 	if (result.n_matches == 0) {
 		setStatusMessage("[No match]");
-		minibuf->completion_state.preserve_message = 1;
+		minibuf->completionState.preserve_message = 1;
 	} else if (result.n_matches == 1) {
 		/* Complete fully */
 		replaceMinibufferText(minibuf, result.matches[0]);
@@ -466,20 +472,20 @@ void handleMinibufferCompletion(struct buffer *minibuf, enum promptType type) {
 			closeCompletionsBuffer();
 		} else {
 			/* Already at common prefix (or no common prefix found) */
-			if (minibuf->completion_state.successive_tabs > 0) {
+			if (minibuf->completionState.successive_tabs > 0) {
 				showCompletionsBuffer(result.matches,
 						      result.n_matches, type);
 			} else {
 				setStatusMessage("[complete, but not unique]");
-				minibuf->completion_state.preserve_message = 1;
+				minibuf->completionState.preserve_message = 1;
 			}
 		}
 	}
 
 	/* Update state BEFORE cleanup */
-	minibuf->completion_state.successive_tabs++;
-	free(minibuf->completion_state.last_completed_text);
-	minibuf->completion_state.last_completed_text = xstrdup(
+	minibuf->completionState.successive_tabs++;
+	free(minibuf->completionState.last_completed_text);
+	minibuf->completionState.last_completed_text = xstrdup(
 		minibuf->numrows > 0 ? (char *)minibuf->row[0].chars : "");
 
 	/* Cleanup */
@@ -487,7 +493,7 @@ void handleMinibufferCompletion(struct buffer *minibuf, enum promptType type) {
 }
 
 void cycleCompletion(struct buffer *minibuf, int direction) {
-	struct completion_state *cs = &minibuf->completion_state;
+	struct completionState *cs = &minibuf->completionState;
 	if (!cs->matches || cs->n_matches == 0)
 		return;
 

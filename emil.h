@@ -24,9 +24,14 @@
 
 /* Universal argument encoding.
  * UARG_REVERSE is the M-- reverse modifier; UARG_COUNT extracts a
- * repeat count, treating "no argument" and "reverse" alike as 1. */
+ * repeat count, treating "no argument" and "reverse" alike as 1.
+ *
+ * The encoding relies on counts and the sentinel occupying disjoint
+ * value ranges: counts are always >= 1, so the sign carries the
+ * discriminant. */
 #define UARG_REVERSE (-1)
 #define UARG_COUNT(u) ((u) > 0 ? (u) : 1)
+#define UARG_MAX 1000000
 
 /* Suppress GCC's warn_unused_result where the return value is
  * intentionally discarded (e.g. best-effort write to stdout). */
@@ -37,13 +42,17 @@
 	} while (0)
 #define ISCTRL(c) ((0 < c && c < 0x20) || c == 0x7f)
 
+/* A prompt's type selects its completion behaviour and its history ring */
 enum promptType {
-	PROMPT_BASIC,
+	PROMPT_PLAIN, /* no completion, no history */
 	PROMPT_BUFFER,
 	PROMPT_FILES,
 	PROMPT_DIR,
 	PROMPT_COMMAND,
 	PROMPT_SEARCH,
+	PROMPT_REPLACE, /* both halves of every replace command */
+	PROMPT_SHELL,
+	PROMPT_RECT,
 };
 /*** data ***/
 
@@ -85,7 +94,7 @@ struct undo {
 	uint8_t *data;
 };
 
-struct completion_state {
+struct completionState {
 	char *last_completed_text;
 	int completion_start_pos;
 	int successive_tabs;
@@ -96,7 +105,7 @@ struct completion_state {
 	int n_matches;	/* Number of matches in the list */
 };
 
-struct completion_result {
+struct completionResult {
 	char **matches;
 	int n_matches;
 	char *common_prefix;
@@ -124,7 +133,6 @@ struct buffer {
 	int special_buffer;
 	int word_wrap;
 	int rectangle_mode;
-	int single_line;
 	int read_only;
 	int lock_fd; /* fd holding advisory lock, or -1 */
 	/* Only used for equality comparison with stat().st_mtime.
@@ -155,7 +163,7 @@ struct buffer {
 	int screen_cache_cols; /* screencols at last buildScreenCache;
 				* a change invalidates every row's
 				* cached_sublines */
-	struct completion_state completion_state;
+	struct completionState completionState;
 };
 
 struct window {
@@ -244,6 +252,12 @@ struct config {
 	/* Buffer management for minibuffer */
 	struct buffer *edbuf;	/* Saved editor context */
 	struct buffer *minibuf; /* Minibuffer object */
+	/* Type of the prompt currently reading the minibuffer.
+	 * Meaningful only while E.buf == E.minibuf; editorPrompt
+	 * saves, sets and restores it, so nested prompts see their
+	 * own type.  Lets keymap.c refuse a quoted newline in
+	 * prompts whose consumers cannot honour one. */
+	enum promptType prompt_type;
 
 	int statusmsg_show;
 	struct termios orig_termios;
@@ -275,6 +289,9 @@ struct config {
 	struct history command_history;
 	struct history shell_history;
 	struct history search_history;
+	struct history replace_history;
+	struct history rect_history;
+	struct history buffer_history;
 	struct history kill_history;
 	int kill_ring_pos;   /* Current position in kill ring for M-y */
 	int self_insert_key; /* Stashed key for CMD_SELF_INSERT */
@@ -284,20 +301,6 @@ struct config {
 };
 
 /*** prototypes ***/
-
-uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
-		      enum promptType t,
-		      void (*callback)(struct buffer *, uint8_t *, int));
-void updateBuffer(struct buffer *buf);
-void splitLineAtPoint(void);
-void insertNewline(int count);
-void insertChar(struct buffer *bufr, int c, int count);
-int editorOpen(struct buffer *bufr, char *filename);
-void die(const char *s);
-struct buffer *newBuffer(void);
-void destroyBuffer(struct buffer *);
-void recordKey(int c);
-void execMacro(struct macro *macro);
 void editorCleanup(void);
 extern struct config E;
 void handlePendingSignals(void);
