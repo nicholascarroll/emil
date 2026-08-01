@@ -14,6 +14,7 @@
 - In atomic write, preserve owner. #98.
 - Clamp universal argument at 1 million #99.
 - Allow entry of newline with `C-q C-j` in `replace-regexp` #96.
+- Fixed bug in rectangle edit that caused UTF-8 corruption.
 
 ### Correction to 0.7.0
 - #90 (read-only buffer corruption from kill-rectangle) was listed under Known

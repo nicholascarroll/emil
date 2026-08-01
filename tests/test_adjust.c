@@ -7,6 +7,10 @@
 #include "test.h"
 #include "test_harness.h"
 #include "adjust.h"
+#include "edit.h"
+#include "region.h"
+#include "unicode.h"
+#include "undo.h"
 #include <string.h>
 
 void setUp(void) {
@@ -171,6 +175,170 @@ void test_ins_point_after_single_line(void) {
 	TEST_ASSERT_EQUAL_INT(10, py); /* no line delta */
 }
 
+/* ----------------------------------------------------------------
+ * Mark ring
+ *
+ * Ring entries are byte offsets, exactly like the live mark, so
+ * adjustAllPoints() must keep them current across mutations.  When it
+ * did not, popMark() restored positions that no longer existed: it
+ * jumped to the wrong place (pure ASCII, no Unicode needed) and could
+ * put the mark inside a multi-byte character, so typing there left
+ * invalid UTF-8 in the buffer -- which no load path will reopen.
+ *
+ * These drive the real edit functions rather than calling adjustPoint
+ * directly, so they pin the whole path: push -> mutate -> pop.
+ * ---------------------------------------------------------------- */
+
+/* Push (cx,cy) onto the ring the way a real C-SPC does. */
+static void push_mark_at(struct buffer *buf, int cx, int cy) {
+	buf->cx = cx;
+	buf->cy = cy;
+	setMark();
+}
+
+void test_markring_adjusted_on_delete(void) {
+	const char *lines[] = { "hello world" };
+	struct buffer *buf = make_test_buffer_lines(lines, 1);
+
+	push_mark_at(buf, 6, 0); /* mark at "world" */
+	push_mark_at(buf, 0, 0); /* pushes (6,0) onto the ring */
+	TEST_ASSERT_EQUAL_INT(6, buf->mark_ring[0].cx);
+
+	/* Delete one char at the start: everything after shifts left */
+	buf->cx = 0;
+	buf->cy = 0;
+	delChar(1);
+
+	/* The ring entry must have tracked the edit, like the live mark */
+	TEST_ASSERT_EQUAL_INT(5, buf->mark_ring[0].cx);
+	TEST_ASSERT_EQUAL_INT(0, buf->mark_ring[0].cy);
+}
+
+void test_markring_adjusted_on_insert(void) {
+	const char *lines[] = { "hello" };
+	struct buffer *buf = make_test_buffer_lines(lines, 1);
+
+	push_mark_at(buf, 5, 0);
+	push_mark_at(buf, 0, 0);
+	TEST_ASSERT_EQUAL_INT(5, buf->mark_ring[0].cx);
+
+	/* insertChar() records no undo itself; its callers record one
+	 * first, and that is what drives adjustAllPoints.  Mirror the
+	 * real call sites (keymap.c) rather than calling it bare. */
+	buf->cx = 0;
+	buf->cy = 0;
+	undoSelfInsert('X', 1);
+	insertChar(buf, 'X', 1);
+
+	TEST_ASSERT_EQUAL_INT(6, buf->mark_ring[0].cx);
+}
+
+void test_markring_pop_jumps_to_right_line(void) {
+	/* Bug 2b: ASCII-only wrong jump.  Mark a line, kill lines
+	 * above it, pop back -- must still land on the same text. */
+	const char *lines[] = { "AAA", "BBB", "CCC", "DDD",
+				"TARGET", "FFF", "GGG" };
+	struct buffer *buf = make_test_buffer_lines(lines, 7);
+
+	push_mark_at(buf, 0, 4); /* on TARGET */
+	push_mark_at(buf, 0, 0); /* ring gets (0,4) */
+
+	/* Kill the four lines above TARGET */
+	buf->cx = 0;
+	buf->cy = 0;
+	for (int i = 0; i < 4; i++)
+		killLine(1);
+
+	TEST_ASSERT_EQUAL_STRING("TARGET", (char *)buf->row[2].chars);
+
+	popMark();
+
+	/* popMark moves point to the old live mark and rotates the
+	 * ring entry into the mark; the entry must now name TARGET. */
+	TEST_ASSERT_EQUAL_INT(2, buf->marky);
+	TEST_ASSERT_EQUAL_STRING("TARGET", (char *)buf->row[buf->marky].chars);
+}
+
+void test_markring_pop_stays_on_char_boundary(void) {
+	/* Bug 2a: stale entry landing mid-character.  "xcafé" is
+	 * 78 63 61 66 C3 A9; byte 4 is the start of 'é'.  Deleting
+	 * the leading 'x' shifts it to 3, so an unadjusted entry of 4
+	 * points into the middle of the character. */
+	const char *lines[] = { "xcaf\xC3\xA9" };
+	struct buffer *buf = make_test_buffer_lines(lines, 1);
+
+	push_mark_at(buf, 4, 0); /* start of 'é' */
+	push_mark_at(buf, 0, 0); /* ring gets (4,0) */
+
+	buf->cx = 0;
+	buf->cy = 0;
+	delChar(1); /* delete 'x' */
+	TEST_ASSERT_EQUAL_STRING("caf\xC3\xA9", (char *)buf->row[0].chars);
+
+	popMark();
+
+	/* The mark must have followed the character, not the offset */
+	TEST_ASSERT_EQUAL_INT(3, buf->markx);
+	TEST_ASSERT_EQUAL_INT(0, buf->marky);
+	TEST_ASSERT(buf->markx == 0 ||
+		    !utf8_isCont(buf->row[buf->marky].chars[buf->markx]));
+
+	/* Typing at the mark (as C-x C-x then self-insert does) must
+	 * leave the row valid: this is the corruption endpoint. */
+	buf->cx = buf->markx;
+	buf->cy = buf->marky;
+	undoSelfInsert('Z', 1);
+	insertChar(buf, 'Z', 1);
+	TEST_ASSERT(utf8_validate(buf->row[0].chars, buf->row[0].size));
+	TEST_ASSERT_EQUAL_STRING("cafZ\xC3\xA9", (char *)buf->row[0].chars);
+}
+
+void test_markring_pop_clamps_out_of_range_entry(void) {
+	/* Backstop: an entry that somehow outlives its text must be
+	 * clamped rather than restored out of range. */
+	const char *lines[] = { "AAA", "BBB", "CCC" };
+	struct buffer *buf = make_test_buffer_lines(lines, 3);
+
+	push_mark_at(buf, 0, 2);
+	push_mark_at(buf, 0, 0);
+
+	/* Forge a stale entry past the end of the buffer */
+	buf->mark_ring[0].cx = 99;
+	buf->mark_ring[0].cy = 99;
+
+	popMark();
+
+	TEST_ASSERT(buf->marky >= 0 && buf->marky < buf->numrows);
+	TEST_ASSERT(buf->markx >= 0 &&
+		    buf->markx <= buf->row[buf->marky].size);
+}
+
+void test_markring_multiple_entries_all_adjusted(void) {
+	/* Every valid entry must be adjusted, not just the newest. */
+	const char *lines[] = { "AAA", "BBB", "CCC", "DDD", "EEE" };
+	struct buffer *buf = make_test_buffer_lines(lines, 5);
+
+	/* The first setMark has no prior mark to push, so four calls
+	 * are needed to leave three entries on the ring. */
+	push_mark_at(buf, 0, 1);
+	push_mark_at(buf, 0, 2);
+	push_mark_at(buf, 0, 3);
+	push_mark_at(buf, 0, 4);
+	TEST_ASSERT_EQUAL_INT(3, buf->mark_ring_len);
+
+	/* Delete the first line (kill to EOL, then the newline):
+	 * every entry below shifts up by one */
+	buf->cx = 0;
+	buf->cy = 0;
+	killLine(1);
+	killLine(1);
+	TEST_ASSERT_EQUAL_STRING("BBB", (char *)buf->row[0].chars);
+
+	TEST_ASSERT_EQUAL_INT(0, buf->mark_ring[0].cy); /* was 1 */
+	TEST_ASSERT_EQUAL_INT(1, buf->mark_ring[1].cy); /* was 2 */
+	TEST_ASSERT_EQUAL_INT(2, buf->mark_ring[2].cy); /* was 3 */
+}
+
 int main(void) {
 	TEST_BEGIN();
 
@@ -193,6 +361,14 @@ int main(void) {
 	RUN_TEST(test_ins_multiline_point_on_start_line);
 	RUN_TEST(test_ins_point_after_later_line);
 	RUN_TEST(test_ins_point_after_single_line);
+
+	/* Mark ring */
+	RUN_TEST(test_markring_adjusted_on_delete);
+	RUN_TEST(test_markring_adjusted_on_insert);
+	RUN_TEST(test_markring_pop_jumps_to_right_line);
+	RUN_TEST(test_markring_pop_stays_on_char_boundary);
+	RUN_TEST(test_markring_pop_clamps_out_of_range_entry);
+	RUN_TEST(test_markring_multiple_entries_all_adjusted);
 
 	return TEST_END();
 }

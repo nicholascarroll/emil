@@ -342,10 +342,6 @@ int main(int argc, char *argv[]) {
 	E.edbuf = E.buf;
 	computeDisplayNames();
 
-#ifdef EMIL_DISABLE_SHELL
-	if (!E.statusmsg_show)
-		setStatusMessage("Shell integration excluded from build.");
-#endif /* EMIL_DISABLE_SHELL */
 	for (;;) {
 		/* Also called from readKey(); repeated here so a flag
 		 * raised before the first read (or between drained

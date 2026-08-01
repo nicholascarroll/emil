@@ -152,6 +152,25 @@ void popMark(void) {
 
 		E.buf->markx = new_cx;
 		E.buf->marky = new_cy;
+
+		/* Backstop: adjustAllPoints() keeps ring entries live
+		 * across mutations, but an entry can also predate a
+		 * buffer reload, so snap what we restore rather than
+		 * trusting it.  Bounds first -- a byte offset must be
+		 * inside the row before it can be tested for being
+		 * mid-character. */
+		if (buf->marky >= buf->numrows)
+			buf->marky = buf->numrows > 0 ? buf->numrows - 1 : 0;
+		if (buf->marky < buf->numrows) {
+			erow *mrow = &buf->row[buf->marky];
+			if (buf->markx > mrow->size)
+				buf->markx = mrow->size;
+			while (buf->markx > 0 &&
+			       utf8_isCont(mrow->chars[buf->markx]))
+				buf->markx--;
+		} else {
+			buf->markx = 0;
+		}
 	}
 
 	E.buf->mark_active = 0;

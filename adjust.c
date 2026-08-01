@@ -75,6 +75,28 @@ void adjustAllPoints(struct buffer *buf, int startx, int starty, int endx,
 				    startx, starty, endx, endy, is_delete);
 	}
 
+	/* Adjust the mark ring.  Ring entries are byte offsets just
+	 * like the live mark, so they go stale after every mutation
+	 * unless adjusted here.  A stale entry restored by popMark()
+	 * both jumps to the wrong place and can land mid-character,
+	 * which breaks the buffer's valid-UTF-8 invariant once the
+	 * user types there.
+	 *
+	 * The valid entries are exactly [0 .. mark_ring_len).  While
+	 * the ring is not yet full, mark_ring_idx == mark_ring_len and
+	 * pushes fill slots 0,1,2,... in order; once it is full every
+	 * slot is valid.  popMark() rotates entries but changes
+	 * neither index nor length, so the occupied set is unchanged.
+	 *
+	 * markRingPush() only ever stores a non-negative mark, but the
+	 * guard mirrors the live-mark case above. */
+	for (int m = 0; m < buf->mark_ring_len && m < MARK_RING_SIZE; m++) {
+		if (buf->mark_ring[m].cx >= 0 && buf->mark_ring[m].cy >= 0)
+			adjustPoint(&buf->mark_ring[m].cx,
+				    &buf->mark_ring[m].cy, startx, starty, endx,
+				    endy, is_delete);
+	}
+
 	/* Adjust register points for this buffer */
 	for (int r = 0; r < 127; r++) {
 		if (E.registers[r].rtype == REGISTER_POINT &&

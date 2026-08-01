@@ -711,8 +711,7 @@ void save(void) {
 	 * is refused up front rather than after the user types a
 	 * path. */
 	if (!checkUTF8Validity(E.buf)) {
-		setStatusMessage(
-			"Save failed: buffer contains invalid UTF-8");
+		setStatusMessage("Save failed: buffer contains invalid UTF-8");
 		return;
 	}
 
