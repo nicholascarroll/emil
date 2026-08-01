@@ -1,15 +1,24 @@
-/* test_rect_undo.c: Rectangle operation undo/redo tests.
+/* test_rect.c: Rectangle operation tests.
  *
- * Tests that every rectangle operation (copy, kill, yank, string-replace)
- * can be undone to restore the exact original buffer content, and that
- * redo re-applies correctly.  All tests are non-interactive: they set up
- * buffer + mark state programmatically and call the region functions
- * directly. */
+ * Undo/redo: every rectangle operation (copy, kill, yank,
+ * string-replace) can be undone to restore the exact original buffer
+ * content, and redo re-applies correctly.
+ *
+ * UTF-8 safety: rectangle columns are byte offsets, so on interior
+ * rows they can land inside a multi-byte sequence.  The operations
+ * snap inward to character boundaries; these tests pin the invariant
+ * that no rectangle operation ever leaves invalid UTF-8 in a buffer
+ * or in the kill ring, and that save() refuses when a buffer somehow
+ * contains invalid UTF-8 (which no load path would reopen).
+ *
+ * All tests are non-interactive: they set up buffer + mark state
+ * programmatically and call the region functions directly. */
 
 #include "test.h"
 #include "test_harness.h"
 #include "edit.h"
 #include "region.h"
+#include "unicode.h"
 #include <stdint.h>
 #include <string.h>
 #include "util.h"
@@ -545,6 +554,209 @@ void test_replace_regex_readonly(void) {
 }
 
 /* ----------------------------------------------------------------
+ * UTF-8 safety
+ *
+ * "日本語" is E6 97 A5 / E6 9C AC / E8 AA 9E — three 3-byte
+ * characters.  Byte columns [1,3) land inside 日 on that row while
+ * being perfectly aligned on the ASCII anchor rows, which is the
+ * corruption case: a well-anchored rectangle slicing through a
+ * multi-byte character on an interior row.
+ * ---------------------------------------------------------------- */
+
+#define NIHONGO "\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E"
+
+static void assert_all_rows_valid(struct buffer *buf, const char *label) {
+	for (int i = 0; i < buf->numrows; i++) {
+		if (!utf8_validate(buf->row[i].chars, buf->row[i].size)) {
+			printf("  FAIL (%s): row %d contains invalid UTF-8\n",
+			       label, i);
+			_current_test_failed = 1;
+		}
+	}
+}
+
+static void assert_kill_valid(const char *label) {
+	TEST_ASSERT_NOT_NULL(E.kill.str);
+	if (E.kill.str &&
+	    !utf8_validate(E.kill.str, strlen((char *)E.kill.str))) {
+		printf("  FAIL (%s): kill ring contains invalid UTF-8\n",
+		       label);
+		_current_test_failed = 1;
+	}
+}
+
+void test_kill_rect_utf8_interior_row(void) {
+	const char *lines[] = { "abcd", NIHONGO, "abcd" };
+	struct buffer *buf = make_test_buffer_lines(lines, 3);
+
+	int snap_n;
+	char **snap = snapshot_buffer(buf, &snap_n);
+
+	/* Cols [1,3): splits 日 and 本 on row 1.  Both partially
+	 * covered characters must stay whole in the buffer and be
+	 * excluded from the kill. */
+	buf->cx = 1;
+	buf->cy = 0;
+	set_mark(buf, 3, 2);
+	killRectangle();
+
+	assert_all_rows_valid(buf, "kill_rect_utf8");
+	assert_kill_valid("kill_rect_utf8");
+	TEST_ASSERT_EQUAL_STRING("ad", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_STRING(NIHONGO, row_str(buf, 1));
+	TEST_ASSERT_EQUAL_STRING("ad", row_str(buf, 2));
+
+	/* Cursor and mark must land on character boundaries */
+	TEST_ASSERT(buf->cx == 0 || !utf8_isCont(buf->row[buf->cy].chars[buf->cx]));
+
+	doUndo(buf, 1);
+	assert_buffer_matches(buf, snap, snap_n, "kill_rect_utf8_undo");
+	free_snapshot(snap, snap_n);
+}
+
+void test_kill_rect_utf8_whole_char_covered(void) {
+	/* Cols [1,4) fully cover 日 on the interior row: it must be
+	 * extracted, not skipped. */
+	const char *lines[] = { "aaaaa", "a" NIHONGO, "aaaaa" };
+	struct buffer *buf = make_test_buffer_lines(lines, 3);
+
+	buf->cx = 1;
+	buf->cy = 0;
+	set_mark(buf, 4, 2);
+	killRectangle();
+
+	assert_all_rows_valid(buf, "kill_rect_utf8_whole");
+	assert_kill_valid("kill_rect_utf8_whole");
+	TEST_ASSERT_EQUAL_STRING("aa", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_STRING("a\xE6\x9C\xAC\xE8\xAA\x9E",
+				 row_str(buf, 1));
+	TEST_ASSERT_EQUAL_STRING("aa", row_str(buf, 2));
+	/* Kill ring rows are rect_width bytes each: "aaa", "日", "aaa" */
+	TEST_ASSERT_EQUAL(3, E.kill.rect_width);
+	TEST_ASSERT(memcmp(E.kill.str, "aaa\xE6\x97\xA5"
+					"aaa",
+			   9) == 0);
+}
+
+void test_copy_rect_utf8_interior_row(void) {
+	const char *lines[] = { "abcd", NIHONGO, "abcd" };
+	struct buffer *buf = make_test_buffer_lines(lines, 3);
+
+	int snap_n;
+	char **snap = snapshot_buffer(buf, &snap_n);
+
+	buf->cx = 1;
+	buf->cy = 0;
+	set_mark(buf, 3, 2);
+	copyRectangle();
+
+	/* Copy must not touch the buffer and must store valid UTF-8:
+	 * the mid-character slice on row 1 becomes space padding. */
+	assert_buffer_matches(buf, snap, snap_n, "copy_rect_utf8");
+	assert_kill_valid("copy_rect_utf8");
+	TEST_ASSERT(memcmp(E.kill.str, "bc  bc", 6) == 0);
+
+	free_snapshot(snap, snap_n);
+}
+
+void test_yank_rect_utf8_into_ascii(void) {
+	/* A rectangle copied across a multibyte interior row must
+	 * yank cleanly into a pure-ASCII buffer. */
+	const char *lines[] = { "abcd", NIHONGO, "abcd" };
+	struct buffer *buf = make_test_buffer_lines(lines, 3);
+	buf->cx = 1;
+	buf->cy = 0;
+	set_mark(buf, 3, 2);
+	copyRectangle();
+
+	const char *lines2[] = { "....", "....", "...." };
+	struct buffer *buf2 = make_test_buffer_lines(lines2, 3);
+	E.buf = buf2;
+	buf2->cx = 0;
+	buf2->cy = 0;
+	yankRectangle();
+
+	assert_all_rows_valid(buf2, "yank_rect_utf8");
+	TEST_ASSERT_EQUAL_STRING("bc....", row_str(buf2, 0));
+	TEST_ASSERT_EQUAL_STRING("  ....", row_str(buf2, 1));
+	TEST_ASSERT_EQUAL_STRING("bc....", row_str(buf2, 2));
+
+	/* buf was displaced from E.headbuf by make_test_buffer_lines;
+	 * destroy it here so the harness cleanup sees no leak. */
+	destroyBuffer(buf);
+}
+
+void test_yank_rect_utf8_destination_midchar(void) {
+	/* Yanking at a byte offset that falls mid-character on a
+	 * destination row must not split that character: the
+	 * insertion point snaps forward to the next boundary. */
+	const char *lines[] = { "abc", "abc" };
+	struct buffer *buf = make_test_buffer_lines(lines, 2);
+	buf->cx = 1;
+	buf->cy = 0;
+	set_mark(buf, 2, 1);
+	copyRectangle(); /* 1x2 rect: "b","b" */
+
+	const char *lines2[] = { "axxx", NIHONGO };
+	struct buffer *buf2 = make_test_buffer_lines(lines2, 2);
+	E.buf = buf2;
+	buf2->cx = 1; /* boundary in row 0, mid-日 in row 1 */
+	buf2->cy = 0;
+	yankRectangle();
+
+	assert_all_rows_valid(buf2, "yank_rect_utf8_dest");
+	TEST_ASSERT_EQUAL_STRING("abxxx", row_str(buf2, 0));
+	TEST_ASSERT_EQUAL_STRING("\xE6\x97\xA5"
+				 "b\xE6\x9C\xAC\xE8\xAA\x9E",
+				 row_str(buf2, 1));
+
+	destroyBuffer(buf);
+}
+
+void test_string_rect_utf8_interior_row(void) {
+	const char *lines[] = { "abcd", NIHONGO, "abcd" };
+	struct buffer *buf = make_test_buffer_lines(lines, 3);
+
+	int snap_n;
+	char **snap = snapshot_buffer(buf, &snap_n);
+
+	buf->cx = 1;
+	buf->cy = 0;
+	set_mark(buf, 3, 2);
+	stringRectangleWithText((uint8_t *)"XY");
+
+	assert_all_rows_valid(buf, "string_rect_utf8");
+	TEST_ASSERT_EQUAL_STRING("aXYd", row_str(buf, 0));
+	/* Cols [1,3) lie inside 日: nothing is removed on that row,
+	 * the string lands between the whole characters. */
+	TEST_ASSERT_EQUAL_STRING("\xE6\x97\xA5"
+				 "XY\xE6\x9C\xAC\xE8\xAA\x9E",
+				 row_str(buf, 1));
+	TEST_ASSERT_EQUAL_STRING("aXYd", row_str(buf, 2));
+
+	doUndo(buf, 1);
+	assert_buffer_matches(buf, snap, snap_n, "string_rect_utf8_undo");
+	free_snapshot(snap, snap_n);
+}
+
+void test_kill_yank_rect_utf8_round_trip(void) {
+	const char *lines[] = { "abcd", NIHONGO, "abcd" };
+	struct buffer *buf = make_test_buffer_lines(lines, 3);
+
+	buf->cx = 1;
+	buf->cy = 0;
+	set_mark(buf, 3, 2);
+	killRectangle();
+
+	buf->cx = 0;
+	buf->cy = 0;
+	yankRectangle();
+
+	assert_all_rows_valid(buf, "kill_yank_rect_utf8");
+	assert_kill_valid("kill_yank_rect_utf8");
+}
+
+/* ----------------------------------------------------------------
  * Runner
  * ---------------------------------------------------------------- */
 
@@ -593,6 +805,15 @@ int main(void) {
 	/* Edge cases */
 	RUN_TEST(test_kill_rect_zero_width);
 	RUN_TEST(test_yank_rect_into_empty_buffer);
+
+	/* UTF-8 safety */
+	RUN_TEST(test_kill_rect_utf8_interior_row);
+	RUN_TEST(test_kill_rect_utf8_whole_char_covered);
+	RUN_TEST(test_copy_rect_utf8_interior_row);
+	RUN_TEST(test_yank_rect_utf8_into_ascii);
+	RUN_TEST(test_yank_rect_utf8_destination_midchar);
+	RUN_TEST(test_string_rect_utf8_interior_row);
+	RUN_TEST(test_kill_yank_rect_utf8_round_trip);
 
 	return TEST_END();
 }

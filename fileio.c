@@ -701,6 +701,21 @@ void save(void) {
 		return;
 	}
 
+	/* All load paths refuse files that fail UTF-8 validation, so
+	 * writing invalid content would produce a file emil itself
+	 * cannot reopen.  Refuse the save instead.  The buffer
+	 * invariant (every buffer contains only valid UTF-8) makes
+	 * this unreachable except through a bug, and this check keeps
+	 * such a bug from turning into silent data loss on disk.
+	 * Checked before the filename prompt so an unsavable buffer
+	 * is refused up front rather than after the user types a
+	 * path. */
+	if (!checkUTF8Validity(E.buf)) {
+		setStatusMessage(
+			"Save failed: buffer contains invalid UTF-8");
+		return;
+	}
+
 	if (E.buf->filename == NULL) {
 		char *input = (char *)editorPrompt(
 			E.buf, "Save as: ", PROMPT_FILES, NULL);

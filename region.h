@@ -32,6 +32,7 @@ int regexSubstituteAll(const regex_t *re, const uint8_t *subject, int len,
 		       const uint8_t *tmpl, int notbol, int noteol,
 		       struct dbuf *out, int *first_off, int *last_off);
 void stringRectangle(void);
+void stringRectangleWithText(uint8_t *string);
 void copyRectangle(void);
 void killRectangle(void);
 void yankRectangle(void);

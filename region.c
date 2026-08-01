@@ -211,6 +211,52 @@ static void normalizeRegion(void) {
 	clampToBuffer(E.buf, &E.buf->markx, &E.buf->marky);
 }
 
+/* Rectangle columns are byte offsets.  The point and mark always sit
+ * on character boundaries in their own rows, but the same byte
+ * offsets applied to the rows in between (or to each other's rows)
+ * can land inside a multi-byte UTF-8 sequence.  Snap such offsets to
+ * character boundaries, inward: a character belongs to the rectangle
+ * only if it lies entirely within [topx..botx) on its own row.
+ * Partially covered characters are left whole in the buffer and
+ * excluded from the extracted rectangle.  This preserves the
+ * invariant that every buffer (and the kill ring) contains only
+ * valid UTF-8. */
+
+/* Smallest character boundary >= x.  Offsets beyond the row are
+ * returned unchanged so callers' short-row padding logic still sees
+ * the nominal column. */
+static int rectSnapFwd(erow *row, int x) {
+	if (x <= 0)
+		return 0;
+	if (x >= row->size)
+		return x;
+	while (x < row->size && utf8_isCont(row->chars[x]))
+		x++;
+	return x;
+}
+
+/* Largest character boundary <= x, clamped to the row.  chars[size]
+ * is the NUL terminator, never a continuation byte, so x == size is
+ * already a boundary. */
+static int rectSnapBack(erow *row, int x) {
+	if (x <= 0)
+		return 0;
+	if (x > row->size)
+		return row->size;
+	while (x > 0 && utf8_isCont(row->chars[x]))
+		x--;
+	return x;
+}
+
+/* Place the cursor at byte column x in row y, snapped forward to a
+ * character boundary and clamped to the row. */
+static void rectPlaceCursor(struct buffer *buf, int x, int y) {
+	buf->cy = y;
+	buf->cx = rectSnapFwd(&buf->row[y], x);
+	if (buf->cx > buf->row[y].size)
+		buf->cx = buf->row[y].size;
+}
+
 /* Normalise rectangle columns so topx <= botx.  Also sets up
  * buf->cx, buf->cy, buf->markx, buf->marky for the rectangle. */
 static void normalizeRectCols(int *topx, int *topy, int *botx, int *boty) {
@@ -223,13 +269,17 @@ static void normalizeRectCols(int *topx, int *topy, int *botx, int *boty) {
 		*botx = E.buf->markx;
 		*topx = E.buf->cx;
 	}
-	E.buf->cx = *topx;
+	/* topx comes from whichever of point/mark had the smaller
+	 * column, which need not be a character boundary in row topy
+	 * (and likewise botx in row boty), so snap the repositioned
+	 * point and mark onto boundaries.  topx/botx themselves stay
+	 * nominal: per-row snapping happens where rows are sliced. */
+	E.buf->cx = rectSnapFwd(&E.buf->row[*topy], *topx);
+	if (E.buf->cx > E.buf->row[*topy].size)
+		E.buf->cx = E.buf->row[*topy].size;
 	E.buf->cy = *topy;
 	E.buf->marky = *boty;
-	if (*botx > E.buf->row[*boty].size)
-		E.buf->markx = E.buf->row[*boty].size;
-	else
-		E.buf->markx = *botx;
+	E.buf->markx = rectSnapBack(&E.buf->row[*boty], *botx);
 }
 
 void deleteRange(int startx, int starty, int endx, int endy,
@@ -759,6 +809,13 @@ void stringRectangle(void) {
 		return;
 	}
 
+	stringRectangleWithText(string);
+	free(string);
+}
+
+/* Core of stringRectangle, separated from the interactive prompt so
+ * it can be exercised by the test suite.  Does not free 'string'. */
+void stringRectangleWithText(uint8_t *string) {
 	struct text okill = saveKill();
 	normalizeRegion();
 
@@ -782,26 +839,29 @@ void stringRectangle(void) {
 		if (i > topy)
 			dbuf_byte(&d, '\n');
 
-		/* Pre-rectangle portion [0..topx) */
-		if (topx > 0) {
-			int avail = row->size;
-			int copy_n = (topx < avail) ? topx : avail;
-			if (copy_n > 0)
-				dbuf_append(&d, row->chars, copy_n);
-			/* Pad if row shorter than topx */
-			int pad = topx - copy_n;
-			if (pad > 0)
-				dbuf_pad(&d, ' ', pad);
-		}
+		/* Snap inward to character boundaries so no multi-byte
+		 * character is split; partially covered characters
+		 * stay whole outside the replacement. */
+		int s = rectSnapFwd(row, topx);
+		int e = rectSnapBack(row, botx);
+
+		/* Pre-rectangle portion [0..s) */
+		int copy_n = (s < row->size) ? s : row->size;
+		if (copy_n > 0)
+			dbuf_append(&d, row->chars, copy_n);
+		/* Pad if row shorter than the nominal column */
+		int pad = topx - copy_n;
+		if (pad > 0)
+			dbuf_pad(&d, ' ', pad);
 
 		/* The replacement string */
 		dbuf_append(&d, string, slen);
 
-		/* Post-rectangle portion [botx..row->size) */
-		int eff_botx = (botx > row->size) ? row->size : botx;
-		if (eff_botx < row->size)
-			dbuf_append(&d, &row->chars[eff_botx],
-				    row->size - eff_botx);
+		/* Post-rectangle portion [e..row->size) */
+		if (e < copy_n)
+			e = copy_n;
+		if (e < row->size)
+			dbuf_append(&d, &row->chars[e], row->size - e);
 	}
 	int out_len;
 	uint8_t *out = dbuf_detach(&d, &out_len);
@@ -810,12 +870,10 @@ void stringRectangle(void) {
 	mutateReplace(buf, 0, topy, region_endx, boty, old_text, old_len, out,
 		      out_len, 0, &ex, &ey);
 
-	buf->cx = topx;
-	buf->cy = topy;
+	rectPlaceCursor(buf, topx, topy);
 
 	free(old_text);
 	free(out);
-	free(string);
 	E.buf->mark_active = 0;
 	;
 	restoreKill(okill);
@@ -830,18 +888,15 @@ static uint8_t *extractRectColumns(struct buffer *buf, int topx, int topy,
 	uint8_t *out = xcalloc((size_t)rw * rh + 1, 1);
 	for (int idx = 0; idx < rh; idx++) {
 		erow *row = &buf->row[topy + idx];
-		if (row->size < botx) {
-			memset(&out[idx * rw], ' ', rw);
-			if (row->size > topx) {
-				int avail = row->size - topx;
-				if (avail > rw)
-					avail = rw;
-				memcpy(&out[idx * rw], &row->chars[topx],
-				       avail);
-			}
-		} else {
-			memcpy(&out[idx * rw], &row->chars[topx], rw);
-		}
+		memset(&out[idx * rw], ' ', rw);
+		/* Snap inward so no multi-byte character is split; the
+		 * slice can only shrink (s >= topx, e <= botx), so it
+		 * always fits in the rw-byte cell, space-padded. */
+		int s = rectSnapFwd(row, topx);
+		int e = rectSnapBack(row, botx);
+		if (s >= row->size || e <= s)
+			continue;
+		memcpy(&out[idx * rw], &row->chars[s], e - s);
 	}
 	return out;
 }
@@ -903,17 +958,22 @@ void killRectangle(void) {
 		if (i > topy)
 			dbuf_byte(&d, '\n');
 
+		/* Snap inward to character boundaries: what stays is
+		 * exactly the complement of what extractRectColumns
+		 * took, so partially covered characters remain whole
+		 * in the buffer. */
+		int s = rectSnapFwd(row, topx);
+		int e = rectSnapBack(row, botx);
+
 		/* Portion before rectangle */
-		if (topx > 0) {
-			int n = (topx > row->size) ? row->size : topx;
-			if (n > 0)
-				dbuf_append(&d, row->chars, n);
-		}
+		int n = (s > row->size) ? row->size : s;
+		if (n > 0)
+			dbuf_append(&d, row->chars, n);
 		/* Portion after rectangle */
-		int eff_botx = (botx > row->size) ? row->size : botx;
-		if (eff_botx < row->size)
-			dbuf_append(&d, &row->chars[eff_botx],
-				    row->size - eff_botx);
+		if (e < n)
+			e = n;
+		if (e < row->size)
+			dbuf_append(&d, &row->chars[e], row->size - e);
 	}
 	int out_len;
 	uint8_t *out = dbuf_detach(&d, &out_len);
@@ -922,8 +982,7 @@ void killRectangle(void) {
 	mutateReplace(buf, 0, topy, region_endx, boty, old_text, old_len, out,
 		      out_len, 0, &ex, &ey);
 
-	buf->cx = topx;
-	buf->cy = topy;
+	rectPlaceCursor(buf, topx, topy);
 
 	/* Kill ring: rectangle data */
 	clearText(&E.kill);
@@ -997,8 +1056,14 @@ void yankRectangle(void) {
 
 		strncpy(slice, (char *)&saved.str[idx * rw], rw);
 
-		/* Row content before topx (with space padding) */
-		int pre_len = (row->size < topx) ? row->size : topx;
+		/* Snap the per-row insertion point forward to a
+		 * character boundary so a destination multi-byte
+		 * character is never split by the insertion. */
+		int ins = rectSnapFwd(row, topx);
+
+		/* Row content before the insertion point (with space
+		 * padding relative to the nominal column) */
+		int pre_len = (row->size < ins) ? row->size : ins;
 		dbuf_append(&d, row->chars, pre_len);
 		int pad = topx - pre_len;
 		if (pad > 0)
@@ -1007,9 +1072,10 @@ void yankRectangle(void) {
 		/* Rectangle slice */
 		dbuf_append(&d, (uint8_t *)slice, rw);
 
-		/* Remainder of row after topx */
-		if (pre_len == topx && topx < row->size)
-			dbuf_append(&d, &row->chars[topx], row->size - topx);
+		/* Remainder of row after the insertion point */
+		if (pre_len < row->size)
+			dbuf_append(&d, &row->chars[pre_len],
+				    row->size - pre_len);
 	}
 	int out_len;
 	uint8_t *out = dbuf_detach(&d, &out_len);
@@ -1018,8 +1084,7 @@ void yankRectangle(void) {
 	mutateReplace(buf, 0, topy, region_endx, boty, old_text, old_len, out,
 		      out_len, needs_extension, NULL, NULL);
 
-	buf->cx = topx;
-	buf->cy = topy;
+	rectPlaceCursor(buf, topx, topy);
 
 	free(old_text);
 	free(out);

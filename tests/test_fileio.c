@@ -267,10 +267,78 @@ void test_utf8_truncated_multibyte(void) {
 	unlink(tmpname);
 }
 
+/* ---- save() UTF-8 guard ----
+ *
+ * Every load path refuses files that fail UTF-8 validation, so
+ * writing an invalid buffer would produce a file emil itself cannot
+ * reopen.  save() must refuse outright with an error message, leave
+ * the file untouched, and not mark the buffer clean. */
+
+void test_save_valid_utf8_succeeds(void) {
+	char tmpname[] = "/tmp/emil_test_XXXXXX";
+	int fd = mkstemp(tmpname);
+	TEST_ASSERT(fd >= 0);
+	close(fd);
+
+	const char *lines[] = { "hello \xE6\x97\xA5" };
+	struct buffer *buf = make_test_buffer_lines(lines, 1);
+	buf->filename = xstrdup(tmpname);
+	buf->dirty = 1;
+
+	save();
+
+	TEST_ASSERT_NOT_NULL(strstr(E.statusmsg, "Wrote"));
+	TEST_ASSERT_EQUAL_INT(0, buf->dirty);
+
+	/* buf is displaced from E.headbuf by make_test_buffer below;
+	 * destroy it first so the harness cleanup sees no leak. */
+	destroyBuffer(buf);
+
+	/* Round trip: what we saved must reopen */
+	struct buffer *buf2 = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, editorOpen(buf2, tmpname));
+
+	unlink(tmpname);
+}
+
+void test_save_invalid_utf8_refused(void) {
+	char tmpname[] = "/tmp/emil_test_XXXXXX";
+	int fd = mkstemp(tmpname);
+	TEST_ASSERT(fd >= 0);
+	write(fd, "old", 3);
+	close(fd);
+
+	const char *lines[] = { "abc" };
+	struct buffer *buf = make_test_buffer_lines(lines, 1);
+	buf->filename = xstrdup(tmpname);
+	buf->dirty = 1;
+	/* Corrupt the row in place: 0xC2 with no continuation byte */
+	buf->row[0].chars[1] = 0xC2;
+
+	save();
+
+	/* Refused with an error... */
+	TEST_ASSERT_NOT_NULL(strstr(E.statusmsg, "Save failed"));
+	TEST_ASSERT_NOT_NULL(strstr(E.statusmsg, "invalid UTF-8"));
+	/* ...the buffer is still dirty... */
+	TEST_ASSERT_EQUAL_INT(1, buf->dirty);
+	/* ...and the on-disk file is untouched */
+	FILE *fp = fopen(tmpname, "rb");
+	TEST_ASSERT_NOT_NULL(fp);
+	if (fp) {
+		char content[16];
+		size_t n = fread(content, 1, sizeof(content), fp);
+		fclose(fp);
+		TEST_ASSERT_EQUAL_INT(3, (int)n);
+		TEST_ASSERT(memcmp(content, "old", 3) == 0);
+	}
+
+	unlink(tmpname);
+}
+
 void setUp(void) {
 	initTestEditor();
-}
-void tearDown(void) {
+}void tearDown(void) {
 	cleanupTestEditor();
 }
 
@@ -295,6 +363,9 @@ int main(void) {
 	RUN_TEST(test_utf8_overlong_rejected);
 	RUN_TEST(test_utf8_null_byte_rejected);
 	RUN_TEST(test_utf8_truncated_multibyte);
+
+	RUN_TEST(test_save_valid_utf8_succeeds);
+	RUN_TEST(test_save_invalid_utf8_refused);
 
 	return TEST_END();
 }
