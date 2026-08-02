@@ -29,7 +29,20 @@ void disableRawMode(void) {
 void disableRawModeKeepScreen(void) {
 }
 
+/* Scripted key input.
+ *
+ * Modal loops (editorPrompt, zapToChar, getRegisterName) consume keys
+ * through readKey().  A test drives them by filling test_key_script and
+ * setting test_key_count; readKey() returns each in turn.  With no
+ * script loaded the behaviour is the historical one (always 0), so
+ * existing suites are unaffected. */
+int test_key_script[64];
+int test_key_count = 0;
+int test_key_pos = 0;
+
 int readKey(void) {
+	if (test_key_pos < test_key_count)
+		return test_key_script[test_key_pos++];
 	return 0;
 }
 

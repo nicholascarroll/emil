@@ -1,4 +1,23 @@
 ## [Unreleased]
+- Fixed nested prompts corrupting the editor buffer. `editorPrompt` saved the
+  current buffer into `E.edbuf` without restoring the outer prompt's value, so
+  opening a second prompt from inside the first (`C-x C-f`, `M-x`, `C-x b`,
+  `C-x i`, `C-x C-w`, `M-|`) left `E.buf` pointing at `*minibuffer*` once the
+  outer prompt exited. Every subsequent keystroke then edited the minibuffer
+  while the windows still showed the real file.
+- Fixed a crash in `revert-buffer` on a buffer with no filename, reachable by
+  starting `emil` with no arguments.
+- `revert-buffer` now refuses when the file no longer exists, rather than
+  silently replacing the buffer with an empty one. The old behaviour destroyed
+  the undo stack along with the buffer, so the work could not be recovered, and
+  left a clean buffer that let `C-x C-c` exit without warning.
+- Fixed `zap-to-char` corrupting the buffer when given a non-character key.
+  Navigation and Meta keys arrive as tokens above 255 and were truncated into
+  the UTF-8 lead-byte range, so the kill could cut a multi-byte character in
+  half and leave the buffer unsavable. Such keys are now rejected.
+- Fixed reverse incremental search (`C-r`) moving forward past point when a
+  match existed on the cursor's own row, and landing on the first rather than
+  the last match when stepping back to an earlier row.
 - Removed the between-rows interrupt poll from interactive search. 
 - Rules for punctuation at right edge of screen in word wrap mode
 - Cope with background/foregrounding and terminal resize while in the minibuffer

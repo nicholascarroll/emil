@@ -140,6 +140,54 @@ static uint8_t *strReplace(uint8_t *text, uint8_t *rep, uint8_t *with) {
 
 /*** Interactive search ***/
 
+/* Last match on 'row' that begins strictly before byte offset 'limit',
+ * or NULL if there is none.
+ *
+ * Backward search needs the match *before* point, but the only search
+ * primitives available scan forward, so walk forward collecting
+ * candidates and keep the last one that still starts before the limit.
+ * Advancing by a single byte rather than by the match length keeps
+ * overlapping matches (searching "aa" in "aaa") reachable.
+ *
+ * "Begins strictly before the limit" mirrors the forward convention
+ * one block down, where a match must begin strictly after the cursor.
+ * Keeping the two symmetric is what makes repeated C-r step backward
+ * one match at a time instead of sticking on the match under point. */
+static uint8_t *searchRowBackward(erow *row, uint8_t *query, int limit,
+				  int regex, int *match_len) {
+	if (limit <= 0)
+		return NULL;
+
+	uint8_t *best = NULL;
+	int best_len = 0;
+	uint8_t *p = row->chars;
+	uint8_t *end = row->chars + row->size;
+
+	while (p <= end) {
+		int mlen = 0;
+		uint8_t *match;
+		if (regex) {
+			match = regexSearch(p, query, &mlen);
+		} else {
+			match = (uint8_t *)strstr((const char *)p,
+						  (const char *)query);
+			if (match)
+				mlen = (int)strlen((const char *)query);
+		}
+		if (match == NULL)
+			break;
+		if (match - row->chars >= limit)
+			break;
+		best = match;
+		best_len = mlen;
+		p = match + 1;
+	}
+
+	if (best)
+		*match_len = best_len;
+	return best;
+}
+
 void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 	static int last_match = -1;
 	static int direction = 1;
@@ -190,7 +238,16 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 		erow *row = &bufr->row[current];
 		uint8_t *match;
 		int mlen = 0;
-		if (bufr->cx + 1 >= row->size) {
+		if (direction == -1) {
+			/* Backward: the previous match on this row.  This
+			 * block used to run the forward search regardless
+			 * of direction, so C-r moved forward past point --
+			 * and since 'current' is seeded from bufr->cy only
+			 * when direction == -1, C-r was almost the only
+			 * way to reach it. */
+			match = searchRowBackward(row, query, bufr->cx,
+						  regex_mode, &mlen);
+		} else if (bufr->cx + 1 >= row->size) {
 			match = NULL;
 		} else {
 			if (regex_mode) {
@@ -230,7 +287,15 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 		erow *row = &bufr->row[current];
 		uint8_t *match;
 		int mlen = 0;
-		if (regex_mode) {
+		if (direction == -1) {
+			/* Stepping backward, so the nearest match on an
+			 * earlier row is its *last* one.  Taking the first
+			 * would skip every other match on that row: the
+			 * same-row block above then finds nothing before
+			 * it and steps back another row. */
+			match = searchRowBackward(row, query, row->size,
+						  regex_mode, &mlen);
+		} else if (regex_mode) {
 			match = regexSearch(row->chars, query, &mlen);
 		} else {
 			match = (uint8_t *)strstr((const char *)row->chars,

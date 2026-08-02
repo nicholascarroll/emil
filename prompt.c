@@ -149,7 +149,18 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 
 	replaceMinibufferText(E.minibuf, "");
 
-	/* Save editor buffer and switch to minibuffer */
+	/* Save editor buffer and switch to minibuffer.
+	 *
+	 * E.edbuf must be saved and restored for the same reason
+	 * E.prompt_type is.  A prompt can open another prompt --
+	 * the loop below dispatches ordinary commands, so C-x C-f,
+	 * M-x, C-x b, C-x i, C-x C-w and M-| are all reachable from
+	 * inside one -- and on entry the inner prompt would store
+	 * the *minibuffer* into the single global slot.  The outer
+	 * prompt then restored E.buf = E.edbuf = E.minibuf, leaving
+	 * every later keystroke editing the minibuffer object while
+	 * the windows still showed the real file. */
+	struct buffer *saved_edbuf = E.edbuf;
 	E.edbuf = E.buf;
 	E.buf = E.minibuf;
 
@@ -408,6 +419,7 @@ done:
 	closeCompletionsBuffer();
 
 	E.buf = E.edbuf;
+	E.edbuf = saved_edbuf;
 	E.prompt_type = saved_prompt_type;
 
 	clearStatusMessage();

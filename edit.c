@@ -860,6 +860,24 @@ void zapToChar(void) {
 		return;
 	}
 
+	/* The target is compared byte-for-byte against buffer content, so
+	 * it has to be a single ASCII byte.  readKey() also returns key
+	 * tokens >= 1000 for navigation and Meta keys, and truncating one
+	 * of those to uint8_t lands squarely in the UTF-8 lead-byte range
+	 * -- KEY_ARROW_LEFT (1000) becomes 0xE8, the lead byte of a
+	 * 3-byte CJK sequence.  The search would then "find" that lead
+	 * byte and delete through it plus one more byte, cutting the
+	 * character in half and leaving the buffer holding invalid UTF-8,
+	 * which save() refuses outright.  A multi-byte target could not
+	 * work here in any case: those bytes arrive in E.unicode, not in
+	 * c.  This also catches the -1 that readKey() returns when a
+	 * signal interrupts the prompt, which previously fell through and
+	 * searched for byte 0xFF. */
+	if (c != '\t' && (c < ' ' || c > '~')) {
+		setStatusMessage("Zap to char: not a character");
+		return;
+	}
+
 	/* Search forward for the character */
 	int sy = E.buf->cy;
 

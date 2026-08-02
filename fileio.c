@@ -506,6 +506,32 @@ int editorOpen(struct buffer *bufr, char *filename) {
 
 void revert(void) {
 	struct buffer *buf = E.buf;
+
+	/* A buffer that isn't visiting a file has nothing to revert to.
+	 * editorOpen's first act is collapseHome(filename), which reads
+	 * path[0] unconditionally, so passing NULL here crashed --
+	 * reachable simply by starting emil with no arguments. */
+	if (buf->filename == NULL) {
+		setStatusMessage("Buffer is not visiting a file");
+		return;
+	}
+
+	/* editorOpen returns 0 both when it loaded a file and when the
+	 * file does not exist (ENOENT posts "(New file)"), so a "< 0"
+	 * test cannot tell the two apart.  Without this check, reverting
+	 * a buffer whose file was never written replaced it with an
+	 * empty one; the destroyBuffer() below then freed the undo
+	 * stack, so the work could not be recovered with C-_, and the
+	 * clean replacement let C-x C-c exit without warning. */
+	char *iopath = expandTilde(buf->filename);
+	struct stat rst;
+	if (stat(iopath, &rst) != 0) {
+		setStatusMessage("File %s no longer exists!", buf->filename);
+		free(iopath);
+		return;
+	}
+	free(iopath);
+
 	struct buffer *new = newBuffer();
 	if (editorOpen(new, buf->filename) < 0) {
 		/* Open/validation failed: keep the current buffer */
