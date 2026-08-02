@@ -1198,7 +1198,15 @@ char *cleanPath(char *path) {
 		if (*p == '/')
 			p++;
 
-		if (len == 1 && seg[0] == '.') {
+		if (len == 0) {
+			/* Empty segment, from a doubled or trailing slash.
+			 * absolutePath builds cwd + "/" + path, so at cwd
+			 * "/" every relative name arrived as "//name" and
+			 * kept a leading empty segment -- "foo" and "/foo"
+			 * then resolved to different strings and
+			 * findBufferByName opened the same file twice. */
+			continue;
+		} else if (len == 1 && seg[0] == '.') {
 			continue;
 		} else if (len == 2 && seg[0] == '.' && seg[1] == '.') {
 			if (depth > 0)

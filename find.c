@@ -33,6 +33,15 @@ static int regex_mode = 0;
 
 static int initial_direction = 1;
 
+/* Where the current interactive search was started.  Incremental search
+ * moves the cursor on every keystroke, so the cursor cannot serve as the
+ * point a fresh search runs from: by the second character it has already
+ * drifted to the first character's match.  searchInteractive records the
+ * real starting point here and findCallback searches from it whenever the
+ * pattern changes. */
+static int search_origin_cx = 0;
+static int search_origin_cy = 0;
+
 /* Compiled-pattern cache for regexSearch. The one live regex_t is 
  * intentionally left allocated at exit. */
 static char *re_cache_pat = NULL;
@@ -229,11 +238,31 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 		return;
 	}
 
-	if (last_match == -1)
+	/* "Fresh" means the pattern just changed -- the first character
+	 * typed, or any subsequent edit to it -- as opposed to a C-s / C-r
+	 * repeat, which keeps the pattern and steps to the next match. */
+	int fresh = (last_match == -1);
+	if (fresh)
 		direction = initial_direction;
+
+	/* A fresh search runs from the search origin; a repeat resumes from
+	 * the cursor, which is sitting on the previous match, and that is
+	 * what makes it step forward.  Seeding a fresh search from the
+	 * cursor instead would let the starting point creep forward as the
+	 * pattern grows, and would not come back when a character is
+	 * deleted from the pattern. */
+	int from_cy = fresh ? search_origin_cy : bufr->cy;
+	int from_cx = fresh ? search_origin_cx : bufr->cx;
+
 	int current = last_match;
-	if (current < 0)
-		current = (direction == -1) ? bufr->cy : -1;
+	if (current < 0) {
+		/* This used to be -1 for a forward search, which made the
+		 * row-stepping loop below start at row 0: C-s always
+		 * scanned from the top of the buffer instead of from
+		 * point.  Only the backward case was seeded from the
+		 * cursor's row. */
+		current = from_cy;
+	}
 	if (current >= 0 && current < bufr->numrows) {
 		erow *row = &bufr->row[current];
 		uint8_t *match;
@@ -245,18 +274,23 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 			 * and since 'current' is seeded from bufr->cy only
 			 * when direction == -1, C-r was almost the only
 			 * way to reach it. */
-			match = searchRowBackward(row, query, bufr->cx,
+			match = searchRowBackward(row, query, from_cx,
 						  regex_mode, &mlen);
-		} else if (bufr->cx + 1 >= row->size) {
+		} else if (fresh ? (from_cx >= row->size) :
+				   (from_cx + 1 >= row->size)) {
 			match = NULL;
 		} else {
+			/* A fresh forward search accepts a match beginning
+			 * at point, as Emacs does.  A repeat has to start
+			 * strictly after it, or C-s would keep re-finding
+			 * the match it is already sitting on. */
+			int start = fresh ? from_cx : from_cx + 1;
 			if (regex_mode) {
-				match = regexSearch(&(row->chars[bufr->cx + 1]),
-						    query, &mlen);
+				match = regexSearch(&(row->chars[start]), query,
+						    &mlen);
 			} else {
 				match = (uint8_t *)strstr(
-					(const char *)&(
-						row->chars[bufr->cx + 1]),
+					(const char *)&(row->chars[start]),
 					(const char *)query);
 				if (match)
 					mlen = (int)strlen((const char *)query);
@@ -327,6 +361,8 @@ static void searchInteractive(int direction, int regex,
 	initial_direction = direction;
 	int saved_cx = E.buf->cx;
 	int saved_cy = E.buf->cy;
+	search_origin_cx = saved_cx;
+	search_origin_cy = saved_cy;
 
 	uint8_t *query =
 		editorPrompt(E.buf, prompt_fmt, PROMPT_SEARCH, findCallback);

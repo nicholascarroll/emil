@@ -140,6 +140,17 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 	uint8_t *result = NULL;
 	int history_pos = -1;
 
+	/* The text the user typed before starting to browse history.
+	 * history_pos == -1 means "showing your own input rather than a
+	 * history entry", but nothing preserved that input, so stepping
+	 * into history and back out replaced it with the empty string --
+	 * as did a bare Down, which never leaves -1 at all.
+	 *
+	 * Local rather than a field on struct config, deliberately:
+	 * prompts nest, and a shared slot would be the same class of bug
+	 * as E.edbuf was. */
+	char *pending_input = NULL;
+
 	/* Publish the prompt type for keymap.c (quoted-newline
 	 * refusal).  Saved and restored so a nested prompt -- e.g.
 	 * query-replace's C-r opening a replacement prompt -- does
@@ -341,8 +352,18 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 			char *history_str = NULL;
 
 			if (hist && hist->count > 0) {
+				/* Whether a history entry -- rather than the
+				 * user's own input -- is currently on show. */
+				int was_browsing = (history_pos >= 0);
+
 				if (!down) {
 					if (history_pos == -1) {
+						/* Leaving the user's own input
+						 * for the first time: stash it
+						 * so Down can bring it back. */
+						free(pending_input);
+						pending_input = minibufJoin(
+							E.minibuf, "\n");
 						history_pos = hist->count - 1;
 					} else if (history_pos > 0) {
 						history_pos--;
@@ -365,9 +386,20 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 						replaceMinibufferText(
 							E.minibuf, history_str);
 					}
-				} else {
-					replaceMinibufferText(E.minibuf, "");
+				} else if (was_browsing) {
+					/* Stepped off the end of history and
+					 * back to the user's own input. */
+					replaceMinibufferText(
+						E.minibuf,
+						pending_input ? pending_input :
+								"");
 				}
+				/* Otherwise Down was pressed without ever
+				 * having browsed: the user's input is
+				 * already on show and there is nothing
+				 * below it.  Leave the text alone -- this
+				 * fell through to a clear before, wiping
+				 * whatever had been typed. */
 			}
 			break;
 		}
@@ -409,6 +441,8 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 	}
 
 done:
+	free(pending_input);
+
 	if (result && strlen((char *)result) > 0) {
 		struct history *hist = histFor(t);
 		if (hist) {

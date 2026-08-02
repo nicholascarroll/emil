@@ -1,4 +1,33 @@
 ## [Unreleased]
+- Fixed forward incremental search (`C-s`) starting from the top of the buffer
+  instead of from point. The row-stepping loop was seeded with -1 for a forward
+  search and only with the cursor's row for a backward one. Search now runs from
+  where it was started, accepts a match beginning at point, and wraps to the top
+  only after passing the end of the buffer. Editing the pattern re-searches from
+  the original starting point rather than from the previous match, so deleting a
+  character no longer strands the search further down the buffer.
+- Fixed a selection in one window being drawn or hidden according to whether the
+  buffer in *another* window had a valid mark. `markInvalidBuf()` takes the
+  buffer to test; `markInvalidSilent()` remains as the wrapper for the focused
+  buffer.
+- Fixed plain Shift-Tab doing nothing. `unindent` looped on the raw prefix
+  argument, which is 0 when no prefix is given; it now applies `UARG_COUNT` like
+  every other command in `edit.c`.
+- Fixed Down in a prompt destroying typed text. Down with no history browsing in
+  progress is now a no-op, and stepping off the end of history restores the text
+  that was being typed, as Emacs does.
+- Fixed `absolutePath` producing `//name` when the working directory is `/`,
+  which made the same file compare unequal to itself and open in two separate
+  buffers, each with its own undo stack and lock state.
+- Fixed `C-x =` reporting a screen row computed from the first window's scroll
+  offset rather than the focused window's.
+- Fixed a multi-byte character being dropped when a signal (SIGWINCH from a
+  terminal resize, SIGCONT from foregrounding) arrived between its lead byte and
+  a continuation byte. The UTF-8 assembly reads now retry on EINTR, as the
+  escape-sequence reader already did.
+- Fixed the status bar truncating a long filename mid-character, emitting
+  invalid UTF-8 to the terminal, and returning an untruncated length that made
+  the caller read past the end of its buffer on very wide terminals.
 - Fixed nested prompts corrupting the editor buffer. `editorPrompt` saved the
   current buffer into `E.edbuf` without restoring the outer prompt's value, so
   opening a second prompt from inside the first (`C-x C-f`, `M-x`, `C-x b`,

@@ -200,11 +200,19 @@ void markBuffer(void) {
 	}
 }
 
+/* Validity of a specific buffer's mark.  Callers that render or edit a
+ * buffer other than the focused one must use this form: the no-arg
+ * wrapper below consults the global E.buf, which is only the right
+ * question when the buffer in hand IS E.buf. */
+int markInvalidBuf(const struct buffer *buf) {
+	return (buf->markx < 0 || buf->marky < 0 || buf->numrows == 0 ||
+		buf->marky >= buf->numrows ||
+		buf->markx > (buf->row[buf->marky].size) ||
+		(buf->markx == buf->cx && buf->cy == buf->marky));
+}
+
 int markInvalidSilent(void) {
-	return (E.buf->markx < 0 || E.buf->marky < 0 || E.buf->numrows == 0 ||
-		E.buf->marky >= E.buf->numrows ||
-		E.buf->markx > (E.buf->row[E.buf->marky].size) ||
-		(E.buf->markx == E.buf->cx && E.buf->cy == E.buf->marky));
+	return markInvalidBuf(E.buf);
 }
 
 int markInvalid(void) {

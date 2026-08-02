@@ -62,7 +62,11 @@ static void computeRowHighlightBounds(struct buffer *buf, int filerow,
 		return;
 	}
 
-	if (buf->mark_active && !markInvalidSilent()) {
+	/* markInvalidBuf(buf), not markInvalidSilent(): this function is
+	 * called for every window, so 'buf' is frequently not E.buf.  The
+	 * no-arg form asked whether the *focused* buffer's mark was valid
+	 * before drawing an unfocused buffer's selection. */
+	if (buf->mark_active && !markInvalidBuf(buf)) {
 		if (buf->rectangle_mode) {
 			int top = buf->cy < buf->marky ? buf->cy : buf->marky;
 			int bot = buf->cy > buf->marky ? buf->cy : buf->marky;
@@ -737,24 +741,49 @@ static int statusLeft(const struct buffer *bufr, char *out, int cap,
 		bufr->display_name ?
 			bufr->display_name :
 			(bufr->filename ? bufr->filename : "*scratch*");
-	int dlen = strlen(dname);
 
 	char flags[8];
 	snprintf(flags, sizeof(flags), "%c%c%c", bufr->dirty ? '*' : '-',
 		 bufr->dirty ? '*' : '-', bufr->read_only ? '%' : ' ');
 
-	/* Left-truncate name with "..." to fit name_width. */
+	/* Left-truncate name with "..." to fit name_width.
+	 *
+	 * name_width is a budget in COLUMNS.  This used to index the name
+	 * by bytes -- dname + dlen - tail -- which lands inside a
+	 * multi-byte sequence whenever the tail does not happen to fall on
+	 * a character boundary, emitting invalid UTF-8 to the terminal.
+	 * Walk forward over whole characters instead, dropping leading
+	 * ones until what remains fits the budget that "..." leaves. */
 	const char *show_name = dname;
 	char trunc[256];
-	if (dlen > name_width) {
-		int tail = name_width - 3;
-		if (tail < 1)
-			tail = 1;
-		snprintf(trunc, sizeof(trunc), "...%s", dname + dlen - tail);
+	if (stringWidth((const uint8_t *)dname) > name_width) {
+		int tail_cols = name_width - 3;
+		if (tail_cols < 1)
+			tail_cols = 1;
+
+		const uint8_t *p = (const uint8_t *)dname;
+		int remaining = stringWidth(p);
+		while (*p && remaining > tail_cols) {
+			int n = utf8_nBytes(*p);
+			if (n <= 0)
+				n = 1;
+			remaining -= charInStringWidth(p, 0);
+			p += n;
+		}
+		snprintf(trunc, sizeof(trunc), "...%s", (const char *)p);
 		show_name = trunc;
 	}
 
-	return snprintf(out, cap, "%s %s", show_name, flags);
+	/* snprintf returns the length it WOULD have written.  The caller
+	 * hands this straight to abAppend against a fixed-size stack
+	 * buffer, so an over-long name made it read past the end.  Clamp
+	 * to what actually fits. */
+	int n = snprintf(out, cap, "%s %s", show_name, flags);
+	if (n < 0)
+		return 0;
+	if (n >= cap)
+		n = cap - 1;
+	return n;
 }
 
 /* Middle block: line:col + position indicator, padded to STATUS_BLOCK.
@@ -1242,7 +1271,10 @@ void whatCursor(void) {
 		}
 	}
 
-	int screen_y = E.buf->cy - E.windows[0]->rowoff + 1;
+	/* The focused window, not window 0: with a split, C-x = reported a
+	 * screen row computed from an unrelated window's scroll offset. */
+	struct window *win = E.windows[windowFocusedIdx()];
+	int screen_y = E.buf->cy - win->rowoff + 1;
 	setStatusMessage(
 		"Line,col (buffer:%d,%d screen:%d,%d) Char='%s' LineLen=%d Window=%dx%d",
 		E.buf->cy + 1, E.buf->cx, screen_y, rx, ch, line_len,

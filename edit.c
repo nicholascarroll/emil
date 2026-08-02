@@ -151,8 +151,13 @@ void unindent(int rept) {
 	/* Calculate size of unindent */
 	/* NB: trunc is bounded by the NUL terminator at chars[size],
 	 * which always mismatches '\t'. */
+	/* UARG_COUNT maps a missing prefix argument (0) to 1, as every
+	 * other command in this file does.  Looping on the raw argument
+	 * meant a plain Shift-Tab -- CMD_UNINDENT passes E.uarg, which is
+	 * 0 with no prefix -- asked for zero levels and did nothing. */
+	int times = UARG_COUNT(rept);
 	int trunc = 0;
-	for (int i = 0; i < rept; i++) {
+	for (int i = 0; i < times; i++) {
 		if (row->chars[trunc] != '\t')
 			break;
 		trunc++;

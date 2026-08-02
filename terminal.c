@@ -259,6 +259,25 @@ void deserializeUnicode(void) {
  *
  * Otherwise: a byte inside a terminal-generated sequence.  Block,
  * retrying on EINTR, until it arrives.  */
+/* Read one UTF-8 continuation byte, retrying on EINTR.
+ *
+ * Same rule as terminalEscByte: never abandon a sequence in flight.
+ * These three branches used a bare read(), so a SIGWINCH or SIGCONT
+ * arriving between the lead byte and a continuation byte -- resizing
+ * the terminal, or foregrounding the editor, while a multi-byte
+ * character was being typed or pasted -- made read() fail with EINTR
+ * and the whole character was dropped. */
+static int terminalContByte(uint8_t *out) {
+	for (;;) {
+		ssize_t n = read(STDIN_FILENO, out, 1);
+		if (n == 1)
+			return 1;
+		if (n == -1 && errno == EINTR)
+			continue;
+		return 0;
+	}
+}
+
 static int terminalEscByte(uint8_t *out, int wait_indefinitely) {
 	for (;;) {
 		ssize_t n = read(STDIN_FILENO, out, 1);
@@ -338,7 +357,7 @@ int readKey(void) {
 	} else if (utf8_is2Char(c)) {
 		E.nunicode = 2;
 		E.unicode[0] = c;
-		if (read(STDIN_FILENO, &E.unicode[1], 1) != 1)
+		if (!terminalContByte(&E.unicode[1]))
 			return KEY_UNICODE_ERROR;
 		if (!utf8_validate(E.unicode, 2))
 			return KEY_UNICODE_ERROR;
@@ -346,9 +365,9 @@ int readKey(void) {
 	} else if (utf8_is3Char(c)) {
 		E.nunicode = 3;
 		E.unicode[0] = c;
-		if (read(STDIN_FILENO, &E.unicode[1], 1) != 1)
+		if (!terminalContByte(&E.unicode[1]))
 			return KEY_UNICODE_ERROR;
-		if (read(STDIN_FILENO, &E.unicode[2], 1) != 1)
+		if (!terminalContByte(&E.unicode[2]))
 			return KEY_UNICODE_ERROR;
 		if (!utf8_validate(E.unicode, 3))
 			return KEY_UNICODE_ERROR;
@@ -356,11 +375,11 @@ int readKey(void) {
 	} else if (utf8_is4Char(c)) {
 		E.nunicode = 4;
 		E.unicode[0] = c;
-		if (read(STDIN_FILENO, &E.unicode[1], 1) != 1)
+		if (!terminalContByte(&E.unicode[1]))
 			return KEY_UNICODE_ERROR;
-		if (read(STDIN_FILENO, &E.unicode[2], 1) != 1)
+		if (!terminalContByte(&E.unicode[2]))
 			return KEY_UNICODE_ERROR;
-		if (read(STDIN_FILENO, &E.unicode[3], 1) != 1)
+		if (!terminalContByte(&E.unicode[3]))
 			return KEY_UNICODE_ERROR;
 		if (!utf8_validate(E.unicode, 4))
 			return KEY_UNICODE_ERROR;
