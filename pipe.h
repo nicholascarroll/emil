@@ -1,3 +1,5 @@
+/* Copyright (c) 2021 chameleon, 2026 Nicholas Carroll.
+ * SPDX-License-Identifier: MIT */
 #ifndef EMIL_PIPE_H
 #define EMIL_PIPE_H
 #include "emil.h"

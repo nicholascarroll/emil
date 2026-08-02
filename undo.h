@@ -1,3 +1,5 @@
+/* Copyright (c) 2021 chameleon, 2026 Nicholas Carroll.
+ * SPDX-License-Identifier: MIT */
 #ifndef EMIL_UNDO_H
 #define EMIL_UNDO_H 1
 

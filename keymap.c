@@ -1,3 +1,5 @@
+/* Copyright (c) 2021 chameleon, 2026 Nicholas Carroll.
+ * SPDX-License-Identifier: MIT */
 #include "keymap.h"
 #include "adjust.h"
 #include "buffer.h"

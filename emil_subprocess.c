@@ -1,4 +1,5 @@
-/* emil_subprocess.c: Implementation of the subprocess API.
+/* Copyright (c) 2021 chameleon, 2026 Nicholas Carroll.
+ * SPDX-License-Identifier: MIT
  *
  * See emil_subprocess.h for the public interface.  When
  * EMIL_DISABLE_SHELL is defined, this translation unit compiles to

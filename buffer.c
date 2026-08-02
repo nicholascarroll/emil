@@ -1,3 +1,5 @@
+/* Copyright (c) 2021 chameleon, 2026 Nicholas Carroll.
+ * SPDX-License-Identifier: MIT */
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -224,6 +226,10 @@ struct buffer *newBuffer(void) {
 	ret->mark_active = 0;
 	ret->mark_ring_len = 0;
 	ret->mark_ring_idx = 0;
+	for (int i = 0; i < MARK_RING_SIZE; i++) {
+		ret->mark_ring[i].cx = -1;
+		ret->mark_ring[i].cy = -1;
+	}
 	ret->cx = 0;
 	ret->cy = 0;
 	ret->numrows = 0;

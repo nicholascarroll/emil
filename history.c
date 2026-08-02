@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 #include <stdlib.h>
 #include <string.h>
 #include "emil.h"

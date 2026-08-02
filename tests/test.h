@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 /* Test framework for emil */
 #ifndef TEST_H
 #define TEST_H

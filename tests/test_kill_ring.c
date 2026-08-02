@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 /* test_kill_ring.c
  *
  * Kill ring operations today touch three things in parallel:

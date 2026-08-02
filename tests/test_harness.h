@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 /* test_harness.h — Shared setup for fat-binary tests.
  *
  * Provides initTestEditor() which mirrors main.c's initEditor()

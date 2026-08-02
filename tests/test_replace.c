@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 /* test_replace.c: the replace-regexp substitution engine.
  *
  * Covers the two pure functions behind replaceRegex:

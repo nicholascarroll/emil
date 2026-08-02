@@ -1,3 +1,6 @@
+# Copyright (c) 2021 chameleon, 2026 Nicholas Carroll.
+# SPDX-License-Identifier: MIT
+
 # Remember to keep the version number up to date
 VERSION = 0.8.0
 

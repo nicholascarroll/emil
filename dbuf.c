@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 #include "dbuf.h"
 #include "util.h"
 #include <limits.h>

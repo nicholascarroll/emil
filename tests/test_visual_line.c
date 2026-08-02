@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 /* test_visual_line.c: Visual line movement, start/end, kill in wrap mode. */
 
 #include "test.h"

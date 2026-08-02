@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 /* test_cjk_indic.c: Tests for issues #71–#74:
  *   #71  utf8Decode + codepoint classifiers
  *   #72  CJK word movement

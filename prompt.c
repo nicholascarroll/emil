@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 #include "prompt.h"
 #include "wrap.h"
 #include "buffer.h"

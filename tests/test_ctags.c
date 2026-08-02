@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 /* test_ctags.c: Tests for ctags tags-file discovery and path
  * resolution.
  */

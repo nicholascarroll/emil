@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 /* test_decoder.c: unit tests for the escape-sequence decoder.
  *
  * The decoder is a pure state machine over a byte source

@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 /*
  * confirm_y2038_bug.c: Y2038 platform canary + emil immunity check
  *

@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 /* test_buffer.c: Row operations, screen cache, coordinate mapping. */
 
 #include "test.h"

@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 #ifndef EMIL_MOTION_H
 #define EMIL_MOTION_H 1
 

@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 /* test_wcwidth.c: Character and string width calculations. */
 
 #ifndef _XOPEN_SOURCE

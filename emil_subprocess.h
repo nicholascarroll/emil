@@ -1,3 +1,11 @@
+/* Copyright (c) 2021 chameleon, 2026 Nicholas Carroll.
+ * SPDX-License-Identifier: MIT
+ *
+ * The subprocess_* interface below comes from Neil Henning's
+ * subprocess.h <https://github.com/sheredom/subprocess.h>, public
+ * domain under the Unlicense, vendored into japanoise/emsys and
+ * reimplemented here over posix_spawn.  The Unlicense imposes no
+ * conditions; this records provenance only. */
 /* emil_subprocess.h
  *
  * Spawn a child process with three pipes (stdin, stdout, stderr)

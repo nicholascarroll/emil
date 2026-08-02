@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 /* test_subprocess.c: Contract tests for the subprocess API surface
  * that pipe.c depends on.
  *

@@ -1,3 +1,5 @@
+/* Copyright (c) 2021 chameleon, 2026 Nicholas Carroll.
+ * SPDX-License-Identifier: MIT */
 /* test_shell.c: Integration tests for pipe.c shell operations.*/
 
 #include "test.h"

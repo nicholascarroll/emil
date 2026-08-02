@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 /* test_unicode.c: UTF-8 classification and validation. */
 
 #include "test.h"

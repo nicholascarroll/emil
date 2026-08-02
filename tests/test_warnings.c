@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 /* test_warnings.c: persistent status-bar warning state. */
 
 #include "test.h"

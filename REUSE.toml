@@ -1,0 +1,51 @@
+version = 1
+SPDX-PackageName = "emil"
+SPDX-PackageSupplier = "Nicholas Carroll <nicholascarroll@tutanota.com>"
+SPDX-PackageDownloadLocation = "https://github.com/nicholascarroll/emil"
+
+# Everything not annotated below is original to emil.
+[[annotations]]
+path = "**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Nicholas Carroll"
+SPDX-License-Identifier = "MIT"
+
+# Files that still contain code derived from japanoise/emsys
+# (MIT, Copyright (c) 2021 chameleon).
+#  Generated with git blame and errs towards over-attribution.
+[[annotations]]
+path = [
+  "Makefile",
+  "abuf.c",
+  "buffer.c", "buffer.h",
+  "display.c",
+  "edit.c",
+  "emil.h",
+  "fileio.c",
+  "find.c", "find.h",
+  "keymap.c",
+  "main.c",
+  "motion.c",
+  "pipe.c", "pipe.h",
+  "region.c", "region.h",
+  "register.c",
+  "terminal.c",
+  "tests/test_shell.c",
+  "transform.c", "transform.h",
+  "undo.c", "undo.h",
+  "unicode.c", "unicode.h",
+  "util.c",
+  "window.c",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = ["2021 chameleon", "2026 Nicholas Carroll"]
+SPDX-License-Identifier = "MIT"
+
+# Adapted from the Linux kernel's .clang-format, which is GPL-2.0.
+# This file configures an external tool; it is not compiled into emil
+# and does not affect emil's MIT licensing.
+[[annotations]]
+path = ".clang-format"
+precedence = "override"
+SPDX-FileCopyrightText = "The Linux Kernel Authors"
+SPDX-License-Identifier = "GPL-2.0-only"

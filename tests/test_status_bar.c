@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 /* test_status_bar.c: Characterisation tests for drawStatusBar.
  */
 

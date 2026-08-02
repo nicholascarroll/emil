@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 #include "wrap.h"
 #include "unicode.h"
 #include "util.h"

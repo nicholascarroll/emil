@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 /* decoder.c: the escape-sequence state machine.
  *
  * Every byte after a raw ESC is decoded here.  States and

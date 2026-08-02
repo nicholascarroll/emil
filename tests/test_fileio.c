@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 /* test_fileio.c: File I/O, round-trip, UTF-8 validation, emil_getline. */
 
 #include "test.h"

@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 #include "mutate.h"
 #include "adjust.h"
 #include "buffer.h"

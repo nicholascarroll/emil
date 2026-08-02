@@ -1,3 +1,5 @@
+/* Copyright (c) 2021 chameleon, 2026 Nicholas Carroll.
+ * SPDX-License-Identifier: MIT */
 #ifndef _XOPEN_SOURCE
 #define _XOPEN_SOURCE 700
 #endif

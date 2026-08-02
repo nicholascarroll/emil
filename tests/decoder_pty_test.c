@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 /* decoder_pty_test.c: terminal-level integration tests for emil's
  * escape-sequence input.  C only; no dependencies beyond POSIX
  * (_XOPEN_SOURCE 600 for posix_openpt and friends).

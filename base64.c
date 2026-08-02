@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 #include "base64.h"
 #include <stdlib.h>
 #include "util.h"

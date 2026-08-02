@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 #ifndef EMIL_DECODER_H
 #define EMIL_DECODER_H
 
