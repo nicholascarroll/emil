@@ -64,7 +64,7 @@ char *minibufJoin(struct buffer *mb, const char *sep) {
 static int minibufEmpty(struct buffer *mb) {
 	if (mb->numrows > 1)
 		return 0;
-	return mb->numrows == 0 || mb->row[0].size == 0;
+	return bufferIsEmpty(mb);
 }
 
 /* Copy 's' with each '\n' rewritten as the two bytes "^J", the same

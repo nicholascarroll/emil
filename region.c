@@ -119,7 +119,7 @@ void popMark(void) {
 
 	/* Clamp */
 	if (E.buf->cy >= E.buf->numrows)
-		buf->cy = E.buf->numrows > 0 ? E.buf->numrows - 1 : 0;
+		buf->cy = E.buf->numrows - 1;
 	if (E.buf->cy < E.buf->numrows &&
 	    E.buf->cx > E.buf->row[E.buf->cy].size)
 		E.buf->cx = E.buf->row[E.buf->cy].size;
@@ -162,7 +162,7 @@ void popMark(void) {
 		 * inside the row before it can be tested for being
 		 * mid-character. */
 		if (buf->marky >= buf->numrows)
-			buf->marky = buf->numrows > 0 ? buf->numrows - 1 : 0;
+			buf->marky = buf->numrows - 1;
 		if (buf->marky < buf->numrows) {
 			erow *mrow = &buf->row[buf->marky];
 			if (buf->markx > mrow->size)
@@ -191,9 +191,9 @@ void toggleRectangleMode(void) {
 }
 
 void markBuffer(void) {
-	if (E.buf->numrows > 0) {
-		E.buf->cy = E.buf->numrows;
-		E.buf->cx = E.buf->row[--E.buf->cy].size;
+	if (!bufferIsEmpty(E.buf)) {
+		E.buf->cy = E.buf->numrows - 1;
+		E.buf->cx = E.buf->row[E.buf->cy].size;
 		setMark();
 		E.buf->cy = 0;
 		E.buf->cx = 0;
@@ -205,7 +205,7 @@ void markBuffer(void) {
  * wrapper below consults the global E.buf, which is only the right
  * question when the buffer in hand IS E.buf. */
 int markInvalidBuf(const struct buffer *buf) {
-	return (buf->markx < 0 || buf->marky < 0 || buf->numrows == 0 ||
+	return (buf->markx < 0 || buf->marky < 0 ||
 		buf->marky >= buf->numrows ||
 		buf->markx > (buf->row[buf->marky].size) ||
 		(buf->markx == buf->cx && buf->cy == buf->marky));
@@ -706,7 +706,7 @@ void replaceRegex(void) {
 		return;
 
 	struct buffer *buf = E.buf;
-	if (buf->numrows == 0) {
+	if (bufferIsEmpty(buf)) {
 		setStatusMessage("Buffer is empty.");
 		return;
 	}
@@ -1058,7 +1058,17 @@ void yankRectangle(void) {
 	 * with paired=0 at the head of the chain; the following
 	 * mutateReplace passes chain_to_prev = needs_extension so its
 	 * delete record pairs back to the extension, and the pair's
-	 * insert pairs to the delete — three records, one atomic undo. */
+	 * insert pairs to the delete — three records, one atomic undo.
+	 *
+	 * The extension and the replace cannot both account for the
+	 * same newline.  mutateExtendRows runs first, so by the time
+	 * mutateReplace looks at (0, topy) that row is a real row:
+	 * boty >= numrows implies topy <= boty gets covered by the
+	 * extension, and the following bulkDelete only ever shrinks the
+	 * buffer back to topy + 1 rows.  Since #105 every position is
+	 * addressable and there is no anchoring step to worry about
+	 * either way.  Verified by rectangle yank at the end of the
+	 * buffer, in test_regress.c. */
 	int needs_extension = 0;
 	if (boty >= buf->numrows) {
 		int n = boty - buf->numrows + 1;

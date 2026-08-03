@@ -348,7 +348,7 @@ void tearDown(void) {
 void test_scroll_viewport_empty_wrap_buffer(void) {
 	/* PageDown on an empty word-wrap buffer */
 	struct buffer *b = make_test_buffer("");
-	TEST_ASSERT_EQUAL_INT(0, b->numrows);
+	TEST_ASSERT_EQUAL_INT(1, b->numrows);
 	E.screencols = 20;
 	E.windows[0]->height = 24;
 	b->word_wrap = 1;

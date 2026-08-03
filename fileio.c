@@ -263,22 +263,34 @@ void checkFileModified(void) {
 
 /*** file i/o ***/
 
+/* Serialise the buffer: rows joined by '\n', with no terminator.  A
+ * trailing newline in the output comes from a trailing empty row, not
+ * from this function -- see the invariant note in buffer.h.  The
+ * result is NUL-terminated for convenience; *buflen excludes it.
+ *
+ * Byte-exact against editorOpen for LF files.  CRLF input is
+ * converted to LF on load and written back as LF; preserving CRLF is
+ * a separate question. */
 char *rowsToString(struct buffer *bufr, size_t *buflen) {
 	size_t totlen = 0;
 	int j;
-	for (j = 0; j < bufr->numrows; j++) {
-		totlen += bufr->row[j].size + 1;
-	}
+	for (j = 0; j < bufr->numrows; j++)
+		totlen += bufr->row[j].size;
+	if (bufr->numrows > 1)
+		totlen += (size_t)bufr->numrows - 1;
 	*buflen = totlen;
 
-	char *buf = xmalloc(totlen);
+	char *buf = xmalloc(totlen + 1);
 	char *p = buf;
 	for (j = 0; j < bufr->numrows; j++) {
+		if (j > 0) {
+			*p = '\n';
+			p++;
+		}
 		memcpy(p, bufr->row[j].chars, bufr->row[j].size);
 		p += bufr->row[j].size;
-		*p = '\n';
-		p++;
 	}
+	*p = '\0';
 
 	return buf;
 }
@@ -395,12 +407,25 @@ int editorOpen(struct buffer *bufr, char *filename) {
 	size_t linecap = 0;
 	ssize_t linelen;
 
+	/* Rebuild the row array from scratch: the buffer arrives from
+	 * newBuffer (or a previous load, via revert) already holding
+	 * rows, and the file's content replaces them wholesale.  The
+	 * invariant is restored below, before returning. */
+	bufferResetRows(bufr);
+
+	int ends_with_newline = 0;
 	while ((linelen = emil_getline(&line, &linecap, fp)) != -1) {
+		ends_with_newline = (linelen > 0 && line[linelen - 1] == '\n');
 		while (linelen > 0 &&
 		       (line[linelen - 1] == '\n' || line[linelen - 1] == '\r'))
 			linelen--;
 		appendRowRaw(bufr, (const uint8_t *)line, linelen);
 	}
+
+	/* The file is the rows joined by '\n'.  A final newline is one
+	 * more (empty) row; an empty file is the single empty row. */
+	if (bufr->numrows == 0 || ends_with_newline)
+		appendRowRaw(bufr, (const uint8_t *)"", 0);
 
 	/* Get the display length of the longest column */
 	int max_width = 0;
@@ -415,12 +440,8 @@ int editorOpen(struct buffer *bufr, char *filename) {
 
 	/* Guard against pathological files with billions of tiny lines. */
 	if (bufr->numrows > INT_MAX / 2) {
-		for (int i = 0; i < bufr->numrows; i++)
-			freeRow(&bufr->row[i]);
-		free(bufr->row);
-		bufr->row = NULL;
-		bufr->numrows = 0;
-		bufr->rowcap = 0;
+		bufferResetRows(bufr);
+		appendRowRaw(bufr, (const uint8_t *)"", 0);
 		free(bufr->filename);
 		bufr->filename = NULL;
 		setStatusMessage("File has too many lines");
@@ -430,13 +451,8 @@ int editorOpen(struct buffer *bufr, char *filename) {
 
 	/* Validate UTF-8 encoding of the loaded content */
 	if (!checkUTF8Validity(bufr)) {
-		for (int i = 0; i < bufr->numrows; i++) {
-			freeRow(&bufr->row[i]);
-		}
-		free(bufr->row);
-		bufr->row = NULL;
-		bufr->numrows = 0;
-		bufr->rowcap = 0;
+		bufferResetRows(bufr);
+		appendRowRaw(bufr, (const uint8_t *)"", 0);
 		free(bufr->filename);
 		bufr->filename = NULL;
 		setStatusMessage("Failed UTF-8 validation");
@@ -498,7 +514,7 @@ int editorOpen(struct buffer *bufr, char *filename) {
 			setStatusMessage(
 				"Read only: advisory lock by another process");
 	} else {
-		setStatusMessage("%d lines, %d columns", bufr->numrows,
+		setStatusMessage("%d lines, %d columns", bufferLineCount(bufr),
 				 max_width);
 	}
 	return 0;
@@ -558,10 +574,10 @@ void revert(void) {
 	}
 	new->cx = buf->cx;
 	new->cy = buf->cy;
-	if (new->numrows == 0) {
-		new->cy = 0;
-		new->cx = 0;
-	} else if (new->cy >= new->numrows) {
+	/* The cursor is carried over from the old buffer, so it may sit
+	 * past the end of a file that shrank on disk.  Live guard, not a
+	 * virtual-EOF leftover. */
+	if (new->cy >= new->numrows) {
 		new->cy = new->numrows - 1;
 		new->cx = 0;
 	} else if (new->cx > new->row[new->cy].size) {
@@ -757,6 +773,11 @@ void save(void) {
 	}
 
 	char *iopath = expandTilde(E.buf->filename);
+
+	/* Policy: a saved file always ends in a newline (POSIX text
+	 * file).  Applied to the buffer, not to the output string, so
+	 * the buffer and the file agree; see bufferEnsureFinalNewline. */
+	bufferEnsureFinalNewline(E.buf);
 
 	size_t len;
 	char *buf = rowsToString(E.buf, &len);
@@ -1011,20 +1032,26 @@ int insertFileAtPath(struct buffer *buf, const char *path,
 	}
 
 	/* Load into a temporary buffer so we can validate before
-	 * modifying the real buffer */
+	 * modifying the real buffer.  Split on newlines exactly as
+	 * editorOpen does, so tmpbuf holds the normal representation. */
 	struct buffer *tmpbuf = newBuffer();
+	bufferResetRows(tmpbuf);
 
 	char *line = NULL;
 	size_t linecap = 0;
 	ssize_t linelen;
+	int ends_with_newline = 0;
 
 	while ((linelen = emil_getline(&line, &linecap, fp)) != -1) {
+		ends_with_newline = (linelen > 0 && line[linelen - 1] == '\n');
 		while (linelen > 0 && (line[linelen - 1] == '\n' ||
 				       line[linelen - 1] == '\r')) {
 			linelen--;
 		}
 		appendRowRaw(tmpbuf, (const uint8_t *)line, linelen);
 	}
+	if (tmpbuf->numrows == 0 || ends_with_newline)
+		appendRowRaw(tmpbuf, (const uint8_t *)"", 0);
 
 	free(line);
 	fclose(fp);
@@ -1036,38 +1063,33 @@ int insertFileAtPath(struct buffer *buf, const char *path,
 		return 1;
 	}
 
-	int lines_inserted = tmpbuf->numrows;
+	int lines_inserted = bufferLineCount(tmpbuf);
 
 	if (lines_inserted > 0) {
-		/* Concatenate the validated rows into a single byte block
-		 * separated by newlines.
+		/* C-x i inserts whole lines: the file's last line stays a
+		 * line of its own rather than merging with the text at
+		 * point, and the row already at point keeps its content on
+		 * a row below the insertion.  So the byte block always
+		 * ends in a newline, whether or not the file did.
 		 *
-		 * Trailing newline policy:
-		 *   - If buf->cy addresses an existing row, we want that row's
-		 *     content to remain a separate row after the inserted
-		 *     block.  Adding a trailing '\n' causes
-		 *     bulkInsert's "save suffix / insert last fragment / emit
-		 *     suffix as new row" path to leave the existing content on
-		 *     its own row below the insertion.
-		 *   - If buf->cy == buf->numrows (past-end virtual row, empty
-		 *     buffer case), there's no suffix to preserve and a
-		 *     trailing '\n' would manufacture an extra empty row that
-		 *     wasn't there before, so omit it.
+		 * This is emil's long-standing behaviour and is preserved
+		 * deliberately.  It is the same policy save() applies via
+		 * bufferEnsureFinalNewline, and the reason the old
+		 * has_suffix_row condition is gone rather than inverted:
+		 * it tested saved_cy < numrows, which cy < numrows (#105)
+		 * makes unconditionally true.
 		 *
-		 * Insert position is (0, buf->cy): start of the current row:
-		 * in both cases. */
+		 * Insert position is (0, buf->cy), the start of the
+		 * current row. */
 		int saved_cy = buf->cy;
-		int has_suffix_row = (saved_cy < buf->numrows);
 
+		size_t rawlen = 0;
+		char *raw = rowsToString(tmpbuf, &rawlen);
 		struct dbuf d = DBUF_INIT;
-		for (int i = 0; i < tmpbuf->numrows; i++) {
-			if (i > 0)
-				dbuf_byte(&d, '\n');
-			dbuf_append(&d, tmpbuf->row[i].chars,
-				    tmpbuf->row[i].size);
-		}
-		if (has_suffix_row)
+		dbuf_append(&d, (const uint8_t *)raw, (int)rawlen);
+		if (rawlen == 0 || raw[rawlen - 1] != '\n')
 			dbuf_byte(&d, '\n');
+		free(raw);
 
 		int byte_len;
 		uint8_t *bytes = dbuf_detach(&d, &byte_len);
@@ -1409,6 +1431,7 @@ struct buffer *loadStdinBuffer(const char *data, size_t len) {
 
 	struct buffer *buf = newBuffer();
 	buf->filename = xstrdup("*stdin*");
+	bufferResetRows(buf); /* rebuilt from scratch below */
 
 	size_t start = 0;
 	for (size_t i = 0; i < len; i++) {
@@ -1429,6 +1452,10 @@ struct buffer *loadStdinBuffer(const char *data, size_t len) {
 			end--;
 		appendRowRaw(buf, (const uint8_t *)&data[start],
 			     (int)(end - start));
+	} else {
+		/* Input was empty or ended with '\n': the final empty
+		 * row is what records that.  See buffer.h. */
+		appendRowRaw(buf, (const uint8_t *)"", 0);
 	}
 
 	/* Validate UTF-8 encoding, mirroring editorOpen: the null-byte

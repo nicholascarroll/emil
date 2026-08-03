@@ -44,8 +44,6 @@ static int isIdentChar(uint8_t c) {
 }
 
 static char *wordAtPoint(void) {
-	if (E.buf->cy >= E.buf->numrows)
-		return NULL;
 	erow *row = &E.buf->row[E.buf->cy];
 	int cx = E.buf->cx;
 	if (cx >= row->size || !isIdentChar(row->chars[cx])) {

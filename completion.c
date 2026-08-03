@@ -276,7 +276,7 @@ static void showCompletionsBuffer(char **matches, int n_matches,
 				  enum promptType type) {
 	/* Find or create completions buffer */
 	struct buffer *comp_buf = findOrCreateSpecialBuffer("*Completions*");
-	clearBuffer(comp_buf);
+	bufferResetRows(comp_buf);
 	comp_buf->read_only = 1;
 	comp_buf->word_wrap = 0;
 
@@ -388,8 +388,7 @@ void closeCompletionsBuffer(void) {
 
 void handleMinibufferCompletion(struct buffer *minibuf, enum promptType type) {
 	/* Get current buffer text */
-	char *current_text =
-		minibuf->numrows > 0 ? (char *)minibuf->row[0].chars : "";
+	char *current_text = (char *)minibuf->row[0].chars;
 
 	/* Check if text changed since last completion */
 	if (minibuf->completionState.last_completed_text == NULL ||
@@ -486,8 +485,8 @@ void handleMinibufferCompletion(struct buffer *minibuf, enum promptType type) {
 	/* Update state BEFORE cleanup */
 	minibuf->completionState.successive_tabs++;
 	free(minibuf->completionState.last_completed_text);
-	minibuf->completionState.last_completed_text = xstrdup(
-		minibuf->numrows > 0 ? (char *)minibuf->row[0].chars : "");
+	minibuf->completionState.last_completed_text =
+		xstrdup((char *)minibuf->row[0].chars);
 
 	/* Cleanup */
 	freeCompletionResult(&result);

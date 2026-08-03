@@ -145,7 +145,7 @@ void test_open_temp_file(void) {
 	struct buffer *buf = make_test_buffer(NULL);
 	int rc = editorOpen(buf, tmpname);
 	TEST_ASSERT_EQUAL_INT(0, rc);
-	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
+	TEST_ASSERT_EQUAL_INT(4, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("Line one", (char *)buf->row[0].chars);
 	TEST_ASSERT_EQUAL_STRING("Line two", (char *)buf->row[1].chars);
 	TEST_ASSERT_EQUAL_STRING("Line three", (char *)buf->row[2].chars);
@@ -162,7 +162,7 @@ void test_open_empty_file(void) {
 	struct buffer *buf = make_test_buffer(NULL);
 	int rc = editorOpen(buf, tmpname);
 	TEST_ASSERT_EQUAL_INT(0, rc);
-	TEST_ASSERT_EQUAL_INT(0, buf->numrows);
+	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
 
 	unlink(tmpname);
 }
@@ -177,7 +177,7 @@ void test_open_directory_fails(void) {
 	int rc = editorOpen(buf, tmpname);
 	TEST_ASSERT_EQUAL_INT(-1, rc);
 	TEST_ASSERT_NULL(buf->filename);
-	TEST_ASSERT_EQUAL_INT(0, buf->numrows);
+	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
 
 	rmdir(tmpname);
 }
@@ -190,7 +190,7 @@ void test_open_trailing_slash_fails(void) {
 	int rc = editorOpen(buf, "/tmp/emil_no_such_dir_xyzzy/");
 	TEST_ASSERT_EQUAL_INT(-1, rc);
 	TEST_ASSERT_NULL(buf->filename);
-	TEST_ASSERT_EQUAL_INT(0, buf->numrows);
+	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
 }
 
 /* ---- UTF-8 validation ---- */
@@ -205,7 +205,7 @@ void test_utf8_valid_file(void) {
 	struct buffer *buf = make_test_buffer(NULL);
 	int rc = editorOpen(buf, tmpname);
 	TEST_ASSERT_EQUAL_INT(0, rc);
-	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
+	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 
 	unlink(tmpname);
 }

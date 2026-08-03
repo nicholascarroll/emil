@@ -169,15 +169,6 @@ void scrollViewport(struct window *win, struct buffer *buf, int n) {
 	}
 
 	/* Word-wrap mode: scroll by individual screen lines */
-	if (buf->numrows == 0) {
-		/* Nothing to scroll; without this, `last = numrows - 1`
-		 * below is -1 and countScreenLines dereferences
-		 * buf->row[-1] on a NULL row array. */
-		win->rowoff = 0;
-		win->skip_sublines = 0;
-		return;
-	}
-
 	buildScreenCache(buf, E.screencols);
 
 	if (n > 0) {
@@ -231,10 +222,6 @@ void scrollViewport(struct window *win, struct buffer *buf, int n) {
 
 /* Update buf->end: is the last buffer line visible in the window? */
 static void updateEndFlag(struct window *win, struct buffer *buf) {
-	if (buf->numrows == 0) {
-		buf->end = 1;
-		return;
-	}
 	if (!buf->word_wrap) {
 		buf->end = (win->rowoff + win->height > buf->numrows);
 		return;
@@ -268,10 +255,6 @@ void clampCursorToViewport(struct window *win, struct buffer *buf) {
 		buildScreenCache(buf, E.screencols);
 		int top = viewportTopScreenLine(win, buf);
 
-		/* Handle cursor past EOF */
-		if (buf->numrows > 0 && buf->cy >= buf->numrows)
-			buf->cy = buf->numrows - 1;
-
 		int cursor_screen =
 			getScreenLineForRow(buf, buf->cy, E.screencols);
 
@@ -297,7 +280,7 @@ void clampCursorToViewport(struct window *win, struct buffer *buf) {
 
 	if (buf->cy < 0)
 		buf->cy = 0;
-	if (buf->cy < buf->numrows && buf->cx > buf->row[buf->cy].size)
+	if (buf->cx > buf->row[buf->cy].size)
 		buf->cx = buf->row[buf->cy].size;
 }
 
@@ -399,42 +382,20 @@ static void renderLineWithHighlighting(erow *row, struct abuf *ab,
 /* Display functions */
 void setScxScy(struct window *win) {
 	struct buffer *buf = win->buf;
-	erow *row = (buf->cy >= buf->numrows) ? NULL : &buf->row[buf->cy];
+	erow *row = &buf->row[buf->cy]; /* cy < numrows (#105) */
 
 	win->scy = 0;
 	win->scx = 0;
 
 	if (buf->word_wrap) {
-		if (buf->cy >= buf->numrows) {
-			/* Virtual line past end of buffer */
-			if (buf->numrows > 0) {
-				int virtual_screen_line = getScreenLineForRow(
-					buf, buf->numrows - 1, E.screencols);
-				virtual_screen_line += countScreenLines(
-					&buf->row[buf->numrows - 1],
-					E.screencols);
-				int rowoff_screen_line = getScreenLineForRow(
-					buf, win->rowoff, E.screencols);
-				win->scy = virtual_screen_line -
-					   rowoff_screen_line -
-					   win->skip_sublines;
-			} else {
-				win->scy = 0 - win->rowoff;
-			}
-		} else {
-			int cursor_screen_line =
-				getScreenLineForRow(buf, buf->cy, E.screencols);
-			int rowoff_screen_line = getScreenLineForRow(
-				buf, win->rowoff, E.screencols);
-			win->scy = cursor_screen_line - rowoff_screen_line -
-				   win->skip_sublines;
-		}
+		int cursor_screen_line =
+			getScreenLineForRow(buf, buf->cy, E.screencols);
+		int rowoff_screen_line =
+			getScreenLineForRow(buf, win->rowoff, E.screencols);
+		win->scy = cursor_screen_line - rowoff_screen_line -
+			   win->skip_sublines;
 	} else {
 		win->scy = buf->cy - win->rowoff;
-	}
-
-	if (buf->cy >= buf->numrows) {
-		return;
 	}
 
 	int total_width = charsToDisplayColumn(row, buf->cx);
@@ -471,9 +432,9 @@ void scroll(void) {
 	struct window *win = E.windows[windowFocusedIdx()];
 	struct buffer *buf = win->buf;
 
-	if (buf->cy + 1 > buf->numrows) {
-		buf->cy = buf->numrows;
-		buf->cx = 0;
+	if (buf->cy > buf->numrows - 1) {
+		buf->cy = buf->numrows - 1;
+		buf->cx = buf->row[buf->cy].size;
 	} else if (buf->cx > buf->row[buf->cy].size) {
 		buf->cx = buf->row[buf->cy].size;
 	}
@@ -482,40 +443,22 @@ void scroll(void) {
 		/* Ensure cache is built (it should already be by refreshScreen) */
 		buildScreenCache(buf, E.screencols);
 
-		/* Compute cursor's absolute screen line position.
-		 * When cy == numrows (virtual line past EOF), the
-		 * cursor is one screen line past the last row. */
-		int cursor_screen_line;
+		/* Cursor's absolute screen line position. */
 		int cursor_sub_line = 0;
-		if (buf->cy >= buf->numrows) {
-			if (buf->numrows > 0) {
-				cursor_screen_line =
-					getScreenLineForRow(buf,
-							    buf->numrows - 1,
-							    E.screencols) +
-					countScreenLines(
-						&buf->row[buf->numrows - 1],
-						E.screencols);
-			} else {
-				cursor_screen_line = 0;
-			}
-		} else {
-			cursor_screen_line =
-				getScreenLineForRow(buf, buf->cy, E.screencols);
-			int render_pos = charsToDisplayColumn(
-				&buf->row[buf->cy], buf->cx);
-			int sub_col;
-			cursorScreenLine(&buf->row[buf->cy], render_pos,
-					 E.screencols, &cursor_sub_line,
-					 &sub_col);
-			/* Mirror the bump setScxScy() applies: a cursor
-			 * at the right edge of a sub-line is drawn on
-			 * the following screen line, so the scroll
-			 * decision must be made against that line. */
-			if (sub_col >= E.screencols)
-				cursor_sub_line++;
-			cursor_screen_line += cursor_sub_line;
-		}
+		int cursor_screen_line =
+			getScreenLineForRow(buf, buf->cy, E.screencols);
+		int render_pos =
+			charsToDisplayColumn(&buf->row[buf->cy], buf->cx);
+		int sub_col;
+		cursorScreenLine(&buf->row[buf->cy], render_pos, E.screencols,
+				 &cursor_sub_line, &sub_col);
+		/* Mirror the bump setScxScy() applies: a cursor at the
+		 * right edge of a sub-line is drawn on the following
+		 * screen line, so the scroll decision must be made
+		 * against that line. */
+		if (sub_col >= E.screencols)
+			cursor_sub_line++;
+		cursor_screen_line += cursor_sub_line;
 
 		int rowoff_screen_line =
 			getScreenLineForRow(buf, win->rowoff, E.screencols);
@@ -799,7 +742,7 @@ static int statusMid(const struct window *win, char *out, char fc) {
 		snprintf(linecol, sizeof(linecol), "%s%d:%d", sep, ry, rx);
 
 	char pos[8];
-	if (bufr->numrows == 0)
+	if (bufferIsEmpty(bufr))
 		memcpy(pos, "Emp", 4);
 	else if (bufr->end && win->rowoff == 0)
 		memcpy(pos, "All", 4);
@@ -1087,10 +1030,7 @@ void refreshScreen(void) {
 	for (int i = 0; i < E.nwindows; i++) {
 		struct window *w = E.windows[i];
 		struct buffer *b = w->buf;
-		if (b->numrows == 0) {
-			w->rowoff = 0;
-			w->skip_sublines = 0;
-		} else if (w->rowoff >= b->numrows) {
+		if (w->rowoff >= b->numrows) {
 			w->rowoff = b->numrows - 1;
 			w->skip_sublines = 0;
 		}
@@ -1184,12 +1124,7 @@ void refreshScreen(void) {
 
 	// Ensure cursor doesn't go beyond the window's bottom
 	if (cursor_y > cumulative_height) {
-		struct buffer *fbuf = focusedWin->buf;
-		if (fbuf->cy >= fbuf->numrows) {
-			cursor_y = cumulative_height;
-		} else {
-			cursor_y = cumulative_height - statusbar_height;
-		}
+		cursor_y = cumulative_height - statusbar_height;
 	}
 
 	snprintf(buf, sizeof(buf), "\x1b[%d;%dH", cursor_y,

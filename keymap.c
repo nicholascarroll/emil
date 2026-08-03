@@ -1,7 +1,6 @@
 /* Copyright (c) 2021 chameleon, 2026 Nicholas Carroll.
  * SPDX-License-Identifier: MIT */
 #include "keymap.h"
-#include "adjust.h"
 #include "buffer.h"
 #include "ctags.h"
 #include "completion.h"
@@ -619,8 +618,8 @@ static int dispatchMove(int c, int uarg, struct window *win) {
 		return 1;
 	case CMD_END_OF_FILE:
 		setMarkSilent();
-		E.buf->cy = E.buf->numrows;
-		E.buf->cx = 0;
+		E.buf->cy = E.buf->numrows - 1;
+		E.buf->cx = E.buf->row[E.buf->cy].size;
 		return 1;
 	case CMD_HOME:
 		beginningOfLine();
@@ -732,20 +731,12 @@ static int dispatchEdit(int c, int uarg) {
 			 * so the auto-indent is deliberately not applied.
 			 *
 			 * insertNewline does its own read-only rejection and
-			 * its own UARG_COUNT, and must not fall through to
-			 * the same-row adjustAllPoints below. */
+			 * its own UARG_COUNT. */
 			insertNewline(uarg);
 		} else if (key < KEY_ARROW_LEFT) {
-			/* Reject BEFORE recording undo (see CMD_SELF_INSERT). */
 			if (rejectIfReadOnly(E.buf))
 				return 1;
-			int count = UARG_COUNT(uarg);
-			undoSelfInsert(key, count);
-			insertChar(E.buf, key, count);
-			if (count > 1)
-				adjustAllPoints(E.buf, E.buf->cx - count,
-						E.buf->cy, E.buf->cx, E.buf->cy,
-						0);
+			selfInsert(E.buf, key, UARG_COUNT(uarg));
 		} else {
 			setStatusMessage("Failed UTF-8 validation");
 		}
@@ -1179,16 +1170,18 @@ void processKeypress(int c) {
 	int windowIdx = windowFocusedIdx();
 	struct window *win = E.windows[windowIdx];
 
-	if (E.micro) {
-		if (E.micro == CMD_REDO && (c == CMD_UNDO)) {
-			doRedo(E.buf, 1);
-			return;
-		} else {
+	/* Redo chain: after C-/ leaves more to redo, a following C-_ or
+	 * C-/ continues redoing rather than undoing.  The chain must end
+	 * as soon as the redo stack empties -- otherwise every later undo
+	 * keystroke is swallowed as a redo of nothing, and undo looks
+	 * dead to the user until some unrelated key is pressed. */
+	if (E.micro == CMD_REDO && c == CMD_UNDO && E.buf->redo != NULL) {
+		doRedo(E.buf, 1);
+		if (E.buf->redo == NULL)
 			E.micro = 0;
-		}
-	} else {
-		E.micro = 0;
+		return;
 	}
+	E.micro = 0;
 
 	if (c >= KEY_ALT_0 && c <= KEY_ALT_9) {
 		if (E.uarg == UARG_REVERSE) {
@@ -1258,19 +1251,10 @@ void processKeypress(int c) {
 	if (c == CMD_TAB || c == CMD_SELF_INSERT) {
 		if (c == CMD_TAB && E.buf == E.minibuf)
 			goto done;
-		/* Reject BEFORE recording undo: undoSelfInsert must not
-		 * push a record for an insertion that insertChar then
-		 * refuses, or a later undo (after C-x C-q) deletes text
-		 * that was never inserted. */
 		if (rejectIfReadOnly(E.buf))
 			goto done;
 		int ch = (c == CMD_TAB) ? '\t' : E.self_insert_key;
-		int count = UARG_COUNT(uarg);
-		undoSelfInsert(ch, count);
-		insertChar(E.buf, ch, count);
-		if (count > 1)
-			adjustAllPoints(E.buf, E.buf->cx - count, E.buf->cy,
-					E.buf->cx, E.buf->cy, 0);
+		selfInsert(E.buf, ch, UARG_COUNT(uarg));
 	}
 
 done:

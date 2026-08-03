@@ -113,7 +113,7 @@ void test_insert_newline_splits(void) {
 	buf->cx = 5;
 	E.buf = buf;
 	insertNewline(1);
-	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
+	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_STRING("World", row_str(buf, 1));
 	TEST_ASSERT_EQUAL_INT(0, buf->cx);
@@ -125,7 +125,7 @@ void test_insert_newline_at_beginning(void) {
 	buf->cx = 0;
 	E.buf = buf;
 	insertNewline(1);
-	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
+	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 1));
 }
@@ -135,7 +135,7 @@ void test_insert_newline_at_end(void) {
 	buf->cx = 5;
 	E.buf = buf;
 	insertNewline(1);
-	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
+	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_STRING("", row_str(buf, 1));
 }
@@ -145,7 +145,7 @@ void test_insert_newline_and_indent(void) {
 	buf->cx = 9;
 	E.buf = buf;
 	insertNewlineAndIndent(1);
-	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
+	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("    Hello", row_str(buf, 0));
 	TEST_ASSERT(buf->row[1].size >= 4);
 	TEST_ASSERT(buf->row[1].chars[0] == ' ');
@@ -160,7 +160,7 @@ void test_newline_indent_readonly_line0(void) {
 	buf->cx = 0;
 	E.buf = buf;
 	insertNewlineAndIndent(1);
-	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
+	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("\tHello", row_str(buf, 0));
 }
 
@@ -169,7 +169,7 @@ void test_open_line(void) {
 	buf->cx = 5;
 	E.buf = buf;
 	openLine(1);
-	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
+	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
 	TEST_ASSERT_EQUAL_INT(0, buf->cy);
 	TEST_ASSERT_EQUAL_INT(5, buf->cx);
 }
@@ -191,7 +191,7 @@ void test_del_char_joins_lines(void) {
 	buf->cy = 0;
 	E.buf = buf;
 	delChar(1);
-	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
+	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("HelloWorld", row_str(buf, 0));
 }
 
@@ -211,7 +211,7 @@ void test_backspace_joins_lines(void) {
 	buf->cy = 1;
 	E.buf = buf;
 	backSpace(1);
-	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
+	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("HelloWorld", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_INT(5, buf->cx);
 	TEST_ASSERT_EQUAL_INT(0, buf->cy);
@@ -414,7 +414,7 @@ void test_kill_paragraph_readonly(void) {
 	buf->read_only = 1;
 	E.buf = buf;
 	killParagraph(1);
-	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
+	TEST_ASSERT_EQUAL_INT(4, buf->numrows);
 }
 
 /* ---- Mark paragraph ---- */
@@ -473,7 +473,7 @@ void test_insert_newline_empty_buffer(void) {
 	buf->cx = 0;
 	buf->cy = 0;
 	insertNewline(1);
-	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
+	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_STRING("", row_str(buf, 1));
 }
@@ -485,7 +485,7 @@ void test_backspace_at_origin(void) {
 	buf->cy = 0;
 	backSpace(1);
 	/* Should be a no-op */
-	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
+	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_INT(0, buf->cx);
 	TEST_ASSERT_EQUAL_INT(0, buf->cy);
@@ -546,26 +546,39 @@ void test_move_cursor_up_to_shorter_line(void) {
 	TEST_ASSERT_EQUAL_INT(2, buf->cx); /* clamped to row length */
 }
 
-/* Regression: killLine and transposeChars with the cursor on the
- * virtual line past EOF (cy == numrows) used to index row[numrows],
- * reading past the row array (heap-buffer-overflow under ASAN when
- * numrows == rowcap). */
+/* Regression: killLine and transposeChars at the end of the buffer used
+ * to index row[numrows], reading past the row array (heap-buffer-
+ * overflow under ASAN when numrows == rowcap).
+ *
+ * The original set cy = numrows directly, the virtual EOF line.  #105
+ * makes that position unreachable -- clampToBuffer refuses it and no
+ * motion produces it -- so the test now uses the end of the last real
+ * row, which is the same place in the text.  The rowcap-exact fill is
+ * retained: row[numrows] is still past the end of the allocation, so
+ * anything that steps beyond cy is still a genuine overflow. */
 void test_kill_line_on_virtual_eof_line(void) {
 	struct buffer *buf = newBuffer();
 	E.buf = buf;
 	E.headbuf = buf;
 	E.windows[0]->buf = buf;
-	/* Fill rowcap exactly (16) so row[numrows] is out of bounds */
-	for (int i = 0; i < 16; i++)
-		insertRow(buf, i, (const uint8_t *)"line", 4);
+	/* Fill to rowcap exactly, so that row[numrows] is past the end
+	 * of the allocation and reading it is a genuine overflow under
+	 * ASAN.  Driven by the invariant rather than a literal count:
+	 * newBuffer now seeds an empty row (#105), so the hardcoded 16
+	 * this test used to rely on no longer lands on the boundary and
+	 * the test passed without exercising anything. */
+	while (buf->numrows < buf->rowcap)
+		insertRow(buf, buf->numrows, (const uint8_t *)"line", 4);
+	TEST_ASSERT_EQUAL_INT(buf->rowcap, buf->numrows);
+	int filled = buf->numrows;
 	buf->dirty = 0;
 	clearUndosAndRedos(buf);
-	buf->cy = buf->numrows;
-	buf->cx = 0;
+	buf->cy = buf->numrows - 1;
+	buf->cx = buf->row[buf->cy].size;
 	killLine(1);
-	TEST_ASSERT_EQUAL_INT(16, buf->numrows); /* no-op */
+	TEST_ASSERT_EQUAL_INT(filled, buf->numrows); /* no-op */
 	transposeChars(0);
-	TEST_ASSERT_EQUAL_INT(16, buf->numrows); /* no-op */
+	TEST_ASSERT_EQUAL_INT(filled, buf->numrows); /* no-op */
 }
 
 /* ---- M-- reverse modifier: transpose and word case ---- */

@@ -168,13 +168,13 @@ void test_yank_rectangle_without_rect_kill(void) {
 	/* No kill at all */
 	yankRectangle();
 	TEST_ASSERT_EQUAL_STRING("hello", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
+	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 
 	/* Plain-text (non-rectangle) kill */
 	addToKillRing("plain", 0, 0, 0);
 	yankRectangle();
 	TEST_ASSERT_EQUAL_STRING("hello", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
+	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 
 	/* Read-only buffer with a real rectangle kill: no modification */
 	addToKillRing("ab", 1, 2, 1);

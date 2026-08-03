@@ -28,7 +28,7 @@ int findBufferWindow(struct buffer *buf) {
 void synchronizeBufferCursor(struct buffer *buf, struct window *win) {
 	// Ensure the cursor is within the buffer's bounds
 	if (win->cy >= buf->numrows) {
-		win->cy = buf->numrows > 0 ? buf->numrows - 1 : 0;
+		win->cy = buf->numrows - 1;
 	}
 	if (win->cy < buf->numrows && win->cx > buf->row[win->cy].size) {
 		win->cx = buf->row[win->cy].size;

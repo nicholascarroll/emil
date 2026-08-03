@@ -486,7 +486,7 @@ void test_yank_rect_into_empty_buffer(void) {
 	 * Wiring it into E orphans src, so destroy src explicitly. */
 	struct buffer *dst = make_test_buffer("");
 	destroyBuffer(src);
-	TEST_ASSERT_EQUAL_INT(0, dst->numrows);
+	TEST_ASSERT_EQUAL_INT(1, dst->numrows);
 
 	yankRectangle();
 

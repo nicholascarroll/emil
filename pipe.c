@@ -374,7 +374,7 @@ void pipeCmd(int useRegion) {
 		/* Singleton buffer — clear any content left over from a
 		 * previous shell invocation and reset cursor/mark so stale
 		 * positions don't dangle past the new content. */
-		clearBuffer(shellBuf);
+		bufferResetRows(shellBuf);
 		shellBuf->cx = 0;
 		shellBuf->cy = 0;
 		shellBuf->markx = -1;
@@ -401,6 +401,7 @@ void pipeCmd(int useRegion) {
 			}
 		}
 
+		bufferEnsureRow(shellBuf);
 		updateBuffer(shellBuf);
 
 		/* Route the shell output to a window.  If a window is
@@ -538,7 +539,7 @@ void diffBufferWithFile(void) {
 	/* Singleton buffer — clear any content left over from a
 	 * previous diff and reset cursor/mark so stale positions
 	 * don't dangle past the new content. */
-	clearBuffer(diffBuf);
+	bufferResetRows(diffBuf);
 	diffBuf->cx = 0;
 	diffBuf->cy = 0;
 	diffBuf->markx = -1;
@@ -560,6 +561,7 @@ void diffBufferWithFile(void) {
 		}
 	}
 
+	bufferEnsureRow(diffBuf);
 	updateBuffer(diffBuf);
 
 	/* Route the diff output to a window.  If a window is already

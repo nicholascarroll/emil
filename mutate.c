@@ -5,6 +5,7 @@
 #include "dbuf.h"
 #include "undo.h"
 #include "util.h"
+#include "wrap.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,27 +32,16 @@ uint8_t *collectRegionText(struct buffer *buf, int startx, int starty, int endx,
 	return dbuf_detach(&d, out_len);
 }
 
-/* Compute the end position after inserting 'len' bytes of 'text'
- * starting at (startx, starty). */
-static void computeInsertEnd(const uint8_t *text, int len, int startx,
-			     int starty, int *endx, int *endy) {
-	int ex = startx, ey = starty;
-	for (int i = 0; i < len; i++) {
-		if (text[i] == '\n') {
-			ey++;
-			ex = 0;
-		} else {
-			ex++;
-		}
-	}
-	*endx = ex;
-	*endy = ey;
-}
-
-void mutateReplace(struct buffer *buf, int startx, int starty, int endx,
-		   int endy, const uint8_t *old_text, int old_len,
-		   const uint8_t *repl, int repl_len, int chain_to_prev,
-		   int *out_endx, int *out_endy) {
+/* Shared body of every mutation.  'coalesce' asks that the single
+ * record produced be offered to the run at the head of the undo list
+ * rather than pushed on top of it; it is honoured only for a mutation
+ * that pushes exactly one record, since a paired delete+insert is one
+ * atomic unit and must not be half-absorbed into a typing run. */
+static void mutateReplaceEx(struct buffer *buf, int startx, int starty,
+			    int endx, int endy, const uint8_t *old_text,
+			    int old_len, const uint8_t *repl, int repl_len,
+			    int chain_to_prev, int coalesce, int *out_endx,
+			    int *out_endy) {
 	/* Authoritative read-only check for the mutation layer.  Must
 	 * precede clearRedos; on refusal the out-params are untouched
 	 * (see mutate.h). */
@@ -59,6 +49,8 @@ void mutateReplace(struct buffer *buf, int startx, int starty, int endx,
 		return;
 
 	int is_replace = (old_len > 0 && repl_len > 0);
+	if (is_replace || chain_to_prev)
+		coalesce = 0;
 
 	clearRedos(buf);
 
@@ -76,7 +68,7 @@ void mutateReplace(struct buffer *buf, int startx, int starty, int endx,
 		del->endx = endx;
 		del->endy = endy;
 		del->delete = 1;
-		del->append = 0;
+		del->append = coalesce;
 		del->paired = chain_to_prev ? 1 : 0;
 		undoReplaceData(del, old_len + 1);
 		memcpy(del->data, old_text, old_len);
@@ -89,7 +81,9 @@ void mutateReplace(struct buffer *buf, int startx, int starty, int endx,
 	if (old_len > 0)
 		bulkDelete(buf, startx, starty, endx, endy);
 
-	/* Compute insert end position */
+	/* Compute insert end position.  This is the LOGICAL end: it is
+	 * what the caller is told and what point adjustment uses.  The
+	 * record below states the anchored end instead. */
 	int iex = startx, iey = starty;
 	if (repl_len > 0)
 		computeInsertEnd(repl, repl_len, startx, starty, &iex, &iey);
@@ -99,31 +93,61 @@ void mutateReplace(struct buffer *buf, int startx, int starty, int endx,
 	 * empty: in the latter case this ins is the "first record" and
 	 * takes the chain. */
 	if (repl_len > 0) {
+		/* The record names the insertion's own position.  Since
+		 * #105 every position is addressable, so there is no
+		 * virtual EOF to translate away from and the logical
+		 * coordinates are the ones bulkDelete can replay. */
+		struct dbuf adata = DBUF_INIT;
+		dbuf_append(&adata, repl, repl_len);
+
 		struct undo *ins = newUndo();
 		ins->startx = startx;
 		ins->starty = starty;
-		ins->endx = iex;
-		ins->endy = iey;
+		computeInsertEnd(adata.buf, adata.len, startx, starty,
+				 &ins->endx, &ins->endy);
 		ins->delete = 0;
-		ins->append = 0;
+		ins->append = coalesce;
 		ins->paired = is_replace ? 1 : (chain_to_prev ? 1 : 0);
-		undoReplaceData(ins, repl_len + 1);
-		memcpy(ins->data, repl, repl_len);
-		ins->data[repl_len] = 0;
-		ins->datalen = repl_len;
+		undoReplaceData(ins, adata.len + 1);
+		memcpy(ins->data, adata.buf, adata.len);
+		ins->data[adata.len] = 0;
+		ins->datalen = adata.len;
 		pushUndo(buf, ins);
+		dbuf_free(&adata);
 
-		/* bulkInsert calls adjustAllPoints internally */
+		/* bulkInsert anchors the row mutation itself and calls
+		 * adjustAllPoints on the logical range. */
 		bulkInsert(buf, startx, starty, repl, repl_len);
 	}
 
 	markBufferDirty(buf);
-	updateBuffer(buf);
+	invalidateScreenCache(buf);
 
 	if (out_endx)
 		*out_endx = iex;
 	if (out_endy)
 		*out_endy = iey;
+}
+
+void mutateReplace(struct buffer *buf, int startx, int starty, int endx,
+		   int endy, const uint8_t *old_text, int old_len,
+		   const uint8_t *repl, int repl_len, int chain_to_prev,
+		   int *out_endx, int *out_endy) {
+	mutateReplaceEx(buf, startx, starty, endx, endy, old_text, old_len,
+			repl, repl_len, chain_to_prev, 0, out_endx, out_endy);
+}
+
+void mutateInsertChar(struct buffer *buf, int startx, int starty,
+		      const uint8_t *text, int len, int *out_endx,
+		      int *out_endy) {
+	mutateReplaceEx(buf, startx, starty, startx, starty, NULL, 0, text, len,
+			0, 1, out_endx, out_endy);
+}
+
+void mutateDeleteChar(struct buffer *buf, int startx, int starty, int endx,
+		      int endy, const uint8_t *old_text, int old_len) {
+	mutateReplaceEx(buf, startx, starty, endx, endy, old_text, old_len,
+			NULL, 0, 0, 1, NULL, NULL);
 }
 
 void mutateDelete(struct buffer *buf, int startx, int starty, int endx,
@@ -196,5 +220,5 @@ void mutateExtendRows(struct buffer *buf, int from_row, int n_rows) {
 	adjustAllPoints(buf, ext->startx, ext->starty, ext->endx, ext->endy, 0);
 
 	markBufferDirty(buf);
-	updateBuffer(buf);
+	invalidateScreenCache(buf);
 }

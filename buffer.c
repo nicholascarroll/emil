@@ -173,52 +173,6 @@ void rowInsertChar(struct buffer *bufr, erow *row, int at, int c) {
 	invalidateScreenCache(bufr);
 }
 
-void rowInsertUnicode(struct buffer *bufr, erow *row, int at) {
-	if (at < 0 || at > row->size)
-		at = row->size;
-	int needed = row->size + 1 + E.nunicode;
-	rowEnsureCap(row, needed);
-	memmove(&row->chars[at + E.nunicode], &row->chars[at],
-		row->size - at + 1);
-	row->size += E.nunicode;
-	memcpy(&row->chars[at], E.unicode, E.nunicode);
-	row->cached_width = -1;
-	row->cached_sublines = -1;
-	markBufferDirty(bufr);
-	invalidateScreenCache(bufr);
-}
-
-void rowAppendString(struct buffer *bufr, erow *row, const uint8_t *s,
-		     size_t len) {
-	/* Guard against int overflow: row->size is int */
-	if (len > (size_t)(INT_MAX - row->size - 1))
-		return;
-	int needed = row->size + (int)len + 1;
-	rowEnsureCap(row, needed);
-	memcpy(&row->chars[row->size], s, len);
-	row->size += len;
-	row->chars[row->size] = '\0';
-	row->cached_width = -1;
-	row->cached_sublines = -1;
-	markBufferDirty(bufr);
-	invalidateScreenCache(bufr);
-}
-
-void rowDelChar(struct buffer *bufr, erow *row, int at) {
-	if (at < 0 || at >= row->size)
-		return;
-	/* at + size <= row->size is guaranteed: all input paths enforce
-	 * valid UTF-8, and all callers pass at on a character boundary. */
-	int size = utf8_nBytes(row->chars[at]);
-	memmove(&row->chars[at], &row->chars[at + size],
-		row->size - ((at + size) - 1));
-	row->size -= size;
-	row->cached_width = -1;
-	row->cached_sublines = -1;
-	markBufferDirty(bufr);
-	invalidateScreenCache(bufr);
-}
-
 struct buffer *newBuffer(void) {
 	struct buffer *ret = xmalloc(sizeof(struct buffer));
 	ret->markx = -1;
@@ -242,7 +196,11 @@ struct buffer *newBuffer(void) {
 	ret->match_len = 0;
 	ret->dirty = 0;
 	ret->special_buffer = 0;
-	ret->undo = newUndo();
+	/* An empty buffer has nothing to undo.  Before #104 this held a
+	 * pre-allocated empty record that the first edit appended to;
+	 * the mutation layer now builds every record, so the list
+	 * simply starts empty. */
+	ret->undo = NULL;
 	ret->redo = NULL;
 	ret->completionState.last_completed_text = NULL;
 	ret->completionState.completion_start_pos = 0;
@@ -267,7 +225,67 @@ struct buffer *newBuffer(void) {
 	ret->external_mod = 0;
 	ret->lock_blocked_pid = 0;
 	ret->internal_mod = 0;
+
+	/* Establish numrows >= 1.  The empty buffer is the one-row
+	 * buffer whose single row is empty, which serialises to the
+	 * empty byte string -- see rowsToString.  appendRowRaw is used
+	 * rather than insertRow because the new buffer must start
+	 * clean. */
+	appendRowRaw(ret, (const uint8_t *)"", 0);
 	return ret;
+}
+
+/* Discard every row, leaving the buffer transiently rowless.  For the
+ * loaders, which build a row array from scratch and restore the
+ * invariant before returning; see the invariant note in buffer.h. */
+void bufferResetRows(struct buffer *bufr) {
+	for (int i = 0; i < bufr->numrows; i++)
+		freeRow(&bufr->row[i]);
+	free(bufr->row);
+	bufr->row = NULL;
+	bufr->numrows = 0;
+	bufr->rowcap = 0;
+}
+
+/* Guarantee the buffer ends in a newline, which under the
+ * representation means guaranteeing a final empty row.  No-op if one
+ * is already there.
+ *
+ * Done as a buffer modification rather than by appending a byte to the
+ * save output, so that the buffer and the file agree.  Appending to
+ * the output would leave the buffer saying "no final newline, so the
+ * cursor cannot go below the last line" while the file on disk has
+ * one, and the two would disagree until reload.  emacs's
+ * require-final-newline modifies the buffer for the same reason. */
+void bufferEnsureFinalNewline(struct buffer *bufr) {
+	if (bufr->numrows > 0 && bufr->row[bufr->numrows - 1].size == 0)
+		return;
+	insertRow(bufr, bufr->numrows, (const uint8_t *)"", 0);
+}
+
+/* Does the buffer hold no text at all?
+ *
+ * Since #105 the empty buffer is the one-row buffer whose single row is
+ * empty, so numrows == 0 no longer expresses this and is in fact
+ * unreachable.  Every emptiness test that was written as numrows == 0
+ * and is still meaningful goes through here. */
+int bufferIsEmpty(struct buffer *bufr) {
+	return bufr->numrows == 1 && bufr->row[0].size == 0;
+}
+
+/* The number of lines of text, as a user counts them, which is not
+ * numrows.  Under the representation a trailing newline is a final
+ * empty row, so "a\nb\n" is three rows but two lines.  A file with no
+ * trailing newline has no such row and its line count is numrows.
+ *
+ * For display only.  Line *numbering* does not go through here: point
+ * may legitimately sit on the final empty row, so the cursor line
+ * stays cy + 1 and can exceed this count by one.  That asymmetry is
+ * deliberate and matches Emacs. */
+int bufferLineCount(struct buffer *bufr) {
+	if (bufr->numrows > 0 && bufr->row[bufr->numrows - 1].size == 0)
+		return bufr->numrows - 1;
+	return bufr->numrows;
 }
 
 void destroyBuffer(struct buffer *buf) {
@@ -340,9 +358,22 @@ struct buffer *findOrCreateSpecialBuffer(const char *name) {
 	return buf;
 }
 
+/* Empty the buffer, leaving it in the canonical empty state: one row,
+ * itself empty.  The invariant holds on return, so callers that only
+ * want to blank a buffer need do nothing further. */
 void clearBuffer(struct buffer *buf) {
 	while (buf->numrows > 0)
 		delRow(buf, 0);
+	appendRowRaw(buf, (const uint8_t *)"", 0);
+}
+
+/* Restore the invariant after bufferResetRows.  The counterpart to it:
+ * reset, append whatever rows the content produces, then call this so
+ * that content which produced no rows at all still leaves a valid
+ * buffer rather than a rowless one. */
+void bufferEnsureRow(struct buffer *buf) {
+	if (buf->numrows == 0)
+		appendRowRaw(buf, (const uint8_t *)"", 0);
 }
 
 void closeSpecialBuffer(const char *name) {
@@ -809,34 +840,36 @@ void computeDisplayNames(void) {
 }
 
 void clampToBuffer(struct buffer *buf, int *px, int *py) {
-	if (buf->numrows == 0) {
-		*py = 0;
-		*px = 0;
-	} else if (*py >= buf->numrows) {
+	if (*py >= buf->numrows) {
 		*py = buf->numrows - 1;
 		*px = buf->row[*py].size;
 	} else if (*py >= 0 && *px > buf->row[*py].size) {
 		*px = buf->row[*py].size;
 	}
+	/* The mark is a position like any other and can be carried
+	 * across rows by an edit, so it snaps to a character boundary
+	 * on the same rule as the cursor. */
+	if (*py >= 0 && *py < buf->numrows)
+		*px = utf8_snapToBoundary(buf->row[*py].chars,
+					  buf->row[*py].size, *px, +1);
 }
 
 /* Clamp cursor and mark to valid buffer positions. Called after every command.*/
 void clampPositions(struct buffer *buf) {
-	if (buf->numrows == 0) {
-		buf->cy = 0;
-		buf->cx = 0;
-		buf->markx = -1;
-		buf->marky = -1;
-		buf->mark_active = 0;
-		return;
-	}
-	/* cy == numrows is allowed (virtual EOF line) but nothing beyond */
-	if (buf->cy > buf->numrows)
-		buf->cy = buf->numrows;
-	if (buf->cy < buf->numrows && buf->cx > buf->row[buf->cy].size)
+	/* cy < numrows: every position the cursor can hold names a real
+	 * row.  numrows >= 1, so numrows - 1 is always valid. */
+	if (buf->cy > buf->numrows - 1)
+		buf->cy = buf->numrows - 1;
+	if (buf->cx > buf->row[buf->cy].size)
 		buf->cx = buf->row[buf->cy].size;
-	if (buf->cy == buf->numrows)
-		buf->cx = 0;
+
+	/* A byte offset is a legal cursor position only at the start of
+	 * a character or at end of line.  Enforced here, after every
+	 * command, rather than trusted to each of the many places that
+	 * move a cursor: any command that carries cx from one row to
+	 * another can otherwise leave it inside a multibyte character. */
+	buf->cx = utf8_snapToBoundary(buf->row[buf->cy].chars,
+				      buf->row[buf->cy].size, buf->cx, +1);
 
 	/* Clamp mark */
 	if (buf->marky >= 0)

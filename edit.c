@@ -8,6 +8,7 @@
 #include "keymap.h"
 
 #include "motion.h"
+#include "dbuf.h"
 #include "mutate.h"
 #include "prompt.h"
 #include "region.h"
@@ -23,6 +24,9 @@
 
 /* Character insertion */
 
+/* Raw insertion with no undo record.  Used for minibuffer text, which
+ * is not part of any undo history.  Editing a user buffer goes through
+ * selfInsert below, or the mutation layer directly. */
 void insertChar(struct buffer *bufr, int c, int count) {
 	if (rejectIfReadOnly(bufr))
 		return;
@@ -33,59 +37,61 @@ void insertChar(struct buffer *bufr, int c, int count) {
 		count = 1;
 
 	for (int i = 0; i < count; i++) {
-		if (bufr->cy == bufr->numrows) {
-			insertRow(bufr, bufr->numrows, (const uint8_t *)"", 0);
-		}
+		/* No virtual row to materialise: cy < numrows (#105). */
 		rowInsertChar(bufr, &bufr->row[bufr->cy], bufr->cx, c);
 		bufr->cx++;
 	}
 }
 
+/* Insert 'len' bytes of 'text' 'times' times at point, recording undo,
+ * and leave point after the insertion.
+ *
+ * A single repetition may join the run at the head of the undo list —
+ * that is what makes typing a word one undo step.  An explicit prefix
+ * argument is one command, so it produces one record however many
+ * copies it asks for, rather than a run the cap would then chop up. */
+static void insertRepeat(struct buffer *buf, const uint8_t *text, int len,
+			 int times) {
+	int ex, ey;
+
+	if (times == 1) {
+		mutateInsertChar(buf, buf->cx, buf->cy, text, len, &ex, &ey);
+	} else {
+		struct dbuf d = DBUF_INIT;
+		for (int i = 0; i < times; i++)
+			dbuf_append(&d, text, len);
+		mutateInsert(buf, buf->cx, buf->cy, d.buf, d.len, &ex, &ey);
+		dbuf_free(&d);
+	}
+	buf->cx = ex;
+	buf->cy = ey;
+}
+
 void insertUnicode(int count) {
-	/* Reject BEFORE recording undo or touching the mark:
-	 * undoAppendUnicode must not push a record (nor shift tracked
-	 * points via adjustAllPoints) for an insertion that
-	 * rowInsertUnicode then refuses.  Undoing such a phantom
-	 * record deletes a byte range that can split a UTF-8
-	 * sequence, breaking the valid-UTF-8 buffer invariant. */
 	if (rejectIfReadOnly(E.buf))
 		return;
 
 	E.buf->mark_active = 0;
-	int times = UARG_COUNT(count);
-	for (int i = 0; i < times; i++) {
-		undoAppendUnicode(E.buf);
-		if (E.buf->cy == E.buf->numrows) {
-			insertRow(E.buf, E.buf->numrows, (const uint8_t *)"",
-				  0);
-		}
-		rowInsertUnicode(E.buf, &E.buf->row[E.buf->cy], E.buf->cx);
-		E.buf->cx += E.nunicode;
-	}
+	insertRepeat(E.buf, E.unicode, E.nunicode, UARG_COUNT(count));
+}
+
+/* Insert 'c' 'count' times at point, recording undo.  This is the
+ * undoable typing path; insertChar above is the raw primitive, used
+ * for minibuffer text that is not part of the undo history. */
+void selfInsert(struct buffer *bufr, int c, int count) {
+	if (rejectIfReadOnly(bufr))
+		return;
+
+	bufr->mark_active = 0;
+
+	if (count <= 0)
+		count = 1;
+
+	uint8_t byte = (uint8_t)c;
+	insertRepeat(bufr, &byte, 1, count);
 }
 
 /* Line operations */
-
-void splitLineAtPoint(void) {
-	if (rejectIfReadOnly(E.buf))
-		return;
-
-	if (E.buf->cx == 0) {
-		insertRow(E.buf, E.buf->cy, (const uint8_t *)"", 0);
-	} else {
-		erow *row = &E.buf->row[E.buf->cy];
-		insertRow(E.buf, E.buf->cy + 1, &row->chars[E.buf->cx],
-			  row->size - E.buf->cx);
-		row = &E.buf->row[E.buf->cy];
-		row->size = E.buf->cx;
-		row->chars[row->size] = '\0';
-		row->cached_width = -1;
-		row->cached_sublines = -1;
-		invalidateScreenCache(E.buf);
-	}
-	E.buf->cy++;
-	E.buf->cx = 0;
-}
 
 void insertNewline(int count) {
 	if (rejectIfReadOnly(E.buf))
@@ -93,11 +99,8 @@ void insertNewline(int count) {
 
 	E.buf->mark_active = 0;
 
-	int times = UARG_COUNT(count);
-	for (int i = 0; i < times; i++) {
-		undoAppendChar(E.buf, '\n');
-		splitLineAtPoint();
-	}
+	const uint8_t nl = '\n';
+	insertRepeat(E.buf, &nl, 1, UARG_COUNT(count));
 }
 
 void openLine(int count) {
@@ -126,8 +129,13 @@ void insertNewlineAndIndent(int count) {
 		int i = 0;
 		while (i < prev->size &&
 		       (prev->chars[i] == ' ' || prev->chars[i] == CTRL('i'))) {
-			undoAppendChar(E.buf, prev->chars[i]);
-			insertChar(E.buf, prev->chars[i], 1);
+			uint8_t c = prev->chars[i];
+			int ex, ey;
+			mutateInsertChar(E.buf, E.buf->cx, E.buf->cy, &c, 1,
+					 &ex, &ey);
+			E.buf->cx = ex;
+			E.buf->cy = ey;
+			prev = &E.buf->row[E.buf->cy - 1];
 			i++;
 		}
 	}
@@ -138,11 +146,6 @@ void insertNewlineAndIndent(int count) {
 void unindent(int rept) {
 	if (rejectIfReadOnly(E.buf))
 		return;
-
-	if (E.buf->cy >= E.buf->numrows) {
-		setStatusMessage("End of buffer");
-		return;
-	}
 
 	E.buf->mark_active = 0;
 
@@ -192,21 +195,22 @@ void delChar(int count) {
 
 	int times = UARG_COUNT(count);
 	for (int i = 0; i < times; i++) {
-		if (E.buf->cy == E.buf->numrows)
-			return;
 		if (E.buf->cy == E.buf->numrows - 1 &&
 		    E.buf->cx == E.buf->row[E.buf->cy].size)
 			return;
 
 		erow *row = &E.buf->row[E.buf->cy];
-		undoDelChar(E.buf, row);
 		if (E.buf->cx == row->size) {
-			row = &E.buf->row[E.buf->cy + 1];
-			rowAppendString(E.buf, &E.buf->row[E.buf->cy],
-					row->chars, row->size);
-			delRow(E.buf, E.buf->cy + 1);
+			/* Deleting the row separator joins the next row
+			 * onto this one. */
+			const uint8_t nl = '\n';
+			mutateDeleteChar(E.buf, E.buf->cx, E.buf->cy, 0,
+					 E.buf->cy + 1, &nl, 1);
 		} else {
-			rowDelChar(E.buf, row, E.buf->cx);
+			int n = utf8_nBytes(row->chars[E.buf->cx]);
+			mutateDeleteChar(E.buf, E.buf->cx, E.buf->cy,
+					 E.buf->cx + n, E.buf->cy,
+					 &row->chars[E.buf->cx], n);
 		}
 	}
 }
@@ -230,30 +234,31 @@ void backSpace(int count) {
 	E.buf->mark_active = 0;
 	int times = UARG_COUNT(count);
 	for (int i = 0; i < times; i++) {
-		if (!E.buf->numrows)
-			return;
-		if (E.buf->cy == E.buf->numrows) {
-			E.buf->cx = E.buf->row[--E.buf->cy].size;
-			return;
-		}
 		if (E.buf->cy == 0 && E.buf->cx == 0)
 			return;
 
 		erow *row = &E.buf->row[E.buf->cy];
 		if (E.buf->cx > 0) {
+			/* Walk back over any UTF-8 continuation bytes so
+			 * the whole character is one deletion. */
+			int to = E.buf->cx;
+			int from = to;
 			do {
-				E.buf->cx--;
-				undoBackSpace(E.buf, row->chars[E.buf->cx]);
-			} while (E.buf->cx > 0 &&
-				 utf8_isCont(row->chars[E.buf->cx]));
-			rowDelChar(E.buf, row, E.buf->cx);
+				from--;
+			} while (from > 0 && utf8_isCont(row->chars[from]));
+			mutateDeleteChar(E.buf, from, E.buf->cy, to, E.buf->cy,
+					 &row->chars[from], to - from);
+			E.buf->cx = from;
 		} else {
-			undoBackSpace(E.buf, '\n');
-			E.buf->cx = E.buf->row[E.buf->cy - 1].size;
-			rowAppendString(E.buf, &E.buf->row[E.buf->cy - 1],
-					row->chars, row->size);
-			delRow(E.buf, E.buf->cy);
-			E.buf->cy--;
+			/* Joining onto the previous row deletes the
+			 * separator between them. */
+			const uint8_t nl = '\n';
+			int prevy = E.buf->cy - 1;
+			int prevx = E.buf->row[prevy].size;
+			mutateDeleteChar(E.buf, prevx, prevy, 0, E.buf->cy, &nl,
+					 1);
+			E.buf->cx = prevx;
+			E.buf->cy = prevy;
 		}
 	}
 }
@@ -352,7 +357,7 @@ static void transposeWordsBackward(void) {
 		return;
 
 	E.buf->mark_active = 0;
-	if (E.buf->numrows == 0) {
+	if (bufferIsEmpty(E.buf)) {
 		setStatusMessage("Buffer is empty");
 		return;
 	}
@@ -400,7 +405,7 @@ void transposeWords(int uarg) {
 	}
 
 	E.buf->mark_active = 0;
-	if (E.buf->numrows == 0) {
+	if (bufferIsEmpty(E.buf)) {
 		setStatusMessage("Buffer is empty");
 		return;
 	}
@@ -408,9 +413,8 @@ void transposeWords(int uarg) {
 	if (E.buf->cx == 0 && E.buf->cy == 0) {
 		setStatusMessage("Beginning of buffer");
 		return;
-	} else if (E.buf->cy >= E.buf->numrows ||
-		   (E.buf->cy == E.buf->numrows - 1 &&
-		    E.buf->cx == E.buf->row[E.buf->cy].size)) {
+	} else if (E.buf->cy == E.buf->numrows - 1 &&
+		   E.buf->cx == E.buf->row[E.buf->cy].size) {
 		setStatusMessage("End of buffer");
 		return;
 	}
@@ -438,13 +442,8 @@ static void transposeCharsBackward(void) {
 		return;
 
 	E.buf->mark_active = 0;
-	if (E.buf->numrows == 0) {
+	if (bufferIsEmpty(E.buf)) {
 		setStatusMessage("Buffer is empty");
-		return;
-	}
-
-	if (E.buf->cy >= E.buf->numrows) {
-		setStatusMessage("End of buffer");
 		return;
 	}
 
@@ -487,13 +486,8 @@ void transposeChars(int uarg) {
 	}
 
 	E.buf->mark_active = 0;
-	if (E.buf->numrows == 0) {
+	if (bufferIsEmpty(E.buf)) {
 		setStatusMessage("Buffer is empty");
-		return;
-	}
-
-	if (E.buf->cy >= E.buf->numrows) {
-		setStatusMessage("End of buffer");
 		return;
 	}
 
@@ -539,9 +533,8 @@ void killLine(int count) {
 
 	int times = UARG_COUNT(count);
 	for (int i = 0; i < times; i++) {
-		if (E.buf->numrows <= 0 || E.buf->cy >= E.buf->numrows) {
+		if (bufferIsEmpty(E.buf))
 			return;
-		}
 
 		erow *row = &E.buf->row[E.buf->cy];
 
@@ -696,7 +689,7 @@ static void transposeSentencesBackward(void) {
 
 	E.buf->mark_active = 0;
 
-	if (E.buf->numrows == 0) {
+	if (bufferIsEmpty(E.buf)) {
 		setStatusMessage("Buffer is empty");
 		return;
 	}
@@ -773,7 +766,7 @@ void transposeSentences(int uarg) {
 
 	E.buf->mark_active = 0;
 
-	if (E.buf->numrows == 0) {
+	if (bufferIsEmpty(E.buf)) {
 		setStatusMessage("Buffer is empty");
 		return;
 	}

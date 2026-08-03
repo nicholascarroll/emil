@@ -192,6 +192,7 @@ static struct buffer *output_to_buffer(const char *output) {
 	struct buffer *buf = newBuffer();
 	buf->filename = xstrdup("*Shell Output*");
 	buf->special_buffer = 1;
+	bufferResetRows(buf); /* rows built from scratch below */
 	size_t len = strlen(output);
 	size_t rowStart = 0;
 	size_t rowLen = 0;

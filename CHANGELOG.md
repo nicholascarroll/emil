@@ -1,4 +1,8 @@
 ## [Unreleased]
+- Radical refactor of undo; implemented issues #104,#105. This fixes
+  #102: undo of newlines at end of buffer fails
+- A run of typing or deleting now becomes a new undo step every 20
+- Fixed failure to undo insertions on the last line of the file #102.
 - Fixed incremental search (`C-s`) starting from the top of the buffer #101
 - Fixed a selection being drawn or hidden according to whether *another* window
   had a valid mark. 

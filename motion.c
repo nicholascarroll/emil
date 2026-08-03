@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: MIT */
 #include "motion.h"
 #include "display.h"
+#include "buffer.h"
 
 #include "prompt.h"
 #include "region.h"
@@ -24,18 +25,6 @@ int isParaBoundary(erow *row) {
 /* Move cursor up or down by one visual (screen) row when word wrap is
  * active.  direction: -1 = up, +1 = down. */
 static void moveVisualRow(int direction) {
-	if (E.buf->cy >= E.buf->numrows) {
-		if (direction > 0 || E.buf->numrows == 0)
-			return;
-		/* Moving up from virtual EOF line */
-		E.buf->cy = E.buf->numrows - 1;
-		erow *prev = &E.buf->row[E.buf->cy];
-		int last_sub = countScreenLines(prev, E.screencols) - 1;
-		E.buf->cx = displayColumnToByteOffset(prev, E.screencols,
-						      last_sub, 0);
-		return;
-	}
-
 	erow *row = &E.buf->row[E.buf->cy];
 	int display_col = charsToDisplayColumn(row, E.buf->cx);
 
@@ -62,9 +51,9 @@ static void moveVisualRow(int direction) {
 	} else {
 		/* Move to next logical row */
 		if (E.buf->cy >= E.buf->numrows - 1) {
-			/* Allow moving to the virtual line past EOF */
-			E.buf->cy = E.buf->numrows;
-			E.buf->cx = 0;
+			/* Already on the last row; nowhere below it. */
+			E.buf->cy = E.buf->numrows - 1;
+			E.buf->cx = E.buf->row[E.buf->cy].size;
 			return;
 		}
 		E.buf->cy++;
@@ -77,9 +66,7 @@ static void moveVisualRow(int direction) {
 void moveCursor(int key, int count) {
 	int times = UARG_COUNT(count);
 	for (int i = 0; i < times; i++) {
-		erow *row = (E.buf->cy >= E.buf->numrows) ?
-				    NULL :
-				    &E.buf->row[E.buf->cy];
+		erow *row = &E.buf->row[E.buf->cy]; /* cy < numrows */
 
 		switch (key) {
 		case KEY_ARROW_LEFT:
@@ -95,9 +82,12 @@ void moveCursor(int key, int count) {
 			break;
 
 		case KEY_ARROW_RIGHT:
-			if (row && E.buf->cx < row->size) {
+			if (E.buf->cx < row->size) {
 				E.buf->cx += utf8_nBytes(row->chars[E.buf->cx]);
-			} else if (row && E.buf->cx == row->size) {
+			} else if (E.buf->cx == row->size &&
+				   E.buf->cy < E.buf->numrows - 1) {
+				/* Stop at the end of the last row: there
+				 * is no virtual line past it (#105). */
 				E.buf->cy++;
 				E.buf->cx = 0;
 			}
@@ -107,37 +97,28 @@ void moveCursor(int key, int count) {
 				moveVisualRow(-1);
 			} else if (E.buf->cy > 0) {
 				E.buf->cy--;
-				if (E.buf->row[E.buf->cy].chars == NULL)
-					break;
-				while (E.buf->cx < E.buf->row[E.buf->cy].size &&
-				       utf8_isCont(E.buf->row[E.buf->cy]
-							   .chars[E.buf->cx]))
-					E.buf->cx++;
+				E.buf->cx = utf8_snapToBoundary(
+					E.buf->row[E.buf->cy].chars,
+					E.buf->row[E.buf->cy].size, E.buf->cx,
+					+1);
 			}
 			break;
 		case KEY_ARROW_DOWN:
 			if (E.buf->word_wrap) {
 				moveVisualRow(+1);
-			} else if (E.buf->cy < E.buf->numrows) {
+			} else if (E.buf->cy < E.buf->numrows - 1) {
+				/* cy < numrows (#105): there is no virtual
+				 * line below the last row to step onto. */
 				E.buf->cy++;
-				if (E.buf->cy < E.buf->numrows) {
-					if (E.buf->row[E.buf->cy].chars == NULL)
-						break;
-					while (E.buf->cx < E.buf->row[E.buf->cy]
-								   .size &&
-					       utf8_isCont(
-						       E.buf->row[E.buf->cy]
-							       .chars[E.buf->cx]))
-						E.buf->cx++;
-				} else {
-					E.buf->cx = 0;
-				}
+				E.buf->cx = utf8_snapToBoundary(
+					E.buf->row[E.buf->cy].chars,
+					E.buf->row[E.buf->cy].size, E.buf->cx,
+					+1);
 			}
 			break;
 		}
-		row = (E.buf->cy >= E.buf->numrows) ? NULL :
-						      &E.buf->row[E.buf->cy];
-		int rowlen = row ? row->size : 0;
+		row = &E.buf->row[E.buf->cy];
+		int rowlen = row->size;
 		if (E.buf->cx > rowlen) {
 			E.buf->cx = rowlen;
 		}
@@ -149,11 +130,6 @@ void moveCursor(int key, int count) {
 void forwardWordEnd(int *dx, int *dy) {
 	int cx = E.buf->cx;
 	int icy = E.buf->cy;
-	if (icy >= E.buf->numrows) {
-		*dx = cx;
-		*dy = icy;
-		return;
-	}
 	int pre = 1;
 	for (int cy = icy; cy < E.buf->numrows; cy++) {
 		int l = E.buf->row[cy].size;
@@ -223,10 +199,6 @@ void forwardWordEnd(int *dx, int *dy) {
 void backwardWordEnd(int *dx, int *dy) {
 	int cx = E.buf->cx;
 	int icy = E.buf->cy;
-
-	if (icy >= E.buf->numrows) {
-		return;
-	}
 
 	int pre = 1;
 
@@ -314,11 +286,7 @@ void backwardParaBoundary(int *cx, int *cy) {
 	*cx = 0;
 	int icy = *cy;
 
-	if (icy >= E.buf->numrows) {
-		icy--;
-	}
-
-	if (E.buf->numrows == 0) {
+	if (bufferIsEmpty(E.buf)) {
 		return;
 	}
 
@@ -345,7 +313,7 @@ void forwardParaBoundary(int *cx, int *cy) {
 		return;
 	}
 
-	if (E.buf->numrows == 0) {
+	if (bufferIsEmpty(E.buf)) {
 		return;
 	}
 
@@ -361,7 +329,7 @@ void forwardParaBoundary(int *cx, int *cy) {
 		}
 	}
 
-	*cy = E.buf->numrows;
+	*cy = E.buf->numrows - 1;
 }
 
 void backPara(int count) {
@@ -711,9 +679,6 @@ void beginningOfLine(void) {
 
 void endOfLine(int count) {
 	(void)count;
-	if (E.buf->row == NULL || E.buf->cy >= E.buf->numrows)
-		return;
-
 	erow *row = &E.buf->row[E.buf->cy];
 
 	if (E.buf->word_wrap) {
@@ -758,7 +723,7 @@ void gotoLine(void) {
 	if (nl < 0) {
 		E.buf->cy = 0;
 	} else if (nl > E.buf->numrows) {
-		E.buf->cy = E.buf->numrows;
+		E.buf->cy = E.buf->numrows - 1;
 	} else {
 		E.buf->cy = nl - 1;
 	}

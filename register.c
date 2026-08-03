@@ -87,7 +87,7 @@ static void formatRegName(char *out, size_t outsz, int reg) {
 
 static void showRegisterPreview(void) {
 	struct buffer *prev = findOrCreateSpecialBuffer("*Register Preview*");
-	clearBuffer(prev);
+	bufferResetRows(prev);
 	prev->read_only = 1;
 	prev->word_wrap = 0;
 
@@ -143,6 +143,7 @@ static void showRegisterPreview(void) {
 	if (prev->numrows == 0)
 		insertRow(prev, 0, (const uint8_t *)"(no registers set)", 18);
 
+	bufferEnsureRow(prev);
 	showPopupBuffer(prev);
 }
 
@@ -156,7 +157,7 @@ static void showRegisterOutput(int reg) {
 	formatRegName(name, sizeof(name), reg);
 
 	struct buffer *out = findOrCreateSpecialBuffer("*Output*");
-	clearBuffer(out);
+	bufferResetRows(out);
 	out->read_only = 1;
 	out->word_wrap = 0;
 
@@ -218,6 +219,7 @@ static void showRegisterOutput(int reg) {
 		break;
 	}
 
+	bufferEnsureRow(out);
 	showPopupBuffer(out);
 }
 
@@ -251,10 +253,7 @@ void jumpToRegister(void) {
 		struct buffer *buf = E.buf;
 		buf->cx = E.registers[reg].data.point.cx;
 		buf->cy = E.registers[reg].data.point.cy;
-		if (buf->numrows == 0) {
-			buf->cx = 0;
-			buf->cy = 0;
-		} else {
+		{
 			if (buf->cy >= buf->numrows)
 				buf->cy = buf->numrows - 1;
 			if (buf->cx > buf->row[buf->cy].size)

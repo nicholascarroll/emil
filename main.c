@@ -321,9 +321,7 @@ int main(int argc, char *argv[]) {
 
 			newBuf->next = E.headbuf;
 			if (linum > 0) {
-				if (newBuf->numrows == 0) {
-					newBuf->cy = 0;
-				} else if (linum - 1 >= newBuf->numrows) {
+				if (linum - 1 >= newBuf->numrows) {
 					newBuf->cy = newBuf->numrows - 1;
 				} else {
 					newBuf->cy = linum - 1;

@@ -2,12 +2,12 @@
 #include "palette.h"
 #include "buffer.h"
 #include "display.h"
+#include "edit.h"
 #include "emil.h"
 #include "keymap.h"
 
 #include "motion.h"
 #include "terminal.h"
-#include "undo.h"
 #include "unicode.h"
 #include "util.h"
 #include "window.h"
@@ -153,7 +153,7 @@ const int palette_size = sizeof(palette) / sizeof(palette[0]);
  * concatenate every entry's utf8[] with a trailing space.  The
  * PALETTE_BREAK entries contain '\n', producing line breaks. */
 static void populatePaletteBuffer(struct buffer *buf) {
-	clearBuffer(buf);
+	bufferResetRows(buf);
 	buf->read_only = 0;
 
 	uint8_t flat[4096];
@@ -204,8 +204,6 @@ static int skipSpacesBackward(erow *row, int from) {
  * -1 after a backward movement, +1 after a forward movement, and
  * 0 for neutral (initial placement, vertical moves). */
 static void snapToSymbol(struct buffer *buf, int direction) {
-	if (buf->cy >= buf->numrows)
-		return;
 	erow *row = &buf->row[buf->cy];
 	if (row->size == 0)
 		return;
@@ -275,6 +273,7 @@ void expandPalette(void) {
 	pbuf->marky = -1;
 	pbuf->mark_active = 0;
 
+	bufferEnsureRow(pbuf);
 	updateBuffer(pbuf);
 	showPopupBuffer(pbuf);
 
@@ -322,31 +321,11 @@ void expandPalette(void) {
 						restoreFocusTo(origin,
 							       origin_win);
 
-						/* Reject BEFORE recording
-						 * undo: the origin buffer
-						 * may be read-only, and
-						 * rowInsertUnicode below
-						 * would refuse the insert
-						 * after undoAppendUnicode
-						 * had already pushed a
-						 * phantom record. */
 						if (rejectIfReadOnly(E.buf))
 							return;
 
 						/* Insert the symbol */
-						undoAppendUnicode(E.buf);
-						if (E.buf->cy == E.buf->numrows)
-							insertRow(
-								E.buf,
-								E.buf->numrows,
-								(const uint8_t
-									 *)"",
-								0);
-						rowInsertUnicode(
-							E.buf,
-							&E.buf->row[E.buf->cy],
-							E.buf->cx);
-						E.buf->cx += E.nunicode;
+						insertUnicode(1);
 						return;
 					}
 				}

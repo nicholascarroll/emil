@@ -271,3 +271,35 @@ int nextScreenX(uint8_t *str, int *idx, int screen_x) {
 
 	return screen_x;
 }
+
+/* Move cx to the nearest UTF-8 character boundary within a row.
+ *
+ * A cursor byte offset is legal only at the start of a character or at
+ * the very end of the row.  Any code that carries a byte offset from
+ * one row to another -- vertical motion, scrolling, restoring a saved
+ * position -- can land inside a multibyte character and must snap.
+ *
+ * dir > 0 snaps forward, which is what vertical motion does: moving up
+ * or down a line and finding yourself inside a character puts you at
+ * the next one.  dir <= 0 snaps backward, for callers that are moving
+ * left and must not jump the cursor forward past the character they
+ * were headed for.
+ *
+ * cx == size is the end-of-line position and is already a boundary; it
+ * is returned unchanged rather than snapped, and the early return also
+ * keeps the backward scan from reading chars[size]. */
+int utf8_snapToBoundary(const uint8_t *chars, int size, int cx, int dir) {
+	if (cx <= 0)
+		return 0;
+	if (cx >= size)
+		return size;
+
+	if (dir > 0) {
+		while (cx < size && utf8_isCont(chars[cx]))
+			cx++;
+	} else {
+		while (cx > 0 && utf8_isCont(chars[cx]))
+			cx--;
+	}
+	return cx;
+}

@@ -89,6 +89,7 @@ struct undo {
 	int endx;
 	int endy;
 	int append;
+	int nmerges; /* operations folded into this record so far */
 	int datalen;
 	int datasize;
 	int delete;

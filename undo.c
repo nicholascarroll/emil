@@ -3,6 +3,7 @@
 #include "undo.h"
 #include "adjust.h"
 #include "buffer.h"
+#include "dbuf.h"
 #include "display.h"
 #include "emil.h"
 
@@ -13,18 +14,36 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Bulk-insert text from 'data' (length 'datalen') into 'buf' starting
- * at buffer position (startx, starty).  Uses direct memmove/memcpy and
- * insertRow — no character-at-a-time primitives.  Does NOT record
- * undo.  Calls adjustAllPoints internally. */
-void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
-		int datalen) {
+void computeInsertEnd(const uint8_t *text, int len, int startx, int starty,
+		      int *endx, int *endy) {
+	int ex = startx, ey = starty;
+	for (int i = 0; i < len; i++) {
+		if (text[i] == '\n') {
+			ey++;
+			ex = 0;
+		} else {
+			ex++;
+		}
+	}
+	*endx = ex;
+	*endy = ey;
+}
+
+/* Perform the row-array mutation for an insert at (startx, starty).
+ * Takes an ALREADY-ANCHORED position and payload, and does NOT adjust
+ * tracked points — bulkInsert does that on the logical range.  Uses
+ * direct memmove/memcpy and insertRow, no character-at-a-time
+ * primitives.  Does NOT record undo. */
+static void bulkInsertRaw(struct buffer *buf, int startx, int starty,
+			  const uint8_t *data, int datalen) {
 	if (datalen <= 0)
 		return;
 
-	/* Ensure the target row exists */
+	/* numrows >= 1 and starty < numrows (#105), so the target row
+	 * always exists.  A malformed record is a bug, not a case to
+	 * paper over. */
 	if (starty >= buf->numrows)
-		insertRow(buf, buf->numrows, (const uint8_t *)"", 0);
+		return;
 
 	/* Scan for newlines to decide single-line vs multi-line */
 	const uint8_t *first_nl = memchr(data, '\n', datalen);
@@ -42,8 +61,6 @@ void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
 		row->cached_sublines = -1;
 		markBufferDirty(buf);
 		invalidateScreenCache(buf);
-		adjustAllPoints(buf, startx, starty, startx + datalen, starty,
-				0);
 		return;
 	}
 
@@ -53,19 +70,6 @@ void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
 	 *   3. Append the first line fragment from data to the start row.
 	 *   4. Insert complete interior lines as new rows.
 	 *   5. Insert the last line fragment + saved suffix as a new row. */
-
-	/* Pre-compute the end position of this insert for point adjustment.
-	 * Walk the data to count newlines and find the last line length. */
-	int ins_endx = startx;
-	int ins_endy = starty;
-	for (int i = 0; i < datalen; i++) {
-		if (data[i] == '\n') {
-			ins_endy++;
-			ins_endx = 0;
-		} else {
-			ins_endx++;
-		}
-	}
 
 	struct erow *row = &buf->row[starty];
 
@@ -111,8 +115,6 @@ void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
 			free(suffix);
 			markBufferDirty(buf);
 			invalidateScreenCache(buf);
-			adjustAllPoints(buf, startx, starty, ins_endx, ins_endy,
-					0);
 			return;
 		}
 		/* Interior complete line */
@@ -132,7 +134,35 @@ void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
 	free(suffix);
 	markBufferDirty(buf);
 	invalidateScreenCache(buf);
-	adjustAllPoints(buf, startx, starty, ins_endx, ins_endy, 0);
+}
+
+/* Bulk-insert text from 'data' (length 'datalen') into 'buf' at the
+ * LOGICAL buffer position (startx, starty) -- which may be the virtual
+ * EOF line.  Does NOT record undo.  Calls adjustAllPoints internally.
+ *
+ * The mutation runs on the anchored position and payload, so that
+ * inserting at the virtual EOF materialises exactly one row and the
+ * result matches what the typed paths produce.  The point adjustment
+ * runs on the LOGICAL range, because a mark sitting at the end of the
+ * last row -- which is precisely where the anchor lands -- must not be
+ * dragged along by an insertion that happens after it.  adjustPoint's
+ * insert branch treats a point exactly at startx as being after the
+ * insertion, so handing it the anchored range would move that mark.
+ *
+ * Records name the insertion's own coordinates, so replaying
+ * one through here is the identity translation and adjusts on the
+ * range the record states. */
+void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
+		int datalen) {
+	if (datalen <= 0)
+		return;
+
+	int log_endx, log_endy;
+	computeInsertEnd(data, datalen, startx, starty, &log_endx, &log_endy);
+
+	bulkInsertRaw(buf, startx, starty, data, datalen);
+
+	adjustAllPoints(buf, startx, starty, log_endx, log_endy, 0);
 }
 
 /* Bulk-delete text from (startx, starty) to (endx, endy).
@@ -140,7 +170,7 @@ void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
  * primitives.  Does NOT record undo.  Calls adjustAllPoints. */
 void bulkDelete(struct buffer *buf, int startx, int starty, int endx,
 		int endy) {
-	if (buf->numrows == 0 || starty >= buf->numrows)
+	if (starty >= buf->numrows)
 		return;
 
 	/* Adjust tracked points before the mutation changes row structure */
@@ -213,6 +243,13 @@ static void undoStep(struct buffer *buf, int redo) {
 	*dst = node;
 	*src = node->prev;
 	node->prev = prev_dst;
+
+	/* Close whatever now sits at the head of the undo list.  A redo
+	 * puts a record back that may still have been open when it was
+	 * undone; without this, typing straight after a redo could fold
+	 * into it and the run would no longer be one uninterrupted
+	 * burst of editing. */
+	undoCloseRun(buf);
 }
 
 void doUndo(struct buffer *buf, int count) {
@@ -220,6 +257,7 @@ void doUndo(struct buffer *buf, int count) {
 		return;
 
 	buf->mark_active = 0;
+	undoCloseRun(buf);
 
 	int times = UARG_COUNT(count);
 	for (int j = 0; j < times; j++) {
@@ -245,6 +283,7 @@ void doRedo(struct buffer *buf, int count) {
 		return;
 
 	buf->mark_active = 0;
+	undoCloseRun(buf);
 
 	int times = UARG_COUNT(count);
 	for (int j = 0; j < times; j++) {
@@ -269,7 +308,8 @@ struct undo *newUndo(void) {
 	ret->starty = 0;
 	ret->endx = 0;
 	ret->endy = 0;
-	ret->append = 1;
+	ret->append = 0; /* the mutation layer opts in; see pushUndo */
+	ret->nmerges = 0;
 	ret->delete = 0;
 	ret->datalen = 0;
 	ret->datasize = 22;
@@ -287,11 +327,133 @@ void undoReplaceData(struct undo *u, int newsize) {
 	u->data = xmalloc(u->datasize);
 }
 
+#define ALIGNED(x1, y1, x2, y2) ((x1 == x2) && (y1 == y2))
+
+/* Maximum number of operations folded into one record.  Counted as
+ * operations, not bytes, so a run of CJK characters breaks at the
+ * same place a run of ASCII does.
+ *
+ * Unbounded runs are correct but unrecoverable: one undo would throw
+ * away an arbitrarily long burst of typing with no way to get part of
+ * it back, because the intermediate states were never recorded.  A cap
+ * that is too tight only costs the user extra keypresses. */
+#define UNDO_MERGE_LIMIT 20
+
+/* Grow u->data to hold at least 'needed' bytes plus a NUL. */
+static void undoEnsureData(struct undo *u, int needed) {
+	if (needed + 1 <= u->datasize)
+		return;
+	int newsize = u->datasize ? u->datasize : 22;
+	while (newsize < needed + 1)
+		newsize *= 2;
+	u->data = xrealloc(u->data, newsize);
+	u->datasize = newsize;
+}
+
+/* Try to fold 'new' into 'prev', which must be the head of the undo
+ * list.  Returns 1 if merged ('new' is then spent and must be freed by
+ * the caller), 0 if the records cannot be joined.
+ *
+ * Pure record arithmetic: no buffer, no cursor, no anchoring.  It
+ * rests on the invariant every record in this design satisfies —
+ *
+ *     end == computeInsertEnd(data, start)
+ *
+ * which is what undoStep already relies on, since undoing a delete
+ * replays it as bulkInsert(start, data) and redoing it as
+ * bulkDelete(start..end).  Given that, the merged end never has to be
+ * reasoned about: it is recomputed from the merged payload.
+ *
+ * Three shapes join, and nothing else does:
+ *
+ *   typing     prev.end   == new.start   append,  start unchanged
+ *   C-d        prev.start == new.start   append,  start unchanged
+ *   backspace  prev.start == new.end     prepend, start := new.start
+ *
+ * The backspace case is why the record start is taken from 'new':
+ * deletion walks leftwards, so each operation extends the record's
+ * reach backwards while its data must stay in forward file order. */
+static int undoMerge(struct undo *prev, struct undo *new) {
+	if (prev == NULL || new == NULL)
+		return 0;
+	if (!prev->append)
+		return 0;
+	if (prev->delete != new->delete)
+		return 0;
+	if (prev->paired || new->paired)
+		return 0;
+	if (prev->nmerges >= UNDO_MERGE_LIMIT)
+		return 0;
+	if (new->datalen <= 0)
+		return 0;
+
+	int prepend = 0;
+	if (!new->delete) {
+		if (!ALIGNED(prev->endx, prev->endy, new->startx, new->starty))
+			return 0;
+	} else if (ALIGNED(prev->startx, prev->starty, new->startx,
+			   new->starty)) {
+		/* forward delete: the buffer collapses to the start
+		 * point, so successive deletions arrive at the same
+		 * coordinates */
+	} else if (ALIGNED(prev->startx, prev->starty, new->endx, new->endy)) {
+		prepend = 1;
+	} else {
+		return 0;
+	}
+
+	undoEnsureData(prev, prev->datalen + new->datalen);
+	if (prepend) {
+		memmove(&prev->data[new->datalen], prev->data, prev->datalen);
+		memcpy(prev->data, new->data, new->datalen);
+		prev->startx = new->startx;
+		prev->starty = new->starty;
+	} else {
+		memcpy(&prev->data[prev->datalen], new->data, new->datalen);
+	}
+	prev->datalen += new->datalen;
+	prev->data[prev->datalen] = 0;
+	prev->nmerges++;
+
+	computeInsertEnd(prev->data, prev->datalen, prev->startx, prev->starty,
+			 &prev->endx, &prev->endy);
+	return 1;
+}
+
 static void freeUndos(struct undo *first);
 
+/* Add a record to the undo list, taking ownership.
+ *
+ * A record arrives with 'append' already set by the mutation layer:
+ * 1 means "this was a single interactive edit and may continue the run
+ * at the head of the list", 0 means "this stands on its own".  Only
+ * the mutation layer can tell a keystroke from a regex replace, so
+ * only it makes that call; whether two given records can actually be
+ * joined is decided here, as arithmetic on the records alone.
+ *
+ * A record that does not merge closes whatever run was open.  Without
+ * that, typing either side of a bulk operation would find the earlier
+ * record still aligned and fold across it. */
 void pushUndo(struct buffer *buf, struct undo *new) {
+	if (new->append && undoMerge(buf->undo, new)) {
+		new->prev = NULL;
+		freeUndos(new);
+		return;
+	}
+	if (buf->undo != NULL)
+		buf->undo->append = 0;
 	new->prev = buf->undo;
 	buf->undo = new;
+}
+
+/* Close any open run.  Called after undo or redo: typing straight
+ * afterwards can land aligned with the record the operation exposed,
+ * and while folding into it would still produce a correct record, "a
+ * run is one uninterrupted burst of editing" is a cheaper invariant to
+ * hold than to re-derive at each use. */
+void undoCloseRun(struct buffer *buf) {
+	if (buf->undo != NULL)
+		buf->undo->append = 0;
 }
 
 static void freeUndos(struct undo *first) {
@@ -315,217 +477,4 @@ void clearUndosAndRedos(struct buffer *buf) {
 	freeUndos(buf->undo);
 	buf->undo = NULL;
 	clearRedos(buf);
-}
-
-#define ALIGNED(x1, y1, x2, y2) ((x1 == x2) && (y1 == y2))
-
-void undoAppendChar(struct buffer *buf, uint8_t c) {
-	clearRedos(buf);
-	if (buf->undo == NULL || !(buf->undo->append) || buf->undo->delete ||
-	    !ALIGNED(buf->undo->endx, buf->undo->endy, buf->cx, buf->cy)) {
-		if (buf->undo != NULL)
-			buf->undo->append = 0;
-		struct undo *new = newUndo();
-		new->startx = buf->cx;
-		new->starty = buf->cy;
-		new->endx = buf->cx;
-		new->endy = buf->cy;
-		pushUndo(buf, new);
-	}
-	buf->undo->data[buf->undo->datalen++] = c;
-	buf->undo->data[buf->undo->datalen] = 0;
-	if (buf->undo->datalen >= buf->undo->datasize - 2) {
-		buf->undo->datasize *= 2;
-		buf->undo->data =
-			xrealloc(buf->undo->data, buf->undo->datasize);
-	}
-	buf->undo->append = !(buf->undo->datalen >= buf->undo->datasize - 2);
-	if (c == '\n') {
-		buf->undo->endx = 0;
-		buf->undo->endy++;
-	} else {
-		buf->undo->endx++;
-	}
-
-	/* Adjust tracked points for this single-char insertion.
-	 * The char is inserted at (cx, cy) — which is the old endx/endy
-	 * before the increment above.  After insertion, the new end is
-	 * (endx, endy).  But the *insertion point* is the old end, which
-	 * equals (cx, cy) since ALIGNED was checked above. */
-	{
-		int sx = buf->cx;
-		int sy = buf->cy;
-		int ex, ey;
-		if (c == '\n') {
-			ex = 0;
-			ey = sy + 1;
-		} else {
-			ex = sx + 1;
-			ey = sy;
-		}
-		adjustAllPoints(buf, sx, sy, ex, ey, 0);
-	}
-}
-
-void undoAppendUnicode(struct buffer *buf) {
-	clearRedos(buf);
-	if (buf->undo == NULL || !(buf->undo->append) ||
-	    (buf->undo->datalen + E.nunicode >= buf->undo->datasize) ||
-	    buf->undo->delete ||
-	    !ALIGNED(buf->undo->endx, buf->undo->endy, buf->cx, buf->cy)) {
-		if (buf->undo != NULL)
-			buf->undo->append = 0;
-		struct undo *new = newUndo();
-		new->startx = buf->cx;
-		new->starty = buf->cy;
-		new->endx = buf->cx;
-		new->endy = buf->cy;
-		pushUndo(buf, new);
-	}
-	for (int i = 0; i < E.nunicode; i++) {
-		buf->undo->data[buf->undo->datalen++] = E.unicode[i];
-	}
-	buf->undo->data[buf->undo->datalen] = 0;
-	buf->undo->append = !(buf->undo->datalen >= buf->undo->datasize - 2);
-	buf->undo->endx += E.nunicode;
-
-	/* Adjust tracked points for this unicode insertion (always same-line) */
-	adjustAllPoints(buf, buf->cx, buf->cy, buf->cx + E.nunicode, buf->cy,
-			0);
-}
-
-void undoBackSpace(struct buffer *buf, uint8_t c) {
-	clearRedos(buf);
-	if (buf->undo == NULL || !(buf->undo->append) || !(buf->undo->delete) ||
-	    !((c == '\n' && buf->undo->startx == 0 &&
-	       buf->undo->starty == buf->cy) ||
-	      (buf->cx + 1 == buf->undo->startx &&
-	       buf->cy == buf->undo->starty))) {
-		if (buf->undo != NULL)
-			buf->undo->append = 0;
-		struct undo *new = newUndo();
-		new->endx = buf->cx;
-		if (c != '\n')
-			new->endx++;
-		new->endy = buf->cy;
-		new->startx = new->endx;
-		new->starty = buf->cy;
-		new->delete = 1;
-		pushUndo(buf, new);
-	}
-	/* Prepend the byte so data stays in forward (file) order.
-	 * Backspace delivers bytes from right to left, so prepending
-	 * reconstructs the original left-to-right sequence. */
-	if (buf->undo->datalen + 1 >= buf->undo->datasize - 2) {
-		buf->undo->datasize *= 2;
-		buf->undo->data =
-			xrealloc(buf->undo->data, buf->undo->datasize);
-	}
-	memmove(&buf->undo->data[1], buf->undo->data, buf->undo->datalen);
-	buf->undo->data[0] = c;
-	buf->undo->datalen++;
-	buf->undo->data[buf->undo->datalen] = 0;
-
-	/* Capture old start before adjusting the undo range */
-	int old_startx = buf->undo->startx;
-	int old_starty = buf->undo->starty;
-
-	/* A '\n' here means a row join: the separator between row
-	 * starty-1 and starty was deleted, so the record's start moves to
-	 * the end of the preceding row.  Editable rows never hold a
-	 * literal 0x0A -- quoted C-q C-j splits the row instead of
-	 * inserting the byte -- so backSpace can only reach this branch
-	 * via edit.c's cx == 0 path, where starty >= 1 is guaranteed by
-	 * the (cy == 0 && cx == 0) early return.
-	 *
-	 * The starty > 0 test is belt-and-braces: were that invariant ever
-	 * violated, the old code read buf->row[-1]. */
-	if (c == '\n') {
-		if (buf->undo->starty > 0) {
-			buf->undo->starty--;
-			buf->undo->startx = buf->row[buf->undo->starty].size;
-		}
-	} else {
-		buf->undo->startx--;
-	}
-
-	/* Adjust tracked points for this single-char deletion.
-	 * The deleted range is from the new start to the old start. */
-	adjustAllPoints(buf, buf->undo->startx, buf->undo->starty, old_startx,
-			old_starty, 1);
-}
-
-void undoDelChar(struct buffer *buf, erow *row) {
-	clearRedos(buf);
-	if (buf->undo == NULL || !(buf->undo->append) || !(buf->undo->delete) ||
-	    !(buf->undo->startx == buf->cx && buf->undo->starty == buf->cy)) {
-		if (buf->undo != NULL)
-			buf->undo->append = 0;
-		struct undo *new = newUndo();
-		new->endx = buf->cx;
-		new->endy = buf->cy;
-		new->startx = buf->cx;
-		new->starty = buf->cy;
-		new->delete = 1;
-		pushUndo(buf, new);
-	}
-
-	if (buf->cx == row->size) {
-		/* Deleting a newline — append it */
-		if (buf->undo->datalen >= buf->undo->datasize - 2) {
-			buf->undo->datasize *= 2;
-			buf->undo->data =
-				xrealloc(buf->undo->data, buf->undo->datasize);
-		}
-		buf->undo->data[buf->undo->datalen++] = '\n';
-		buf->undo->data[buf->undo->datalen] = 0;
-		buf->undo->endy++;
-		buf->undo->endx = 0;
-
-		/* Deleting newline: merges (cx, cy) with (0, cy+1) */
-		adjustAllPoints(buf, buf->cx, buf->cy, 0, buf->cy + 1, 1);
-	} else {
-		int n = utf8_nBytes(row->chars[buf->cx]);
-		if (buf->undo->datalen + n >= buf->undo->datasize - 2) {
-			buf->undo->datasize *= 2;
-			if (buf->undo->datalen + n >= buf->undo->datasize - 2) {
-				buf->undo->datasize =
-					buf->undo->datalen + n + 4;
-			}
-			buf->undo->data =
-				xrealloc(buf->undo->data, buf->undo->datasize);
-		}
-		/* Append bytes in natural UTF-8 order */
-		for (int i = 0; i < n; i++) {
-			buf->undo->data[buf->undo->datalen++] =
-				row->chars[buf->cx + i];
-		}
-		buf->undo->data[buf->undo->datalen] = 0;
-		buf->undo->endx += n;
-
-		/* Deleting n bytes on same line at cursor */
-		adjustAllPoints(buf, buf->cx, buf->cy, buf->cx + n, buf->cy, 1);
-	}
-}
-
-void undoSelfInsert(uint8_t c, int count) {
-	if (count == 1) {
-		undoAppendChar(E.buf, c);
-		return;
-	}
-	clearRedos(E.buf);
-	struct undo *new = newUndo();
-	new->startx = E.buf->cx;
-	new->starty = E.buf->cy;
-	new->endx = E.buf->cx + count;
-	new->endy = E.buf->cy;
-	new->append = 0;
-	if (count + 1 > new->datasize) {
-		new->datasize = count + 1;
-		new->data = xrealloc(new->data, new->datasize);
-	}
-	memset(new->data, c, count);
-	new->data[count] = 0;
-	new->datalen = count;
-	pushUndo(E.buf, new);
 }

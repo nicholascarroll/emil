@@ -66,6 +66,21 @@ void mutateDelete(struct buffer *buf, int startx, int starty, int endx,
 void mutateInsert(struct buffer *buf, int startx, int starty,
 		  const uint8_t *text, int len, int *out_endx, int *out_endy);
 
+/* Single interactive edits — one keystroke's worth.  Identical to
+ * mutateInsert / mutateDelete except that the record produced may be
+ * folded into the run at the head of the undo list, so that typing
+ * "hello" is one undo step rather than five.
+ *
+ * Use these only for edits the user performs one at a time.  Bulk
+ * mutations (yank, kill, regex replace, insert-file) must use
+ * mutateInsert / mutateDelete / mutateReplace, whose records always
+ * stand alone. */
+void mutateInsertChar(struct buffer *buf, int startx, int starty,
+		      const uint8_t *text, int len, int *out_endx,
+		      int *out_endy);
+void mutateDeleteChar(struct buffer *buf, int startx, int starty, int endx,
+		      int endy, const uint8_t *old_text, int old_len);
+
 /* Append 'n_rows' empty lines to the end of buf.  Records a single
  * pure-insert undo with paired=0.  Used by yankRectangle to extend
  * the buffer before pasting a rectangle that overruns it — the

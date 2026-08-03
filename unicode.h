@@ -30,3 +30,5 @@ int isIndicSentenceTerminator(uint32_t cp);
 int utf8_validate(const uint8_t *buf, int len);
 
 int nextScreenX(uint8_t *str, int *idx, int screen_x);
+
+int utf8_snapToBoundary(const uint8_t *chars, int size, int cx, int dir);

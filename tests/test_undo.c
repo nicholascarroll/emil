@@ -6,6 +6,7 @@
 #include "test_harness.h"
 #include "edit.h"
 #include "mutate.h"
+#include "undo.h"
 #include <stdint.h>
 
 /* ---- Basic undo/redo ---- */
@@ -15,11 +16,8 @@ void test_undo_insert_chars(void) {
 	buf->cx = 5;
 
 	const char *text = " World";
-	for (int i = 0; text[i]; i++) {
-		undoAppendChar(buf, text[i]);
-		rowInsertChar(buf, &buf->row[0], buf->cx, text[i]);
-		buf->cx++;
-	}
+	for (int i = 0; text[i]; i++)
+		selfInsert(buf, text[i], 1);
 	TEST_ASSERT_EQUAL_STRING("Hello World", row_str(buf, 0));
 
 	doUndo(buf, 1);
@@ -30,9 +28,7 @@ void test_undo_then_redo(void) {
 	struct buffer *buf = make_test_buffer("ABC");
 	buf->cx = 3;
 
-	undoAppendChar(buf, 'D');
-	rowInsertChar(buf, &buf->row[0], buf->cx, 'D');
-	buf->cx++;
+	selfInsert(buf, 'D', 1);
 	TEST_ASSERT_EQUAL_STRING("ABCD", row_str(buf, 0));
 
 	doUndo(buf, 1);
@@ -46,14 +42,10 @@ void test_multiple_sequential_undos(void) {
 	struct buffer *buf = make_test_buffer("A");
 	buf->cx = 1;
 
-	undoAppendChar(buf, 'B');
-	rowInsertChar(buf, &buf->row[0], buf->cx, 'B');
-	buf->cx++;
+	selfInsert(buf, 'B', 1);
 	buf->undo->append = 0; /* Force new record */
 
-	undoAppendChar(buf, 'C');
-	rowInsertChar(buf, &buf->row[0], buf->cx, 'C');
-	buf->cx++;
+	selfInsert(buf, 'C', 1);
 	TEST_ASSERT_EQUAL_STRING("ABC", row_str(buf, 0));
 
 	doUndo(buf, 1);
@@ -67,8 +59,8 @@ void test_undo_delete_chars(void) {
 	struct buffer *buf = make_test_buffer("Hello");
 	buf->cx = 4;
 
-	undoDelChar(buf, &buf->row[0]);
-	rowDelChar(buf, &buf->row[0], buf->cx);
+	E.buf = buf;
+	delChar(1);
 	TEST_ASSERT_EQUAL_STRING("Hell", row_str(buf, 0));
 
 	doUndo(buf, 1);
@@ -83,15 +75,9 @@ void test_coalesce_consecutive_inserts(void) {
 	buf->cx = 0;
 	clearUndosAndRedos(buf);
 
-	undoAppendChar(buf, 'A');
-	rowInsertChar(buf, &buf->row[0], buf->cx, 'A');
-	buf->cx++;
-	undoAppendChar(buf, 'B');
-	rowInsertChar(buf, &buf->row[0], buf->cx, 'B');
-	buf->cx++;
-	undoAppendChar(buf, 'C');
-	rowInsertChar(buf, &buf->row[0], buf->cx, 'C');
-	buf->cx++;
+	selfInsert(buf, 'A', 1);
+	selfInsert(buf, 'B', 1);
+	selfInsert(buf, 'C', 1);
 	TEST_ASSERT_EQUAL_STRING("ABC", row_str(buf, 0));
 
 	/* Should undo as a single record */
@@ -104,13 +90,9 @@ void test_backspace_coalescing(void) {
 	buf->cx = 4;
 	clearUndosAndRedos(buf);
 
-	buf->cx--;
-	undoBackSpace(buf, buf->row[0].chars[buf->cx]);
-	rowDelChar(buf, &buf->row[0], buf->cx);
-
-	buf->cx--;
-	undoBackSpace(buf, buf->row[0].chars[buf->cx]);
-	rowDelChar(buf, &buf->row[0], buf->cx);
+	E.buf = buf;
+	backSpace(1);
+	backSpace(1);
 
 	TEST_ASSERT_EQUAL_STRING("AB", row_str(buf, 0));
 
@@ -123,11 +105,9 @@ void test_forward_delete_coalescing(void) {
 	buf->cx = 0;
 	clearUndosAndRedos(buf);
 
-	undoDelChar(buf, &buf->row[0]);
-	rowDelChar(buf, &buf->row[0], buf->cx);
-
-	undoDelChar(buf, &buf->row[0]);
-	rowDelChar(buf, &buf->row[0], buf->cx);
+	E.buf = buf;
+	delChar(1);
+	delChar(1);
 
 	TEST_ASSERT_EQUAL_STRING("CD", row_str(buf, 0));
 
@@ -147,17 +127,13 @@ void test_redo_cleared_after_new_edit(void) {
 	struct buffer *buf = make_test_buffer("A");
 	buf->cx = 1;
 
-	undoAppendChar(buf, 'B');
-	rowInsertChar(buf, &buf->row[0], buf->cx, 'B');
-	buf->cx++;
+	selfInsert(buf, 'B', 1);
 
 	doUndo(buf, 1);
 	TEST_ASSERT_NOT_NULL(buf->redo);
 
 	buf->cx = 1;
-	undoAppendChar(buf, 'C');
-	rowInsertChar(buf, &buf->row[0], buf->cx, 'C');
-	buf->cx++;
+	selfInsert(buf, 'C', 1);
 	TEST_ASSERT_NULL(buf->redo);
 	TEST_ASSERT_EQUAL_STRING("AC", row_str(buf, 0));
 }
@@ -169,12 +145,12 @@ void test_undo_newline_insert(void) {
 	buf->cx = 5;
 	E.buf = buf;
 	insertNewline(1);
-	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
+	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_STRING("World", row_str(buf, 1));
 
 	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
+	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("HelloWorld", row_str(buf, 0));
 }
 
@@ -194,8 +170,7 @@ void test_mutate_replace_readonly(void) {
 
 	/* Seed a redo record: one real insert, then undo it. */
 	buf->cx = 0;
-	undoAppendChar(buf, 'X');
-	insertChar(buf, 'X', 1);
+	selfInsert(buf, 'X', 1);
 	doUndo(buf, 1);
 	TEST_ASSERT_NOT_NULL(buf->redo);
 
@@ -213,8 +188,8 @@ void test_mutate_replace_readonly(void) {
  *
  * '\n' is emil's row separator, never a byte stored inside a row.
  * CMD_QUOTED_INSERT therefore splits the row rather than calling
- * insertChar, which would have written a literal 0x0A while
- * undoAppendChar recorded a row split -- coordinates and buffer then
+ * insertChar, which would have written a literal 0x0A while the undo
+ * record described a row split -- coordinates and buffer then
  * disagreed, and undo destroyed the rest of the line plus the row
  * below.  These two pin the invariant from both directions. */
 
@@ -226,31 +201,35 @@ void test_quoted_newline_undo_preserves_following_row(void) {
 	clearUndosAndRedos(buf);
 
 	insertNewline(1);
-	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
+	TEST_ASSERT_EQUAL_INT(4, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("abc", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_STRING("def", row_str(buf, 1));
 	TEST_ASSERT_EQUAL_STRING("ghi", row_str(buf, 2));
 
 	/* Previously produced a single row, "abcghi". */
 	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
+	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("abcdef", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_STRING("ghi", row_str(buf, 1));
 }
 
-void test_backspace_newline_at_row_zero_does_not_read_oob(void) {
+/* The row-join branch of backSpace used to derive the record's start
+ * itself, reading buf->row[cy - 1] with no guarantee that cy >= 1.
+ * The mutation layer is now handed both coordinates by the caller, so
+ * the read is gone rather than guarded.  Backspace at the origin must
+ * be a no-op; run under `make asan` to check it stays one. */
+void test_backspace_at_origin_is_a_noop(void) {
 	struct buffer *buf = make_test_buffer("ab");
-	buf->cx = 1;
+	buf->cx = 0;
 	buf->cy = 0;
+	E.buf = buf;
 	clearUndosAndRedos(buf);
 
-	/* Unreachable while the invariant holds: backSpace only passes
-	 * '\n' from its cx == 0 row-join path, where cy >= 1.  Reaching
-	 * it with starty == 0 previously read buf->row[-1]; run under
-	 * `make asan` to check this stays fixed. */
-	undoBackSpace(buf, '\n');
+	backSpace(1);
 
-	TEST_ASSERT_EQUAL_INT(0, buf->undo->starty);
+	TEST_ASSERT_EQUAL_STRING("ab", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
+	TEST_ASSERT_NULL(buf->undo);
 }
 
 int main(void) {
@@ -270,7 +249,7 @@ int main(void) {
 
 	RUN_TEST(test_undo_newline_insert);
 	RUN_TEST(test_quoted_newline_undo_preserves_following_row);
-	RUN_TEST(test_backspace_newline_at_row_zero_does_not_read_oob);
+	RUN_TEST(test_backspace_at_origin_is_a_noop);
 
 	RUN_TEST(test_mutate_replace_readonly);
 

@@ -5,6 +5,11 @@ CC=${CC:-cc}
 CFLAGS=${CFLAGS:-""}
 LDFLAGS=${LDFLAGS:-""}
 
+# How many individual failure lines to print per suite.  The failure
+# *count* is always reported in full; this caps only the detail.  0
+# means print everything.
+MAX_FAIL_LINES=${MAX_FAIL_LINES:-10}
+
 echo "run_tests.sh: Received CC=$CC"
 echo "run_tests.sh: Running tests on $(uname -s) $(uname -m)"
 echo ""
@@ -55,12 +60,12 @@ fi
 
 INVARIANT_FAIL=0
 
-# Mutation-layer invariant: bulkInsert, bulkDelete, pushUndo, and
-# newUndo must not appear outside the permitted files.
+# Mutation-layer invariant: bulkInsert, bulkDelete and pushUndo must
+# not appear outside the permitted files.
 # Filter out comment lines (/* ... */, // ..., and * continuation lines).
 # The grep output has "file.c:NNN:<content>" format, so comment markers
 # appear after the second colon.
-MUTATION_HITS=$(grep -nE '\b(bulkInsert|bulkDelete|pushUndo|newUndo)\b' *.c 2>/dev/null \
+MUTATION_HITS=$(grep -nE '\b(bulkInsert|bulkDelete|pushUndo)\b' *.c 2>/dev/null \
     | grep -v '^mutate\.c:' \
     | grep -v '^undo\.c:' \
     | grep -v '^buffer\.c:' \
@@ -72,6 +77,23 @@ if [ -n "$MUTATION_HITS" ]; then
     INVARIANT_FAIL=1
 else
     echo "✓ Mutation-layer invariant"
+fi
+
+# Record-construction invariant (#104): mutate.c is the only place that
+# builds undo records.  undo.c stores, merges and replays them; it must
+# not allocate one.  This is what keeps a virtual-EOF fix like #102
+# from having to be written twice.
+RECORD_HITS=$(grep -nE '\bnewUndo\b' *.c 2>/dev/null \
+    | grep -v '^mutate\.c:' \
+    | grep -v '^undo\.c:[0-9]*:struct undo \*newUndo' \
+    | grep -vE ':[0-9]+:.*(/\*|//)' \
+    | grep -vE ':[0-9]+:[[:space:]]*\*')
+if [ -n "$RECORD_HITS" ]; then
+    echo "✗ Record-construction invariant violation (newUndo outside mutate.c):"
+    echo "$RECORD_HITS" | sed 's/^/    /'
+    INVARIANT_FAIL=1
+else
+    echo "✓ Record-construction invariant"
 fi
 
 # Banned unsafe functions: strcpy, strcat, sprintf, gets, malloc, realloc, calloc
@@ -152,7 +174,7 @@ TEST_OBJECTS="decoder.o unicode.o buffer.o region.o undo.o transform.o \
 
 echo "Unit tests:"
 
-for suite in decoder unicode wcwidth buffer undo edit fileio relpath visual_line utf8_validate rect replace transform subprocess shell adjust history abuf tilde keymap kill_ring insert_file status_bar cjk_indic warnings ctags regress; do
+for suite in decoder unicode wcwidth buffer undo coalesce edit fileio relpath visual_line utf8_validate rect replace transform subprocess shell adjust history abuf tilde keymap kill_ring insert_file status_bar cjk_indic warnings ctags regress; do
     src="tests/test_${suite}.c"
     bin="tests/test_${suite}"
     printf "  %-12s " "$suite"
@@ -174,8 +196,21 @@ for suite in decoder unicode wcwidth buffer undo edit fileio relpath visual_line
         echo "$output" | grep -E ">>|run_shell|run_command|write_temp" | head -n 5 | sed 's/^/    /'
         ANY_FAIL=1
     elif echo "$output" | grep -q "FAIL"; then
-        echo "FAIL" 
-        echo "$output" | grep "FAIL:" | head -n 3 | sed 's/^/    /'
+        # Report the true count, then show at most MAX_FAIL_LINES of
+        # detail.  The count and the detail are separate: capping the
+        # detail keeps the summary readable, but capping the count
+        # silently understates how much is broken.  Set
+        # MAX_FAIL_LINES=0 for no cap.
+        nfail=$(echo "$output" | grep -c "FAIL:")
+        if [ "$MAX_FAIL_LINES" -eq 0 ] || [ "$nfail" -le "$MAX_FAIL_LINES" ]; then
+            echo "FAIL ($nfail failures)"
+            echo "$output" | grep "FAIL:" | sed 's/^/    /'
+        else
+            echo "FAIL ($nfail failures)"
+            echo "$output" | grep "FAIL:" | head -n "$MAX_FAIL_LINES" \
+                | sed 's/^/    /'
+            echo "    ... $((nfail - MAX_FAIL_LINES)) more (MAX_FAIL_LINES=$MAX_FAIL_LINES)"
+        fi
         ANY_FAIL=1
     elif [ $rc -ne 0 ]; then
         echo "FAIL (Sanitizer/Error - Exit Code $rc)"

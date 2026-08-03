@@ -223,13 +223,13 @@ void test_markring_adjusted_on_insert(void) {
 	push_mark_at(buf, 0, 0);
 	TEST_ASSERT_EQUAL_INT(5, buf->mark_ring[0].cx);
 
-	/* insertChar() records no undo itself; its callers record one
-	 * first, and that is what drives adjustAllPoints.  Mirror the
-	 * real call sites (keymap.c) rather than calling it bare. */
+	/* selfInsert() is the undoable typing path, and the mutation
+	 * layer inside it drives adjustAllPoints.  Mirror the real call
+	 * site (keymap.c) rather than calling the raw insertChar
+	 * primitive bare. */
 	buf->cx = 0;
 	buf->cy = 0;
-	undoSelfInsert('X', 1);
-	insertChar(buf, 'X', 1);
+	selfInsert(buf, 'X', 1);
 
 	TEST_ASSERT_EQUAL_INT(6, buf->mark_ring[0].cx);
 }
@@ -288,8 +288,7 @@ void test_markring_pop_stays_on_char_boundary(void) {
 	 * leave the row valid: this is the corruption endpoint. */
 	buf->cx = buf->markx;
 	buf->cy = buf->marky;
-	undoSelfInsert('Z', 1);
-	insertChar(buf, 'Z', 1);
+	selfInsert(buf, 'Z', 1);
 	TEST_ASSERT(utf8_validate(buf->row[0].chars, buf->row[0].size));
 	TEST_ASSERT_EQUAL_STRING("cafZ\xC3\xA9", (char *)buf->row[0].chars);
 }

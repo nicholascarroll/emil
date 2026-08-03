@@ -117,6 +117,51 @@ void tearDown(void) {
 	cleanupTestEditor();
 }
 
+
+/* ---- Character-boundary snapping ---- */
+
+/* utf8_snapToBoundary is the single implementation of "a byte offset is
+ * a legal cursor position only at the start of a character or at end of
+ * line".  Before it existed, the rule was open-coded at each site that
+ * moved a cursor, and the viewport clamp carried a byte offset from one
+ * row to another with only a byte-length check -- so scrolling onto a
+ * row of multibyte text left the cursor inside a character. */
+void test_snap_boundary_forward(void) {
+	/* U+65E5 U+672C U+8A9E: three 3-byte characters, 9 bytes. */
+	const uint8_t r[] = "\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e";
+	int n = 9;
+	/* Already on a boundary: unchanged. */
+	TEST_ASSERT_EQUAL_INT(0, utf8_snapToBoundary(r, n, 0, +1));
+	TEST_ASSERT_EQUAL_INT(3, utf8_snapToBoundary(r, n, 3, +1));
+	TEST_ASSERT_EQUAL_INT(6, utf8_snapToBoundary(r, n, 6, +1));
+	/* Inside a character: forward to the next boundary. */
+	TEST_ASSERT_EQUAL_INT(3, utf8_snapToBoundary(r, n, 1, +1));
+	TEST_ASSERT_EQUAL_INT(3, utf8_snapToBoundary(r, n, 2, +1));
+	TEST_ASSERT_EQUAL_INT(9, utf8_snapToBoundary(r, n, 7, +1));
+}
+
+void test_snap_boundary_backward(void) {
+	const uint8_t r[] = "\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e";
+	int n = 9;
+	TEST_ASSERT_EQUAL_INT(0, utf8_snapToBoundary(r, n, 1, -1));
+	TEST_ASSERT_EQUAL_INT(0, utf8_snapToBoundary(r, n, 2, -1));
+	TEST_ASSERT_EQUAL_INT(6, utf8_snapToBoundary(r, n, 7, -1));
+	TEST_ASSERT_EQUAL_INT(6, utf8_snapToBoundary(r, n, 8, -1));
+}
+
+/* End of line is a boundary and must survive untouched.  It is also
+ * where a naive backward scan would read chars[size]. */
+void test_snap_boundary_end_of_line(void) {
+	const uint8_t r[] = "\xe6\x97\xa5";
+	TEST_ASSERT_EQUAL_INT(3, utf8_snapToBoundary(r, 3, 3, +1));
+	TEST_ASSERT_EQUAL_INT(3, utf8_snapToBoundary(r, 3, 3, -1));
+	/* Out of range in either direction clamps to a boundary. */
+	TEST_ASSERT_EQUAL_INT(3, utf8_snapToBoundary(r, 3, 99, +1));
+	TEST_ASSERT_EQUAL_INT(0, utf8_snapToBoundary(r, 3, -5, +1));
+	/* An empty row has exactly one position. */
+	TEST_ASSERT_EQUAL_INT(0, utf8_snapToBoundary(r, 0, 0, +1));
+}
+
 int main(void) {
 	TEST_BEGIN();
 	RUN_TEST(test_utf8_bytes);
@@ -129,5 +174,8 @@ int main(void) {
 	RUN_TEST(test_invalid_lead_bytes);
 	RUN_TEST(test_continuation_not_start);
 	RUN_TEST(test_nbytes_all_ranges);
+	RUN_TEST(test_snap_boundary_forward);
+	RUN_TEST(test_snap_boundary_backward);
+	RUN_TEST(test_snap_boundary_end_of_line);
 	return TEST_END();
 }
