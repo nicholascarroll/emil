@@ -572,15 +572,23 @@ void test_forward_search_starts_from_column(void) {
 	cleanupTestEditor();
 }
 
-/* Having passed the end of the buffer with no match, the search wraps
- * to the top -- an occurrence above point is still reachable. */
-void test_forward_search_wraps_to_find_earlier_match(void) {
+/* A forward search that finds nothing between point and the end of the
+ * buffer FAILS THERE.  It does not quietly continue round the top and
+ * land on a match above the starting point -- doing that moves point
+ * backwards, which is what C-s must never do on its own.
+ *
+ * This test previously asserted the opposite, on the mistaken view
+ * that wrapping was part of searching from point.  Emacs reports
+ * "Failing I-search" and leaves point alone; only a further C-s wraps,
+ * which is the next test. */
+void test_forward_search_does_not_wrap_on_first_pass(void) {
 	initTestEditor();
 	makeMinibuffer();
+	/* "target" exists only ABOVE the cursor. */
 	const char *lines[] = { "target here", "zzz", "zzz" };
-	struct buffer *buf = make_test_buffer_lines(lines, 3);
-	buf->cy = 1;
-	buf->cx = 0;
+	struct buffer *lbuf = make_test_buffer_lines(lines, 3);
+	lbuf->cy = 1;
+	lbuf->cx = 0;
 
 	int keys[] = { 't', '\r' };
 	scriptKeys(keys, 2);
@@ -589,8 +597,60 @@ void test_forward_search_wraps_to_find_earlier_match(void) {
 	unmuteStdout();
 	clearKeys();
 
+	/* Point unmoved, and nothing highlighted as a match. */
+	TEST_ASSERT_EQUAL_INT(1, E.buf->cy);
+	TEST_ASSERT_EQUAL_INT(0, E.buf->cx);
+	TEST_ASSERT_EQUAL_INT(0, E.buf->match);
+
+	freeMinibuffer();
+	cleanupTestEditor();
+}
+
+/* A second C-s after a failing search is Emacs's wrap gesture: now the
+ * occurrence above point is reachable. */
+void test_forward_search_repeat_wraps_after_failing(void) {
+	initTestEditor();
+	makeMinibuffer();
+	const char *lines[] = { "target here", "zzz", "zzz" };
+	struct buffer *lbuf = make_test_buffer_lines(lines, 3);
+	lbuf->cy = 1;
+	lbuf->cx = 0;
+
+	int keys[] = { 't', CTRL('s'), '\r' };
+	scriptKeys(keys, 3);
+	muteStdout();
+	editorFind();
+	unmuteStdout();
+	clearKeys();
+
 	TEST_ASSERT_EQUAL_INT(0, E.buf->cy);
 	TEST_ASSERT_EQUAL_INT(0, E.buf->cx);
+
+	freeMinibuffer();
+	cleanupTestEditor();
+}
+
+/* Backward search is symmetric: nothing above point means the pass
+ * fails rather than continuing round the bottom. */
+void test_reverse_search_does_not_wrap_on_first_pass(void) {
+	initTestEditor();
+	makeMinibuffer();
+	/* "target" exists only BELOW the cursor. */
+	const char *lines[] = { "zzz", "zzz", "target here" };
+	struct buffer *lbuf = make_test_buffer_lines(lines, 3);
+	lbuf->cy = 1;
+	lbuf->cx = 0;
+
+	int keys[] = { 't', '\r' };
+	scriptKeys(keys, 2);
+	muteStdout();
+	reverseFind();
+	unmuteStdout();
+	clearKeys();
+
+	TEST_ASSERT_EQUAL_INT(1, E.buf->cy);
+	TEST_ASSERT_EQUAL_INT(0, E.buf->cx);
+	TEST_ASSERT_EQUAL_INT(0, E.buf->match);
 
 	freeMinibuffer();
 	cleanupTestEditor();
@@ -994,7 +1054,9 @@ int main(void) {
 	RUN_TEST(test_forward_search_starts_from_point);
 	RUN_TEST(test_forward_search_matches_at_point);
 	RUN_TEST(test_forward_search_starts_from_column);
-	RUN_TEST(test_forward_search_wraps_to_find_earlier_match);
+	RUN_TEST(test_forward_search_does_not_wrap_on_first_pass);
+	RUN_TEST(test_forward_search_repeat_wraps_after_failing);
+	RUN_TEST(test_reverse_search_does_not_wrap_on_first_pass);
 	RUN_TEST(test_forward_search_backspace_returns_to_origin);
 
 

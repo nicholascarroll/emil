@@ -42,6 +42,13 @@ static int initial_direction = 1;
 static int search_origin_cx = 0;
 static int search_origin_cy = 0;
 
+/* Set when a pass found nothing.  Emacs does not silently run past the
+ * end of the buffer and come round the other side: it reports "Failing
+ * I-search" and leaves point alone, and only a further C-s / C-r wraps.
+ * Scanning straight through the wrap meant C-s could move point
+ * *backwards* to a match above where the search started. */
+static int search_failing = 0;
+
 /* Compiled-pattern cache for regexSearch. The one live regex_t is 
  * intentionally left allocated at exit. */
 static char *re_cache_pat = NULL;
@@ -197,6 +204,19 @@ static uint8_t *searchRowBackward(erow *row, uint8_t *query, int limit,
 	return best;
 }
 
+/* Put point on a match and record its extent for highlighting. */
+static void placeMatch(struct buffer *bufr, int rowidx, uint8_t *match,
+		       int mlen) {
+	erow *row = &bufr->row[rowidx];
+	bufr->cy = rowidx;
+	bufr->cx = match - row->chars;
+	while (bufr->cx > 0 && utf8_isCont(row->chars[bufr->cx]))
+		bufr->cx--;
+	bufr->match_len = mlen + (int)(match - row->chars) - bufr->cx;
+	scroll();
+	bufr->match = 1;
+}
+
 void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 	static int last_match = -1;
 	static int direction = 1;
@@ -209,18 +229,29 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 	bufr->match = 0;
 	bufr->match_len = 0;
 
+	/* Only a repeat that follows a failed pass may wrap round the end
+	 * of the buffer -- that is Emacs's second C-s, the one that turns
+	 * "Failing I-search" into "Wrapped I-search". */
+	int allow_wrap = 0;
+
 	if (key == CTRL('g') || key == CTRL('c') || key == '\r') {
 		last_match = -1;
 		direction = 1;
 		regex_mode = 0;
+		search_failing = 0;
 		return;
 	} else if (key == CTRL('s')) {
 		direction = 1;
+		allow_wrap = search_failing;
 	} else if (key == CTRL('r')) {
 		direction = -1;
+		allow_wrap = search_failing;
 	} else {
+		/* The pattern changed: re-search from the origin, and
+		 * without wrapping, however the previous pass ended. */
 		last_match = -1;
 		direction = initial_direction;
+		search_failing = 0;
 	}
 
 	if (!query || strlen((const char *)query) == 0) {
@@ -242,8 +273,6 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 	 * typed, or any subsequent edit to it -- as opposed to a C-s / C-r
 	 * repeat, which keeps the pattern and steps to the next match. */
 	int fresh = (last_match == -1);
-	if (fresh)
-		direction = initial_direction;
 
 	/* A fresh search runs from the search origin; a repeat resumes from
 	 * the cursor, which is sitting on the previous match, and that is
@@ -298,25 +327,23 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 		}
 		if (match) {
 			last_match = current;
-			bufr->cy = current;
-			bufr->cx = match - row->chars;
-			while (bufr->cx > 0 &&
-			       utf8_isCont(row->chars[bufr->cx])) {
-				bufr->cx--;
-			}
-			bufr->match_len =
-				mlen + (int)(match - row->chars) - bufr->cx;
-			scroll();
-			bufr->match = 1;
-			return;
+			placeMatch(bufr, current, match, mlen);
 		}
 	}
-	for (int i = 0; i < bufr->numrows; i++) {
+
+	for (int i = 0; !bufr->match && i < bufr->numrows; i++) {
 		current += direction;
-		if (current == -1)
+		if (current == -1) {
+			/* Ran off the top. */
+			if (!allow_wrap)
+				break;
 			current = bufr->numrows - 1;
-		else if (current == bufr->numrows)
+		} else if (current == bufr->numrows) {
+			/* Ran off the bottom. */
+			if (!allow_wrap)
+				break;
 			current = 0;
+		}
 
 		erow *row = &bufr->row[current];
 		uint8_t *match;
@@ -339,18 +366,27 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 		}
 		if (match) {
 			last_match = current;
-			bufr->cy = current;
-			bufr->cx = match - row->chars;
-			while (bufr->cx > 0 &&
-			       utf8_isCont(row->chars[bufr->cx])) {
-				bufr->cx--;
-			}
-			bufr->match_len =
-				mlen + (int)(match - row->chars) - bufr->cx;
-			scroll();
-			bufr->match = 1;
-			break;
+			placeMatch(bufr, current, match, mlen);
 		}
+	}
+
+	/* Report the outcome.  editorPrompt rewrites the status line from
+	 * the prompt on every pass, so preserve_message is what keeps
+	 * this on screen. */
+	if (bufr->match) {
+		if (allow_wrap) {
+			setStatusMessage("Wrapped I-search: %s", query);
+			if (E.minibuf)
+				E.minibuf->completionState.preserve_message = 1;
+		}
+		search_failing = 0;
+	} else {
+		/* Point deliberately stays where it is, on the last match
+		 * that did succeed, as Emacs leaves it. */
+		setStatusMessage("Failing I-search: %s", query);
+		if (E.minibuf)
+			E.minibuf->completionState.preserve_message = 1;
+		search_failing = 1;
 	}
 }
 
@@ -359,6 +395,7 @@ static void searchInteractive(int direction, int regex,
 	setMarkSilent();
 	regex_mode = regex;
 	initial_direction = direction;
+	search_failing = 0;
 	int saved_cx = E.buf->cx;
 	int saved_cy = E.buf->cy;
 	search_origin_cx = saved_cx;

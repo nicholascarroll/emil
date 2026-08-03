@@ -178,8 +178,16 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 	while (1) {
 		/* Display prompt with minibuffer content */
 		char *shown = minibufJoin(E.minibuf, "^J");
+		int prefix_width;
 		if (!E.minibuf->completionState.preserve_message) {
 			setStatusMessage("%s%s", prompt, shown);
+			prefix_width = stringWidth((const uint8_t *)prompt);
+		} else {
+			prefix_width =
+				stringWidth((const uint8_t *)E.statusmsg) -
+				stringWidth((const uint8_t *)shown);
+			if (prefix_width < 0)
+				prefix_width = 0;
 		}
 		free(shown);
 		E.minibuf->completionState.preserve_message = 0;
@@ -191,8 +199,7 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 		 * index, so convert (a CJK character is 3 bytes but 2
 		 * columns; passing bytes drifts the cursor right of
 		 * the text). */
-		int prompt_width = stringWidth((const uint8_t *)prompt);
-		cursorBottomLine(prompt_width + minibufCursorCols(E.minibuf) +
+		cursorBottomLine(prefix_width + minibufCursorCols(E.minibuf) +
 				 1);
 
 		/* Read key */
