@@ -1,4 +1,10 @@
 ## [Unreleased]
+- A file's trailing newline is now a buffer invariant.
+- `C-x C-s` on a buffer with no unsaved changes now reports
+  "(No changes need to be saved)" instead of rewriting the file.
+- Fixed a heap-use-after-free in `scrollViewport`: `rowoff` was not
+  clamped on entry, so scrolling up in word-wrap mode after an edit had
+  deleted rows read a freed row. Pre-existing; found by `fuzz_undo.c`.
 - Radical refactor of undo; implemented issues #104,#105. This fixes
   #102: undo of newlines at end of buffer fails
 - A run of typing or deleting now becomes a new undo step every 20

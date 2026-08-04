@@ -6,6 +6,7 @@
 #include "fileio.h"
 #include "util.h"
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 
 /* ---- emil_getline ---- */
@@ -343,6 +344,88 @@ void setUp(void) {
 	cleanupTestEditor();
 }
 
+/* ---- Final-newline invariant ----
+ *
+ * A file buffer ends in a newline: its last row is empty unless the
+ * buffer is empty.  Established here, at load, so that save() has no
+ * policy to apply and never modifies the buffer on the way out.
+ *
+ * These pin the two ends of that: what a file without a trailing
+ * newline becomes on load, and what it costs (nothing) if the user
+ * never edits it. */
+
+static struct buffer *openBytes(const char *bytes, size_t n, char *tmpname) {
+	int fd = mkstemp(tmpname);
+	TEST_ASSERT(fd >= 0);
+	if (n > 0)
+		TEST_ASSERT_EQUAL_INT((int)n, (int)write(fd, bytes, n));
+	close(fd);
+	struct buffer *buf = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, editorOpen(buf, tmpname));
+	return buf;
+}
+
+static void assertSerialises(struct buffer *buf, const char *want) {
+	size_t len = 0;
+	char *got = rowsToString(buf, &len);
+	TEST_ASSERT_EQUAL_INT((int)strlen(want), (int)len);
+	if (len == strlen(want))
+		TEST_ASSERT_EQUAL_INT(0, memcmp(want, got, len));
+	free(got);
+}
+
+/* A file that already ends in a newline is unchanged by the rule. */
+void test_load_keeps_existing_final_newline(void) {
+	char tmpname[] = "/tmp/emil_test_XXXXXX";
+	struct buffer *buf = openBytes("a\nb\n", 4, tmpname);
+
+	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
+	TEST_ASSERT_EQUAL_STRING("", (char *)buf->row[2].chars);
+	assertSerialises(buf, "a\nb\n");
+
+	unlink(tmpname);
+}
+
+/* A file without one gains it at load, not at save. */
+void test_load_adds_missing_final_newline(void) {
+	char tmpname[] = "/tmp/emil_test_XXXXXX";
+	struct buffer *buf = openBytes("a\nb", 3, tmpname);
+
+	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
+	TEST_ASSERT_EQUAL_STRING("b", (char *)buf->row[1].chars);
+	TEST_ASSERT_EQUAL_STRING("", (char *)buf->row[2].chars);
+	assertSerialises(buf, "a\nb\n");
+
+	unlink(tmpname);
+}
+
+/* And gaining it does not mark the buffer modified, so an untouched
+ * file is not rewritten, prompts nothing on quit, and keeps its mtime.
+ * appendRowRaw deliberately leaves the dirty flag alone; this is the
+ * property that makes the load-time rule free. */
+void test_load_adding_final_newline_leaves_buffer_clean(void) {
+	char tmpname[] = "/tmp/emil_test_XXXXXX";
+	struct buffer *buf = openBytes("no trailing newline", 19, tmpname);
+
+	TEST_ASSERT_EQUAL_INT(0, buf->dirty);
+	TEST_ASSERT_NULL(buf->undo);
+
+	unlink(tmpname);
+}
+
+/* An empty file stays empty: it has no lines, so it has nothing to
+ * terminate, and it must not grow a newline out of nowhere. */
+void test_load_empty_file_serialises_to_nothing(void) {
+	char tmpname[] = "/tmp/emil_test_XXXXXX";
+	struct buffer *buf = openBytes("", 0, tmpname);
+
+	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
+	TEST_ASSERT_EQUAL_INT(0, buf->dirty);
+	assertSerialises(buf, "");
+
+	unlink(tmpname);
+}
+
 int main(void) {
 	TEST_BEGIN();
 
@@ -367,6 +450,11 @@ int main(void) {
 
 	RUN_TEST(test_save_valid_utf8_succeeds);
 	RUN_TEST(test_save_invalid_utf8_refused);
+
+	RUN_TEST(test_load_keeps_existing_final_newline);
+	RUN_TEST(test_load_adds_missing_final_newline);
+	RUN_TEST(test_load_adding_final_newline_leaves_buffer_clean);
+	RUN_TEST(test_load_empty_file_serialises_to_nothing);
 
 	return TEST_END();
 }

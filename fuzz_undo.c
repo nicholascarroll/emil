@@ -6,6 +6,7 @@
  *
  *   - every row is valid UTF-8
  *   - the cursor is in bounds and on a character boundary
+ *   - the buffer ends in a newline unless it is empty
  *
  * and, after the whole sequence:
  *
@@ -22,6 +23,7 @@
  *   /tmp/fuzz [iterations] [seed]
  */
 #include "test_harness.h"
+#include "buffer.h"
 #include "keymap.h"
 #include "fileio.h"
 #include "undo.h"
@@ -201,6 +203,19 @@ static int checkInvariants(struct buffer *buf) {
 			 buf->cy);
 		return 0;
 	}
+	/* A file buffer ends in a newline -- its last row is empty --
+	 * unless it is empty, which has no lines to terminate.  The
+	 * mutation layer maintains this, so it holds after every
+	 * operation, not merely at save.  This is the check that keeps
+	 * a future edit path from quietly dropping the terminator: the
+	 * consequence would otherwise show up only as a file on disk. */
+	if (!bufferIsEmpty(buf) && buf->row[buf->numrows - 1].size != 0) {
+		snprintf(fail_reason, sizeof(fail_reason),
+			 "last row \"%.20s\" is not empty: buffer does not "
+			 "end in a newline",
+			 (const char *)buf->row[buf->numrows - 1].chars);
+		return 0;
+	}
 	return 1;
 }
 
@@ -211,16 +226,14 @@ static const char *START_LINES[] = { "alpha beta", "(gamma delta).",
 #define NSTART ((int)(sizeof(START_LINES) / sizeof(START_LINES[0])))
 
 /* Returns 0 on success, non-zero on invariant violation.  fail_reason
- * describes the failure.  'lossy' is set when the run passed through a
- * rowless buffer, where the undo restore is lossy by design (§7.1). */
-static int runSequence(const struct step *steps, int n, int *lossy) {
+ * describes the failure. */
+static int runSequence(const struct step *steps, int n) {
 	initTestEditor();
 	muteStdout();
 
 	struct buffer *buf = make_test_buffer_lines(START_LINES, NSTART);
 	char *original = contentOf(buf);
 	int rc = 0;
-	int saw_rowless = 0;
 
 	for (int i = 0; i < n && rc == 0; i++) {
 		E.uarg = steps[i].uarg;
@@ -238,8 +251,6 @@ static int runSequence(const struct step *steps, int n, int *lossy) {
 			processKeypress(OPS[steps[i].op].cmd);
 		}
 
-		if (buf->numrows == 0)
-			saw_rowless = 1;
 		if (!checkInvariants(buf)) {
 			rc = 1;
 			break;
@@ -249,8 +260,6 @@ static int runSequence(const struct step *steps, int n, int *lossy) {
 	if (rc == 0) {
 		for (int k = 0; k < 4096 && buf->undo != NULL; k++) {
 			processKeypress(CMD_UNDO);
-			if (buf->numrows == 0)
-				saw_rowless = 1;
 			if (!checkInvariants(buf)) {
 				rc = 1;
 				break;
@@ -261,23 +270,10 @@ static int runSequence(const struct step *steps, int n, int *lossy) {
 	if (rc == 0 && getenv("EMIL_FUZZ_SKIP_UNDO") == NULL) {
 		char *restored = contentOf(buf);
 		if (strcmp(original, restored) != 0) {
-			/* Known, documented limitation: a buffer that
-			 * passed through numrows == 0 restores to one
-			 * empty row rather than none, because
-			 * bulkDelete cannot represent a rowless buffer.
-			 * Tracked separately; do not let it mask real
-			 * failures. */
-			if (saw_rowless) {
-				rc = 0;
-				if (lossy)
-					*lossy = 1;
-			} else {
-				snprintf(fail_reason, sizeof(fail_reason),
-					 "undo did not restore: %zu bytes "
-					 "vs %zu",
-					 strlen(original), strlen(restored));
-				rc = 1;
-			}
+			snprintf(fail_reason, sizeof(fail_reason),
+				 "undo did not restore: %zu bytes vs %zu",
+				 strlen(original), strlen(restored));
+			rc = 1;
 		}
 		free(restored);
 	}
@@ -315,7 +311,7 @@ static int deltaDebug(struct step *steps, int n) {
 			for (int j = 0; j < n; j++)
 				if (j != i)
 					trial[m++] = steps[j];
-			if (runSequence(trial, m, NULL) != 0) {
+			if (runSequence(trial, m) != 0) {
 				memcpy(steps, trial,
 				       sizeof(struct step) * (size_t)m);
 				n = m;
@@ -338,7 +334,7 @@ int main(int argc, char **argv) {
 
 	const char *mf = getenv("EMIL_FUZZ_MAX_FAILURES");
 	int max_failures = mf ? atoi(mf) : 5;
-	int failures = 0, lossy_runs = 0;
+	int failures = 0;
 	for (int it = 0; it < iterations; it++) {
 		int n = 2 + (int)(rnd() % 60);
 		struct step steps[64];
@@ -352,8 +348,7 @@ int main(int argc, char **argv) {
 							  0;
 		}
 
-		int lossy = 0;
-		if (runSequence(steps, n, &lossy) != 0) {
+		if (runSequence(steps, n) != 0) {
 			char kept[256];
 			emil_strlcpy(kept, fail_reason, sizeof(kept));
 			printf("\n*** FAILURE (iteration %d, %d ops): %s\n", it,
@@ -361,7 +356,7 @@ int main(int argc, char **argv) {
 			int m = getenv("EMIL_FUZZ_NO_REDUCE") ?
 					n :
 					deltaDebug(steps, n);
-			runSequence(steps, m, NULL);
+			runSequence(steps, m);
 			printf("  reduced to %d op(s): %s\n", m, fail_reason);
 			printSequence(steps, m);
 			failures++;
@@ -371,12 +366,8 @@ int main(int argc, char **argv) {
 				return 1;
 			}
 		}
-		if (lossy)
-			lossy_runs++;
 	}
 
-	printf("%d failure(s); %d run(s) hit the documented rowless-restore "
-	       "limitation\n",
-	       failures, lossy_runs);
+	printf("%d failure(s)\n", failures);
 	return failures != 0;
 }

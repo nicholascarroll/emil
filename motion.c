@@ -187,13 +187,8 @@ void forwardWordEnd(int *dx, int *dy) {
 	 * buffer.  Land at end of buffer (like Emacs M-f), not at
 	 * (0, starting row): cx was reset to 0 at each line end, so the
 	 * old "*dx = cx" moved the cursor BACKWARD to column 0. */
-	if (E.buf->numrows > 0) {
-		*dy = E.buf->numrows - 1;
-		*dx = E.buf->row[*dy].size;
-	} else {
-		*dx = cx;
-		*dy = icy;
-	}
+	*dy = E.buf->numrows - 1; /* numrows >= 1 (#105) */
+	*dx = E.buf->row[*dy].size;
 }
 
 void backwardWordEnd(int *dx, int *dy) {

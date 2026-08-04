@@ -51,6 +51,27 @@ void clampPositions(struct buffer *buf);
  * The empty buffer is therefore the one-row buffer holding an empty
  * row, not the rowless buffer.  numrows == 0 is unreachable.
  *
+ * ---- Final-newline invariant ----
+ *
+ * A file buffer additionally satisfies
+ *
+ *     bufferIsEmpty(buf) || row[numrows - 1].size == 0
+ *
+ * that is, it ends in a newline unless it is empty, in which case it
+ * has no lines to terminate and serialises to zero bytes.  So of the
+ * mappings above, ["a"] and ["a", "b"] are representable but are not
+ * states a file buffer rests in: a file lacking a trailing newline
+ * gains one at load.
+ *
+ * Established by newBuffer and editorOpen, maintained by mutate.c --
+ * which both refuses an edit that would delete only the final newline
+ * and repairs one that takes it along with real text.  save() applies
+ * no policy of its own; it serialises a buffer that is already
+ * correct.  Scoped to file buffers: the minibuffer is excluded, and
+ * popup buffers never reach the mutation layer.
+ *
+ * ---- Cursor position ----
+ *
  * A cursor byte offset is likewise legal only at the start of a
  * character or at end of line -- never inside a multibyte character.
  * clampPositions enforces that after every command, so the many places
@@ -70,7 +91,6 @@ void bufferResetRows(struct buffer *buf);
 void bufferEnsureRow(struct buffer *buf);
 int bufferLineCount(struct buffer *buf);
 int bufferIsEmpty(struct buffer *buf);
-void bufferEnsureFinalNewline(struct buffer *buf);
 void closeSpecialBuffer(const char *name);
 char *leftTruncate(const char *s, int max_width);
 int nameFit(const char *name, int formatted_len);

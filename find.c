@@ -602,13 +602,10 @@ void queryReplace(void) {
 			goto QR_CLEANUP;
 		case '!':
 		case 'Y':
-			if (E.buf->numrows > 0) {
-				E.buf->marky = E.buf->numrows - 1;
-				E.buf->markx = E.buf->row[E.buf->marky].size;
-			} else {
-				E.buf->marky = 0;
-				E.buf->markx = 0;
-			}
+			/* numrows >= 1 (#105): the end of the buffer is
+			 * always the end of a real row. */
+			E.buf->marky = E.buf->numrows - 1;
+			E.buf->markx = E.buf->row[E.buf->marky].size;
 			transformRegion(transformerReplaceString);
 			goto QR_CLEANUP;
 		case 'u':

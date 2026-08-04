@@ -413,19 +413,26 @@ int editorOpen(struct buffer *bufr, char *filename) {
 	 * invariant is restored below, before returning. */
 	bufferResetRows(bufr);
 
-	int ends_with_newline = 0;
 	while ((linelen = emil_getline(&line, &linecap, fp)) != -1) {
-		ends_with_newline = (linelen > 0 && line[linelen - 1] == '\n');
 		while (linelen > 0 &&
 		       (line[linelen - 1] == '\n' || line[linelen - 1] == '\r'))
 			linelen--;
 		appendRowRaw(bufr, (const uint8_t *)line, linelen);
 	}
 
-	/* The file is the rows joined by '\n'.  A final newline is one
-	 * more (empty) row; an empty file is the single empty row. */
-	if (bufr->numrows == 0 || ends_with_newline)
-		appendRowRaw(bufr, (const uint8_t *)"", 0);
+	/* The file is the rows joined by '\n', so a trailing newline is
+	 * one more (empty) row.  Appended unconditionally: emil's buffers
+	 * end in a newline (see mutate.c), so a file that arrives without
+	 * one gains it here rather than at save time.  The invariant then
+	 * holds from load onwards and save has no policy to apply.
+	 *
+	 * appendRowRaw deliberately does not dirty the buffer, so this
+	 * costs nothing: an untouched file is still clean, still prompts
+	 * nothing on quit, and is not rewritten unless the user edits it.
+	 *
+	 * An empty file is the single empty row, which serialises back to
+	 * zero bytes -- it has no lines, so it has nothing to terminate. */
+	appendRowRaw(bufr, (const uint8_t *)"", 0);
 
 	/* Get the display length of the longest column */
 	int max_width = 0;
@@ -739,7 +746,10 @@ static int confirmOverwriteDirect(const char *msg) {
 	return (c == 'y' || c == 'Y');
 }
 
-void save(void) {
+/* The write itself, with no "is this worth doing" question attached.
+ * saveAs uses this directly: it has just pointed the buffer at a file
+ * that does not exist yet, so a clean buffer still needs writing. */
+static void saveBuffer(void) {
 	if (E.recording || E.playback) {
 		setStatusMessage("Not available during macro");
 		return;
@@ -773,11 +783,6 @@ void save(void) {
 	}
 
 	char *iopath = expandTilde(E.buf->filename);
-
-	/* Policy: a saved file always ends in a newline (POSIX text
-	 * file).  Applied to the buffer, not to the output string, so
-	 * the buffer and the file agree; see bufferEnsureFinalNewline. */
-	bufferEnsureFinalNewline(E.buf);
 
 	size_t len;
 	char *buf = rowsToString(E.buf, &len);
@@ -841,6 +846,22 @@ void save(void) {
 	free(iopath);
 }
 
+/* C-x C-s.  A buffer that already matches its file is not rewritten:
+ * the write is not free (atomic temp file, rename, two fsyncs, an
+ * mtime bump that every other process watching the file will see), and
+ * a no-op save should not look like a change to anything downstream.
+ *
+ * Gated on having a filename, so an unnamed buffer still reaches the
+ * prompt in saveBuffer, and bypassed by saveAs, which needs to write a
+ * clean buffer to a name it has only just been given. */
+void save(void) {
+	if (E.buf->filename != NULL && !E.buf->dirty) {
+		setStatusMessage("(No changes need to be saved)");
+		return;
+	}
+	saveBuffer();
+}
+
 void saveAs(void) {
 	/* Not allowed during macro record/playback */
 	if (E.recording || E.playback) {
@@ -859,7 +880,7 @@ void saveAs(void) {
 	/* Release lock on the old file before saving to the new one */
 	releaseLock(E.buf);
 	computeDisplayNames();
-	save();
+	saveBuffer();
 }
 
 /* Switch the focused window to the named file.  If a buffer with that
@@ -1073,11 +1094,9 @@ int insertFileAtPath(struct buffer *buf, const char *path,
 		 * ends in a newline, whether or not the file did.
 		 *
 		 * This is emil's long-standing behaviour and is preserved
-		 * deliberately.  It is the same policy save() applies via
-		 * bufferEnsureFinalNewline, and the reason the old
-		 * has_suffix_row condition is gone rather than inverted:
-		 * it tested saved_cy < numrows, which cy < numrows (#105)
-		 * makes unconditionally true.
+		 * deliberately.  The old has_suffix_row condition is gone
+		 * rather than inverted: it tested saved_cy < numrows,
+		 * which cy < numrows (#105) makes unconditionally true.
 		 *
 		 * Insert position is (0, buf->cy), the start of the
 		 * current row. */

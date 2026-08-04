@@ -247,22 +247,6 @@ void bufferResetRows(struct buffer *bufr) {
 	bufr->rowcap = 0;
 }
 
-/* Guarantee the buffer ends in a newline, which under the
- * representation means guaranteeing a final empty row.  No-op if one
- * is already there.
- *
- * Done as a buffer modification rather than by appending a byte to the
- * save output, so that the buffer and the file agree.  Appending to
- * the output would leave the buffer saying "no final newline, so the
- * cursor cannot go below the last line" while the file on disk has
- * one, and the two would disagree until reload.  emacs's
- * require-final-newline modifies the buffer for the same reason. */
-void bufferEnsureFinalNewline(struct buffer *bufr) {
-	if (bufr->numrows > 0 && bufr->row[bufr->numrows - 1].size == 0)
-		return;
-	insertRow(bufr, bufr->numrows, (const uint8_t *)"", 0);
-}
-
 /* Does the buffer hold no text at all?
  *
  * Since #105 the empty buffer is the one-row buffer whose single row is

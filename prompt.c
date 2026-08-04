@@ -319,8 +319,9 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 		case CTRL('r'):
 			/* C-s C-s or C-r C-r: populate empty search with
 			 * the last search string. */
-			if (t == PROMPT_SEARCH && E.minibuf->numrows > 0 &&
-			    E.minibuf->row[0].size == 0) {
+			/* numrows >= 1 (#105); replaceMinibufferText
+			 * always leaves at least one row. */
+			if (t == PROMPT_SEARCH && E.minibuf->row[0].size == 0) {
 				char *last_search = NULL;
 				struct historyEntry *last_entry =
 					getLastHistory(&E.search_history);
@@ -440,9 +441,7 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 		}
 
 		if (callback) {
-			char *text = E.minibuf->numrows > 0 ?
-					     (char *)E.minibuf->row[0].chars :
-					     "";
+			char *text = (char *)E.minibuf->row[0].chars;
 			callback(bufr, (uint8_t *)text, callback_key);
 		}
 	}

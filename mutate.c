@@ -32,6 +32,87 @@ uint8_t *collectRegionText(struct buffer *buf, int startx, int starty, int endx,
 	return dbuf_detach(&d, out_len);
 }
 
+/* ---- Final-newline invariant ----
+ *
+ * A file buffer ends in a newline, which under the representation
+ * means its last row is empty -- unless the buffer is empty, which has
+ * no lines to terminate and must still serialise to zero bytes.
+ *
+ *     bufferIsEmpty(buf) || row[numrows - 1].size == 0
+ *
+ * newBuffer establishes it (the empty buffer satisfies it), editorOpen
+ * establishes it by appending the row a file without a trailing
+ * newline lacks, and the two functions below maintain it.  save()
+ * therefore has no policy of its own: it serialises a buffer that is
+ * already correct.
+ *
+ * Scoped to file buffers by excluding the minibuffer, which is the
+ * only non-file buffer that reaches this layer -- popups are built
+ * with the row primitives and are read-only, so rejectIfReadOnly turns
+ * them away first.  A minibuffer is not a text file, which is the same
+ * reason it is never written to disk. */
+static int wantsFinalNewline(struct buffer *buf) {
+	return buf != E.minibuf;
+}
+
+/* Would this mutation delete the final newline and nothing else?
+ *
+ * Such a request nets out to nothing: the deletion would be undone
+ * immediately by the repair below, leaving the buffer byte-identical
+ * but two undo records heavier, marked dirty, and with the redo stack
+ * cleared.  Refusing it up front is cheaper than repairing it, and it
+ * covers every path that can ask -- backspace at the start of the last
+ * row, C-d or C-k at the end of the row above it, delete-word either
+ * way, and a kill-region whose selection is exactly that newline.
+ * Enumerating those at the edit layer would be six conditions across
+ * two files with nothing to stop a seventh appearing. */
+static int deletesOnlyFinalNewline(struct buffer *buf, int startx, int starty,
+				   int endx, int endy, int old_len,
+				   int repl_len) {
+	if (old_len <= 0 || repl_len > 0)
+		return 0;
+	if (buf->numrows < 2)
+		return 0;
+	if (buf->row[buf->numrows - 1].size != 0)
+		return 0;
+	return starty == buf->numrows - 2 &&
+	       startx == buf->row[buf->numrows - 2].size &&
+	       endy == buf->numrows - 1 && endx == 0;
+}
+
+/* Restore the invariant after a mutation that consumed the final
+ * newline along with real text -- a kill-region running off the end, a
+ * regex replace matching it.  The appended row is recorded with
+ * paired=1, so it and the mutation that provoked it undo as one step;
+ * this is the same mechanism a replace already uses to bind its delete
+ * and insert together.  Nothing else is needed: a row appended past
+ * the end of the buffer moves no tracked point. */
+static void restoreFinalNewline(struct buffer *buf) {
+	if (!wantsFinalNewline(buf) || bufferIsEmpty(buf))
+		return;
+	if (buf->row[buf->numrows - 1].size == 0)
+		return;
+
+	int atx = buf->row[buf->numrows - 1].size;
+	int aty = buf->numrows - 1;
+
+	struct undo *fix = newUndo();
+	fix->startx = atx;
+	fix->starty = aty;
+	computeInsertEnd((const uint8_t *)"\n", 1, atx, aty, &fix->endx,
+			 &fix->endy);
+	fix->delete = 0;
+	fix->append = 0;
+	fix->paired = 1;
+	undoReplaceData(fix, 2);
+	fix->data[0] = '\n';
+	fix->data[1] = 0;
+	fix->datalen = 1;
+	pushUndo(buf, fix);
+
+	bulkInsert(buf, atx, aty, (const uint8_t *)"\n", 1);
+}
+
 /* Shared body of every mutation.  'coalesce' asks that the single
  * record produced be offered to the run at the head of the undo list
  * rather than pushed on top of it; it is honoured only for a mutation
@@ -46,6 +127,14 @@ static void mutateReplaceEx(struct buffer *buf, int startx, int starty,
 	 * precede clearRedos; on refusal the out-params are untouched
 	 * (see mutate.h). */
 	if (rejectIfReadOnly(buf))
+		return;
+
+	/* Refused for the same reason and on the same terms as the
+	 * read-only check above: before clearRedos, with the out-params
+	 * left untouched (see mutate.h). */
+	if (wantsFinalNewline(buf) &&
+	    deletesOnlyFinalNewline(buf, startx, starty, endx, endy, old_len,
+				    repl_len))
 		return;
 
 	int is_replace = (old_len > 0 && repl_len > 0);
@@ -119,6 +208,8 @@ static void mutateReplaceEx(struct buffer *buf, int startx, int starty,
 		 * adjustAllPoints on the logical range. */
 		bulkInsert(buf, startx, starty, repl, repl_len);
 	}
+
+	restoreFinalNewline(buf);
 
 	markBufferDirty(buf);
 	invalidateScreenCache(buf);

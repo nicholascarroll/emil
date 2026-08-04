@@ -280,8 +280,11 @@ void test_yank_rect_extra_lines_undo(void) {
 	buf->cy = 0;
 	yankRectangle();
 
-	/* Should have 4 rows now */
-	TEST_ASSERT_EQUAL_INT(4, buf->numrows);
+	/* Four rows of rectangle, plus the empty row that terminates
+	 * the last of them: the rectangle's bottom row is now the last
+	 * line of the file and needs its newline like any other. */
+	TEST_ASSERT_EQUAL_INT(5, buf->numrows);
+	TEST_ASSERT_EQUAL_STRING("", row_str(buf, 4));
 
 	doUndo(buf, 1);
 
@@ -490,9 +493,11 @@ void test_yank_rect_into_empty_buffer(void) {
 
 	yankRectangle();
 
-	TEST_ASSERT_EQUAL_INT(2, dst->numrows);
+	/* Two rows of rectangle plus the terminating empty row. */
+	TEST_ASSERT_EQUAL_INT(3, dst->numrows);
 	TEST_ASSERT_EQUAL_STRING("BCD", row_str(dst, 0));
 	TEST_ASSERT_EQUAL_STRING("GHI", row_str(dst, 1));
+	TEST_ASSERT_EQUAL_STRING("", row_str(dst, 2));
 	TEST_ASSERT_EQUAL_INT(0, dst->cx);
 	TEST_ASSERT_EQUAL_INT(0, dst->cy);
 
@@ -504,9 +509,10 @@ void test_yank_rect_into_empty_buffer(void) {
 
 	/* Redo restores the yanked rectangle. */
 	doRedo(dst, 1);
-	TEST_ASSERT_EQUAL_INT(2, dst->numrows);
+	TEST_ASSERT_EQUAL_INT(3, dst->numrows);
 	TEST_ASSERT_EQUAL_STRING("BCD", row_str(dst, 0));
 	TEST_ASSERT_EQUAL_STRING("GHI", row_str(dst, 1));
+	TEST_ASSERT_EQUAL_STRING("", row_str(dst, 2));
 }
 
 /* ----------------------------------------------------------------

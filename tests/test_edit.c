@@ -513,9 +513,14 @@ void test_del_char_at_end_of_last_line(void) {
 	buf->cx = 5;
 	buf->cy = 0;
 	delChar(1);
-	/* Should be a no-op — nothing after the last char of the last line */
-	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
+	/* A no-op, and now genuinely so.  The character after the last
+	 * one is the file's trailing newline, which the buffer must
+	 * keep, so the mutation layer refuses the deletion outright.
+	 * This used to assert numrows == 1 -- the newline had in fact
+	 * been deleted and the row count silently dropped. */
+	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_STRING("", row_str(buf, 1));
 }
 
 void test_move_cursor_empty_buffer(void) {
@@ -567,8 +572,13 @@ void test_kill_line_on_virtual_eof_line(void) {
 	 * newBuffer now seeds an empty row (#105), so the hardcoded 16
 	 * this test used to rely on no longer lands on the boundary and
 	 * the test passed without exercising anything. */
+	/* Filled ahead of the terminator row newBuffer seeded, so the
+	 * buffer still ends in an empty row -- a hand-built buffer that
+	 * broke the final-newline invariant would have the mutation
+	 * layer repair it mid-test and the row count would move for a
+	 * reason unrelated to what is being tested. */
 	while (buf->numrows < buf->rowcap)
-		insertRow(buf, buf->numrows, (const uint8_t *)"line", 4);
+		insertRow(buf, buf->numrows - 1, (const uint8_t *)"line", 4);
 	TEST_ASSERT_EQUAL_INT(buf->rowcap, buf->numrows);
 	int filled = buf->numrows;
 	buf->dirty = 0;

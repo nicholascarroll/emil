@@ -1055,24 +1055,15 @@ void test_b13_statusleft_does_not_overrun_its_buffer(void) {
  * returns a length-counted block, not a C string, so terminate it —
  * these comparisons are on content, and a stray tail would make them
  * pass or fail for the wrong reason. */
-/* The byte string the buffer would be written out as -- that is, with
- * the save policy applied.  rowsToString alone gives the buffer's own
- * content, which since #105 may lack a final newline; save() appends
- * one via bufferEnsureFinalNewline.  These tests are about the text a
- * user ends up with on disk, so mirror that here.  Done by copy rather
- * than by calling bufferEnsureFinalNewline, which modifies the buffer
- * and would disturb the undo/redo sequence being measured. */
+/* The byte string the buffer would be written out as.  Plain
+ * serialisation: save() applies no policy of its own, because the
+ * buffer already ends in a newline -- established at load, maintained
+ * by the mutation layer.  This used to append one to a copy, working
+ * around a policy that lived in save().  NUL-terminated so the
+ * comparisons below can use string equality. */
 static char *contentOf(struct buffer *buf) {
 	size_t len;
-	char *raw = rowsToString(buf, &len);
-	int needs_nl = (len > 0 && raw[len - 1] != '\n');
-	char *out = xmalloc(len + (size_t)needs_nl + 1);
-	memcpy(out, raw, len);
-	if (needs_nl)
-		out[len++] = '\n';
-	out[len] = '\0';
-	free(raw);
-	return out;
+	return rowsToString(buf, &len);
 }
 
 static void undoAll(struct buffer *buf) {
@@ -1321,6 +1312,81 @@ void test_scroll_leaves_cursor_on_char_boundary(void) {
 	TEST_ASSERT_EQUAL_INT(0, buf->cy);
 	TEST_ASSERT(buf->cx == buf->row[0].size ||
 		    !utf8_isCont(buf->row[0].chars[buf->cx]));
+	cleanupTestEditor();
+}
+
+/* Stale rowoff in scrollViewport.
+ *
+ * Deleting rows does not adjust any window's rowoff, so between the
+ * edit and the next frame a window can name a row that no longer
+ * exists.  refreshScreen clamps it, but a keyboard macro or a
+ * uarg-repeated command runs many operations per frame.  The word-wrap
+ * path in scrollViewport indexes buf->row[win->rowoff] directly, so a
+ * stale rowoff there read a row->chars that delRow had already freed
+ * (heap-use-after-free, found by fuzz_undo.c under ASan).
+ *
+ * Asserted as a bounds check rather than left to the sanitizer, so the
+ * test fails on a plain build too. */
+void test_scroll_up_with_stale_rowoff_stays_in_bounds(void) {
+	initTestEditor();
+	static const char *lines[5] = { "alpha", "beta", "gamma", "delta",
+					"epsilon" };
+	struct buffer *buf = make_test_buffer_lines(lines, 5);
+	E.buf = buf;
+	E.windows[0]->buf = buf;
+	E.windows[0]->height = 2;
+	buf->word_wrap = 1;
+
+	/* Scrolled near the bottom, then the buffer shrinks under us. */
+	E.windows[0]->rowoff = 4;
+	E.windows[0]->skip_sublines = 0;
+	while (buf->numrows > 2)
+		delRow(buf, buf->numrows - 1);
+	buf->cy = 0;
+	buf->cx = 0;
+	invalidateScreenCache(buf);
+
+	scrollViewport(E.windows[0], buf, -1);
+
+	TEST_ASSERT(E.windows[0]->rowoff >= 0);
+	TEST_ASSERT(E.windows[0]->rowoff < buf->numrows);
+	cleanupTestEditor();
+}
+
+/* The same clamp on the scroll-down side, so the guard is not quietly
+ * tied to one direction.
+ *
+ * Word wrap only, and the bound here is rowoff <= numrows rather than
+ * rowoff < numrows.  Scrolling down deliberately walks rowoff one past
+ * the last row so the final line can leave the screen -- both branches
+ * do it, and refreshScreen pulls it back to numrows - 1 before drawing.
+ * What the entry clamp guarantees is that rowoff cannot still be the
+ * stale value it arrived with; every deref inside the scroll-down loop
+ * is already guarded by its own rowoff >= numrows test.  The strict
+ * bound is asserted on the scroll-up side above, which is where the
+ * unguarded buf->row[win->rowoff] lives. */
+void test_scroll_down_with_stale_rowoff_stays_in_bounds(void) {
+	initTestEditor();
+	static const char *lines[5] = { "alpha", "beta", "gamma", "delta",
+					"epsilon" };
+	struct buffer *buf = make_test_buffer_lines(lines, 5);
+	E.buf = buf;
+	E.windows[0]->buf = buf;
+	E.windows[0]->height = 2;
+	buf->word_wrap = 1;
+
+	E.windows[0]->rowoff = 4;
+	E.windows[0]->skip_sublines = 0;
+	while (buf->numrows > 2)
+		delRow(buf, buf->numrows - 1);
+	buf->cy = 0;
+	buf->cx = 0;
+	invalidateScreenCache(buf);
+
+	scrollViewport(E.windows[0], buf, 1);
+
+	TEST_ASSERT(E.windows[0]->rowoff >= 0);
+	TEST_ASSERT(E.windows[0]->rowoff <= buf->numrows);
 	cleanupTestEditor();
 }
 
@@ -1601,10 +1667,15 @@ void test_rectangle_yank_at_virtual_eof_roundtrip(void) {
 	char *edited = contentOf(buf);
 	TEST_ASSERT_EQUAL_STRING("alpha\nbeta\nab\ncd\n", edited);
 
-	/* The replace's own insert record is unanchored: the extension
-	 * already accounted for both newlines. */
-	TEST_ASSERT_EQUAL(0, buf->undo->startx);
-	TEST_ASSERT_EQUAL(2, buf->undo->starty);
+	/* The head record is the final-newline repair: the rectangle's
+	 * bottom row became the last line of the file and needed its
+	 * terminator, recorded paired so it undoes with the yank rather
+	 * than as a step of its own.  The replace's insert record sits
+	 * beneath it, and is unanchored -- the extension already
+	 * accounted for both newlines. */
+	TEST_ASSERT_EQUAL(1, buf->undo->paired);
+	TEST_ASSERT_EQUAL(0, buf->undo->prev->startx);
+	TEST_ASSERT_EQUAL(2, buf->undo->prev->starty);
 
 	undoAll(buf);
 	char *undone = contentOf(buf);
@@ -1719,6 +1790,8 @@ int main(void) {
 	RUN_TEST(test_eof_repeated_newline_undo_does_not_accumulate);
 	RUN_TEST(test_eof_newline_redo_inserts_one_row_not_two);
 	RUN_TEST(test_scroll_leaves_cursor_on_char_boundary);
+	RUN_TEST(test_scroll_up_with_stale_rowoff_stays_in_bounds);
+	RUN_TEST(test_scroll_down_with_stale_rowoff_stays_in_bounds);
 	RUN_TEST(test_logical_insert_record_round_trips);
 	RUN_TEST(test_eof_payload_one_line);
 	RUN_TEST(test_eof_payload_two_lines);

@@ -373,12 +373,12 @@ void expandPalette(void) {
 				pbuf->cx = 0;
 				break;
 			case CMD_END_OF_FILE:
-				pbuf->cy = pbuf->numrows > 0 ?
-						   pbuf->numrows - 1 :
-						   0;
+				/* bufferEnsureRow ran before this loop and
+				 * nothing in it resets rows, so numrows >= 1
+				 * holds throughout (#105). */
+				pbuf->cy = pbuf->numrows - 1;
 				pbuf->cx = 0;
-				if (pbuf->cy < pbuf->numrows)
-					endOfLine(0);
+				endOfLine(0);
 				snap_dir = -1;
 				break;
 			case CMD_PAGE_UP:

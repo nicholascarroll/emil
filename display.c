@@ -155,6 +155,25 @@ void scrollViewport(struct window *win, struct buffer *buf, int n) {
 	if (n == 0)
 		return;
 
+	/* rowoff is not adjusted when an edit deletes rows, so on entry
+	 * it may name a row that no longer exists.  refreshScreen
+	 * clamps it (§7.2), but that is a per-frame guarantee, and a
+	 * keyboard macro or a uarg-repeated command runs many
+	 * operations between frames.  The word-wrap path below
+	 * dereferences buf->row[win->rowoff] directly, so a stale
+	 * rowoff there reads a row->chars that delRow already freed.
+	 * Clamp on entry rather than rely on refresh timing.
+	 *
+	 * numrows >= 1 (#105), so numrows - 1 is always a valid index. */
+	if (win->rowoff > buf->numrows - 1) {
+		win->rowoff = buf->numrows - 1;
+		win->skip_sublines = 0;
+	}
+	if (win->rowoff < 0) {
+		win->rowoff = 0;
+		win->skip_sublines = 0;
+	}
+
 	if (!buf->word_wrap) {
 		win->rowoff += n;
 		if (win->rowoff < 0)
@@ -162,7 +181,7 @@ void scrollViewport(struct window *win, struct buffer *buf, int n) {
 		int max_rowoff = buf->numrows - win->height + 2;
 		if (max_rowoff < 0)
 			max_rowoff = 0;
-		if (buf->numrows > 0 && win->rowoff > max_rowoff)
+		if (win->rowoff > max_rowoff)
 			win->rowoff = max_rowoff;
 		win->skip_sublines = 0;
 		return;
