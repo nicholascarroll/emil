@@ -133,6 +133,33 @@ static int minibufCursorCols(struct buffer *mb) {
 uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 		      enum promptType t,
 		      void (*callback)(struct buffer *, uint8_t *, int)) {
+	/* A prompt must not open while one is already running.
+	 *
+	 * The loop below dispatches ordinary commands, so C-x C-f, M-x,
+	 * C-x b, C-x i, C-x C-w and M-| are all reachable from inside a
+	 * prompt.  Letting them through meant a second prompt opened on
+	 * top of the first, sharing the one E.minibuf: the inner prompt
+	 * cleared the line, and the outer one came back holding the
+	 * inner's text.  Pressing C-x C-f twice and cancelling the
+	 * second prompt left "Find file:" holding whatever had been
+	 * typed into it, so RET opened the wrong file.
+	 *
+	 * Emacs refuses the same thing by default
+	 * (enable-recursive-minibuffers is nil).  Nothing in emil needs
+	 * recursive prompts, so rather than make the minibuffer a stack
+	 * to support a capability no one wants, refuse it here: one
+	 * check, and the whole class goes away.
+	 *
+	 * E.buf is set to E.minibuf on entry below and restored at
+	 * done:, and nowhere else assigns it, so this is an exact test
+	 * for "a prompt is already running".  Returning NULL is the
+	 * same answer callers already handle for C-g. */
+	if (E.buf == E.minibuf) {
+		setStatusMessage(
+			"Command attempted to use minibuffer while in minibuffer");
+		return NULL;
+	}
+
 	/* 'prompt' is a plain prefix string displayed before the
 	 * minibuffer content.  It is NEVER used as a printf format:
 	 * user-controlled text (search terms, filenames) may be
@@ -159,6 +186,20 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 	E.prompt_type = t;
 
 	replaceMinibufferText(E.minibuf, "");
+
+	/* A universal argument pending when the prompt opens belongs to
+	 * the command that opened it, not to minibuffer editing.  The
+	 * loop below dispatches through processKeypress, which reads
+	 * E.uarg, so leaving it set made the first keystroke typed at
+	 * the prompt repeat: C-u 4 C-x C-f then "ab" put "aaaab" in the
+	 * minibuffer.  Discarded rather than saved and restored: the
+	 * opening command already captured its own count by value
+	 * before calling here (see processKeypress, which copies E.uarg
+	 * into a local before dispatch), so there is nothing to give
+	 * back.  A C-u typed *inside* the prompt still works; this only
+	 * drops one left over from before it opened.  editorPipe did
+	 * this locally; doing it here makes it true for all callers. */
+	E.uarg = 0;
 
 	/* Save editor buffer and switch to minibuffer.
 	 *

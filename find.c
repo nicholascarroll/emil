@@ -476,9 +476,20 @@ static int findNextMatch(uint8_t *needle, int skip_current) {
 }
 
 void replaceString(void) {
+	/* The prompts below dispatch ordinary commands, so another
+	 * replace-string or query-replace can run nested inside this
+	 * one.  It would free these statics and NULL them, leaving the
+	 * outer invocation using freed memory.  Hold the caller's values
+	 * on the stack and put them back on every exit -- the same
+	 * treatment editorPrompt gives E.edbuf and E.prompt_type. */
+	uint8_t *saved_orig = replace_orig;
+	uint8_t *saved_repl = replace_repl;
+
 	replace_orig = editorPrompt(E.buf, "Replace: ", PROMPT_REPLACE, NULL);
 	if (replace_orig == NULL) {
 		setStatusMessage("Canceled replace-string.");
+		replace_orig = saved_orig;
+		replace_repl = saved_repl;
 		return;
 	}
 
@@ -494,8 +505,9 @@ void replaceString(void) {
 	free(prompt);
 	if (replace_repl == NULL) {
 		free(replace_orig);
-		replace_orig = NULL;
 		setStatusMessage("Canceled replace-string.");
+		replace_orig = saved_orig;
+		replace_repl = saved_repl;
 		return;
 	}
 
@@ -503,8 +515,8 @@ void replaceString(void) {
 
 	free(replace_orig);
 	free(replace_repl);
-	replace_orig = NULL;
-	replace_repl = NULL;
+	replace_orig = saved_orig;
+	replace_repl = saved_repl;
 }
 
 /* Build the "Query replacing X with Y:" status line shown during the
@@ -522,25 +534,36 @@ static char *qrStatusPrompt(void) {
 }
 
 void queryReplace(void) {
-	replace_orig =
-		editorPrompt(E.buf, "Query replace: ", PROMPT_REPLACE, NULL);
-	if (replace_orig == NULL) {
-		setStatusMessage("Canceled query-replace.");
-		return;
-	}
+	/* The prompts here, and the y/n loop's C-r and e/E prompts,
+	 * dispatch ordinary commands, so another query-replace or
+	 * replace-string can run nested inside this one.  It would free
+	 * these statics and NULL them, and the outer invocation would
+	 * then pass a dangling or NULL pattern to findNextMatch.  Hold
+	 * the caller's values on the stack and put them back on every
+	 * exit -- the same treatment editorPrompt gives E.edbuf. */
+	uint8_t *saved_orig = replace_orig;
+	uint8_t *saved_repl = replace_repl;
 
-	if (replace_orig[0] == '\0') {
+	for (;;) {
+		replace_orig = editorPrompt(
+			E.buf, "Query replace: ", PROMPT_REPLACE, NULL);
+		if (replace_orig == NULL) {
+			setStatusMessage("Canceled query-replace.");
+			replace_orig = saved_orig;
+			replace_repl = saved_repl;
+			return;
+		}
+		if (replace_orig[0] != '\0')
+			break;
 		free(replace_orig);
-		replace_orig = NULL;
-		setStatusMessage("query-replace needs a search string");
-		return;
 	}
 
 	if (strchr((const char *)replace_orig, '\n')) {
 		free(replace_orig);
-		replace_orig = NULL;
 		setStatusMessage(
 			"query-replace cannot match across lines; use replace-regexp");
+		replace_orig = saved_orig;
+		replace_repl = saved_repl;
 		return;
 	}
 
@@ -553,8 +576,9 @@ void queryReplace(void) {
 	replace_repl = editorPrompt(E.buf, prompt_buf, PROMPT_REPLACE, NULL);
 	if (replace_repl == NULL) {
 		free(replace_orig);
-		replace_orig = NULL;
 		setStatusMessage("Canceled query-replace.");
+		replace_orig = saved_orig;
+		replace_repl = saved_repl;
 		return;
 	}
 
@@ -685,7 +709,7 @@ QR_CLEANUP:
 	E.buf->marky = savedMy;
 	free(replace_orig);
 	free(replace_repl);
-	replace_orig = NULL;
-	replace_repl = NULL;
+	replace_orig = saved_orig;
+	replace_repl = saved_repl;
 	free(prompt);
 }

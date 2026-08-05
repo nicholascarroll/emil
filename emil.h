@@ -244,7 +244,18 @@ struct history {
 };
 
 struct config {
-	struct text kill; /* active kill entry */
+	/* Active kill entry.
+	 *
+	 * Deliberately shared between the minibuffer and ordinary
+	 * buffers, as in Emacs: a kill made while typing at a prompt
+	 * lands in the same ring the file yanks from, which is what
+	 * makes C-w at a prompt then C-y in the buffer work.  The kill
+	 * ring, kill_ring_pos and the history rings below are therefore
+	 * NOT saved and restored across a nested prompt -- unlike
+	 * edbuf and prompt_type, which are per-prompt state.  A nested
+	 * prompt moving the outer buffer's yank position is the
+	 * intended behaviour, not a nesting bug. */
+	struct text kill;
 	int screenrows;
 	int screencols;
 	uint8_t unicode[4];
