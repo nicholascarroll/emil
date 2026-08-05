@@ -529,12 +529,13 @@ void queryReplace(void) {
 		return;
 	}
 
-	/* findNextMatch locates matches with per-row strstr, so a
-	 * pattern containing a newline can never match.  The replace
-	 * ring is shared with replace-regexp (as query-replace-history
-	 * is in Emacs), so a multi-line entry is one M-p away; without
-	 * this check it would exit silently with no message at all.
-	 * Refuse up front, before asking for a replacement. */
+	if (replace_orig[0] == '\0') {
+		free(replace_orig);
+		replace_orig = NULL;
+		setStatusMessage("query-replace needs a search string");
+		return;
+	}
+
 	if (strchr((const char *)replace_orig, '\n')) {
 		free(replace_orig);
 		replace_orig = NULL;

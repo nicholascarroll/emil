@@ -277,6 +277,13 @@ int wordWrapBreak(erow *row, int screencols, int line_start_col,
 		*break_col = hard_col;
 		*break_byte = hard_byte;
 	} else {
+		/* Nothing fit: the segment's first character is wider
+		 * than the window.  Emit it anyway.  Returning a break
+		 * at line_start_byte would make callers loop forever. */
+		if (bidx == line_start_byte && bidx < row->size) {
+			col += charInStringWidth(row->chars, bidx);
+			bidx += utf8_nBytes(row->chars[bidx]);
+		}
 		*break_col = col;
 		*break_byte = bidx;
 	}

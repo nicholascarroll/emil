@@ -1,30 +1,8 @@
-## [Unreleased]
-- `make hal` now compiles the test suite with `-Werror` too; both strict
-  passes previously covered only the binary.
-- `HAL_WARNINGS` gains thirteen checks, including `-Wcast-align=strict`,
-  `-Wwrite-strings` and `-Wcast-qual`. Fixing the last two separated
-  borrowed from owned pointers in `pipe.c` and `completion.c`, and made
-  `editorOpen` and the register helpers take `const`.
-- Test builds no longer discard compiler diagnostics, and the shared
-  helpers in `test_harness.h` are `static inline`, so
-  `-Wno-unused-function` is gone and a dead static in a test is reported
-  again. Fixed the 20 warnings that had accumulated unseen.
-- Fixed heap corruption when undoing inside a prompt. `editorPrompt`
-  resets the minibuffer through `replaceMinibufferText`, which rebuilds
-  the rows with the row primitives but left the undo records from the
-  previous prompt session in place. Replaying one made `bulkDelete`
-  derive a negative length and pass it to `memmove` as a `size_t`.
-  Reachable by searching, exiting, searching again and pressing `C-_`.
-  `bulkDelete` now also clamps its range, so no record can make it
-  compute a negative length.
-- Removed `clearBuffer`, which nothing called. Its header comment
-  described it as leaving the buffer rowless, which its own
-  implementation contradicted.
+## [0.9.2]
+- query-replace better error handling
+- Fixed #103: After failing search, cursor position wrong
+- Fixed heap corruption when undoing inside a prompt. 
 - Fixed trailing blank lines being undeletable from the end of a buffer.
-  The final-newline refusal fired whenever the target was the last
-  newline, but it is only a no-op when the row surviving the join is
-  non-empty; otherwise backspace, `C-d` and `C-k` at end of buffer all
-  silently did nothing.
 - A lone CR is no longer reported as a DOS line ending. A classic-Mac
   CR-only file keeps its CRs on save, so announcing a conversion to Unix
   endings promised something that does not happen.
