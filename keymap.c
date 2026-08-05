@@ -1050,7 +1050,7 @@ static int dispatchMacro(int c, int uarg) {
 		return 1;
 	case CMD_MACRO_END:
 		if (E.playback) {
-			setStatusMessage("Not available during macro");
+			setStatusMessage("Macro executed");
 			return 1;
 		}
 		if (E.recording) {

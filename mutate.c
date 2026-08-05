@@ -44,28 +44,19 @@ uint8_t *collectRegionText(struct buffer *buf, int startx, int starty, int endx,
  * establishes it by appending the row a file without a trailing
  * newline lacks, and the two functions below maintain it.  save()
  * therefore has no policy of its own: it serialises a buffer that is
- * already correct.
- *
- * Scoped to file buffers by excluding the minibuffer, which is the
- * only non-file buffer that reaches this layer -- popups are built
- * with the row primitives and are read-only, so rejectIfReadOnly turns
- * them away first.  A minibuffer is not a text file, which is the same
- * reason it is never written to disk. */
+ * already correct. */
 static int wantsFinalNewline(struct buffer *buf) {
 	return buf != E.minibuf;
 }
 
 /* Would this mutation delete the final newline and nothing else?
  *
- * Such a request nets out to nothing: the deletion would be undone
- * immediately by the repair below, leaving the buffer byte-identical
- * but two undo records heavier, marked dirty, and with the redo stack
- * cleared.  Refusing it up front is cheaper than repairing it, and it
- * covers every path that can ask -- backspace at the start of the last
- * row, C-d or C-k at the end of the row above it, delete-word either
- * way, and a kill-region whose selection is exactly that newline.
- * Enumerating those at the edit layer would be six conditions across
- * two files with nothing to stop a seventh appearing. */
+ * Such a request is a pure no-op under the final-newline invariant.
+ * The deletion would be immediately restored by the repair below,
+ * leaving the buffer byte-identical while adding two undo records,
+ * marking the buffer dirty, and clearing the redo stack.  Refusing
+ * the request up front preserves both the invariant and the integrity
+ * of the undo history. */
 static int deletesOnlyFinalNewline(struct buffer *buf, int startx, int starty,
 				   int endx, int endy, int old_len,
 				   int repl_len) {
@@ -188,11 +179,7 @@ static void mutateReplaceEx(struct buffer *buf, int startx, int starty,
 	 * empty: in the latter case this ins is the "first record" and
 	 * takes the chain. */
 	if (repl_len > 0) {
-		/* The record names the insertion's own position.  Since
-		 * #105 every position is addressable, so there is no
-		 * virtual EOF to translate away from and the logical
-		 * coordinates are the ones bulkDelete can replay. */
-		struct dbuf adata = DBUF_INIT;
+			struct dbuf adata = DBUF_INIT;
 		dbuf_append(&adata, repl, repl_len);
 
 		struct undo *ins = newUndo();
