@@ -1,3 +1,6 @@
+## [Unreleased]
+- Higlighting of matches in `query-replace` #106.
+
 ## [0.9.3]
 - query-replace better error handling
 - Fixed #103: After failing search, cursor position wrong

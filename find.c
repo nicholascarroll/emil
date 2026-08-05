@@ -453,6 +453,9 @@ static int findNextMatch(uint8_t *needle, int skip_current) {
 	int oy = E.buf->cy;
 	int needle_len = strlen((const char *)needle);
 
+	E.buf->match = 0;
+	E.buf->match_len = 0;
+
 	while (E.buf->cy < E.buf->numrows) {
 		erow *row = &E.buf->row[E.buf->cy];
 		uint8_t *match = (uint8_t *)strstr(
@@ -465,8 +468,16 @@ static int findNextMatch(uint8_t *needle, int skip_current) {
 				continue;
 			}
 			E.buf->cx = mx;
+			while (E.buf->cx > 0 &&
+			       utf8_isCont(row->chars[E.buf->cx]))
+				E.buf->cx--;
+			E.buf->match_len = needle_len +
+					   (int)(match - row->chars) -
+					   E.buf->cx;
 			E.buf->marky = E.buf->cy;
 			E.buf->markx = mx + needle_len;
+			scroll();
+			E.buf->match = 1;
 			return 1;
 		}
 		E.buf->cx = 0;

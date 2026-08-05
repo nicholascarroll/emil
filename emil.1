@@ -458,13 +458,7 @@ Files are loaded in their entirety into memory.
 .Pp
 .Nm
 adheres to the Unix convention where lines are delimited by a single linefeed (LF) character and files terminate with a linefeed.
-A file opened without a terminating linefeed gains one when it is loaded, not when it is saved; the buffer is not marked modified by this, so a file that is never edited is never rewritten.
-Consequently the final linefeed cannot be deleted:
-.Ic C-d
-or
-.Ic C-k
-at the end of the last line of text does nothing, and a deletion running past the end of the buffer restores the linefeed as part of the same undo step.
-An empty file remains empty, having no lines to terminate.
+A file opened without a terminating linefeed gains one when it is loaded.
 Validation at file load and inserting text in the buffer disallow  null bytes (0x00) or malformed UTF-8 sequences.
 .Ss File Persistence
 When saving,
