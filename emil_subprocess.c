@@ -24,6 +24,7 @@
 #include <errno.h>
 #include <spawn.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <sys/wait.h>
 #include <signal.h>
@@ -104,22 +105,23 @@ int subprocess_create(const char *const command_line[], int options,
 	int rc;
 	if (options & subprocess_option_search_user_path) {
 		rc = posix_spawnp(&child, command_line[0], &actions, attrp,
-				  (char *const *)command_line, env);
+				  (char *const *)(uintptr_t)command_line, env);
 	} else {
 		rc = posix_spawn(&child, command_line[0], &actions, attrp,
-				 (char *const *)command_line, env);
+				 (char *const *)(uintptr_t)command_line, env);
 	}
 
 	/* Retry ungrouped if the attribute itself made the spawn fail. */
 	if (rc != 0 && attrp != NULL) {
 		grouped = 0;
 		if (options & subprocess_option_search_user_path) {
-			rc = posix_spawnp(&child, command_line[0], &actions,
-					  NULL, (char *const *)command_line,
-					  env);
+			rc = posix_spawnp(
+				&child, command_line[0], &actions, NULL,
+				(char *const *)(uintptr_t)command_line, env);
 		} else {
 			rc = posix_spawn(&child, command_line[0], &actions,
-					 NULL, (char *const *)command_line,
+					 NULL,
+					 (char *const *)(uintptr_t)command_line,
 					 env);
 		}
 	}

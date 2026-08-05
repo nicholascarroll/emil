@@ -92,7 +92,8 @@ static uint8_t *regexSearch(uint8_t *text, uint8_t *pattern, int *match_len) {
 
 /* Replace all occurrences of 'rep' in 'text' with 'with'.
  * Returns a newly allocated string.  Caller frees. */
-static uint8_t *strReplace(uint8_t *text, uint8_t *rep, uint8_t *with) {
+static uint8_t *strReplace(uint8_t *text, const uint8_t *rep,
+			   const uint8_t *with) {
 	uint8_t *ins;
 	uint8_t *tmp;
 	size_t len_rep;
@@ -106,7 +107,7 @@ static uint8_t *strReplace(uint8_t *text, uint8_t *rep, uint8_t *with) {
 	if (len_rep == 0)
 		return NULL;
 	if (!with)
-		with = (uint8_t *)"";
+		with = (const uint8_t *)"";
 	len_with = strlen((const char *)with);
 
 	/* Count occurrences */

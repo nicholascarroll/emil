@@ -5,6 +5,7 @@
 #include "test_harness.h"
 #include "fileio.h"
 #include "util.h"
+#include "buffer.h"
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -140,7 +141,7 @@ void test_open_temp_file(void) {
 	char tmpname[] = "/tmp/emil_test_XXXXXX";
 	int fd = mkstemp(tmpname);
 	TEST_ASSERT(fd >= 0);
-	write(fd, "Line one\nLine two\nLine three\n", 29);
+	TEST_ASSERT(write(fd, "Line one\nLine two\nLine three\n", 29) == (ssize_t)29);
 	close(fd);
 
 	struct buffer *buf = make_test_buffer(NULL);
@@ -200,7 +201,7 @@ void test_utf8_valid_file(void) {
 	char tmpname[] = "/tmp/emil_test_XXXXXX";
 	int fd = mkstemp(tmpname);
 	TEST_ASSERT(fd >= 0);
-	write(fd, "Hello \xC2\xA2 \xE2\x82\xAC\n", 13);
+	TEST_ASSERT(write(fd, "Hello \xC2\xA2 \xE2\x82\xAC\n", 13) == (ssize_t)13);
 	close(fd);
 
 	struct buffer *buf = make_test_buffer(NULL);
@@ -215,7 +216,7 @@ void test_utf8_invalid_continuation(void) {
 	char tmpname[] = "/tmp/emil_test_XXXXXX";
 	int fd = mkstemp(tmpname);
 	TEST_ASSERT(fd >= 0);
-	write(fd, "Bad \xC2\x41\n", 7);
+	TEST_ASSERT(write(fd, "Bad \xC2\x41\n", 7) == (ssize_t)7);
 	close(fd);
 
 	struct buffer *buf = make_test_buffer(NULL);
@@ -229,7 +230,7 @@ void test_utf8_overlong_rejected(void) {
 	char tmpname[] = "/tmp/emil_test_XXXXXX";
 	int fd = mkstemp(tmpname);
 	TEST_ASSERT(fd >= 0);
-	write(fd, "\xC0\xAF\n", 3);
+	TEST_ASSERT(write(fd, "\xC0\xAF\n", 3) == (ssize_t)3);
 	close(fd);
 
 	struct buffer *buf = make_test_buffer(NULL);
@@ -245,7 +246,7 @@ void test_utf8_null_byte_rejected(void) {
 	TEST_ASSERT(fd >= 0);
 	const char data[] = "AB\x00"
 			    "CD\n";
-	write(fd, data, 6);
+	TEST_ASSERT(write(fd, data, 6) == (ssize_t)6);
 	close(fd);
 
 	struct buffer *buf = make_test_buffer(NULL);
@@ -259,7 +260,7 @@ void test_utf8_truncated_multibyte(void) {
 	char tmpname[] = "/tmp/emil_test_XXXXXX";
 	int fd = mkstemp(tmpname);
 	TEST_ASSERT(fd >= 0);
-	write(fd, "A\xE2\x82\n", 4);
+	TEST_ASSERT(write(fd, "A\xE2\x82\n", 4) == (ssize_t)4);
 	close(fd);
 
 	struct buffer *buf = make_test_buffer(NULL);
@@ -307,7 +308,7 @@ void test_save_invalid_utf8_refused(void) {
 	char tmpname[] = "/tmp/emil_test_XXXXXX";
 	int fd = mkstemp(tmpname);
 	TEST_ASSERT(fd >= 0);
-	write(fd, "old", 3);
+	TEST_ASSERT(write(fd, "old", 3) == (ssize_t)3);
 	close(fd);
 
 	const char *lines[] = { "abc" };
@@ -340,7 +341,8 @@ void test_save_invalid_utf8_refused(void) {
 
 void setUp(void) {
 	initTestEditor();
-}void tearDown(void) {
+}
+void tearDown(void) {
 	cleanupTestEditor();
 }
 
@@ -426,6 +428,198 @@ void test_load_empty_file_serialises_to_nothing(void) {
 	unlink(tmpname);
 }
 
+/* --- Load-time normalisation is reported, not silent ---------------
+ *
+ * Emil edits UTF-8 text files, and a text file is a sequence of lines
+ * each terminated by '\n'.  Input departing from that -- a missing
+ * final terminator, or DOS line endings -- is normalised on the way
+ * in.  The buffer stays clean, so an unedited file is never rewritten;
+ * the status line says what will happen if the user does save. */
+
+static int openTempWith(struct buffer *buf, const char *content) {
+	char tmpname[] = "/tmp/emil_norm_XXXXXX";
+	int fd = mkstemp(tmpname);
+	TEST_ASSERT(fd >= 0);
+	if (content[0] != '\0')
+		TEST_ASSERT(write(fd, content, strlen(content)) > 0);
+	close(fd);
+	int rc = editorOpen(buf, tmpname);
+	unlink(tmpname);
+	return rc;
+}
+
+void test_open_reports_missing_final_newline(void) {
+	struct buffer *buf = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, openTempWith(buf, "alpha\nbeta"));
+
+	TEST_ASSERT_NOT_NULL(strstr(E.statusmsg, "no final newline"));
+	TEST_ASSERT_NULL(strstr(E.statusmsg, "DOS"));
+
+	/* Normalised in the buffer, but not yet on disk: an untouched
+	 * file must not be rewritten, so the buffer stays clean. */
+	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
+	TEST_ASSERT_EQUAL_INT(0, buf->row[buf->numrows - 1].size);
+	TEST_ASSERT_EQUAL_INT(0, buf->dirty);
+}
+
+void test_open_reports_dos_line_endings(void) {
+	struct buffer *buf = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, openTempWith(buf, "alpha\r\nbeta\r\n"));
+
+	TEST_ASSERT_NOT_NULL(strstr(E.statusmsg, "DOS line endings"));
+	TEST_ASSERT_NULL(strstr(E.statusmsg, "no final newline"));
+
+	TEST_ASSERT_EQUAL_STRING("alpha", (char *)buf->row[0].chars);
+	TEST_ASSERT_EQUAL_STRING("beta", (char *)buf->row[1].chars);
+	TEST_ASSERT_EQUAL_INT(0, buf->dirty);
+}
+
+/* Both at once is the ordinary shape of a file off a Windows machine,
+ * and the status line shows one message, so they combine. */
+void test_open_reports_both_normalisations(void) {
+	struct buffer *buf = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, openTempWith(buf, "alpha\r\nbeta"));
+
+	TEST_ASSERT_NOT_NULL(strstr(E.statusmsg, "DOS line endings"));
+	TEST_ASSERT_NOT_NULL(strstr(E.statusmsg, "no final newline"));
+	TEST_ASSERT_EQUAL_INT(0, buf->dirty);
+}
+
+void test_open_well_formed_file_reports_nothing_extra(void) {
+	struct buffer *buf = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, openTempWith(buf, "alpha\nbeta\n"));
+
+	TEST_ASSERT_NULL(strstr(E.statusmsg, "DOS"));
+	TEST_ASSERT_NULL(strstr(E.statusmsg, "no final newline"));
+	TEST_ASSERT_NOT_NULL(strstr(E.statusmsg, "2 lines"));
+}
+
+/* An empty file has no lines, so nothing to terminate and nothing to
+ * report. */
+void test_open_empty_file_reports_nothing_extra(void) {
+	struct buffer *buf = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, openTempWith(buf, ""));
+
+	TEST_ASSERT_NULL(strstr(E.statusmsg, "no final newline"));
+	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
+}
+
+/* Piped input without a final newline used to leave the last row
+ * non-empty, breaking the invariant every mutation path relies on
+ * (see buffer.h).  editorOpen terminated unconditionally; this path
+ * did not. */
+void test_stdin_without_final_newline_keeps_invariant(void) {
+	struct buffer *buf = loadStdinBuffer("alpha\nbeta", 10);
+	TEST_ASSERT_NOT_NULL(buf);
+	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
+	TEST_ASSERT_EQUAL_STRING("beta", (char *)buf->row[1].chars);
+	TEST_ASSERT_EQUAL_INT(0, buf->row[buf->numrows - 1].size);
+	destroyBuffer(buf);
+}
+
+void test_stdin_with_final_newline_unchanged(void) {
+	struct buffer *buf = loadStdinBuffer("alpha\nbeta\n", 11);
+	TEST_ASSERT_NOT_NULL(buf);
+	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
+	TEST_ASSERT_EQUAL_INT(0, buf->row[buf->numrows - 1].size);
+	destroyBuffer(buf);
+}
+
+/* A CR-only file has no '\n', so it arrives as one row with the CRs
+ * kept, and save writes them back.  Reporting DOS would promise a
+ * conversion that never happens; the missing newline is still real. */
+void test_open_cr_only_file_is_not_reported_as_dos(void) {
+	struct buffer *buf = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, openTempWith(buf, "alpha\rbeta\r"));
+
+	TEST_ASSERT_NULL(strstr(E.statusmsg, "DOS"));
+	TEST_ASSERT_NOT_NULL(strstr(E.statusmsg, "no final newline"));
+
+	/* One row of text, CR retained, plus the terminator row. */
+	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
+	TEST_ASSERT_EQUAL_STRING("alpha\rbeta", (char *)buf->row[0].chars);
+	TEST_ASSERT_EQUAL_INT(0, buf->dirty);
+}
+
+
+/* Write a scratch file and return a malloc'd path. */
+static char *writeTempFile(const char *name, const char *contents) {
+	char *path = xmalloc(256);
+	snprintf(path, 256, "/tmp/emil_regress_%s_%d", name, (int)getpid());
+	FILE *fp = fopen(path, "w");
+	if (fp) {
+		fputs(contents, fp);
+		fclose(fp);
+	}
+	return path;
+}
+
+/* ---- B2: revert() on a buffer with no filename must not crash.
+ *
+ * revert() passed buf->filename straight to editorOpen, whose first
+ * act is collapseHome(filename) -> path[0].  Starting emil with no
+ * arguments leaves the initial buffer with filename == NULL, so
+ * M-x revert-buffer segfaulted. */
+
+void test_revert_null_filename_survives(void) {
+	struct buffer *buf = make_test_buffer("scratch text");
+	free(buf->filename);
+	buf->filename = NULL;
+
+	revert(); /* must not dereference NULL */
+
+	TEST_ASSERT_NOT_NULL(E.buf);
+	TEST_ASSERT_EQUAL_INT(2, E.buf->numrows);
+	TEST_ASSERT_EQUAL_STRING("scratch text", row_str(E.buf, 0));
+
+}
+
+/* ---- B4: revert() must refuse when the file no longer exists.
+ *
+ * editorOpen returns 0 both when it loaded a file and when the file is
+ * missing (ENOENT -> posts "(New file)").  revert() only tested < 0,
+ * so reverting a buffer whose file was never created silently replaced
+ * it with an empty, clean buffer.  revert() ends in destroyBuffer(),
+ * which frees the undo stack, so C-_ could not cross it and the work
+ * was unrecoverable -- and because the replacement was clean, C-x C-c
+ * exited without warning. */
+
+void test_revert_missing_file_refuses(void) {
+	struct buffer *buf = make_test_buffer("typed but never saved");
+	free(buf->filename);
+	buf->filename = xstrdup("/tmp/emil_regress_definitely_absent");
+	unlink("/tmp/emil_regress_definitely_absent");
+	buf->dirty = 1;
+
+	revert();
+
+	/* Buffer must be untouched: same object, same contents. */
+	TEST_ASSERT(E.buf == buf);
+	TEST_ASSERT_EQUAL_INT(2, E.buf->numrows);
+	TEST_ASSERT_EQUAL_STRING("typed but never saved", row_str(E.buf, 0));
+	TEST_ASSERT(E.buf->dirty != 0);
+
+}
+
+/* The case that must keep working: the file exists, the buffer has
+ * unsaved edits, revert discards them and reloads from disk. */
+void test_revert_existing_file_still_reloads(void) {
+	char *path = writeTempFile("revert", "on disk line\n");
+
+	struct buffer *buf = make_test_buffer("UNSAVED EDIT");
+	free(buf->filename);
+	buf->filename = xstrdup(path);
+	buf->dirty = 1;
+
+	revert();
+
+	TEST_ASSERT_EQUAL_INT(2, E.buf->numrows);
+	TEST_ASSERT_EQUAL_STRING("on disk line", row_str(E.buf, 0));
+
+	unlink(path);
+	free(path);
+}
+
 int main(void) {
 	TEST_BEGIN();
 
@@ -456,5 +650,18 @@ int main(void) {
 	RUN_TEST(test_load_adding_final_newline_leaves_buffer_clean);
 	RUN_TEST(test_load_empty_file_serialises_to_nothing);
 
+	RUN_TEST(test_open_reports_missing_final_newline);
+	RUN_TEST(test_open_reports_dos_line_endings);
+	RUN_TEST(test_open_reports_both_normalisations);
+	RUN_TEST(test_open_cr_only_file_is_not_reported_as_dos);
+	RUN_TEST(test_open_well_formed_file_reports_nothing_extra);
+	RUN_TEST(test_open_empty_file_reports_nothing_extra);
+	RUN_TEST(test_stdin_without_final_newline_keeps_invariant);
+	RUN_TEST(test_stdin_with_final_newline_unchanged);
+
+
+	RUN_TEST(test_revert_null_filename_survives);
+	RUN_TEST(test_revert_missing_file_refuses);
+	RUN_TEST(test_revert_existing_file_still_reloads);
 	return TEST_END();
 }

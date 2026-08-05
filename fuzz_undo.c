@@ -37,26 +37,7 @@
 
 /* ---- plumbing ---------------------------------------------------- */
 
-static int saved_stdout = -1;
-
-static void muteStdout(void) {
-	fflush(stdout);
-	saved_stdout = dup(STDOUT_FILENO);
-	int devnull = open("/dev/null", O_WRONLY);
-	if (devnull >= 0) {
-		dup2(devnull, STDOUT_FILENO);
-		close(devnull);
-	}
-}
-
-static void unmuteStdout(void) {
-	fflush(stdout);
-	if (saved_stdout >= 0) {
-		dup2(saved_stdout, STDOUT_FILENO);
-		close(saved_stdout);
-		saved_stdout = -1;
-	}
-}
+/* muteStdout/unmuteStdout come from test_harness.h. */
 
 /* xorshift, so runs are reproducible from a seed regardless of libc */
 static uint32_t rng_state = 1;

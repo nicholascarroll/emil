@@ -37,7 +37,7 @@ void test_subprocess_echo(void) {
 	FILE *out = subprocess_stdout(&proc);
 	TEST_ASSERT_NOT_NULL(out);
 	char buf[64] = { 0 };
-	fgets(buf, sizeof(buf), out);
+	TEST_ASSERT_NOT_NULL(fgets(buf, sizeof(buf), out));
 	TEST_ASSERT_EQUAL_STRING("hello\n", buf);
 
 	subprocess_destroy(&proc);
@@ -76,7 +76,7 @@ void test_subprocess_stdin_stdout(void) {
 
 	FILE *out = subprocess_stdout(&proc);
 	char buf[64] = { 0 };
-	fgets(buf, sizeof(buf), out);
+	TEST_ASSERT_NOT_NULL(fgets(buf, sizeof(buf), out));
 	TEST_ASSERT_EQUAL_STRING("hello world\n", buf);
 
 	subprocess_destroy(&proc);
@@ -99,11 +99,11 @@ void test_subprocess_multiline_stdin(void) {
 
 	FILE *out = subprocess_stdout(&proc);
 	char buf[64] = { 0 };
-	fgets(buf, sizeof(buf), out);
+	TEST_ASSERT_NOT_NULL(fgets(buf, sizeof(buf), out));
 	TEST_ASSERT_EQUAL_STRING("line1\n", buf);
-	fgets(buf, sizeof(buf), out);
+	TEST_ASSERT_NOT_NULL(fgets(buf, sizeof(buf), out));
 	TEST_ASSERT_EQUAL_STRING("line2\n", buf);
-	fgets(buf, sizeof(buf), out);
+	TEST_ASSERT_NOT_NULL(fgets(buf, sizeof(buf), out));
 	TEST_ASSERT_EQUAL_STRING("line3\n", buf);
 
 	subprocess_destroy(&proc);
@@ -124,7 +124,7 @@ void test_subprocess_shell_pipeline(void) {
 
 	FILE *out = subprocess_stdout(&proc);
 	char buf[64] = { 0 };
-	fgets(buf, sizeof(buf), out);
+	TEST_ASSERT_NOT_NULL(fgets(buf, sizeof(buf), out));
 	TEST_ASSERT_EQUAL_STRING("Hello\n", buf);
 
 	subprocess_destroy(&proc);
@@ -147,7 +147,7 @@ void test_subprocess_shell_with_stdin(void) {
 
 	FILE *out = subprocess_stdout(&proc);
 	char buf[64] = { 0 };
-	fgets(buf, sizeof(buf), out);
+	TEST_ASSERT_NOT_NULL(fgets(buf, sizeof(buf), out));
 	TEST_ASSERT_EQUAL_STRING("HELLO\n", buf);
 
 	subprocess_destroy(&proc);
@@ -170,7 +170,7 @@ void test_subprocess_path_search(void) {
 
 	FILE *out = subprocess_stdout(&proc);
 	char buf[64] = { 0 };
-	fgets(buf, sizeof(buf), out);
+	TEST_ASSERT_NOT_NULL(fgets(buf, sizeof(buf), out));
 	TEST_ASSERT_EQUAL_STRING("found\n", buf);
 
 	subprocess_destroy(&proc);
@@ -192,7 +192,7 @@ void test_subprocess_nonzero_exit_with_output(void) {
 
 	FILE *out = subprocess_stdout(&proc);
 	char buf[64] = { 0 };
-	fgets(buf, sizeof(buf), out);
+	TEST_ASSERT_NOT_NULL(fgets(buf, sizeof(buf), out));
 	TEST_ASSERT_EQUAL_STRING("partial\n", buf);
 
 	subprocess_destroy(&proc);
@@ -236,7 +236,7 @@ void test_subprocess_utf8_roundtrip(void) {
 
 	FILE *out = subprocess_stdout(&proc);
 	char buf[128] = { 0 };
-	fgets(buf, sizeof(buf), out);
+	TEST_ASSERT_NOT_NULL(fgets(buf, sizeof(buf), out));
 	TEST_ASSERT_EQUAL_STRING(utf8, buf);
 
 	subprocess_destroy(&proc);

@@ -2,6 +2,7 @@
 /* test_relpath.c: Unit tests for relativePath(). */
 
 #include "test.h"
+#include <limits.h>
 #include "test_harness.h"
 #include "fileio.h"
 #include <stdlib.h>
@@ -245,6 +246,49 @@ void tearDown(void) {
 	cleanupTestEditor();
 }
 
+
+/* ================= B9 — absolutePath yields "//foo" at cwd "/" =====
+ *
+ * cleanPath keeps the empty leading segment produced by
+ * "/" + "/" + name, so at cwd "/" the same file resolves to two
+ * different strings depending on how it was named, and
+ * findBufferByName's comparison stops deduplicating. */
+
+void test_b9_cleanpath_collapses_double_leading_slash(void) {
+	char path[64];
+	snprintf(path, sizeof(path), "//foo");
+
+	cleanPath(path);
+
+	TEST_ASSERT_EQUAL_STRING("/foo", path);
+
+}
+
+void test_b9_absolutepath_at_root_matches_absolute_form(void) {
+	char oldcwd[PATH_MAX];
+	if (getcwd(oldcwd, sizeof(oldcwd)) == NULL) {
+		TEST_ASSERT(0);
+		cleanupTestEditor();
+		return;
+	}
+	if (chdir("/") != 0) {
+		TEST_ASSERT(0);
+		cleanupTestEditor();
+		return;
+	}
+
+	char *relative = absolutePath("rootfile.txt");
+	char *absolute = absolutePath("/rootfile.txt");
+
+	TEST_ASSERT_EQUAL_STRING("/rootfile.txt", relative);
+	TEST_ASSERT_EQUAL_STRING(absolute, relative);
+
+	free(relative);
+	free(absolute);
+	if (chdir(oldcwd) != 0)
+		TEST_ASSERT(0);
+}
+
 int main(void) {
 	TEST_BEGIN();
 
@@ -288,5 +332,8 @@ int main(void) {
 	RUN_TEST(test_rebase_dotdot_cd_up_two);
 	RUN_TEST(test_rebase_double_cd_with_dotdot);
 
+
+	RUN_TEST(test_b9_cleanpath_collapses_double_leading_slash);
+	RUN_TEST(test_b9_absolutepath_at_root_matches_absolute_form);
 	return TEST_END();
 }

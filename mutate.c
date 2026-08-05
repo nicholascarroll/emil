@@ -75,6 +75,12 @@ static int deletesOnlyFinalNewline(struct buffer *buf, int startx, int starty,
 		return 0;
 	if (buf->row[buf->numrows - 1].size != 0)
 		return 0;
+	/* Only a no-op if the repair would fire, which needs the row
+	 * surviving the join to be non-empty.  An empty one leaves the
+	 * invariant holding: this is a real edit, deleting a blank
+	 * line. */
+	if (buf->row[buf->numrows - 2].size == 0)
+		return 0;
 	return starty == buf->numrows - 2 &&
 	       startx == buf->row[buf->numrows - 2].size &&
 	       endy == buf->numrows - 1 && endx == 0;

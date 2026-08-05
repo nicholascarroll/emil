@@ -342,15 +342,6 @@ struct buffer *findOrCreateSpecialBuffer(const char *name) {
 	return buf;
 }
 
-/* Empty the buffer, leaving it in the canonical empty state: one row,
- * itself empty.  The invariant holds on return, so callers that only
- * want to blank a buffer need do nothing further. */
-void clearBuffer(struct buffer *buf) {
-	while (buf->numrows > 0)
-		delRow(buf, 0);
-	appendRowRaw(buf, (const uint8_t *)"", 0);
-}
-
 /* Restore the invariant after bufferResetRows.  The counterpart to it:
  * reset, append whatever rows the content produces, then call this so
  * that content which produced no rows at all still leaves a valid

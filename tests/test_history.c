@@ -5,6 +5,7 @@
  * eviction at HISTORY_MAX_ENTRIES. */
 
 #include "test.h"
+#include "prompt.h"
 #include "test_harness.h"
 #include "history.h"
 #include <string.h>
@@ -125,8 +126,10 @@ void test_history_get_empty(void) {
 void test_history_eviction(void) {
 	struct history h;
 	initHistory(&h);
-	/* Fill past the limit */
-	char buf[16];
+	/* Fill past the limit.  Sized for "entry_" plus the widest int
+	 * the compiler can see the loop counter taking, so no truncation
+	 * is possible. */
+	char buf[32];
 	for (int i = 0; i < HISTORY_MAX_ENTRIES + 5; i++) {
 		snprintf(buf, sizeof(buf), "entry_%d", i);
 		addHistory(&h, buf);
@@ -186,6 +189,63 @@ void test_history_free_resets(void) {
 	freeHistory(&h);
 }
 
+
+/* ================= B8 — Down in a prompt destroys typed text =======
+ *
+ * With history_pos == -1 (the user has not browsed history at all),
+ * Down falls into the else branch, leaves history_pos at -1, and hits
+ * replaceMinibufferText(E.minibuf, "").  The typed text is gone.
+ *
+ * Note the history must be non-empty for the bug to fire: the whole
+ * block is guarded by `hist->count > 0`. */
+
+void test_b8_down_without_browsing_keeps_typed_text(void) {
+	makeMinibuffer();
+	struct buffer *file = make_test_buffer("contents");
+	addHistory(&E.file_history, "/tmp/previously-visited");
+
+	int keys[] = { '/', 't', 'm', 'p', '/', 'a', 'b', 'c',
+		       KEY_ARROW_DOWN, '\r' };
+	scriptKeys(keys, 10);
+
+	muteStdout();
+	uint8_t *r = editorPrompt(file, "Find File: ", PROMPT_FILES, NULL);
+	unmuteStdout();
+	clearKeys();
+
+	TEST_ASSERT_NOT_NULL(r);
+	if (r)
+		TEST_ASSERT_EQUAL_STRING("/tmp/abc", (const char *)r);
+
+	free(r);
+	freeMinibuffer();
+}
+
+/* The Emacs behaviour of the same key pair: Up parks the in-progress
+ * text, Down brings it back.  This is the "full fix" option (decision
+ * 2 in the audit); the minimal fix only makes the test above pass. */
+void test_b8_up_then_down_restores_typed_text(void) {
+	makeMinibuffer();
+	struct buffer *file = make_test_buffer("contents");
+	addHistory(&E.file_history, "/tmp/previously-visited");
+
+	int keys[] = { '/', 't', 'm', 'p', '/', 'a', 'b', 'c',
+		       KEY_ARROW_UP, KEY_ARROW_DOWN, '\r' };
+	scriptKeys(keys, 11);
+
+	muteStdout();
+	uint8_t *r = editorPrompt(file, "Find File: ", PROMPT_FILES, NULL);
+	unmuteStdout();
+	clearKeys();
+
+	TEST_ASSERT_NOT_NULL(r);
+	if (r)
+		TEST_ASSERT_EQUAL_STRING("/tmp/abc", (const char *)r);
+
+	free(r);
+	freeMinibuffer();
+}
+
 int main(void) {
 	TEST_BEGIN();
 
@@ -204,5 +264,8 @@ int main(void) {
 	RUN_TEST(test_history_rect_duplicate_suppression);
 	RUN_TEST(test_history_free_resets);
 
+
+	RUN_TEST(test_b8_down_without_browsing_keeps_typed_text);
+	RUN_TEST(test_b8_up_then_down_restores_typed_text);
 	return TEST_END();
 }

@@ -19,13 +19,17 @@
 #include "keymap.h"
 #include "history.h"
 #include "undo.h"
+#include "util.h"
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <fcntl.h>
 
 /* E is defined in stubs.c (which replaces main.o) */
 extern struct config E;
 
-static void cleanupTestEditor(void) {
+static inline void cleanupTestEditor(void) {
 	/* Free the buffer list.  Tests are expected to destroyBuffer()
      * their own buffers, but if one forgets (or crashes mid-test),
      * clean up here so the sanitizer doesn't report leaks. */
@@ -92,7 +96,7 @@ static void cleanupTestEditor(void) {
 	E.prefix_display[0] = '\0';
 }
 
-static void initTestEditor(void) {
+static inline void initTestEditor(void) {
 	/* Always allocate fresh windows */
 	E.windows = malloc(sizeof(struct window *));
 	E.windows[0] = calloc(1, sizeof(struct window));
@@ -117,7 +121,7 @@ static void initTestEditor(void) {
 }
 
 /* Create a buffer with one line of content and wire it into E. */
-static struct buffer *make_test_buffer(const char *line) {
+static inline struct buffer *make_test_buffer(const char *line) {
 	struct buffer *buf = newBuffer();
 	if (line && *line)
 		insertRow(buf, 0, (const uint8_t *)line, strlen(line));
@@ -134,7 +138,7 @@ static struct buffer *make_test_buffer(const char *line) {
 }
 
 /* Create a buffer with multiple lines and wire it into E. */
-static struct buffer *make_test_buffer_lines(const char **lines, int n) {
+static inline struct buffer *make_test_buffer_lines(const char **lines, int n) {
 	struct buffer *buf = newBuffer();
 	for (int i = 0; i < n; i++)
 		insertRow(buf, i, (const uint8_t *)lines[i], strlen(lines[i]));
@@ -150,10 +154,72 @@ static struct buffer *make_test_buffer_lines(const char **lines, int n) {
 }
 
 /* Get row content as string (safe for assertion). */
-static const char *row_str(struct buffer *buf, int row) {
+static inline const char *row_str(struct buffer *buf, int row) {
 	if (row >= buf->numrows)
 		return "";
 	return (const char *)buf->row[row].chars;
+}
+
+/* ---- Scripted keys, muted output, minibuffer ----
+ * Shared by the suites that drive a prompt or a command calling
+ * readKey(). */
+
+/* Keys fed to readKey() by the stub in stubs.c. */
+extern int test_key_script[64];
+extern int test_key_count;
+extern int test_key_pos;
+
+static inline void scriptKeys(const int *keys, int n) {
+	for (int i = 0; i < n; i++)
+		test_key_script[i] = keys[i];
+	test_key_count = n;
+	test_key_pos = 0;
+}
+
+static inline void clearKeys(void) {
+	test_key_count = 0;
+	test_key_pos = 0;
+}
+
+/* The prompt loop and the search callback both call refreshScreen(),
+ * which writes escape sequences straight to fd 1.  That would corrupt
+ * the test runner's view of stdout, so redirect it for the duration of
+ * the call under test. */
+static int saved_stdout = -1;
+
+static inline void muteStdout(void) {
+	fflush(stdout);
+	saved_stdout = dup(STDOUT_FILENO);
+	int devnull = open("/dev/null", O_WRONLY);
+	if (devnull >= 0) {
+		dup2(devnull, STDOUT_FILENO);
+		close(devnull);
+	}
+}
+
+static inline void unmuteStdout(void) {
+	fflush(stdout);
+	if (saved_stdout >= 0) {
+		dup2(saved_stdout, STDOUT_FILENO);
+		close(saved_stdout);
+		saved_stdout = -1;
+	}
+}
+
+/* editorPrompt needs a minibuffer; main.c builds one at startup and
+ * initTestEditor does not. */
+static inline void makeMinibuffer(void) {
+	E.minibuf = newBuffer();
+	E.minibuf->word_wrap = 0;
+	E.minibuf->filename = xstrdup("*minibuffer*");
+	E.minibuf->special_buffer = 1;
+}
+
+static inline void freeMinibuffer(void) {
+	if (E.minibuf) {
+		destroyBuffer(E.minibuf);
+		E.minibuf = NULL;
+	}
 }
 
 #endif /* TEST_HARNESS_H */

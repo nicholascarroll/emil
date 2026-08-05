@@ -757,6 +757,36 @@ void tearDown(void) {
 	cleanupTestEditor();
 }
 
+
+/* ================= B7 — plain Shift-Tab does nothing ==============
+ *
+ * unindent(int rept) loops `for (i = 0; i < rept; i++)`, and
+ * CMD_UNINDENT passes E.uarg raw, which is 0 with no prefix argument.
+ * Every other command routes through UARG_COUNT(), which maps 0 -> 1. */
+
+void test_b7_unindent_with_no_prefix_removes_one_tab(void) {
+	struct buffer *buf = make_test_buffer("\t\t\tcode");
+	buf->cy = 0;
+	buf->cx = 3;
+
+	unindent(0); /* what CMD_UNINDENT passes for a bare Shift-Tab */
+
+	TEST_ASSERT_EQUAL_STRING("\t\tcode", row_str(E.buf, 0));
+
+}
+
+/* Explicit counts already work; pinned so a fix doesn't break them. */
+void test_b7_unindent_with_explicit_count_unchanged(void) {
+	struct buffer *buf = make_test_buffer("\t\t\tcode");
+	buf->cy = 0;
+	buf->cx = 3;
+
+	unindent(2);
+
+	TEST_ASSERT_EQUAL_STRING("\tcode", row_str(E.buf, 0));
+
+}
+
 int main(void) {
 	TEST_BEGIN();
 
@@ -840,5 +870,8 @@ int main(void) {
 	RUN_TEST(test_upcase_word_reverse_at_buffer_start);
 	RUN_TEST(test_transpose_reverse_readonly);
 
+
+	RUN_TEST(test_b7_unindent_with_no_prefix_removes_one_tab);
+	RUN_TEST(test_b7_unindent_with_explicit_count_unchanged);
 	return TEST_END();
 }

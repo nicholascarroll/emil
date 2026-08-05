@@ -109,14 +109,19 @@ HAL_WARNINGS = -Wall -Wextra -Wpedantic \
 	-Wshadow -Wnull-dereference -Wjump-misses-init \
 	-Wredundant-decls -Wmissing-prototypes -Wstrict-prototypes \
 	-Wold-style-definition -Wswitch-enum -Wvla \
-	-Wformat=2 -Wno-format-nonliteral
- 
+	-Wformat=2 -Wno-format-nonliteral \
+	-Wcast-align=strict -Wundef -Wpointer-arith \
+	-Wbad-function-cast -Wunused-macros -Wformat-signedness \
+	-Wstrict-overflow=2 -Winit-self -Wfloat-equal \
+	-Wshift-overflow=2 -Wmissing-declarations \
+	-Wwrite-strings -Wcast-qual
+
 hal:
 	$(MAKE) format
 	$(MAKE) clean
 	for f in *.c; do clang-tidy $$f -- -I. ; done
 	$(MAKE) CFLAGS="$(CFLAGS) -D_POSIX_C_SOURCE=200112L -D_FORTIFY_SOURCE=3 -Werror" $(PROGNAME)
-	$(MAKE) CFLAGS="$(CFLAGS) -D_POSIX_C_SOURCE=200112L -D_FORTIFY_SOURCE=3" test
+	$(MAKE) CFLAGS="$(CFLAGS) -D_POSIX_C_SOURCE=200112L -D_FORTIFY_SOURCE=3 -Werror" test
 	$(MAKE) clean
 	$(MAKE) CC=gcc CFLAGS="$(HAL_WARNINGS) -O2 -Werror" $(PROGNAME)
 	@echo "--- gcc -fanalyzer (advisory) ---"
@@ -125,7 +130,7 @@ hal:
 		    -fanalyzer -c $$f -o /dev/null 2>&1 || true; \
 	done
 	$(MAKE) clean
-	$(MAKE) test
+	$(MAKE) CFLAGS="-Werror" test
 
 # Development targets
 debug:

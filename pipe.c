@@ -41,7 +41,7 @@
 #include "util.h"
 #include <errno.h>
 
-static uint8_t *cmd;
+static const uint8_t *cmd;
 
 /* Interrupt source watched during a running command.  The editor
  * uses the terminal (STDIN_FILENO); tests substitute their own
@@ -201,7 +201,8 @@ static int pumpSubprocessIO(struct subprocess_s *sp, uint8_t *input,
 static uint8_t *transformerPipeCmd(uint8_t *input) {
 	pipe_last_canceled = 0;
 	/* Using sh -c lets us use pipes and stuff and takes care of quoting. */
-	const char *command_line[4] = { "/bin/sh", "-c", (char *)cmd, NULL };
+	const char *command_line[4] = { "/bin/sh", "-c", (const char *)cmd,
+					NULL };
 	struct subprocess_s subprocess;
 	int result = subprocess_create(command_line,
 				       subprocess_option_inherit_environment,
@@ -300,7 +301,7 @@ uint8_t *pipeCommandCaptureIntr(const uint8_t *command, uint8_t *input,
 				int intr_fd, int *out_canceled) {
 	int saved_intr = pipe_intr_fd;
 	pipe_intr_fd = intr_fd;
-	cmd = (uint8_t *)command;
+	cmd = command;
 	uint8_t *out = transformerPipeCmd(input);
 	cmd = NULL;
 	pipe_intr_fd = saved_intr;
@@ -313,9 +314,10 @@ uint8_t *editorPipe(int useRegion) {
 	cmd = NULL;
 	int u = E.uarg;
 	E.uarg = 0;
-	cmd = editorPrompt(E.buf, "Shell: ", PROMPT_SHELL, NULL);
+	uint8_t *owned = editorPrompt(E.buf, "Shell: ", PROMPT_SHELL, NULL);
+	cmd = owned;
 
-	if (cmd == NULL) {
+	if (owned == NULL) {
 		setStatusMessage("Canceled shell command.");
 	} else if (useRegion) {
 		if (u) {
@@ -323,13 +325,13 @@ uint8_t *editorPipe(int useRegion) {
 			// unmark region
 			E.buf->markx = -1;
 			E.buf->marky = -1;
-			free(cmd);
+			free(owned);
 			return NULL;
 		} else {
 			// 1. Extract the selected region
 			if (markInvalid()) {
 				setStatusMessage("Mark invalid.");
-				free(cmd);
+				free(owned);
 				return NULL;
 			}
 
@@ -338,16 +340,16 @@ uint8_t *editorPipe(int useRegion) {
 			// 2. Pass the extracted text to transformerPipeCmd
 			uint8_t *result = transformerPipeCmd(E.kill.str);
 
-			free(cmd);
+			free(owned);
 			return result;
 		}
 	} else {
 		uint8_t *result = transformerPipeCmd(NULL);
-		free(cmd);
+		free(owned);
 		return result;
 	}
 
-	free(cmd);
+	free(owned);
 	return NULL;
 }
 

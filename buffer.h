@@ -81,12 +81,10 @@ void clampPositions(struct buffer *buf);
  * instant.  Construction and whole-array reload may pass through zero
  * rows internally provided no caller can observe it; bufferResetRows
  * exists for exactly that and its callers must restore the invariant
- * before returning.  clearBuffer is likewise a low-level primitive
- * that leaves the buffer rowless -- its callers repopulate. */
+ * before returning. */
 
 struct buffer *findBufferByName(const char *name);
 struct buffer *findOrCreateSpecialBuffer(const char *name);
-void clearBuffer(struct buffer *buf);
 void bufferResetRows(struct buffer *buf);
 void bufferEnsureRow(struct buffer *buf);
 int bufferLineCount(struct buffer *buf);

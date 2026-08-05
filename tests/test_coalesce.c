@@ -418,6 +418,69 @@ void test_deleting_past_the_end_repairs_in_one_step(void) {
 	assertContent(buf, "alpha\nbeta\n");
 }
 
+/* The refusal is narrower than "the target is the final newline": it
+ * applies only where the repair would undo the delete.  An empty
+ * penultimate row leaves the invariant holding, so removing a trailing
+ * blank line is a real edit. */
+void test_backspace_deletes_a_trailing_blank_line(void) {
+	const char *lines[] = { "a", "" };
+	struct buffer *buf = make_test_buffer_lines(lines, 2);
+	E.buf = buf;
+	clearUndosAndRedos(buf);
+	buf->dirty = 0;
+	assertContent(buf, "a\n\n");
+
+	buf->cx = 0;
+	buf->cy = 2;
+	backSpace(1);
+
+	assertContent(buf, "a\n");
+	TEST_ASSERT_EQUAL_STRING("", row_str(buf, buf->numrows - 1));
+	TEST_ASSERT_EQUAL_INT(1, nrecords(buf));
+	TEST_ASSERT_EQUAL_INT(1, buf->dirty);
+
+	doUndo(buf, 1);
+	assertContent(buf, "a\n\n");
+}
+
+/* The same edit reached with C-d from the end of the row above. */
+void test_delete_forward_removes_a_trailing_blank_line(void) {
+	const char *lines[] = { "a", "" };
+	struct buffer *buf = make_test_buffer_lines(lines, 2);
+	E.buf = buf;
+	clearUndosAndRedos(buf);
+	buf->dirty = 0;
+
+	buf->cx = 0;
+	buf->cy = 1;
+	delChar(1);
+
+	assertContent(buf, "a\n");
+	doUndo(buf, 1);
+	assertContent(buf, "a\n\n");
+}
+
+/* A buffer holding only a newline empties, satisfying the invariant by
+ * the bufferIsEmpty arm. */
+void test_backspace_on_lone_blank_line_empties_the_buffer(void) {
+	const char *lines[] = { "" };
+	struct buffer *buf = make_test_buffer_lines(lines, 1);
+	E.buf = buf;
+	clearUndosAndRedos(buf);
+	buf->dirty = 0;
+	assertContent(buf, "\n");
+
+	buf->cx = 0;
+	buf->cy = 1;
+	backSpace(1);
+
+	assertContent(buf, "");
+	TEST_ASSERT_EQUAL_INT(1, bufferIsEmpty(buf));
+
+	doUndo(buf, 1);
+	assertContent(buf, "\n");
+}
+
 /* ---- Round trip ---- */
 
 /* The property the fuzzer asserts, pinned for a run that crosses
@@ -501,6 +564,9 @@ int main(void) {
 	RUN_TEST(test_deleting_only_the_final_newline_is_refused);
 	RUN_TEST(test_backspace_onto_the_terminator_row_is_refused);
 	RUN_TEST(test_deleting_past_the_end_repairs_in_one_step);
+	RUN_TEST(test_backspace_deletes_a_trailing_blank_line);
+	RUN_TEST(test_delete_forward_removes_a_trailing_blank_line);
+	RUN_TEST(test_backspace_on_lone_blank_line_empties_the_buffer);
 
 	RUN_TEST(test_newline_at_virtual_eof_undoes_cleanly);
 	RUN_TEST(test_typing_at_virtual_eof_undoes_cleanly);

@@ -56,7 +56,8 @@ static int uargScale(int uarg) {
 // Forward declarations for command functions
 
 static int compareCommands(const void *a, const void *b) {
-	return strcmp(((struct command *)a)->key, ((struct command *)b)->key);
+	return strcmp(((const struct command *)a)->key,
+		      ((const struct command *)b)->key);
 }
 
 void setupCommands(void) {

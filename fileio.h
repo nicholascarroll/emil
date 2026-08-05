@@ -17,7 +17,7 @@ void resetFileCheckThrottle(void);
 
 /* File I/O operations */
 char *rowsToString(struct buffer *bufr, size_t *buflen);
-int editorOpen(struct buffer *bufr, char *filename);
+int editorOpen(struct buffer *bufr, const char *filename);
 void save(void);
 void saveAs(void);
 void revert(void);

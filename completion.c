@@ -88,7 +88,10 @@ static void getFileCompletions(const char *prefix,
 	result->common_prefix = NULL;
 	result->prefix_len = strlen(prefix);
 
+	/* pattern_to_use borrows prefix or points at expanded, the only
+	 * one to free. */
 	const char *pattern_to_use = prefix;
+	char *expanded = NULL;
 
 	/* Manual tilde expansion */
 	if (*prefix == '~') {
@@ -99,7 +102,7 @@ static void getFileCompletions(const char *prefix,
 
 		size_t home_len = strlen(home_dir);
 		size_t prefix_len = strlen(prefix);
-		char *expanded = xmalloc(home_len + prefix_len);
+		expanded = xmalloc(home_len + prefix_len);
 		emil_strlcpy(expanded, home_dir, home_len + prefix_len);
 		emil_strlcat(expanded, prefix + 1, home_len + prefix_len);
 		pattern_to_use = expanded;
@@ -112,9 +115,7 @@ static void getFileCompletions(const char *prefix,
 	glob_pattern[len] = '*';
 	glob_pattern[len + 1] = '\0';
 
-	if (pattern_to_use != prefix) {
-		free((void *)pattern_to_use);
-	}
+	free(expanded);
 	pattern_to_use = glob_pattern;
 
 	int glob_result = glob(pattern_to_use, GLOB_MARK, NULL, &globlist);
@@ -168,7 +169,7 @@ static void getBufferCompletions(const char *prefix,
 		if (b->filename && strcmp(b->filename, "*Completions*") == 0)
 			continue;
 
-		char *name = b->filename ? b->filename : "*scratch*";
+		const char *name = b->filename ? b->filename : "*scratch*";
 
 		/* Match against the basename portion */
 		const char *slash = strrchr(name, '/');
@@ -250,6 +251,11 @@ static void getCommandCompletions(const char *prefix,
 }
 
 void replaceMinibufferText(struct buffer *minibuf, const char *text) {
+	/* Rebuilding the rows here bypasses the mutation layer, so any
+	 * undo record describes text that no longer exists.  Each prompt
+	 * session gets its own undo history. */
+	clearUndosAndRedos(minibuf);
+
 	/* Clear current content */
 	while (minibuf->numrows > 0) {
 		delRow(minibuf, 0);

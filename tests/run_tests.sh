@@ -147,6 +147,9 @@ echo ""
 # stubs.o provides E, page_overlap, and no-op terminal functions.
 
 ANY_FAIL=0
+ANY_WARN=0
+BUILD_LOG=$(mktemp)
+trap 'rm -f "$BUILD_LOG"' EXIT
 
 # Detect sanitizer build
 SANITIZER_FLAGS=""
@@ -159,7 +162,7 @@ fi
 # test-specific flags. 
 
 # Build stubs.o (replaces main.o + terminal.o)
-TEST_CFLAGS="$CFLAGS -Wno-unused-function -I."
+TEST_CFLAGS="$CFLAGS -I."
 $CC $TEST_CFLAGS $SANITIZER_FLAGS -c tests/stubs.c -o tests/stubs.o 2>&1 || {
     echo "✗ Failed to compile stubs.c"
     exit 1
@@ -174,17 +177,55 @@ TEST_OBJECTS="decoder.o unicode.o buffer.o region.o undo.o transform.o \
 
 echo "Unit tests:"
 
-for suite in decoder unicode wcwidth buffer undo coalesce edit fileio relpath visual_line utf8_validate rect replace transform subprocess shell adjust history abuf tilde keymap kill_ring insert_file status_bar cjk_indic warnings ctags regress; do
+# Suites are listed explicitly rather than globbed, so adding a file is
+# a deliberate act.  The count check below catches the matching mistake:
+# a new tests/test_*.c that nobody added here would otherwise be silently
+# skipped rather than reported.
+SUITES="decoder unicode wcwidth buffer undo coalesce edit fileio relpath
+    visual_line utf8_validate rect replace transform subprocess shell adjust
+    history abuf tilde keymap kill_ring insert_file status_bar cjk_indic
+    warnings ctags find display prompt"
+
+listed=$(echo $SUITES | wc -w)
+present=$(ls tests/test_*.c 2>/dev/null | wc -l)
+if [ "$listed" -ne "$present" ]; then
+    echo "  ERROR: $present tests/test_*.c files but $listed listed in SUITES."
+    echo "         A suite is present but unlisted (or listed but missing)."
+    for f in tests/test_*.c; do
+        nm=$(basename "$f" .c); nm=${nm#test_}
+        # Word-split $SUITES rather than glob-match it: the list spans
+        # several lines, so a substring match on " $nm " misses names
+        # sitting next to a newline or indentation.
+        found=0
+        for s in $SUITES; do
+            [ "$s" = "$nm" ] && found=1
+        done
+        [ "$found" -eq 1 ] || echo "         unlisted: $f"
+    done
+    ANY_FAIL=1
+fi
+
+for suite in $SUITES; do
     src="tests/test_${suite}.c"
     bin="tests/test_${suite}"
     printf "  %-12s " "$suite"
 
-    # Compile and link (use TEST_CFLAGS for the test source, LDFLAGS for linking)
-    if ! $CC $TEST_CFLAGS $SANITIZER_FLAGS -o "$bin" "$src" $TEST_OBJECTS $LDFLAGS 2>/dev/null; then
+    # Compile and link (use TEST_CFLAGS for the test source, LDFLAGS for
+    # linking).  Diagnostics are kept rather than sent to /dev/null: a
+    # warning in test code was invisible for as long as it was discarded,
+    # which is how a suite accumulates them unnoticed.
+    if ! $CC $TEST_CFLAGS $SANITIZER_FLAGS -o "$bin" "$src" $TEST_OBJECTS \
+        $LDFLAGS 2>"$BUILD_LOG"; then
         echo "BUILD FAIL"
-        $CC $TEST_CFLAGS $SANITIZER_FLAGS -o "$bin" "$src" $TEST_OBJECTS $LDFLAGS 2>&1 | tail -5
+        tail -20 "$BUILD_LOG" | sed 's/^/    /'
         ANY_FAIL=1
         continue
+    fi
+    if [ -s "$BUILD_LOG" ]; then
+        echo "WARN"
+        sed 's/^/    /' "$BUILD_LOG"
+        ANY_WARN=1
+        printf '  %-12s ' "$suite"
     fi
 
     # Run
@@ -227,6 +268,39 @@ for suite in decoder unicode wcwidth buffer undo coalesce edit fileio relpath vi
     rm -f "$bin"
 done
 
+# Invariant fuzzer: random command sequences through the mutation and
+# undo layers, checking after every operation that the buffer is still
+# well-formed and that undoing everything restores the original text.
+# Cheap enough to run every time -- 10k sequences is ~0.2s on a plain
+# build and ~1.1s under sanitizers -- and it guards exactly the
+# invariants the mutation layer is built around.  FUZZ_SEQS=0 skips it.
+FUZZ_SEQS="${FUZZ_SEQS:-10000}"
+FUZZ_SEED="${FUZZ_SEED:-1}"
+if [ "$FUZZ_SEQS" -gt 0 ]; then
+    printf '%-14s ' "  fuzz_undo"
+    # -Itests because fuzz_undo.c lives in the repo root and includes
+    # test_harness.h; the unit tests get that path for free.
+    if ! $CC $TEST_CFLAGS -Itests $SANITIZER_FLAGS -o tests/fuzz_undo \
+        fuzz_undo.c $TEST_OBJECTS $LDFLAGS 2>/dev/null; then
+        echo "BUILD FAIL"
+        $CC $TEST_CFLAGS -Itests $SANITIZER_FLAGS -o tests/fuzz_undo \
+            fuzz_undo.c $TEST_OBJECTS $LDFLAGS 2>&1 | tail -5
+        ANY_FAIL=1
+    else
+        fuzz_out=$(./tests/fuzz_undo "$FUZZ_SEQS" "$FUZZ_SEED" 2>&1)
+        fuzz_rc=$?
+        # The fuzzer reports "N failure(s)" and exits non-zero on any.
+        if [ $fuzz_rc -ne 0 ] || ! echo "$fuzz_out" | grep -q "^0 failure"; then
+            echo "FAIL"
+            echo "$fuzz_out" | tail -20 | sed 's/^/    /'
+            ANY_FAIL=1
+        else
+            echo "PASS ($FUZZ_SEQS sequences, seed $FUZZ_SEED)"
+        fi
+    fi
+    rm -f tests/fuzz_undo
+fi
+
 rm -f tests/stubs.o
 
 # Terminal-level integration: drive the built binary under a pty.
@@ -254,6 +328,12 @@ echo "-------------------------------------------------------"
 if [ "$ANY_FAIL" -ne 0 ]; then
     echo "TEST STATUS: FAILED"
     exit 1
+elif [ "$ANY_WARN" -ne 0 ]; then
+    # Not fatal here: the portability matrix builds with compilers that
+    # each warn about different things.  make hal compiles the tests with
+    # -Werror, which is where a warning has to be fixed.
+    echo "TEST STATUS: ALL PASSED (with warnings)"
+    exit 0
 else
     echo "TEST STATUS: ALL PASSED"
     exit 0

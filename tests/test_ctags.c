@@ -147,7 +147,9 @@ void test_find_tags_from_subdir(void) {
 	char saved[PATH_MAX];
 	TEST_ASSERT_NOT_NULL(getcwd(saved, sizeof(saved)));
 
-	char sub[PATH_MAX];
+	/* Sized to hold the longest suffix appended below, so the
+	 * compiler can see the result always fits. */
+	char sub[PATH_MAX + 16];
 	snprintf(sub, sizeof(sub), "%s/src/deep", root);
 	TEST_ASSERT_EQUAL_INT(0, chdir(sub));
 
@@ -163,7 +165,7 @@ void test_find_tags_from_subdir(void) {
 	 * directory and confirm it points at the right absolute file. */
 	char resolved[PATH_MAX];
 	resolveTagPath(found, "src/foo.c", resolved, sizeof(resolved));
-	char expect[PATH_MAX];
+	char expect[PATH_MAX + 16];
 	snprintf(expect, sizeof(expect), "%s/src/foo.c", found);
 	TEST_ASSERT_EQUAL_STRING(expect, resolved);
 

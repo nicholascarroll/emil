@@ -173,6 +173,19 @@ void bulkDelete(struct buffer *buf, int startx, int starty, int endx,
 	if (starty >= buf->numrows)
 		return;
 
+	/* Clamp to what the rows hold.  In-layer callers derive the range
+	 * from the current buffer, so this is a no-op for them; it guards
+	 * undo replay, where an out-of-range record would make
+	 * row->size - endx negative and hand memmove a huge size_t. */
+	if (endy >= buf->numrows)
+		endy = buf->numrows - 1;
+	if (startx > buf->row[starty].size)
+		startx = buf->row[starty].size;
+	if (endx > buf->row[endy].size)
+		endx = buf->row[endy].size;
+	if (starty == endy && endx < startx)
+		endx = startx;
+
 	/* Adjust tracked points before the mutation changes row structure */
 	adjustAllPoints(buf, startx, starty, endx, endy, 1);
 

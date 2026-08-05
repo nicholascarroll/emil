@@ -331,7 +331,7 @@ static int fileContainsNullBytes(FILE *fp) {
  * Returns 0 on success, -1 on failure (file not found is not a failure;
  * the buffer is left empty with the filename set). */
 
-int editorOpen(struct buffer *bufr, char *filename) {
+int editorOpen(struct buffer *bufr, const char *filename) {
 	free(bufr->filename);
 	bufr->filename = collapseHome(filename);
 
@@ -413,7 +413,25 @@ int editorOpen(struct buffer *bufr, char *filename) {
 	 * invariant is restored below, before returning. */
 	bufferResetRows(bufr);
 
+	/* A text file is lines each terminated by '\n'.  Input departing
+	 * from that is normalised on the way in, and the user told, so
+	 * the file does not quietly change at save. */
+	int dos_endings = 0;
+	int no_final_newline = 0;
+
 	while ((linelen = emil_getline(&line, &linecap, fp)) != -1) {
+		/* Sampled before stripping and overwritten each pass, so
+		 * after the loop it describes the final line. */
+		no_final_newline = (linelen == 0 || line[linelen - 1] != '\n');
+
+		/* A CR counts as a DOS ending only when it precedes the
+		 * '\n'.  A lone CR is an ordinary byte, kept as-is on
+		 * save, so flagging it would promise a conversion that
+		 * never happens. */
+		if (linelen >= 2 && line[linelen - 1] == '\n' &&
+		    line[linelen - 2] == '\r')
+			dos_endings = 1;
+
 		while (linelen > 0 &&
 		       (line[linelen - 1] == '\n' || line[linelen - 1] == '\r'))
 			linelen--;
@@ -520,6 +538,18 @@ int editorOpen(struct buffer *bufr, char *filename) {
 		else
 			setStatusMessage(
 				"Read only: advisory lock by another process");
+	} else if (dos_endings && no_final_newline) {
+		setStatusMessage("%d lines, %d columns; DOS line endings and "
+				 "no final newline, both fixed on save",
+				 bufferLineCount(bufr), max_width);
+	} else if (dos_endings) {
+		setStatusMessage("%d lines, %d columns; DOS line endings, "
+				 "will be converted to Unix on save",
+				 bufferLineCount(bufr), max_width);
+	} else if (no_final_newline) {
+		setStatusMessage("%d lines, %d columns; no final newline, "
+				 "one will be added on save",
+				 bufferLineCount(bufr), max_width);
 	} else {
 		setStatusMessage("%d lines, %d columns", bufferLineCount(bufr),
 				 max_width);
@@ -898,7 +928,7 @@ struct buffer *switchToFile(const char *filename) {
 
 	/* Open new buffer */
 	struct buffer *nb = newBuffer();
-	if (editorOpen(nb, (char *)filename) < 0) {
+	if (editorOpen(nb, filename) < 0) {
 		destroyBuffer(nb);
 		return NULL;
 	}
@@ -1033,9 +1063,8 @@ int insertFileAtPath(struct buffer *buf, const char *path,
 		if (errno == ENOENT) {
 			int n = snprintf(NULL, 0, "File not found: %s",
 					 display_name);
-			char *showName =
-				leftTruncate((char *)display_name,
-					     nameFit((char *)display_name, n));
+			char *showName = leftTruncate(display_name,
+						      nameFit(display_name, n));
 			setStatusMessage("File not found: %s", showName);
 			free(showName);
 		} else {
@@ -1127,8 +1156,7 @@ int insertFileAtPath(struct buffer *buf, const char *path,
 
 	int n = snprintf(NULL, 0, "Inserted %d lines from %s", lines_inserted,
 			 display_name);
-	char *showName = leftTruncate((char *)display_name,
-				      nameFit((char *)display_name, n));
+	char *showName = leftTruncate(display_name, nameFit(display_name, n));
 	setStatusMessage("Inserted %d lines from %s", lines_inserted, showName);
 	free(showName);
 
@@ -1464,18 +1492,19 @@ struct buffer *loadStdinBuffer(const char *data, size_t len) {
 			start = i + 1;
 		}
 	}
-	/* Handle final line without trailing newline */
+	/* Handle a final line with no trailing newline. */
 	if (start < len) {
 		size_t end = len;
 		if (end > start && data[end - 1] == '\r')
 			end--;
 		appendRowRaw(buf, (const uint8_t *)&data[start],
 			     (int)(end - start));
-	} else {
-		/* Input was empty or ended with '\n': the final empty
-		 * row is what records that.  See buffer.h. */
-		appendRowRaw(buf, (const uint8_t *)"", 0);
 	}
+
+	/* Terminate unconditionally, as editorOpen does: piped input
+	 * without a final newline would otherwise leave the last row
+	 * non-empty, breaking the invariant in buffer.h. */
+	appendRowRaw(buf, (const uint8_t *)"", 0);
 
 	/* Validate UTF-8 encoding, mirroring editorOpen: the null-byte
 	 * check above only catches a subset of binary input. */

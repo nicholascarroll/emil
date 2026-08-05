@@ -15,9 +15,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-static int getRegisterName(char *prompt) {
+static int getRegisterName(const char *prompt) {
 	int key;
-	int psize = stringWidth((uint8_t *)prompt);
+	int psize = stringWidth((const uint8_t *)prompt);
 	do {
 		setStatusMessage("%s:", prompt);
 		cursorBottomLine(psize + 2);
@@ -36,7 +36,7 @@ static int getRegisterName(char *prompt) {
 		return;                      \
 	}
 
-static void registerMessage(char *msg, char reg) {
+static void registerMessage(const char *msg, char reg) {
 	char str[4];
 	if (reg < 32) {
 		snprintf(str, sizeof(str), "C-%c", reg + '@');
