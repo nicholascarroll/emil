@@ -1,4 +1,13 @@
 ## [Unreleased]
+- Fixed the terminal-ownership pty scenarios failing on illumos. They
+  asserted that `tcgetattr()` on the pty master reports the slave's
+  termios, which is a Linux/BSD convenience: an illumos pty is a STREAMS
+  device whose master has no terminal semantics of its own, so the call
+  fails and the suite reported "editor did not start in raw mode" against
+  an editor that had. The scenarios now skip where the state cannot be
+  observed, and the Ctrl-C-after-suspend check -- which needs no termios
+  visibility and passed on OpenIndiana throughout -- now covers all three
+  suspend paths, so those platforms keep real coverage.
 - Saving now direct-writes hard-linked files.
 - Saving no longer replaces a FIFO, socket or device node.
 - A file whose directory is not writable can now be saved.

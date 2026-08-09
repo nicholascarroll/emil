@@ -328,7 +328,17 @@ if [ -x ./emil ]; then
     if $CC $TEST_CFLAGS tests/decoder_pty_test.c -o tests/decoder_pty_test \
         && ./tests/decoder_pty_test ./emil > /tmp/pty_test_out 2>&1; then
         pty_scenarios=$(grep -c '^  .*PASS$' /tmp/pty_test_out)
-        echo "PASS ($pty_scenarios scenarios)"
+        pty_skipped=$(grep -c '^  .*SKIP (' /tmp/pty_test_out)
+        # Individual scenarios skip themselves where the platform
+        # cannot observe what they assert on -- illumos ptys are
+        # STREAMS devices whose master reports no termios of the
+        # slave.  Surface the count rather than let a suite quietly
+        # shrink.
+        if [ "$pty_skipped" -gt 0 ]; then
+            echo "PASS ($pty_scenarios scenarios, $pty_skipped skipped)"
+        else
+            echo "PASS ($pty_scenarios scenarios)"
+        fi
     else
         echo "FAIL"
         cat /tmp/pty_test_out
