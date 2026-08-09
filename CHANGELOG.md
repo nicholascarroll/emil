@@ -1,6 +1,15 @@
 ## [Unreleased]
+- Saving now direct-writes hard-linked files.
+- Saving no longer replaces a FIFO, socket or device node.
+- A file whose directory is not writable can now be saved.
+- #107 Removed the direct-overwrite prompt on ENOSPC.
 - Higlighting of matches in `query-replace` #106.
 - On file save, a confirmation prompt if file on disk is newer
+- Fixed the editor being left with the terminal in cooked mode after
+  `C-z`, `C-x z` or `C-x C-z` when the raised `SIGTSTP` is discarded.
+- Fixed a heap-buffer-overflow in `clampCursorToViewport`.
+- `fuzz_undo` now runs a set of seeds rather than the pinned seed 1.
+- The shared test harness now gives its window a realistic height.
 
 ## [0.9.3]
 - query-replace better error handling

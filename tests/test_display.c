@@ -9,6 +9,7 @@
 #include "abuf.h"
 #include "edit.h"
 #include "region.h"
+#include "motion.h"
 #include "util.h"
 #include <string.h>
 #include <stdio.h>
@@ -250,6 +251,67 @@ void test_scroll_down_with_stale_rowoff_stays_in_bounds(void) {
 	cleanupTestEditor();
 }
 
+/* clampCursorToViewport derives cy from the window's rowoff and
+ * height, neither of which is bounded by the buffer, and then indexes
+ * buf->row[cy].  A window sized to zero rows -- reachable in the real
+ * editor, because neither the height distribution nor sizePopupWindow
+ * floors at one row -- makes the first branch assign cy = rowoff
+ * outright, so a rowoff past a shortened buffer reads off the end of
+ * the row array.  Found by fuzz_undo on seeds other than 1. */
+void test_clamp_cursor_zero_height_window_stays_in_bounds(void) {
+	initTestEditor();
+	static const char *lines[5] = { "alpha", "beta", "gamma", "delta",
+					"epsilon" };
+	struct buffer *buf = make_test_buffer_lines(lines, 5);
+	E.buf = buf;
+	E.windows[0]->buf = buf;
+	E.windows[0]->height = 0;
+	E.windows[0]->rowoff = 4;
+	buf->word_wrap = 0;
+
+	while (buf->numrows > 2)
+		delRow(buf, buf->numrows - 1);
+	buf->cy = 0;
+	buf->cx = 0;
+	invalidateScreenCache(buf);
+
+	clampCursorToViewport(E.windows[0], buf);
+
+	TEST_ASSERT(buf->cy >= 0);
+	TEST_ASSERT(buf->cy < buf->numrows);
+	TEST_ASSERT(buf->cx <= buf->row[buf->cy].size);
+	cleanupTestEditor();
+}
+
+/* The same guarantee through the call path the fuzzer actually
+ * reported: pageDown -> clampCursorToViewport -> row[cy].  Driving
+ * the command rather than the helper keeps the test honest if the
+ * clamping ever moves between the two. */
+void test_page_down_zero_height_window_stays_in_bounds(void) {
+	initTestEditor();
+	static const char *lines[6] = { "alpha", "beta",  "gamma",
+					"delta", "epsil", "zeta" };
+	struct buffer *buf = make_test_buffer_lines(lines, 6);
+	E.buf = buf;
+	E.windows[0]->buf = buf;
+	E.windows[0]->height = 0;
+	E.windows[0]->rowoff = 5;
+	buf->word_wrap = 0;
+
+	while (buf->numrows > 2)
+		delRow(buf, buf->numrows - 1);
+	buf->cy = 0;
+	buf->cx = 0;
+	invalidateScreenCache(buf);
+
+	pageDown(1);
+
+	TEST_ASSERT(buf->cy >= 0);
+	TEST_ASSERT(buf->cy < buf->numrows);
+	TEST_ASSERT(buf->cx <= buf->row[buf->cy].size);
+	cleanupTestEditor();
+}
+
 /* These tests manage the editor themselves. */
 void setUp(void) {
 }
@@ -265,6 +327,8 @@ int main(void) {
 	RUN_TEST(test_scroll_leaves_cursor_on_char_boundary);
 	RUN_TEST(test_scroll_up_with_stale_rowoff_stays_in_bounds);
 	RUN_TEST(test_scroll_down_with_stale_rowoff_stays_in_bounds);
+	RUN_TEST(test_clamp_cursor_zero_height_window_stays_in_bounds);
+	RUN_TEST(test_page_down_zero_height_window_stays_in_bounds);
 
 	return TEST_END();
 }

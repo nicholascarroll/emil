@@ -104,6 +104,20 @@ static inline void initTestEditor(void) {
 	E.nwindows = 1;
 	E.windows[0]->focused = 1;
 
+	/* The window is calloc'd, so height stayed 0 until a test set
+	 * it explicitly -- and only test_display.c ever did.  Every
+	 * other suite, and the fuzzer, therefore drove processKeypress
+	 * with a zero-row viewport: paging, scrolling, recentering and
+	 * the word-wrap sub-line maths all ran in a configuration the
+	 * real editor never sustains, which is coverage that looks
+	 * green without exercising much.  Mirror what the layout code
+	 * computes for one window on a 24x80 terminal: screenrows,
+	 * less one row of minibuffer, less one status bar per window.
+	 * Tests that want a degenerate viewport now have to ask for it
+	 * (see the clamp regression in test_display.c), which is the
+	 * right way round. */
+	E.windows[0]->height = 24 - 1 - 1;
+
 	/* Install the SIGALRM handler for timed file checks */
 	initFileCheck();
 

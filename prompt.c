@@ -136,27 +136,19 @@ static int minibufCursorCols(struct buffer *mb) {
 uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 		      enum promptType t,
 		      void (*callback)(struct buffer *, uint8_t *, int)) {
-	/* A prompt must not open while one is already running.
+	/* A prompt must not open while one is already running.  The loop
+	 * below dispatches ordinary commands, so C-x C-f, M-x, C-x b,
+	 * C-x i, C-x C-w and M-| are all reachable from inside a prompt,
+	 * and a second prompt would share the one E.minibuf with the
+	 * first.  Emacs refuses the same thing by default
+	 * (enable-recursive-minibuffers is nil), and nothing in emil
+	 * needs recursive prompts, so refuse rather than make the
+	 * minibuffer a stack.
 	 *
-	 * The loop below dispatches ordinary commands, so C-x C-f, M-x,
-	 * C-x b, C-x i, C-x C-w and M-| are all reachable from inside a
-	 * prompt.  Letting them through meant a second prompt opened on
-	 * top of the first, sharing the one E.minibuf: the inner prompt
-	 * cleared the line, and the outer one came back holding the
-	 * inner's text.  Pressing C-x C-f twice and cancelling the
-	 * second prompt left "Find file:" holding whatever had been
-	 * typed into it, so RET opened the wrong file.
-	 *
-	 * Emacs refuses the same thing by default
-	 * (enable-recursive-minibuffers is nil).  Nothing in emil needs
-	 * recursive prompts, so rather than make the minibuffer a stack
-	 * to support a capability no one wants, refuse it here: one
-	 * check, and the whole class goes away.
-	 *
-	 * E.buf is set to E.minibuf on entry below and restored at
-	 * done:, and nowhere else assigns it, so this is an exact test
-	 * for "a prompt is already running".  Returning NULL is the
-	 * same answer callers already handle for C-g. */
+	 * E.buf is set to E.minibuf on entry below and restored at done:,
+	 * and nowhere else assigns it, so this is an exact test for "a
+	 * prompt is already running".  Returning NULL is the answer
+	 * callers already handle for C-g. */
 	if (E.buf == E.minibuf) {
 		setStatusMessage(
 			"Command attempted to use minibuffer while in minibuffer");
@@ -413,9 +405,7 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 				/* Otherwise Down was pressed without ever
 				 * having browsed: the user's input is
 				 * already on show and there is nothing
-				 * below it.  Leave the text alone -- this
-				 * fell through to a clear before, wiping
-				 * whatever had been typed. */
+				 * below it.  Leave the text alone. */
 			}
 			break;
 		}

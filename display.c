@@ -156,15 +156,11 @@ void scrollViewport(struct window *win, struct buffer *buf, int n) {
 		return;
 
 	/* rowoff is not adjusted when an edit deletes rows, so on entry
-	 * it may name a row that no longer exists.  refreshScreen
-	 * clamps it (§7.2), but that is a per-frame guarantee, and a
-	 * keyboard macro or a uarg-repeated command runs many
-	 * operations between frames.  The word-wrap path below
-	 * dereferences buf->row[win->rowoff] directly, so a stale
-	 * rowoff there reads a row->chars that delRow already freed.
-	 * Clamp on entry rather than rely on refresh timing.
-	 *
-	 * numrows >= 1 (#105), so numrows - 1 is always a valid index. */
+	 * it may name a row that no longer exists.  refreshScreen clamps
+	 * it, but that is a per-frame guarantee and a macro or a
+	 * uarg-repeated command runs many operations between frames,
+	 * while the word-wrap path below dereferences buf->row[rowoff]
+	 * directly.  Clamp on entry rather than rely on refresh timing. */
 	if (win->rowoff > buf->numrows - 1) {
 		win->rowoff = buf->numrows - 1;
 		win->skip_sublines = 0;
@@ -299,6 +295,14 @@ void clampCursorToViewport(struct window *win, struct buffer *buf) {
 
 	if (buf->cy < 0)
 		buf->cy = 0;
+	/* Both branches above derive cy from the viewport (rowoff,
+	 * height), neither of which is bounded by numrows, so cy can
+	 * land outside the row array before the read below.  The event
+	 * loop re-clamps rowoff every frame, but that makes invariant
+	 * 4.9 depend on another module's timing; enforce it where cy is
+	 * indexed. */
+	if (buf->cy >= buf->numrows)
+		buf->cy = buf->numrows - 1;
 	if (buf->cx > buf->row[buf->cy].size)
 		buf->cx = buf->row[buf->cy].size;
 }
@@ -711,11 +715,9 @@ static int statusLeft(const struct buffer *bufr, char *out, int cap,
 	 *   %%   clean, read-only
 	 *   %*   modified, read-only
 	 *
-	 * Both properties share the same two columns rather than
-	 * spending a third on a flag that is blank most of the time:
-	 * the left column carries read-only, the right carries
-	 * modified, and each doubles the other's character when it has
-	 * nothing of its own to say. */
+	 * Both properties share the same two columns: the left carries
+	 * read-only, the right carries modified, and each doubles the
+	 * other's character when it has nothing of its own to say. */
 	char flags[4];
 	if (bufr->read_only) {
 		flags[0] = '%';
@@ -726,14 +728,11 @@ static int statusLeft(const struct buffer *bufr, char *out, int cap,
 	}
 	flags[2] = '\0';
 
-	/* Left-truncate name with "..." to fit name_width.
-	 *
-	 * name_width is a budget in COLUMNS.  This used to index the name
-	 * by bytes -- dname + dlen - tail -- which lands inside a
-	 * multi-byte sequence whenever the tail does not happen to fall on
-	 * a character boundary, emitting invalid UTF-8 to the terminal.
-	 * Walk forward over whole characters instead, dropping leading
-	 * ones until what remains fits the budget that "..." leaves. */
+	/* Left-truncate name with "..." to fit name_width, which is a
+	 * budget in COLUMNS.  Walk forward over whole characters,
+	 * dropping leading ones until what remains fits the budget that
+	 * "..." leaves: indexing by bytes instead would land inside a
+	 * multi-byte sequence and emit invalid UTF-8. */
 	const char *show_name = dname;
 	char trunc[256];
 	if (stringWidth((const uint8_t *)dname) > name_width) {

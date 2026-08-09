@@ -9,6 +9,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 /* ---- emil_getline ---- */
 
@@ -620,6 +622,157 @@ void test_revert_existing_file_still_reloads(void) {
 	free(path);
 }
 
+/* ---- write strategy ----
+ *
+ * A save normally writes a temp file and renames it over the target,
+ * so a crash cannot leave a half-written file.  That replaces the
+ * inode, which is wrong when something else depends on the inode
+ * surviving, and impossible when no temp file can be created beside
+ * it.  chooseWriteStrategy decides from the file, before writing;
+ * the old code fell back to a direct overwrite on ENOSPC only, which
+ * caught none of these. */
+
+void test_write_strategy_plain_file_is_atomic(void) {
+	char tmpname[] = "/tmp/emil_test_XXXXXX";
+	int fd = mkstemp(tmpname);
+	TEST_ASSERT(fd >= 0);
+	close(fd);
+
+	const char *reason = "unset";
+	TEST_ASSERT_EQUAL_INT(WRITE_ATOMIC,
+			      chooseWriteStrategy(tmpname, &reason));
+	TEST_ASSERT_NULL(reason);
+
+	unlink(tmpname);
+}
+
+/* rename() detaches the name from the inode, so every other link keeps
+ * the old content while the save reports success. */
+void test_write_strategy_hard_linked_file_is_in_place(void) {
+	char tmpname[] = "/tmp/emil_test_XXXXXX";
+	int fd = mkstemp(tmpname);
+	TEST_ASSERT(fd >= 0);
+	close(fd);
+
+	char linkname[64];
+	snprintf(linkname, sizeof(linkname), "%s.lnk", tmpname);
+	TEST_ASSERT_EQUAL_INT(0, link(tmpname, linkname));
+
+	const char *reason = NULL;
+	TEST_ASSERT_EQUAL_INT(WRITE_IN_PLACE,
+			      chooseWriteStrategy(tmpname, &reason));
+	TEST_ASSERT_NOT_NULL(reason);
+
+	unlink(linkname);
+	/* With the extra link gone it is an ordinary file again. */
+	reason = NULL;
+	TEST_ASSERT_EQUAL_INT(WRITE_ATOMIC,
+			      chooseWriteStrategy(tmpname, &reason));
+
+	unlink(tmpname);
+}
+
+/* A FIFO, socket or device node would be replaced by a plain file --
+ * the same mistake as clobbering a symlink.  A FIFO stands in for the
+ * class here because it needs no privileges to create. */
+void test_write_strategy_non_regular_file_is_in_place(void) {
+	char tmpname[] = "/tmp/emil_test_XXXXXX";
+	int fd = mkstemp(tmpname);
+	TEST_ASSERT(fd >= 0);
+	close(fd);
+	unlink(tmpname);
+
+	if (mkfifo(tmpname, 0600) != 0)
+		return; /* not supported here; nothing to assert */
+
+	const char *reason = NULL;
+	TEST_ASSERT_EQUAL_INT(WRITE_IN_PLACE,
+			      chooseWriteStrategy(tmpname, &reason));
+	TEST_ASSERT_NOT_NULL(reason);
+
+	unlink(tmpname);
+}
+
+/* End to end: the links survive, both names see the new text, and a
+ * shrinking buffer still truncates the file. */
+void test_save_hard_linked_file_keeps_links(void) {
+	char tmpname[] = "/tmp/emil_test_XXXXXX";
+	int fd = mkstemp(tmpname);
+	TEST_ASSERT(fd >= 0);
+	TEST_ASSERT(write(fd, "old content here\n", 17) == (ssize_t)17);
+	close(fd);
+
+	char linkname[64];
+	snprintf(linkname, sizeof(linkname), "%s.lnk", tmpname);
+	TEST_ASSERT_EQUAL_INT(0, link(tmpname, linkname));
+
+	struct stat before;
+	TEST_ASSERT_EQUAL_INT(0, stat(tmpname, &before));
+
+	const char *lines[] = { "new" };
+	struct buffer *buf = make_test_buffer_lines(lines, 1);
+	buf->filename = xstrdup(tmpname);
+	buf->dirty = 1;
+
+	save();
+
+	TEST_ASSERT_NOT_NULL(strstr(E.statusmsg, "Wrote"));
+	TEST_ASSERT_NOT_NULL(strstr(E.statusmsg, "in place"));
+	TEST_ASSERT_EQUAL_INT(0, buf->dirty);
+
+	struct stat after;
+	TEST_ASSERT_EQUAL_INT(0, stat(tmpname, &after));
+	/* Same inode, still two links. */
+	TEST_ASSERT(before.st_ino == after.st_ino);
+	TEST_ASSERT_EQUAL_INT(2, (int)after.st_nlink);
+	/* Shrunk from 17 bytes to "new\n", not merely overwritten. */
+	TEST_ASSERT_EQUAL_INT(4, (int)after.st_size);
+
+	/* The other name sees the new content. */
+	FILE *fp = fopen(linkname, "rb");
+	TEST_ASSERT_NOT_NULL(fp);
+	if (fp) {
+		char content[16] = { 0 };
+		size_t n = fread(content, 1, sizeof(content) - 1, fp);
+		fclose(fp);
+		TEST_ASSERT_EQUAL_INT(4, (int)n);
+		TEST_ASSERT(memcmp(content, "new\n", 4) == 0);
+	}
+
+	unlink(linkname);
+	unlink(tmpname);
+}
+
+/* An ordinary file still goes through the atomic path, which replaces
+ * the inode.  This is the guarantee the other cases trade away, so it
+ * is worth asserting that they did not trade it away for everyone. */
+void test_save_plain_file_still_replaces_inode(void) {
+	char tmpname[] = "/tmp/emil_test_XXXXXX";
+	int fd = mkstemp(tmpname);
+	TEST_ASSERT(fd >= 0);
+	TEST_ASSERT(write(fd, "old\n", 4) == (ssize_t)4);
+	close(fd);
+
+	struct stat before;
+	TEST_ASSERT_EQUAL_INT(0, stat(tmpname, &before));
+
+	const char *lines[] = { "new" };
+	struct buffer *buf = make_test_buffer_lines(lines, 1);
+	buf->filename = xstrdup(tmpname);
+	buf->dirty = 1;
+
+	save();
+
+	TEST_ASSERT_NOT_NULL(strstr(E.statusmsg, "Wrote"));
+	TEST_ASSERT_NULL(strstr(E.statusmsg, "in place"));
+
+	struct stat after;
+	TEST_ASSERT_EQUAL_INT(0, stat(tmpname, &after));
+	TEST_ASSERT(before.st_ino != after.st_ino);
+
+	unlink(tmpname);
+}
+
 int main(void) {
 	TEST_BEGIN();
 
@@ -663,5 +816,11 @@ int main(void) {
 	RUN_TEST(test_revert_null_filename_survives);
 	RUN_TEST(test_revert_missing_file_refuses);
 	RUN_TEST(test_revert_existing_file_still_reloads);
+
+	RUN_TEST(test_write_strategy_plain_file_is_atomic);
+	RUN_TEST(test_write_strategy_hard_linked_file_is_in_place);
+	RUN_TEST(test_write_strategy_non_regular_file_is_in_place);
+	RUN_TEST(test_save_hard_linked_file_keeps_links);
+	RUN_TEST(test_save_plain_file_still_replaces_inode);
 	return TEST_END();
 }

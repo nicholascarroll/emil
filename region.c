@@ -462,20 +462,15 @@ void yankPop(int uarg) {
 	}
 
 	/* E.kill_ring_pos is emil's last-command flag: processKeypress
-	 * resets it to -1 for every command except yank, yank-pop and
-	 * the argument keys, and yank sets it.  A non-negative value
-	 * already means "the immediately preceding user-level command
-	 * was a yank or a yank-pop", so no corroboration from the undo
-	 * stack is needed or possible -- the stack records mutations,
-	 * not which command made them.
-	 *
-	 * What IS still needed is the assurance that there is a record
-	 * to undo.  The prompt loop dispatches C-y through
-	 * processKeypress but handles history browsing itself, so
-	 * "C-y, Up, M-y" in a prompt leaves kill_ring_pos set while
-	 * replaceMinibufferText has cleared the undo stack.  Without
-	 * this check the doUndo below would no-op and the yank below
-	 * would duplicate the text instead of replacing it. */
+		 * resets it to -1 for every command except yank, yank-pop and
+		 * the argument keys.  A non-negative value already means the
+		 * preceding user-level command was a yank or yank-pop.
+		 *
+		 * What is still needed is the assurance that there is a record
+		 * to undo.  The prompt loop dispatches C-y through
+		 * processKeypress but handles history browsing itself, so
+		 * "C-y, Up, M-y" in a prompt leaves kill_ring_pos set while
+		 * replaceMinibufferText has cleared the undo stack. */
 	if (E.buf->undo == NULL) {
 		setStatusMessage("Previous command was not a yank");
 		return;
@@ -1092,22 +1087,18 @@ void yankRectangle(void) {
 	int topy = buf->cy;
 	int boty = topy + rh - 1;
 
-	/* If the rectangle overruns the buffer, extend with blank rows
-	 * first.  mutateExtendRows pushes a single pure-insert undo
-	 * with paired=0 at the head of the chain; the following
-	 * mutateReplace passes chain_to_prev = needs_extension so its
-	 * delete record pairs back to the extension, and the pair's
-	 * insert pairs to the delete — three records, one atomic undo.
-	 *
-	 * The extension and the replace cannot both account for the
-	 * same newline.  mutateExtendRows runs first, so by the time
-	 * mutateReplace looks at (0, topy) that row is a real row:
-	 * boty >= numrows implies topy <= boty gets covered by the
-	 * extension, and the following bulkDelete only ever shrinks the
-	 * buffer back to topy + 1 rows.  Since #105 every position is
-	 * addressable and there is no anchoring step to worry about
-	 * either way.  Verified by rectangle yank at the end of the
-	 * buffer, in test_regress.c. */
+	/* If the rectangle overruns the buffer, extend with blank
+		 * rows first.  mutateExtendRows pushes a single pure-insert
+		 * undo with paired=0 at the head of the chain; the following
+		 * mutateReplace passes chain_to_prev = needs_extension so its
+		 * delete record pairs back to the extension, and the pair's
+		 * insert pairs to the delete -- three records, one atomic
+		 * undo.
+		 *
+		 * The extension runs first, so by the time mutateReplace
+		 * looks at (0, topy) that row is a real row, and the
+		 * following bulkDelete only ever shrinks the buffer back to
+		 * topy + 1 rows. */
 	int needs_extension = 0;
 	if (boty >= buf->numrows) {
 		int n = boty - buf->numrows + 1;

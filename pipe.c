@@ -262,18 +262,16 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 		setStatusMessage("Read %d bytes", d.len);
 	}
 
-	/* Reject output containing NUL bytes.  Both consumers of this
-	 * result measure it with strlen — pipeCmd when building the
-	 * *Shell Output* buffer, and transformRange when REPLACING the
-	 * user's region with it — so a NUL would silently truncate,
-	 * in the worst case swapping the selected text for a prefix
-	 * of the real output.  Every other ingestion path (editorOpen,
-	 * insertFileAtPath, loadStdinBuffer) refuses NUL-bearing
-	 * content outright; this is the same policy at the last
-	 * remaining door.  Returning NULL leaves the buffer untouched
-	 * (see transformRange).  d.len is the true byte count; it is
-	 * discarded by dbuf_detach below, which is why the check must
-	 * happen here and not in the strlen-based callers. */
+	/* Reject output containing NUL bytes.  Both consumers
+		 * measure it with strlen -- pipeCmd building the *Shell
+		 * Output* buffer, and transformRange REPLACING the user's
+		 * region with it -- so a NUL would silently truncate, in
+		 * the worst case swapping the selected text for a prefix
+		 * of the real output.  Every other ingestion path refuses
+		 * NUL-bearing content; this is the last remaining door.
+		 * d.len is the true byte count and is discarded by
+		 * dbuf_detach below, which is why the check belongs here
+		 * and not in the strlen-based callers. */
 	if (d.len > 0 && memchr(d.buf, '\0', (size_t)d.len) != NULL) {
 		setStatusMessage("Shell output contains null bytes");
 		subprocess_destroy(&subprocess);

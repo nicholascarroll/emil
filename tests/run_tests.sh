@@ -275,7 +275,16 @@ done
 # build and ~1.1s under sanitizers -- and it guards exactly the
 # invariants the mutation layer is built around.  FUZZ_SEQS=0 skips it.
 FUZZ_SEQS="${FUZZ_SEQS:-10000}"
-FUZZ_SEED="${FUZZ_SEED:-1}"
+# One pinned seed is one walk through the state space, and a green run
+# says only that this walk is clean.  A heap-buffer-overflow in
+# clampCursorToViewport lived here for as long as it did because seed 1
+# happens not to reach it while roughly half of its neighbours do.
+# Run a fixed set instead, so a regression has to survive several
+# independent walks to stay hidden, and keep the set fixed rather than
+# time-seeded: a suite that fails only on some days is worse than one
+# that misses a bug, because nobody trusts it.  FUZZ_SEEDS overrides
+# for a deeper soak (`FUZZ_SEEDS="$(seq 1 200)" make test`).
+FUZZ_SEEDS="${FUZZ_SEEDS:-${FUZZ_SEED:-1 2 3 4 5 6 7 8}}"
 if [ "$FUZZ_SEQS" -gt 0 ]; then
     printf '%-14s ' "  fuzz_undo"
     if ! $CC $TEST_CFLAGS -Itests $SANITIZER_FLAGS -o tests/fuzz_undo \
@@ -285,15 +294,26 @@ if [ "$FUZZ_SEQS" -gt 0 ]; then
             tests/fuzz_undo.c $TEST_OBJECTS $LDFLAGS 2>&1 | tail -5
         ANY_FAIL=1
     else
-        fuzz_out=$(./tests/fuzz_undo "$FUZZ_SEQS" "$FUZZ_SEED" 2>&1)
-        fuzz_rc=$?
-        # The fuzzer reports "N failure(s)" and exits non-zero on any.
-        if [ $fuzz_rc -ne 0 ] || ! echo "$fuzz_out" | grep -q "^0 failure"; then
-            echo "FAIL"
-            echo "$fuzz_out" | tail -20 | sed 's/^/    /'
-            ANY_FAIL=1
-        else
-            echo "PASS ($FUZZ_SEQS sequences, seed $FUZZ_SEED)"
+        fuzz_failed=0
+        fuzz_nseeds=0
+        for fuzz_seed in $FUZZ_SEEDS; do
+            fuzz_nseeds=$((fuzz_nseeds + 1))
+            fuzz_out=$(./tests/fuzz_undo "$FUZZ_SEQS" "$fuzz_seed" 2>&1)
+            fuzz_rc=$?
+            # The fuzzer reports "N failure(s)" and exits non-zero on any.
+            if [ $fuzz_rc -ne 0 ] ||
+               ! echo "$fuzz_out" | grep -q "^0 failure"; then
+                if [ $fuzz_failed -eq 0 ]; then
+                    echo "FAIL"
+                fi
+                echo "    seed $fuzz_seed:"
+                echo "$fuzz_out" | tail -20 | sed 's/^/      /'
+                fuzz_failed=1
+                ANY_FAIL=1
+            fi
+        done
+        if [ $fuzz_failed -eq 0 ]; then
+            echo "PASS ($FUZZ_SEQS sequences x $fuzz_nseeds seeds)"
         fi
     fi
     rm -f tests/fuzz_undo

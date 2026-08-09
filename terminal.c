@@ -136,6 +136,13 @@ void openShellDrawer(void) {
 	/* Let the shell take over */
 	signal(SIGTSTP, SIG_DFL);
 	raise(SIGTSTP);
+
+	/* The drawer raises SIGTSTP itself with the handler reset, so
+	 * editorSuspend() never runs.  Reaching this line means the stop
+	 * was discarded (orphaned process group) and the editor is
+	 * running on with cooked mode and a DECSTBM region still set:
+	 * ask for the same repair a real `fg` gets. */
+	requestTerminalResume();
 }
 
 /*
@@ -261,12 +268,9 @@ void deserializeUnicode(void) {
  * retrying on EINTR, until it arrives.  */
 /* Read one UTF-8 continuation byte, retrying on EINTR.
  *
- * Same rule as terminalEscByte: never abandon a sequence in flight.
- * These three branches used a bare read(), so a SIGWINCH or SIGCONT
- * arriving between the lead byte and a continuation byte -- resizing
- * the terminal, or foregrounding the editor, while a multi-byte
- * character was being typed or pasted -- made read() fail with EINTR
- * and the whole character was dropped. */
+ * Same rule as terminalEscByte: never abandon a sequence in flight.  A
+ * bare read() here drops the whole character when a SIGWINCH or
+ * SIGCONT arrives mid-sequence. */
 static int terminalContByte(uint8_t *out) {
 	for (;;) {
 		ssize_t n = read(STDIN_FILENO, out, 1);

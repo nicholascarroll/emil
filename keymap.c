@@ -1271,17 +1271,12 @@ done:
 
 /* Replay a recorded macro through the normal dispatch path.
  *
- * There is no recursion to guard against.  CMD_MACRO_EXEC refuses
- * while E.recording || E.playback (see dispatchMacro), which is the
- * "No Self-Referential Execution" invariant of §4.2, so this function
- * can never be entered from within itself.  A depth counter and a
- * save/restore of E.macro used to sit here; both were unreachable by
- * construction, and an unreachable guard is worse than none: it
- * implies a nesting capability that does not exist.
- *
- * 'macro' is always &E.macro for the same reason, and is taken as a
- * parameter only to keep the call site explicit about what is being
- * played. */
+ * There is no recursion to guard against: CMD_MACRO_EXEC refuses while
+ * E.recording || E.playback (see dispatchMacro), which is the "No
+ * Self-Referential Execution" invariant of 4.2, so this function can
+ * never be entered from within itself.  'macro' is always &E.macro for
+ * the same reason, and is a parameter only to keep the call site
+ * explicit about what is being played. */
 void execMacro(struct macro *macro) {
 	E.playback = 0;
 	while (E.playback < macro->nkeys) {

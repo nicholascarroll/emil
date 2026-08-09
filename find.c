@@ -286,11 +286,9 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 
 	int current = last_match;
 	if (current < 0) {
-		/* This used to be -1 for a forward search, which made the
-		 * row-stepping loop below start at row 0: C-s always
-		 * scanned from the top of the buffer instead of from
-		 * point.  Only the backward case was seeded from the
-		 * cursor's row. */
+		/* Seeded from the cursor's row for both directions: -1
+		 * here restarts the row-stepping loop below at row 0, so
+		 * C-s would scan from the top instead of from point. */
 		current = from_cy;
 	}
 	if (current >= 0 && current < bufr->numrows) {
@@ -298,12 +296,9 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 		uint8_t *match;
 		int mlen = 0;
 		if (direction == -1) {
-			/* Backward: the previous match on this row.  This
-			 * block used to run the forward search regardless
-			 * of direction, so C-r moved forward past point --
-			 * and since 'current' is seeded from bufr->cy only
-			 * when direction == -1, C-r was almost the only
-			 * way to reach it. */
+			/* Backward: the previous match on this row.  Running
+			 * the forward search here regardless of direction is
+			 * what makes C-r move forward past point. */
 			match = searchRowBackward(row, query, from_cx,
 						  regex_mode, &mlen);
 		} else if (fresh ? (from_cx >= row->size) :

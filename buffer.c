@@ -248,12 +248,9 @@ void bufferResetRows(struct buffer *bufr) {
 	bufr->rowcap = 0;
 }
 
-/* Does the buffer hold no text at all?
- *
- * Since #105 the empty buffer is the one-row buffer whose single row is
- * empty, so numrows == 0 no longer expresses this and is in fact
- * unreachable.  Every emptiness test that was written as numrows == 0
- * and is still meaningful goes through here. */
+/* Does the buffer hold no text at all?  The empty buffer is the one-row
+ * buffer whose single row is empty (numrows == 0 is unreachable), so
+ * every emptiness test goes through here. */
 int bufferIsEmpty(struct buffer *bufr) {
 	return bufr->numrows == 1 && bufr->row[0].size == 0;
 }

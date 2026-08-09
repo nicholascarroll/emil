@@ -115,12 +115,10 @@ int lockFile(struct buffer *bufr, const char *filename) {
 	if (fd < 0) {
 		if (errno == ENOENT)
 			return LOCK_UNAVAILABLE; /* nothing to lock */
-		/* EINTR is not a permission failure.  The background
-		 * check arms a SIGALRM deadline around this very call,
-		 * so an interrupted open used to fall through to the
-		 * O_RDONLY retry and take an F_RDLCK on a perfectly
-		 * writable file -- reporting the file as unwritable
-		 * because our own watchdog fired. */
+		/* EINTR is not a permission failure: the background check
+		 * arms a SIGALRM deadline around this very call, and
+		 * falling through to the O_RDONLY retry would take an
+		 * F_RDLCK on a writable file and report it unwritable. */
 		if (errno == EINTR)
 			return LOCK_RETRY;
 		fd = open(filename, O_RDONLY);
@@ -183,13 +181,11 @@ int lockFile(struct buffer *bufr, const char *filename) {
 /* Release the advisory lock held by this buffer.
  *
  * Deliberately does NOT clear open_mtime.  The lock lifetime and the
- * external-modification baseline are unrelated: this is called from
- * markBufferClean on the dirty->clean edge, which a plain run of C-_
- * back to the start of the session reaches.  Zeroing open_mtime there
- * disabled the FILE MODIFIED check for the rest of the buffer's life,
- * because checkFileModified's job 1 is gated on open_mtime != 0.
- * Callers that genuinely change which file the buffer refers to
- * (saveAs) clear the baseline themselves. */
+ * external-modification baseline are unrelated: this runs on the
+ * dirty->clean edge, which a plain run of C-_ back to the start of the
+ * session reaches, and checkFileModified's job 1 is gated on
+ * open_mtime != 0.  Callers that genuinely change which file the buffer
+ * refers to (saveAs) clear the baseline themselves. */
 void releaseLock(struct buffer *bufr) {
 	if (bufr->lock_fd >= 0) {
 		close(bufr->lock_fd);
@@ -211,46 +207,39 @@ static void clearLockWarning(struct buffer *bufr) {
 	}
 }
 
-/* Check whether the underlying file has been modified externally,
- * and opportunistically clear a stale lock_blocked_pid warning if
- * the blocking process has since released the lock.
+/* Check whether the underlying file has been modified externally, and
+ * opportunistically clear a stale lock_blocked_pid warning if the
+ * blocking process has since released the lock.
  *
- * Called periodically (from refreshScreen) on the focused buffer.
- *
- * Throttled: at most one check every FILE_CHECK_INTERVAL_SEC seconds
- * (monotonic clock) to avoid hammering slow network filesystems.
- *
- * Timeout-guarded: each stat() / lockFile() call is wrapped in a
- * 50ms SIGALRM deadline so a hung filesystem never stalls the editor.
+ * Called periodically (from refreshScreen) on the focused buffer, at
+ * most once every FILE_CHECK_INTERVAL_SEC seconds on the monotonic
+ * clock, with each stat() / lockFile() wrapped in a 50ms SIGALRM
+ * deadline so a hung filesystem never stalls the editor.
  *
  * Two independent jobs:
  *
  *   1. Set bufr->external_mod if mtime has drifted since open/save.
  *      One-shot: skipped if the flag is already set.
  *
- *   2. Clear a stale lock warning once the holder has released.
- *      Runs while lock_blocked_pid is set and we do not hold the
- *      lock, whether or not the buffer is dirty -- a buffer opened
- *      read-only BECAUSE of a lock can never become dirty, so the
- *      old dirty gate excluded the single most common way the
- *      warning appears, and it displayed a PID that had long since
- *      exited for the rest of the session.
+ *   2. Clear a stale lock warning once the holder has released.  Runs
+ *      while lock_blocked_pid is set and we do not hold the lock,
+ *      whether or not the buffer is dirty -- a buffer opened read-only
+ *      BECAUSE of a lock can never become dirty, so a dirty gate would
+ *      exclude the most common way the warning appears.
  *
  *      A dirty buffer wants the lock, so it tries to acquire it.  A
- *      clean one only wants to know whether the holder is gone, so
- *      it probes without acquiring: the lock is held while there are
- *      unsaved changes and at no other time.
+ *      clean one only wants to know whether the holder is gone, so it
+ *      probes without acquiring.
  *
- *      Job 2 is gated on !external_mod: if the blocking process
- *      saved changes before releasing the lock, Job 1 will have
- *      already set external_mod from the mtime drift, and we
- *      deliberately don't acquire a lock we'd use to overwrite
- *      those changes.
+ *      Gated on !external_mod: if the blocking process saved before
+ *      releasing, Job 1 has already set external_mod, and we
+ *      deliberately don't take a lock we'd use to overwrite those
+ *      changes.
  *
- * The timeout is advisory in BOTH jobs.  It never invalidates a
- * result: if the underlying syscall returned successfully, that
- * answer is used even though the alarm was delivered during it.  The
- * flag says the operation was slow, not that its result is wrong. */
+ * The timeout is advisory in BOTH jobs and never invalidates a result:
+ * if the syscall returned successfully, that answer is used even though
+ * the alarm fired during it.  The flag says the operation was slow, not
+ * that its result is wrong. */
 
 void checkFileModified(void) {
 	if (E.buf->filename == NULL || E.buf->special_buffer)
@@ -561,10 +550,9 @@ int editorOpen(struct buffer *bufr, const char *filename) {
 		bufr->read_only = 1;
 	}
 
-	/* Record mtime for external-modification detection.  The lock
-	 * used to be acquired here as a side effect; under the "lock only
-	 * while dirty" policy (issue #49), the lock is deferred until the
-	 * buffer is actually modified: see markBufferDirty(). */
+	/* Record mtime for external-modification detection.  The lock is
+	 * not taken here: it is held only while the buffer is dirty, so
+	 * acquisition is deferred to markBufferDirty(). */
 	{
 		struct stat st;
 		if (stat(iopath, &st) == 0)
@@ -644,10 +632,9 @@ void revert(void) {
 	/* editorOpen returns 0 both when it loaded a file and when the
 	 * file does not exist (ENOENT posts "(New file)"), so a "< 0"
 	 * test cannot tell the two apart.  Without this check, reverting
-	 * a buffer whose file was never written replaced it with an
-	 * empty one; the destroyBuffer() below then freed the undo
-	 * stack, so the work could not be recovered with C-_, and the
-	 * clean replacement let C-x C-c exit without warning. */
+	 * a buffer whose file was never written replaces it with an empty
+	 * one and the destroyBuffer() below frees the undo stack, putting
+	 * the work beyond recovery. */
 	char *iopath = expandTilde(buf->filename);
 	struct stat rst;
 	if (stat(iopath, &rst) != 0) {
@@ -795,8 +782,18 @@ static int writeAtomic(const char *iopath, const char *buf, size_t len) {
 	return 0;
 }
 
-static int writeDirect(const char *iopath, const char *buf, size_t len) {
-	int fd = open(iopath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+/* Write in place: same inode, same links, same metadata.
+ *
+ * Not atomic -- a crash mid-write leaves a partly updated file -- so
+ * this is used only where rename is impossible or would be wrong (see
+ * chooseWriteStrategy).  No O_TRUNC: the bytes are overwritten in
+ * place and the file is cut to length afterwards, so it is never
+ * observably empty and a failed write leaves the old tail rather than
+ * nothing.  Mode is only supplied for the O_CREAT case; an existing
+ * file keeps its own, along with its owner, ACLs and xattrs, none of
+ * which the temp-file path can carry across. */
+static int writeInPlace(const char *iopath, const char *buf, size_t len) {
+	int fd = open(iopath, O_WRONLY | O_CREAT, 0644);
 	if (fd == -1)
 		return -1;
 
@@ -817,35 +814,101 @@ static int writeDirect(const char *iopath, const char *buf, size_t len) {
 		total += (size_t)n;
 	}
 
-	if (fsync(fd) == -1) {
-		close(fd);
-		return -1;
+	/* Truncation and durability both only mean something for a
+	 * regular file.  On a device or FIFO ftruncate and fsync fail
+	 * with EINVAL, which would report a write that in fact succeeded
+	 * as a failed save. */
+	struct stat st;
+	int regular = (fstat(fd, &st) == 0 && S_ISREG(st.st_mode));
+
+	if (regular) {
+		/* Cut any tail left over from a longer previous version.
+		 * After the write, not before it, so the old content
+		 * survives a failure above. */
+		if (ftruncate(fd, (off_t)len) == -1) {
+			close(fd);
+			return -1;
+		}
+		if (fsync(fd) == -1) {
+			close(fd);
+			return -1;
+		}
 	}
 
 	return close(fd);
 }
 
-static int confirmOverwriteDirect(const char *msg) {
-	/* Suppress checkFileModified's "[FILE CHANGED ON DISK]" during
-	 * the prompt: refreshScreen() calls checkFileModified(), and a
-	 * failing writeAtomic() may have touched the file's mtime before
-	 * rolling back, which would print the stale-file warning on top
-	 * of our y/N prompt.  checkFileModified() no-ops when
-	 * open_mtime == 0, so zero it for the duration and restore
-	 * after. */
-	time_t saved_mtime = E.buf->open_mtime;
-	E.buf->open_mtime = 0;
+/* Which of the two writers this file needs.
+ *
+ * The atomic path replaces the file: it writes a new inode beside the
+ * old one and renames over it.  That is the right default -- a crash
+ * mid-save cannot leave a half-written file -- but for some targets it
+ * is either impossible or destroys something the user meant to keep,
+ * and no error code tells us that after the fact.  Decide from the
+ * file itself, before writing.
+ *
+ *   Not a regular file.  A FIFO, socket or device node would be
+ *   replaced by a plain file: saving /dev/null as root turns it into a
+ *   2-byte regular file.  Same class of mistake as clobbering a
+ *   symlink, which the realpath() above already avoids.
+ *
+ *   More than one link.  rename() detaches this name from the inode,
+ *   so every other name keeps the old content while emil reports
+ *   success.  Nothing warns the user that the file they just edited is
+ *   no longer the file their other name refers to.
+ *
+ *   Unwritable parent directory.  A temp file cannot be created there
+ *   at all, though the file itself may be perfectly writable -- an
+ *   everyday shape in /etc and in shared directories.
+ *
+ * In place is not atomic, and that trade is unavoidable: one inode
+ * cannot both be replaced and be kept.  vim resolves it the same way
+ * (backupcopy=auto), as does Emacs (backup-by-copying-when-linked).
+ *
+ * There is a TOCTOU window -- the file could gain a link between this
+ * stat and the rename -- which is inherent and no worse than today. */
+enum writeStrategy chooseWriteStrategy(const char *iopath,
+				       const char **reason) {
+	*reason = NULL;
 
-	setStatusMessage("%s", msg);
-	refreshScreen();
+	/* Resolve first, as writeAtomic does: the temp file is created
+	 * beside the link's target, so that is the directory whose
+	 * writability decides whether the atomic path can work at all. */
+	char resolved[PATH_MAX];
+	const char *target = iopath;
+	if (realpath(iopath, resolved) != NULL)
+		target = resolved;
 
-	int c = readKey();
+	struct stat st;
+	if (stat(target, &st) == 0) {
+		if (!S_ISREG(st.st_mode)) {
+			*reason = "not a regular file";
+			return WRITE_IN_PLACE;
+		}
+		if (st.st_nlink > 1) {
+			*reason = "hard-linked";
+			return WRITE_IN_PLACE;
+		}
+	}
 
-	clearStatusMessage(); /* clear prompt */
+	char dirpath[PATH_MAX];
+	const char *slash = strrchr(target, '/');
+	if (slash == NULL) {
+		dirpath[0] = '.';
+		dirpath[1] = '\0';
+	} else {
+		size_t dlen = (slash == target) ? 1 : (size_t)(slash - target);
+		if (dlen >= sizeof(dirpath))
+			return WRITE_ATOMIC;
+		memcpy(dirpath, target, dlen);
+		dirpath[dlen] = '\0';
+	}
+	if (access(dirpath, W_OK) != 0) {
+		*reason = "directory not writable";
+		return WRITE_IN_PLACE;
+	}
 
-	E.buf->open_mtime = saved_mtime;
-
-	return (c == 'y' || c == 'Y');
+	return WRITE_ATOMIC;
 }
 
 /* The write itself, with no "is this worth doing" question attached.
@@ -889,31 +952,26 @@ static void saveBuffer(void) {
 	size_t len;
 	char *buf = rowsToString(E.buf, &len);
 
-	/* Try atomic write first */
-	if (writeAtomic(iopath, buf, len) == -1) {
-		if (errno == ENOSPC) {
-			if (!confirmOverwriteDirect(
-				    "Atomic save failed (disk space). Overwrite directly (risky)? (y/N)")) {
-				free(buf);
-				free(iopath);
-				setStatusMessage("Save aborted.");
-				return;
-			}
+	/* Pick the writer from what the file is, not from how the atomic
+	 * write failed.  The old code fell back to a direct overwrite on
+	 * ENOSPC only: a narrow win (the temp file needs the size twice
+	 * over, a direct write does not) bought with a y/N prompt at the
+	 * worst possible moment, and answering it destroyed the original
+	 * before attempting a write that could fail the same way.  A full
+	 * disk is now reported like any other failure, with the file left
+	 * intact. */
+	const char *in_place_reason = NULL;
+	int rc;
+	if (chooseWriteStrategy(iopath, &in_place_reason) == WRITE_IN_PLACE)
+		rc = writeInPlace(iopath, buf, len);
+	else
+		rc = writeAtomic(iopath, buf, len);
 
-			if (writeDirect(iopath, buf, len) == -1) {
-				free(buf);
-				free(iopath);
-				setStatusMessage("Save failed: %s",
-						 strerror(errno));
-				return;
-			}
-
-		} else {
-			free(buf);
-			free(iopath);
-			setStatusMessage("Save failed: %s", strerror(errno));
-			return;
-		}
+	if (rc == -1) {
+		free(buf);
+		free(iopath);
+		setStatusMessage("Save failed: %s", strerror(errno));
+		return;
 	}
 	/* Success  */
 
@@ -937,6 +995,22 @@ static void saveBuffer(void) {
 
 	/* Lock is released on clean by markBufferClean above; reacquired
 	 * on the next clean→dirty transition. */
+
+	/* Say when the save was not atomic, and why.  Stated rather than
+	 * asked: by the time the file is hard-linked or is a device node
+	 * there is no choice left for the user to make, but they should
+	 * know the crash guarantee did not apply to this write. */
+	if (in_place_reason != NULL) {
+		int n = snprintf(NULL, 0, "Wrote %d bytes to %s (in place: %s)",
+				 (int)len, E.buf->filename, in_place_reason);
+		char *showName = leftTruncate(E.buf->filename,
+					      nameFit(E.buf->filename, n));
+		setStatusMessage("Wrote %d bytes to %s (in place: %s)",
+				 (int)len, showName, in_place_reason);
+		free(showName);
+		free(iopath);
+		return;
+	}
 
 	int n = snprintf(NULL, 0, "Wrote %d bytes to %s", (int)len,
 			 E.buf->filename);
@@ -1033,12 +1107,10 @@ void saveAs(void) {
 	free(E.buf->filename);
 	E.buf->filename = collapseHome(new_filename);
 	free(new_filename);
-	/* Release lock on the old file before saving to the new one.
+	/* Release the lock on the old file before saving to the new one.
 	 * The buffer now refers to a different file, so the
-	 * external-modification baseline and any lock-imposed
-	 * read-only both belong to the old one and are discarded here
-	 * -- releaseLock deliberately no longer does this, because the
-	 * dirty->clean edge must not. */
+	 * external-modification baseline and any lock-imposed read-only
+	 * both belong to the old one and are discarded here. */
 	releaseLock(E.buf);
 	E.buf->open_mtime = 0;
 	E.buf->external_mod = 0;
@@ -1257,19 +1329,13 @@ int insertFileAtPath(struct buffer *buf, const char *path,
 	int lines_inserted = bufferLineCount(tmpbuf);
 
 	if (lines_inserted > 0) {
-		/* C-x i inserts whole lines: the file's last line stays a
-		 * line of its own rather than merging with the text at
-		 * point, and the row already at point keeps its content on
-		 * a row below the insertion.  So the byte block always
-		 * ends in a newline, whether or not the file did.
-		 *
-		 * This is emil's long-standing behaviour and is preserved
-		 * deliberately.  The old has_suffix_row condition is gone
-		 * rather than inverted: it tested saved_cy < numrows,
-		 * which cy < numrows (#105) makes unconditionally true.
-		 *
-		 * Insert position is (0, buf->cy), the start of the
-		 * current row. */
+		/* C-x i inserts whole lines: the file's last line stays
+			 * a line of its own rather than merging with the text
+			 * at point, and the row already at point keeps its
+			 * content on a row below the insertion.  So the byte
+			 * block always ends in a newline, whether or not the
+			 * file did.  Insert position is (0, buf->cy), the start
+			 * of the current row. */
 		int saved_cy = buf->cy;
 
 		size_t rawlen = 0;

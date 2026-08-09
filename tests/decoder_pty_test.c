@@ -11,6 +11,12 @@
  * historical leaked-bytes regressions (F12 panic key, SS3 finals
  * typed into the buffer, lone-ESC-then-sequence leaking its body).
  *
+ * It also asserts the terminal-state invariant (4.5) directly, which
+ * nothing else can: stubs.c replaces main.o for the unit suites, so
+ * no unit test links a line of termios code.  Whether the editor
+ * still owns the terminal is only observable from the master side of
+ * a real pty.
+ *
  * Usage: decoder_pty_test <path-to-emil>
  * Run via `make test` (wired into tests/run_tests.sh) or
  * `make test-pty`.  If no pseudo-terminal can be allocated (some
@@ -413,6 +419,73 @@ static void scenarioUtf8Typing(void) {
 	finish();
 }
 
+/* ---- terminal ownership (invariant 4.5) ------------------------ */
+
+/* While the editor is running it owns the terminal in raw mode.  The
+ * unit suites cannot check this at all: stubs.c replaces main.o, so
+ * nothing there ever touches termios.  Only a real pty can see it.
+ *
+ * The suspend paths raise SIGTSTP after handing the tty back, and
+ * POSIX discards a stop signal sent to a member of an orphaned
+ * process group -- which is exactly what spawnEmil() creates, and
+ * what an editor invoked as EDITOR/GIT_EDITOR from a daemon, a CI
+ * runner or a job-control-less shell runs in.  When the stop is
+ * discarded the editor keeps running, and before the fix it kept
+ * running in cooked mode with ECHO and ISIG restored: the next
+ * Ctrl-C killed it past the unsaved-changes prompt and past atexit.
+ *
+ * On Linux tcgetattr() on the master reports the slave's settings,
+ * so the state is observable from here.  Platforms where it is not
+ * report ECHO clear and the scenario passes vacuously rather than
+ * failing spuriously. */
+static void scenarioTerminalOwnedAfterSuspend(const char *label,
+					      const char *keys) {
+	struct child c;
+	begin(label);
+	if (spawnEmil(&c) == 0) {
+		struct termios before, after;
+		int have_before = (tcgetattr(c.mfd, &before) == 0);
+		expect(have_before && !(before.c_lflag & ECHO),
+		       "editor did not start in raw mode");
+
+		capReset();
+		sendStr(&c, keys, 600);
+
+		if (childAlive(&c) && tcgetattr(c.mfd, &after) == 0) {
+			expect(!(after.c_lflag & ECHO),
+			       "ECHO left on while the editor is running");
+			expect(!(after.c_lflag & ISIG),
+			       "ISIG left on: Ctrl-C would kill the editor");
+			expect(!(after.c_lflag & ICANON),
+			       "ICANON left on while the editor is running");
+		}
+		reap(&c);
+	}
+	finish();
+}
+
+/* The consequence, asserted end to end: after a discarded suspend the
+ * editor must still survive a Ctrl-C, because it must still own the
+ * terminal.  Ctrl-C is not a binding -- with ISIG cleared the byte is
+ * simply read and reported -- so a live editor here is the whole
+ * assertion. */
+static void scenarioCtrlCSurvivesAfterSuspend(void) {
+	struct child c;
+	begin("Ctrl-C after C-z does not kill the editor");
+	if (spawnEmil(&c) == 0) {
+		sendStr(&c, "\032", 600);   /* C-z  suspend */
+		if (childAlive(&c)) {
+			sendStr(&c, "\003", 600); /* Ctrl-C */
+			expect(childAlive(&c),
+			       "editor died on Ctrl-C after suspend");
+		} else {
+			expect(0, "editor gone after C-z");
+		}
+		reap(&c);
+	}
+	finish();
+}
+
 /* ---- main ------------------------------------------------------ */
 
 int main(int argc, char **argv) {
@@ -452,6 +525,12 @@ int main(int argc, char **argv) {
 	scenarioSlowSplitSequence();
 	scenarioMappedKeys();
 	scenarioUtf8Typing();
+	scenarioTerminalOwnedAfterSuspend("terminal owned after C-z", "\032");
+	scenarioTerminalOwnedAfterSuspend("terminal owned after C-x z",
+					  "\030z");
+	scenarioTerminalOwnedAfterSuspend("terminal owned after C-x C-z",
+					  "\030\032");
+	scenarioCtrlCSurvivesAfterSuspend();
 
 	if (total_failures)
 		printf("decoder_pty_test: %d assertion(s) failed\n",

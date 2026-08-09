@@ -322,4 +322,11 @@ void editorCleanup(void);
 extern struct config E;
 void handlePendingSignals(void);
 
+/* Flag a resume so the next pass of the main loop reclaims the
+ * terminal.  For code outside main.c that hands the tty back and
+ * raises SIGTSTP itself: if the stop is discarded (orphaned process
+ * group) the raise returns and the editor must repair its own
+ * terminal state.  See openShellDrawer(). */
+void requestTerminalResume(void);
+
 #endif

@@ -44,10 +44,30 @@ static void editorSuspend(int sig) {
 	IGNORE_RETURN(write(STDOUT_FILENO, CSI "?1049l", 8));
 	signal(SIGTSTP, SIG_DFL);
 	raise(SIGTSTP);
+
+	/* Reached in two cases, both meaning the editor is running
+	 * again and must take the terminal back: a normal resume, or a
+	 * stop that never happened.  POSIX discards a stop signal sent
+	 * to a member of an orphaned process group, so raise() returns
+	 * at once and no SIGCONT ever arrives -- and an orphaned group
+	 * is ordinary for an editor run as EDITOR/GIT_EDITOR under a
+	 * daemon, a CI runner or setsid.  Without this the editor runs
+	 * on with the tty cooked, breaking invariant 4.5.
+	 *
+	 * handlePendingSignals() does the repair, including
+	 * reinstalling the handler the SIG_DFL above just cleared. */
+	got_sigcont = 1;
 }
 
 static void editorResume(int sig) {
 	(void)sig;
+	got_sigcont = 1;
+}
+
+/* got_sigcont is private to this file; openShellDrawer() raises
+ * SIGTSTP with the handler reset to SIG_DFL, so it cannot go through
+ * editorSuspend() and needs a way to ask for the same repair. */
+void requestTerminalResume(void) {
 	got_sigcont = 1;
 }
 
@@ -75,9 +95,8 @@ static void handleSighup(int sig) {
  * arrive asynchronously, so the handlers do nothing but set a flag. */
 void handlePendingSignals(void) {
 	if (got_sigterm || got_sighup) {
-		/* Previously only checked by the main loop, so a
-		 * SIGTERM arriving while a prompt was open was
-		 * never acted on and the editor ignored it. */
+		/* Checked here rather than only in the main loop, so a
+		 * SIGTERM arriving while a prompt is open is acted on. */
 		disableRawMode();
 		_exit(1);
 	}
