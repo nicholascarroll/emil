@@ -1,5 +1,6 @@
 ## [Unreleased]
 - Higlighting of matches in `query-replace` #106.
+- On file save, a confirmation prompt if file on disk is newer
 
 ## [0.9.3]
 - query-replace better error handling

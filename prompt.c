@@ -169,52 +169,16 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 	 * embedded in it freely by callers without escaping.  */
 	uint8_t *result = NULL;
 	int history_pos = -1;
-
-	/* The text the user typed before starting to browse history.
-	 * history_pos == -1 means "showing your own input rather than a
-	 * history entry", but nothing preserved that input, so stepping
-	 * into history and back out replaced it with the empty string --
-	 * as did a bare Down, which never leaves -1 at all.
-	 *
-	 * Local rather than a field on struct config, deliberately:
-	 * prompts nest, and a shared slot would be the same class of bug
-	 * as E.edbuf was. */
 	char *pending_input = NULL;
 
-	/* Publish the prompt type for keymap.c (quoted-newline
-	 * refusal).  Saved and restored so a nested prompt -- e.g.
-	 * query-replace's C-r opening a replacement prompt -- does
-	 * not clobber its parent's type. */
 	enum promptType saved_prompt_type = E.prompt_type;
 	E.prompt_type = t;
 
 	replaceMinibufferText(E.minibuf, "");
 
-	/* A universal argument pending when the prompt opens belongs to
-	 * the command that opened it, not to minibuffer editing.  The
-	 * loop below dispatches through processKeypress, which reads
-	 * E.uarg, so leaving it set made the first keystroke typed at
-	 * the prompt repeat: C-u 4 C-x C-f then "ab" put "aaaab" in the
-	 * minibuffer.  Discarded rather than saved and restored: the
-	 * opening command already captured its own count by value
-	 * before calling here (see processKeypress, which copies E.uarg
-	 * into a local before dispatch), so there is nothing to give
-	 * back.  A C-u typed *inside* the prompt still works; this only
-	 * drops one left over from before it opened.  editorPipe did
-	 * this locally; doing it here makes it true for all callers. */
 	E.uarg = 0;
 
-	/* Save editor buffer and switch to minibuffer.
-	 *
-	 * E.edbuf must be saved and restored for the same reason
-	 * E.prompt_type is.  A prompt can open another prompt --
-	 * the loop below dispatches ordinary commands, so C-x C-f,
-	 * M-x, C-x b, C-x i, C-x C-w and M-| are all reachable from
-	 * inside one -- and on entry the inner prompt would store
-	 * the *minibuffer* into the single global slot.  The outer
-	 * prompt then restored E.buf = E.edbuf = E.minibuf, leaving
-	 * every later keystroke editing the minibuffer object while
-	 * the windows still showed the real file. */
+	/* Save editor buffer and switch to minibuffer.*/
 	struct buffer *saved_edbuf = E.edbuf;
 	E.edbuf = E.buf;
 	E.buf = E.minibuf;

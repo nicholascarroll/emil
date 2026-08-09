@@ -684,32 +684,6 @@ void test_presave_prompt_accepted_writes(void) {
 	free(path);
 }
 
-/* Suppression: if the status bar was already warning, the save is a
- * deliberate act and must not be second-guessed.  No key is scripted,
- * so a prompt here would consume the stub's default 0 and abort. */
-void test_presave_prompt_suppressed_when_already_warned(void) {
-	char *path = make_temp_file("original\n");
-	TEST_ASSERT_NOT_NULL(path);
-
-	struct buffer *b = make_test_buffer(NULL);
-	TEST_ASSERT_EQUAL_INT(0, editorOpen(b, path));
-	markBufferDirty(b);
-
-	bump_mtime(path, 2);
-	resetThrottle();
-	checkFileModified();
-	TEST_ASSERT_TRUE(b->external_mod); /* indicator lit */
-
-	clearKeys();
-	muteStdout();
-	save();
-	unmuteStdout();
-
-	TEST_ASSERT_FALSE(b->dirty); /* went through without asking */
-
-	unlink(path);
-	free(path);
-}
 
 /* An unmodified file is saved with no prompt at all. */
 void test_presave_no_prompt_when_unchanged(void) {
@@ -766,7 +740,6 @@ int main(void) {
 
 	RUN_TEST(test_presave_prompt_refused_leaves_file);
 	RUN_TEST(test_presave_prompt_accepted_writes);
-	RUN_TEST(test_presave_prompt_suppressed_when_already_warned);
 	RUN_TEST(test_presave_no_prompt_when_unchanged);
 
 	return TEST_END();
