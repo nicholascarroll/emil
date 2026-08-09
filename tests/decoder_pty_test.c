@@ -212,6 +212,24 @@ static int childAlive(struct child *c) {
 	return waitpid(c->pid, NULL, WNOHANG) == 0;
 }
 
+/* Running, stopped, or gone.
+ *
+ * childAlive() cannot tell the first two apart -- waitpid() without
+ * WUNTRACED reports a stopped child as simply not exited -- and for the
+ * suspend scenarios that difference is the whole question: a stopped
+ * editor is *supposed* to have handed the terminal back. */
+enum childState { CHILD_RUNNING, CHILD_STOPPED, CHILD_GONE };
+
+static enum childState childState(struct child *c) {
+	int st;
+	pid_t r = waitpid(c->pid, &st, WNOHANG | WUNTRACED);
+	if (r == 0)
+		return CHILD_RUNNING;
+	if (r == c->pid && WIFSTOPPED(st))
+		return CHILD_STOPPED;
+	return CHILD_GONE;
+}
+
 static void reap(struct child *c) {
 	kill(c->pid, SIGKILL);
 	waitpid(c->pid, NULL, 0);
@@ -484,13 +502,54 @@ static void scenarioTerminalOwnedAfterSuspend(const char *label,
 		capReset();
 		sendStr(&c, keys, 600);
 
-		if (childAlive(&c) && tcgetattr(c.mfd, &after) == 0) {
-			expect(!(after.c_lflag & ECHO),
-			       "ECHO left on while the editor is running");
-			expect(!(after.c_lflag & ISIG),
-			       "ISIG left on: Ctrl-C would kill the editor");
-			expect(!(after.c_lflag & ICANON),
-			       "ICANON left on while the editor is running");
+		/* Whether the raise() stops the process is a property of
+		 * the platform's job control, not of emil, and the
+		 * correct terminal state differs between the two
+		 * outcomes.  POSIX says a stop signal sent to a member
+		 * of an orphaned process group -- which is what
+		 * spawnEmil() creates -- is discarded, and Linux and
+		 * illumos do that; Cygwin/MSYS2 stops the process
+		 * anyway.  A stopped editor is *supposed* to have handed
+		 * the terminal back, so asserting raw mode there would
+		 * be asserting the opposite of correct behaviour. */
+		switch (childState(&c)) {
+		case CHILD_GONE:
+			expect(0, "editor exited on suspend");
+			break;
+
+		case CHILD_STOPPED:
+			/* The stop took.  Cooked mode is right, and what
+			 * matters is that the editor reclaims the
+			 * terminal on resume -- the same repair path,
+			 * reached the ordinary way. */
+			kill(c.pid, SIGCONT);
+			pump(c.mfd, 600);
+			if (childState(&c) != CHILD_RUNNING) {
+				expect(0, "editor did not resume on SIGCONT");
+				break;
+			}
+			if (tcgetattr(c.mfd, &after) == 0) {
+				expect(!(after.c_lflag & ECHO),
+				       "ECHO left on after resume");
+				expect(!(after.c_lflag & ISIG),
+				       "ISIG left on after resume");
+				expect(!(after.c_lflag & ICANON),
+				       "ICANON left on after resume");
+			}
+			break;
+
+		case CHILD_RUNNING:
+			/* The stop was discarded and the editor ran on,
+			 * so it must still own the terminal. */
+			if (tcgetattr(c.mfd, &after) == 0) {
+				expect(!(after.c_lflag & ECHO),
+				       "ECHO left on while the editor is running");
+				expect(!(after.c_lflag & ISIG),
+				       "ISIG left on: Ctrl-C would kill the editor");
+				expect(!(after.c_lflag & ICANON),
+				       "ICANON left on while the editor is running");
+			}
+			break;
 		}
 		reap(&c);
 	}
@@ -511,12 +570,22 @@ static void scenarioCtrlCSurvivesAfterSuspend(const char *label,
 	begin(label);
 	if (spawnEmil(&c) == 0) {
 		sendStr(&c, keys, 600);
-		if (childAlive(&c)) {
-			sendStr(&c, "\003", 600); /* Ctrl-C */
-			expect(childAlive(&c),
-			       "editor died on Ctrl-C after suspend");
-		} else {
+		switch (childState(&c)) {
+		case CHILD_GONE:
 			expect(0, "editor gone after suspend");
+			break;
+		case CHILD_STOPPED:
+			/* Genuinely suspended: Ctrl-C is not delivered to
+			 * a stopped process, so surviving it would prove
+			 * nothing.  The termios scenario above covers
+			 * this platform via the resume path instead. */
+			skip("editor suspended; Ctrl-C not delivered");
+			break;
+		case CHILD_RUNNING:
+			sendStr(&c, "\003", 600); /* Ctrl-C */
+			expect(childState(&c) != CHILD_GONE,
+			       "editor died on Ctrl-C after suspend");
+			break;
 		}
 		reap(&c);
 	}

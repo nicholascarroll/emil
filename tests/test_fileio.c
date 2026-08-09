@@ -647,7 +647,11 @@ void test_write_strategy_plain_file_is_atomic(void) {
 }
 
 /* rename() detaches the name from the inode, so every other link keeps
- * the old content while the save reports success. */
+ * the old content while the save reports success.
+ *
+ * Skipped where link() fails: a filesystem with no hard links cannot
+ * have the bug, and asserting that link() works is asserting about the
+ * platform rather than about emil. */
 void test_write_strategy_hard_linked_file_is_in_place(void) {
 	char tmpname[] = "/tmp/emil_test_XXXXXX";
 	int fd = mkstemp(tmpname);
@@ -656,7 +660,11 @@ void test_write_strategy_hard_linked_file_is_in_place(void) {
 
 	char linkname[64];
 	snprintf(linkname, sizeof(linkname), "%s.lnk", tmpname);
-	TEST_ASSERT_EQUAL_INT(0, link(tmpname, linkname));
+	if (link(tmpname, linkname) != 0) {
+		unlink(tmpname);
+		TEST_SKIP("no hard links on this filesystem");
+		return;
+	}
 
 	const char *reason = NULL;
 	TEST_ASSERT_EQUAL_INT(WRITE_IN_PLACE,
@@ -704,7 +712,11 @@ void test_save_hard_linked_file_keeps_links(void) {
 
 	char linkname[64];
 	snprintf(linkname, sizeof(linkname), "%s.lnk", tmpname);
-	TEST_ASSERT_EQUAL_INT(0, link(tmpname, linkname));
+	if (link(tmpname, linkname) != 0) {
+		unlink(tmpname);
+		TEST_SKIP("no hard links on this filesystem");
+		return;
+	}
 
 	struct stat before;
 	TEST_ASSERT_EQUAL_INT(0, stat(tmpname, &before));

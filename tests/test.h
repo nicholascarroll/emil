@@ -12,6 +12,8 @@
 static int _tests_run = 0;
 static int _tests_failed = 0;
 static int _current_test_failed = 0;
+static int _current_test_skipped = 0;
+static int _tests_skipped = 0;
 static const char *_current_test_name = NULL;
 
 /* Name of the test currently executing, for failure messages.  Only
@@ -105,11 +107,15 @@ static const char *_current_test_name = NULL;
 #define RUN_TEST(func)                                 \
 	do {                                           \
 		_current_test_failed = 0;              \
+		_current_test_skipped = 0;             \
 		_current_test_name = #func;            \
 		setUp();                               \
 		func();                                \
 		tearDown();                            \
-		_tests_run++;                          \
+		if (_current_test_skipped)             \
+			_tests_skipped++;              \
+		else                                   \
+			_tests_run++;                  \
 		if (_current_test_failed) {            \
 			_tests_failed++;               \
 			printf("  %s: FAIL\n", #func); \
@@ -121,8 +127,22 @@ static const char *_current_test_name = NULL;
  * failure count is deliberately NOT returned, since an exit status is
  * truncated to 8 bits and exactly 256 failures would be reported as
  * success. */
+/* Report the current test as skipped and stop counting it as a pass.
+ *
+ * For facts about the platform rather than about the code: a filesystem
+ * with no hard links, a pty that cannot report its own termios.  The
+ * alternative -- returning early and silently -- leaves a test that
+ * looks green while asserting nothing, which is worse than a visible
+ * gap.  The caller must return immediately after this. */
+#define TEST_SKIP(why)                                             \
+	do {                                                       \
+		printf("  SKIP: [%s]: %s\n", _TEST_NAME(), (why)); \
+		_current_test_skipped = 1;                         \
+	} while (0)
+
 #define TEST_END()                                                    \
-	(printf("%d Tests %d Failures\n", _tests_run, _tests_failed), \
+	(printf("%d Tests %d Failures %d Skipped\n", _tests_run,      \
+		_tests_failed, _tests_skipped),                       \
 	 (_tests_failed == 0) ? printf("OK\n") : printf("FAIL\n"),    \
 	 (_tests_failed != 0))
 

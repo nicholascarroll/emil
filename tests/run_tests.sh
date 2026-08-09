@@ -261,7 +261,16 @@ for suite in $SUITES; do
     else
         # Success is the only place we report the test count
         total=$(echo "$output" | awk '/Tests/{print $1; exit}')
-        echo "PASS ($total tests)"
+        skipped=$(echo "$output" | awk '/Tests/{print $5; exit}')
+        # A test that skips itself where the platform cannot host it
+        # (no hard links, no pty) must not read as a pass.  Show the
+        # count so a suite cannot quietly shrink.
+        if [ -n "$skipped" ] && [ "$skipped" -gt 0 ] 2>/dev/null; then
+            echo "PASS ($total tests, $skipped skipped)"
+            echo "$output" | grep '^  SKIP:' | sed 's/^/    /'
+        else
+            echo "PASS ($total tests)"
+        fi
     fi
 
 

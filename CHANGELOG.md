@@ -1,4 +1,20 @@
 ## [Unreleased]
+- Fixed the hard-link tests failing on Haiku, where `link()` is not
+  available. They asserted that the call succeeds, which is a claim about
+  the filesystem rather than about emil -- and a filesystem without hard
+  links cannot have the bug they guard. They now skip.
+- Fixed the terminal-ownership pty scenarios failing on MSYS2. They
+  assumed the raised `SIGTSTP` is always discarded, which POSIX requires
+  only for an orphaned process group: Linux and illumos discard it,
+  Cygwin stops the process anyway. A stopped editor is supposed to have
+  handed the terminal back, so the assertion had it exactly backwards.
+  The scenarios now distinguish stopped from running, and where the stop
+  takes effect they send `SIGCONT` and assert the editor reclaims the
+  terminal -- the same repair, reached the ordinary way.
+- Tests can now skip themselves. `TEST_SKIP` reports a platform that
+  cannot host a test rather than passing silently, and both the unit
+  suites and the pty scenarios count and print their skips, so coverage
+  cannot quietly shrink where nobody is looking.
 - Fixed the terminal-ownership pty scenarios failing on illumos. They
   asserted that `tcgetattr()` on the pty master reports the slave's
   termios, which is a Linux/BSD convenience: an illumos pty is a STREAMS
