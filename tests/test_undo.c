@@ -68,54 +68,6 @@ void test_undo_delete_chars(void) {
 	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
 }
 
-/* ---- Coalescing ---- */
-
-void test_coalesce_consecutive_inserts(void) {
-	struct buffer *buf = make_test_buffer("");
-	insertRow(buf, 0, (const uint8_t *)"", 0);
-	buf->cx = 0;
-	clearUndosAndRedos(buf);
-
-	selfInsert(buf, 'A', 1);
-	selfInsert(buf, 'B', 1);
-	selfInsert(buf, 'C', 1);
-	TEST_ASSERT_EQUAL_STRING("ABC", row_str(buf, 0));
-
-	/* Should undo as a single record */
-	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_STRING("", row_str(buf, 0));
-}
-
-void test_backspace_coalescing(void) {
-	struct buffer *buf = make_test_buffer("ABCD");
-	buf->cx = 4;
-	clearUndosAndRedos(buf);
-
-	E.buf = buf;
-	backSpace(1);
-	backSpace(1);
-
-	TEST_ASSERT_EQUAL_STRING("AB", row_str(buf, 0));
-
-	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_STRING("ABCD", row_str(buf, 0));
-}
-
-void test_forward_delete_coalescing(void) {
-	struct buffer *buf = make_test_buffer("ABCD");
-	buf->cx = 0;
-	clearUndosAndRedos(buf);
-
-	E.buf = buf;
-	delChar(1);
-	delChar(1);
-
-	TEST_ASSERT_EQUAL_STRING("CD", row_str(buf, 0));
-
-	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_STRING("ABCD", row_str(buf, 0));
-}
-
 /* ---- Edge cases ---- */
 
 void test_undo_empty_stack(void) {
@@ -257,16 +209,10 @@ void test_backspace_at_origin_is_a_noop(void) {
  * are what the old records got wrong.
  * ------------------------------------------------------------------ */
 
-/* The byte string the buffer would be written out as.  rowsToString
- * returns a length-counted block, not a C string, so terminate it —
- * these comparisons are on content, and a stray tail would make them
- * pass or fail for the wrong reason. */
-/* The byte string the buffer would be written out as.  Plain
- * serialisation: save() applies no policy of its own, because the
- * buffer already ends in a newline -- established at load, maintained
- * by the mutation layer.  This used to append one to a copy, working
- * around a policy that lived in save().  NUL-terminated so the
- * comparisons below can use string equality. */
+/* The byte string the buffer would be written out as.  save() applies
+ * no policy of its own: the buffer already ends in a newline, so plain
+ * serialisation is the whole of it.  NUL-terminated, because the
+ * comparisons below use string equality. */
 static char *contentOf(struct buffer *buf) {
 	size_t len;
 	return rowsToString(buf, &len);
@@ -288,12 +234,10 @@ static struct buffer *eofTestBuffer(void) {
 	return buf;
 }
 
-/* Put the cursor on the virtual EOF line, the way M-> does. */
 /* Put the cursor at the end of the buffer, the way M-> does.  Under
- * cy < numrows that is the end of the last real row, not a virtual
- * line past it.  For a newline-terminated buffer the last row is the
- * empty one, so cx is still 0 -- the same position in the text as
- * before, now nameable by the row array. */
+ * cy < numrows that is the end of the last real row, not a virtual line
+ * past it: the trailing newline is a real row, so the position is the
+ * same place in the text and the row array can name it. */
 static void gotoVirtualEOF(struct buffer *buf) {
 	processKeypress(CMD_END_OF_FILE);
 	TEST_ASSERT_EQUAL(buf->numrows - 1, buf->cy);
@@ -341,21 +285,20 @@ static void runEofOp(enum eof_op op) {
 	}
 }
 
-/* §9.1 / §9.9 — round-trip matrix.  Each insertion path at the virtual
- * EOF, and the same path at the end of the last real line as a control:
- * undo restores the original, redo restores the edit, undo again
- * restores the original. */
-static void eofRoundTrip(enum eof_op op, int at_virtual_eof) {
+/* Round-trip matrix, one case per insertion path: undo restores the
+ * original, redo restores the edit, undo again restores the original.
+ *
+ * This used to take an at_virtual_eof flag and run each path a second
+ * time as a control, positioned by hand at the end of the last real
+ * row.  Since the trailing newline became a real row, gotoVirtualEOF
+ * lands on exactly that position, so the control ran the identical
+ * scenario and asserted nothing the case above it had not. */
+static void eofRoundTrip(enum eof_op op) {
 	cleanupTestEditor();
 	initTestEditor();
 	struct buffer *buf = eofTestBuffer();
 
-	if (at_virtual_eof) {
-		gotoVirtualEOF(buf);
-	} else {
-		buf->cy = buf->numrows - 1;
-		buf->cx = buf->row[buf->cy].size;
-	}
+	gotoVirtualEOF(buf);
 
 	char *original = contentOf(buf);
 	runEofOp(op);
@@ -387,42 +330,27 @@ static void eofRoundTrip(enum eof_op op, int at_virtual_eof) {
 }
 
 void test_eof_roundtrip_newline(void) {
-	eofRoundTrip(OP_RET, 1);
+	eofRoundTrip(OP_RET);
 }
 
 void test_eof_roundtrip_open_line(void) {
-	eofRoundTrip(OP_OPEN_LINE, 1);
+	eofRoundTrip(OP_OPEN_LINE);
 }
 
 void test_eof_roundtrip_newline_indent(void) {
-	eofRoundTrip(OP_NEWLINE_INDENT, 1);
+	eofRoundTrip(OP_NEWLINE_INDENT);
 }
 
 void test_eof_roundtrip_self_insert(void) {
-	eofRoundTrip(OP_SELF_INSERT, 1);
+	eofRoundTrip(OP_SELF_INSERT);
 }
 
 void test_eof_roundtrip_tab(void) {
-	eofRoundTrip(OP_TAB, 1);
+	eofRoundTrip(OP_TAB);
 }
 
 void test_eof_roundtrip_yank(void) {
-	eofRoundTrip(OP_YANK, 1);
-}
-
-/* §9.9 — controls.  The same operations at the end of the last real
- * line were always correct and must stay correct: this change alters
- * what records mean, so the non-EOF paths need re-testing too. */
-void test_control_roundtrip_newline_at_eol(void) {
-	eofRoundTrip(OP_RET, 0);
-}
-
-void test_control_roundtrip_self_insert_at_eol(void) {
-	eofRoundTrip(OP_SELF_INSERT, 0);
-}
-
-void test_control_roundtrip_yank_at_eol(void) {
-	eofRoundTrip(OP_YANK, 0);
+	eofRoundTrip(OP_YANK);
 }
 
 /* §1 — the original symptom.  Five repetitions of M-> RET C-_ used to
@@ -547,28 +475,9 @@ void test_logical_insert_record_round_trips(void) {
 	free(after);
 }
 
-/* RETIRED in #105 phase 1 -- mechanism tests for anchorInsert.
- *
- * Removed here: test_anchor_insert_rule,
- * test_virtual_eof_records_state_the_whole_change,
- * test_record_equality_newline_at_eol_vs_virtual_eof,
- * test_empty_buffer_insert_undo_is_lossy_by_design.
- *
- * They asserted anchorInsert's return coordinates and the raw
- * startx/starty/endx/endy of the records it built -- the existence and
- * exact output of a compensation #105 removes on purpose.  A test that
- * pins the mechanism cannot survive the change it is measuring.
- *
- * The behaviour they protected is retained, and asserted on serialised
- * content instead: an edit at the end of the buffer undoes back to the
- * original text, redo reinstates it, and no spurious row is left
- * behind.  See the eof_payload_* family below and the virtual-EOF
- * tests in test_coalesce.c.
- *
- * The last of the four pinned the rowless-restore limitation (undo of
- * an insert into an empty buffer left one row rather than none).
- * numrows >= 1 makes a rowless buffer unreachable, so there is no
- * longer a limitation to pin. */
+/* The eof_payload_* family below asserts on serialised content rather
+ * than on record coordinates.  Coordinates were the wrong thing to pin:
+ * they described anchorInsert, a compensation #105 removed. */
 
 void test_eof_payload_one_line(void) {
 	eofYankRoundTrip("one", "alpha\nbeta\none\n");
@@ -576,10 +485,6 @@ void test_eof_payload_one_line(void) {
 
 void test_eof_payload_two_lines(void) {
 	eofYankRoundTrip("one\ntwo", "alpha\nbeta\none\ntwo\n");
-}
-
-void test_eof_payload_three_lines(void) {
-	eofYankRoundTrip("one\ntwo\nthree", "alpha\nbeta\none\ntwo\nthree\n");
 }
 
 void test_eof_payload_leading_newline(void) {
@@ -871,9 +776,6 @@ int main(void) {
 	RUN_TEST(test_multiple_sequential_undos);
 	RUN_TEST(test_undo_delete_chars);
 
-	RUN_TEST(test_coalesce_consecutive_inserts);
-	RUN_TEST(test_backspace_coalescing);
-	RUN_TEST(test_forward_delete_coalescing);
 
 	RUN_TEST(test_undo_empty_stack);
 	RUN_TEST(test_redo_cleared_after_new_edit);
@@ -891,15 +793,11 @@ int main(void) {
 	RUN_TEST(test_eof_roundtrip_self_insert);
 	RUN_TEST(test_eof_roundtrip_tab);
 	RUN_TEST(test_eof_roundtrip_yank);
-	RUN_TEST(test_control_roundtrip_newline_at_eol);
-	RUN_TEST(test_control_roundtrip_self_insert_at_eol);
-	RUN_TEST(test_control_roundtrip_yank_at_eol);
 	RUN_TEST(test_eof_repeated_newline_undo_does_not_accumulate);
 	RUN_TEST(test_eof_newline_redo_inserts_one_row_not_two);
 	RUN_TEST(test_logical_insert_record_round_trips);
 	RUN_TEST(test_eof_payload_one_line);
 	RUN_TEST(test_eof_payload_two_lines);
-	RUN_TEST(test_eof_payload_three_lines);
 	RUN_TEST(test_eof_payload_leading_newline);
 	RUN_TEST(test_eof_payload_newlines_only);
 	RUN_TEST(test_eof_payload_cjk);

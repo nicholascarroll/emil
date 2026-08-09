@@ -554,7 +554,7 @@ static char *writeTempFile(const char *name, const char *contents) {
 	return path;
 }
 
-/* ---- B2: revert() on a buffer with no filename must not crash.
+/* B2: revert() on a buffer with no filename must not crash.
  *
  * revert() passed buf->filename straight to editorOpen, whose first
  * act is collapseHome(filename) -> path[0].  Starting emil with no
@@ -574,7 +574,7 @@ void test_revert_null_filename_survives(void) {
 
 }
 
-/* ---- B4: revert() must refuse when the file no longer exists.
+/* B4: revert() must refuse when the file no longer exists.
  *
  * editorOpen returns 0 both when it loaded a file and when the file is
  * missing (ENOENT -> posts "(New file)").  revert() only tested < 0,

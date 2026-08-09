@@ -461,7 +461,22 @@ void yankPop(int uarg) {
 		return;
 	}
 
-	if (E.buf->undo == NULL || E.buf->undo->delete != 0) {
+	/* E.kill_ring_pos is emil's last-command flag: processKeypress
+	 * resets it to -1 for every command except yank, yank-pop and
+	 * the argument keys, and yank sets it.  A non-negative value
+	 * already means "the immediately preceding user-level command
+	 * was a yank or a yank-pop", so no corroboration from the undo
+	 * stack is needed or possible -- the stack records mutations,
+	 * not which command made them.
+	 *
+	 * What IS still needed is the assurance that there is a record
+	 * to undo.  The prompt loop dispatches C-y through
+	 * processKeypress but handles history browsing itself, so
+	 * "C-y, Up, M-y" in a prompt leaves kill_ring_pos set while
+	 * replaceMinibufferText has cleared the undo stack.  Without
+	 * this check the doUndo below would no-op and the yank below
+	 * would duplicate the text instead of replacing it. */
+	if (E.buf->undo == NULL) {
 		setStatusMessage("Previous command was not a yank");
 		return;
 	}
@@ -873,6 +888,14 @@ void stringRectangleWithText(uint8_t *string) {
 		 * stay whole outside the replacement. */
 		int s = rectSnapFwd(row, topx);
 		int e = rectSnapBack(row, botx);
+		/* A rectangle whose columns both fall inside one
+		 * multi-byte character snaps to an inverted pair: the
+		 * left edge forward past the character, the right edge
+		 * back before it.  That is a zero-width intersection
+		 * with this row, so say so here rather than leaving
+		 * each consumer to derive it from its own clamp. */
+		if (e < s)
+			e = s;
 
 		/* Pre-rectangle portion [0..s) */
 		int copy_n = (s < row->size) ? s : row->size;
@@ -923,6 +946,14 @@ static uint8_t *extractRectColumns(struct buffer *buf, int topx, int topy,
 		 * always fits in the rw-byte cell, space-padded. */
 		int s = rectSnapFwd(row, topx);
 		int e = rectSnapBack(row, botx);
+		/* A rectangle whose columns both fall inside one
+		 * multi-byte character snaps to an inverted pair: the
+		 * left edge forward past the character, the right edge
+		 * back before it.  That is a zero-width intersection
+		 * with this row, so say so here rather than leaving
+		 * each consumer to derive it from its own clamp. */
+		if (e < s)
+			e = s;
 		if (s >= row->size || e <= s)
 			continue;
 		memcpy(&out[idx * rw], &row->chars[s], e - s);
@@ -993,6 +1024,14 @@ void killRectangle(void) {
 		 * in the buffer. */
 		int s = rectSnapFwd(row, topx);
 		int e = rectSnapBack(row, botx);
+		/* A rectangle whose columns both fall inside one
+		 * multi-byte character snaps to an inverted pair: the
+		 * left edge forward past the character, the right edge
+		 * back before it.  That is a zero-width intersection
+		 * with this row, so say so here rather than leaving
+		 * each consumer to derive it from its own clamp. */
+		if (e < s)
+			e = s;
 
 		/* Portion before rectangle */
 		int n = (s > row->size) ? row->size : s;

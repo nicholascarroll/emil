@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-/* ---- B5: reverse search must not move forward past point.
+/* B5: reverse search must not move forward past point.
  *
  * The "match on the same row as the cursor" block was hardcoded
  * forward-only (strstr from cx + 1) and never consulted direction, so
@@ -66,36 +66,6 @@ void test_reverse_search_previous_row_takes_last_match(void) {
 	cleanupTestEditor();
 }
 
-/* Forward search on the cursor's own row starts at the cursor column.
- *
- * This test previously asserted cx == 0 and carried a comment saying
- * that a forward search scans from the top of the buffer rather than
- * from point, pinning that as intended behaviour.  It was not
- * intended: it is B14, and the assertion is now the Emacs one.  With
- * the cursor at column 5 of "foo bar foo", the match before point at
- * column 0 must be skipped in favour of the one at column 8. */
-void test_forward_search_first_char_from_point(void) {
-	initTestEditor();
-	makeMinibuffer();
-	const char *lines[] = { "aaa", "foo bar foo" };
-	struct buffer *buf = make_test_buffer_lines(lines, 2);
-	buf->cy = 1;
-	buf->cx = 5;
-
-	int keys[] = { 'f', '\r' };
-	scriptKeys(keys, 2);
-	muteStdout();
-	editorFind();
-	unmuteStdout();
-	clearKeys();
-
-	TEST_ASSERT_EQUAL_INT(1, E.buf->cy);
-	TEST_ASSERT_EQUAL_INT(8, E.buf->cx);
-
-	freeMinibuffer();
-	cleanupTestEditor();
-}
-
 /* C-s repeat drives the forward same-row block, which is the branch
  * the reverse fix sits next to.  The cursor starts at column 0 so that
  * the fresh search matches at point (column 0) and the repeat then has
@@ -124,7 +94,7 @@ void test_forward_search_repeat_advances(void) {
 	cleanupTestEditor();
 }
 
-/* ---- B14: forward search must start from point, not the top of the
+/* B14: forward search must start from point, not the top of the
  * buffer.
  *
  * Reported against the released build: C-s always began scanning at
@@ -328,7 +298,6 @@ int main(void) {
 
 	RUN_TEST(test_reverse_search_goes_backward);
 	RUN_TEST(test_reverse_search_previous_row_takes_last_match);
-	RUN_TEST(test_forward_search_first_char_from_point);
 	RUN_TEST(test_forward_search_repeat_advances);
 	RUN_TEST(test_forward_search_starts_from_point);
 	RUN_TEST(test_forward_search_matches_at_point);

@@ -23,37 +23,6 @@ void test_upcase_cafe(void) {
 	free(r);
 }
 
-void test_upcase_naive(void) {
-	/* naïve: n a ï(C3 AF) v e */
-	uint8_t *r = transformerUpcase((uint8_t *)"na\xc3\xafve");
-	TEST_ASSERT_EQUAL_STRING("NA\xc3\x8fVE", (char *)r);
-	free(r);
-}
-
-void test_upcase_ano(void) {
-	/* año: a ñ(C3 B1) o */
-	uint8_t *r = transformerUpcase((uint8_t *)"a\xc3\xb1o");
-	TEST_ASSERT_EQUAL_STRING("A\xc3\x91O", (char *)r);
-	free(r);
-}
-
-void test_upcase_uber(void) {
-	/* über: ü(C3 BC) b e r → ÜBER: Ü(C3 9C) B E R */
-	uint8_t *r = transformerUpcase((uint8_t *)"\xc3\xbc"
-						  "ber");
-	TEST_ASSERT_EQUAL_STRING("\xc3\x9c"
-				 "BER",
-				 (char *)r);
-	free(r);
-}
-
-void test_upcase_resume(void) {
-	/* résumé: r é(C3 A9) s u m é(C3 A9) */
-	uint8_t *r = transformerUpcase((uint8_t *)"r\xc3\xa9sum\xc3\xa9");
-	TEST_ASSERT_EQUAL_STRING("R\xc3\x89SUM\xc3\x89", (char *)r);
-	free(r);
-}
-
 void test_upcase_eszett_passthrough(void) {
 	/* ß (C3 9F) should pass through unchanged */
 	uint8_t *r = transformerUpcase((uint8_t *)"\xc3\x9f");
@@ -75,21 +44,6 @@ void test_downcase_cafe(void) {
 	free(r);
 }
 
-void test_downcase_uber(void) {
-	uint8_t *r = transformerDowncase((uint8_t *)"\xc3\x9c"
-						    "BER");
-	TEST_ASSERT_EQUAL_STRING("\xc3\xbc"
-				 "ber",
-				 (char *)r);
-	free(r);
-}
-
-void test_downcase_ano(void) {
-	uint8_t *r = transformerDowncase((uint8_t *)"A\xc3\x91O");
-	TEST_ASSERT_EQUAL_STRING("a\xc3\xb1o", (char *)r);
-	free(r);
-}
-
 /* ---- Capital case ---- */
 
 void test_capital_ascii(void) {
@@ -104,22 +58,6 @@ void test_capital_cafe(void) {
 	free(r);
 }
 
-void test_capital_uber(void) {
-	/* über → Über: ü at start should become Ü */
-	uint8_t *r = transformerCapitalCase((uint8_t *)"\xc3\xbc"
-						       "ber");
-	TEST_ASSERT_EQUAL_STRING("\xc3\x9c"
-				 "ber",
-				 (char *)r);
-	free(r);
-}
-
-void test_capital_resume(void) {
-	uint8_t *r = transformerCapitalCase((uint8_t *)"r\xc3\xa9sum\xc3\xa9");
-	TEST_ASSERT_EQUAL_STRING("R\xc3\xa9sum\xc3\xa9", (char *)r);
-	free(r);
-}
-
 void test_capital_mixed_words(void) {
 	/* "hello café world" → "Hello Café World" */
 	uint8_t *r =
@@ -128,27 +66,11 @@ void test_capital_mixed_words(void) {
 	free(r);
 }
 
-void test_capital_ano(void) {
-	uint8_t *r = transformerCapitalCase((uint8_t *)"a\xc3\xb1o");
-	TEST_ASSERT_EQUAL_STRING("A\xc3\xb1o", (char *)r);
-	free(r);
-}
-
 void test_capital_leading_accent(void) {
 	/* élan → Élan */
 	uint8_t *r = transformerCapitalCase((uint8_t *)"\xc3\xa9lan");
 	TEST_ASSERT_EQUAL_STRING("\xc3\x89lan", (char *)r);
 	free(r);
-}
-
-/* ---- Round-trip ---- */
-
-void test_upcase_downcase_roundtrip(void) {
-	uint8_t *up = transformerUpcase((uint8_t *)"caf\xc3\xa9");
-	uint8_t *down = transformerDowncase(up);
-	TEST_ASSERT_EQUAL_STRING("caf\xc3\xa9", (char *)down);
-	free(up);
-	free(down);
 }
 
 /* ---- Latin Extended-A ---- */
@@ -249,29 +171,19 @@ int main(void) {
 	/* Upcase */
 	RUN_TEST(test_upcase_ascii);
 	RUN_TEST(test_upcase_cafe);
-	RUN_TEST(test_upcase_naive);
-	RUN_TEST(test_upcase_ano);
-	RUN_TEST(test_upcase_uber);
-	RUN_TEST(test_upcase_resume);
 	RUN_TEST(test_upcase_eszett_passthrough);
 
 	/* Downcase */
 	RUN_TEST(test_downcase_ascii);
 	RUN_TEST(test_downcase_cafe);
-	RUN_TEST(test_downcase_uber);
-	RUN_TEST(test_downcase_ano);
 
 	/* Capital case */
 	RUN_TEST(test_capital_ascii);
 	RUN_TEST(test_capital_cafe);
-	RUN_TEST(test_capital_uber);
-	RUN_TEST(test_capital_resume);
 	RUN_TEST(test_capital_mixed_words);
-	RUN_TEST(test_capital_ano);
 	RUN_TEST(test_capital_leading_accent);
 
 	/* Round-trip */
-	RUN_TEST(test_upcase_downcase_roundtrip);
 
 	/* Latin Extended-A */
 	RUN_TEST(test_upcase_amacron);

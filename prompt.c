@@ -104,7 +104,10 @@ static struct history *histFor(enum promptType t) {
 	case PROMPT_COMMAND:
 		return &E.command_history;
 	case PROMPT_BUFFER:
-		return &E.buffer_history;
+		/* No history: completion already offers every open
+		 * buffer by name, so a history ring would only ever
+		 * repeat what TAB already shows. */
+		return NULL;
 	case PROMPT_REPLACE:
 		return &E.replace_history;
 	case PROMPT_SHELL:

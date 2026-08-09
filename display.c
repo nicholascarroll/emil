@@ -704,9 +704,27 @@ static int statusLeft(const struct buffer *bufr, char *out, int cap,
 			bufr->display_name :
 			(bufr->filename ? bufr->filename : "*scratch*");
 
-	char flags[8];
-	snprintf(flags, sizeof(flags), "%c%c%c", bufr->dirty ? '*' : '-',
-		 bufr->dirty ? '*' : '-', bufr->read_only ? '%' : ' ');
+	/* Two-character flag field, as Emacs writes it:
+	 *
+	 *   --   clean, writable
+	 *   **   modified, writable
+	 *   %%   clean, read-only
+	 *   %*   modified, read-only
+	 *
+	 * Both properties share the same two columns rather than
+	 * spending a third on a flag that is blank most of the time:
+	 * the left column carries read-only, the right carries
+	 * modified, and each doubles the other's character when it has
+	 * nothing of its own to say. */
+	char flags[4];
+	if (bufr->read_only) {
+		flags[0] = '%';
+		flags[1] = bufr->dirty ? '*' : '%';
+	} else {
+		flags[0] = bufr->dirty ? '*' : '-';
+		flags[1] = flags[0];
+	}
+	flags[2] = '\0';
 
 	/* Left-truncate name with "..." to fit name_width.
 	 *
@@ -799,10 +817,9 @@ static int statusMid(const struct window *win, char *out, char fc) {
  * count.
  *
  * Precedence (highest first):
- *   1. [MEMORY OVER!] 
- *   2. [DISK CHANGED] 
- *   3. [LOCK PID N]   
- *   4. (Macro)/(Wrap) 
+ *   1. FILE MODIFIED
+ *   2. NNNN LOCK / LOCKED
+ *   3. (Macro) / (Wrap) / (Macro Wrap)
  */
 static void statusRight(const struct window *win, char *out, int *out_bytes,
 			int *out_cols, char fc) {
@@ -816,9 +833,14 @@ static void statusRight(const struct window *win, char *out, int *out_bytes,
 	if (bufr->external_mod) {
 		snprintf(warn_buf, sizeof(warn_buf), "%s", "FILE MODIFIED");
 		warn = warn_buf;
-	} else if (bufr->lock_blocked_pid != 0) {
+	} else if (bufr->lock_blocked_pid > 0) {
 		snprintf(warn_buf, sizeof(warn_buf), "%d LOCK",
 			 bufr->lock_blocked_pid);
+		warn = warn_buf;
+	} else if (bufr->lock_blocked_pid != 0) {
+		/* Holder unknown: F_GETLK named no PID.  Sentinels must
+		 * never reach the user as "-1 LOCK". */
+		snprintf(warn_buf, sizeof(warn_buf), "%s", "LOCKED");
 		warn = warn_buf;
 	}
 
@@ -916,7 +938,7 @@ void drawStatusBar(struct window *win, struct abuf *ab, int line) {
 	if (min_name > dlen)
 		min_name = dlen;
 
-	int flags_len = 3; /* always "XY " where X,Y are dirty/ro chars */
+	int flags_len = 2; /* "XY": read-only column, modified column */
 	int name_need = 1 + flags_len + min_name; /* space + flags + name */
 	int remain = total - name_need;
 

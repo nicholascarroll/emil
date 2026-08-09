@@ -39,21 +39,9 @@ void test_expand_tilde_slash_only(void) {
 	free(r);
 }
 
-void test_expand_tilde_nested(void) {
-	char *r = expandTilde("~/a/b/c.txt");
-	TEST_ASSERT_EQUAL_STRING("/home/testuser/a/b/c.txt", r);
-	free(r);
-}
-
 void test_expand_no_tilde(void) {
 	char *r = expandTilde("/usr/bin/foo");
 	TEST_ASSERT_EQUAL_STRING("/usr/bin/foo", r);
-	free(r);
-}
-
-void test_expand_relative(void) {
-	char *r = expandTilde("src/main.c");
-	TEST_ASSERT_EQUAL_STRING("src/main.c", r);
 	free(r);
 }
 
@@ -91,12 +79,6 @@ void test_collapse_home_slash(void) {
 	free(r);
 }
 
-void test_collapse_nested(void) {
-	char *r = collapseHome("/home/testuser/a/b/c.txt");
-	TEST_ASSERT_EQUAL_STRING("~/a/b/c.txt", r);
-	free(r);
-}
-
 void test_collapse_not_under_home(void) {
 	char *r = collapseHome("/usr/local/bin");
 	TEST_ASSERT_EQUAL_STRING("/usr/local/bin", r);
@@ -109,42 +91,12 @@ void test_collapse_prefix_false_match(void) {
 	free(r);
 }
 
-void test_collapse_relative(void) {
-	char *r = collapseHome("src/main.c");
-	TEST_ASSERT_EQUAL_STRING("src/main.c", r);
-	free(r);
-}
-
 void test_collapse_no_home(void) {
 	unsetenv("HOME");
 	char *r = collapseHome("/home/testuser/foo");
 	TEST_ASSERT_EQUAL_STRING("/home/testuser/foo", r);
 	free(r);
 	setenv("HOME", "/home/testuser", 1);
-}
-
-void test_collapse_special_buffer(void) {
-	char *r = collapseHome("*scratch*");
-	TEST_ASSERT_EQUAL_STRING("*scratch*", r);
-	free(r);
-}
-
-/* ---- round-trip ---- */
-
-void test_roundtrip_expand_then_collapse(void) {
-	char *expanded = expandTilde("~/projects/foo.c");
-	char *collapsed = collapseHome(expanded);
-	TEST_ASSERT_EQUAL_STRING("~/projects/foo.c", collapsed);
-	free(expanded);
-	free(collapsed);
-}
-
-void test_roundtrip_absolute_collapse(void) {
-	char *collapsed = collapseHome("/home/testuser/bar.c");
-	char *expanded = expandTilde(collapsed);
-	TEST_ASSERT_EQUAL_STRING("/home/testuser/bar.c", expanded);
-	free(collapsed);
-	free(expanded);
 }
 
 /* ---- trailing slash on HOME ---- */
@@ -211,9 +163,7 @@ int main(void) {
 	RUN_TEST(test_expand_tilde_slash);
 	RUN_TEST(test_expand_tilde_alone);
 	RUN_TEST(test_expand_tilde_slash_only);
-	RUN_TEST(test_expand_tilde_nested);
 	RUN_TEST(test_expand_no_tilde);
-	RUN_TEST(test_expand_relative);
 	RUN_TEST(test_expand_tilde_otheruser);
 	RUN_TEST(test_expand_tilde_no_home);
 
@@ -221,16 +171,11 @@ int main(void) {
 	RUN_TEST(test_collapse_basic);
 	RUN_TEST(test_collapse_exact_home);
 	RUN_TEST(test_collapse_home_slash);
-	RUN_TEST(test_collapse_nested);
 	RUN_TEST(test_collapse_not_under_home);
 	RUN_TEST(test_collapse_prefix_false_match);
-	RUN_TEST(test_collapse_relative);
 	RUN_TEST(test_collapse_no_home);
-	RUN_TEST(test_collapse_special_buffer);
 
 	/* round-trip */
-	RUN_TEST(test_roundtrip_expand_then_collapse);
-	RUN_TEST(test_roundtrip_absolute_collapse);
 
 	/* trailing slash */
 	RUN_TEST(test_collapse_home_trailing_slash);

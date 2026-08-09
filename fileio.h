@@ -7,7 +7,21 @@
 struct buffer;
 struct config;
 
-/* File locking */
+/* File locking.
+ *
+ * lockFile distinguishes a conflict from an error, because the two
+ * want different responses from the background re-probe: a conflict
+ * is worth waiting out, an error is not.  ENOLCK in particular is
+ * what an NFS mount without a running rpc.lockd returns -- there is
+ * no holder and never will be one, so retrying every two seconds for
+ * the rest of the session accomplishes nothing. */
+enum lockResult {
+	LOCK_ACQUIRED = 0,
+	LOCK_CONFLICT = -1,    /* held by another process; retry */
+	LOCK_RETRY = -2,       /* interrupted (EINTR); retry */
+	LOCK_UNAVAILABLE = -3, /* ENOENT, ENOLCK, ...; never retry */
+};
+
 int probeLock(const char *filename);
 int lockFile(struct buffer *bufr, const char *filename);
 void releaseLock(struct buffer *bufr);

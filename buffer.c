@@ -220,6 +220,7 @@ struct buffer *newBuffer(void) {
 				     * buildScreenCache always takes the
 				     * column-change path */
 	ret->read_only = 0;
+	ret->read_only_by_lock = 0;
 	ret->lock_fd = -1;
 	ret->open_mtime = 0;
 	ret->external_mod = 0;

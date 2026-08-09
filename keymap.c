@@ -716,7 +716,7 @@ static int dispatchEdit(int c, int uarg) {
 			 * input that cannot work. */
 			setStatusMessage(
 				E.prompt_type == PROMPT_SEARCH ?
-					"Search cannot cross lines; use replace-regexp" :
+					"Search cannot cross lines" :
 					"Cannot use a newline in this prompt");
 			E.minibuf->completionState.preserve_message = 1;
 		} else if (key == '\n') {
@@ -868,6 +868,10 @@ static int dispatchBuffer(int c, int uarg) {
 		return 1;
 	case CMD_TOGGLE_READ_ONLY:
 		E.buf->read_only = !E.buf->read_only;
+		/* Whichever way it went, the state is now the user's
+		 * choice rather than one we imposed for an advisory
+		 * lock, so releasing that lock must not override it. */
+		E.buf->read_only_by_lock = 0;
 		setStatusMessage(E.buf->read_only ? "Buffer is read-only" :
 						    "Buffer set to writable");
 		return 1;
@@ -1265,26 +1269,24 @@ done:
 
 /*** init ***/
 
+/* Replay a recorded macro through the normal dispatch path.
+ *
+ * There is no recursion to guard against.  CMD_MACRO_EXEC refuses
+ * while E.recording || E.playback (see dispatchMacro), which is the
+ * "No Self-Referential Execution" invariant of §4.2, so this function
+ * can never be entered from within itself.  A depth counter and a
+ * save/restore of E.macro used to sit here; both were unreachable by
+ * construction, and an unreachable guard is worse than none: it
+ * implies a nesting capability that does not exist.
+ *
+ * 'macro' is always &E.macro for the same reason, and is taken as a
+ * parameter only to keep the call site explicit about what is being
+ * played. */
 void execMacro(struct macro *macro) {
-	const int MAX_MACRO_DEPTH = 100;
-	if (E.macro_depth >= MAX_MACRO_DEPTH) {
-		setStatusMessage("Macro recursion depth exceeded");
-		return;
-	}
-
-	E.macro_depth++;
-
-	struct macro tmp;
-	tmp.keys = NULL;
-	if (macro != &E.macro) {
-		memcpy(&tmp, &E.macro, sizeof(struct macro));
-		memcpy(&E.macro, macro, sizeof(struct macro));
-	}
 	E.playback = 0;
-	while (E.playback < E.macro.nkeys) {
-		/* Increment here, so that
-		 * readkey sees playback != 0 */
-		int key = E.macro.keys[E.playback++];
+	while (E.playback < macro->nkeys) {
+		/* Increment here, so that readKey sees playback != 0 */
+		int key = macro->keys[E.playback++];
 		if (key == KEY_UNICODE) {
 			deserializeUnicode();
 		}
@@ -1295,9 +1297,4 @@ void execMacro(struct macro *macro) {
 			processKeypress(cmd);
 	}
 	E.playback = 0;
-	if (tmp.keys != NULL) {
-		memcpy(&E.macro, &tmp, sizeof(struct macro));
-	}
-
-	E.macro_depth--;
 }

@@ -48,7 +48,6 @@ static inline void cleanupTestEditor(void) {
 	freeHistory(&E.search_history);
 	freeHistory(&E.replace_history);
 	freeHistory(&E.rect_history);
-	freeHistory(&E.buffer_history);
 	freeHistory(&E.kill_history);
 
 	/* Free the kill text */
@@ -87,7 +86,6 @@ static inline void cleanupTestEditor(void) {
 	E.uarg = 0;
 	E.kill_ring_pos = 0;
 	E.self_insert_key = 0;
-	E.macro_depth = 0;
 	E.lastVisitedBuffer = NULL;
 	E.edbuf = NULL;
 	E.minibuf = NULL;

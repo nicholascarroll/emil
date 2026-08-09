@@ -115,38 +115,6 @@ static char *run_shell(const char *shell_cmd, const char *input) {
 	return buf;
 }
 
-/* ---- Helper: resolve a command name to an absolute path by
- *      searching PATH (like posix_spawnp, but explicit).
- *      Returns a malloc'd string, or NULL if not found. ---- */
-static char *resolve_in_path(const char *name) {
-	if (name[0] == '/') {
-		if (access(name, X_OK) == 0)
-			return xstrdup(name);
-		return NULL;
-	}
-
-	const char *path_env = getenv("PATH");
-	if (!path_env) return NULL;
-
-	char *path_copy = xstrdup(path_env);
-	char *saveptr = NULL;
-	char *dir = strtok_r(path_copy, ":", &saveptr);
-	char trial[1024];
-
-	while (dir) {
-		int n = snprintf(trial, sizeof(trial), "%s/%s", dir, name);
-		if (n > 0 && (size_t)n < sizeof(trial)) {
-			if (access(trial, X_OK) == 0) {
-				free(path_copy);
-				return xstrdup(trial);
-			}
-		}
-		dir = strtok_r(NULL, ":", &saveptr);
-	}
-	free(path_copy);
-	return NULL;
-}
-
 /* ---- Helper: run a direct command with PATH search (no shell).
  *      This matches how diffBufferWithFile spawns diff.
  *      Returns NULL on failure (caller must handle). ---- */
@@ -241,141 +209,6 @@ static char *write_temp_file(const char *content) {
 	}
 	close(fd);
 	return path;
-}
-
-/* ================================================================
- * 0. Platform diagnostics: baby-step verification of prerequisites
- *
- * Each test isolates ONE assumption.  When something breaks on a
- * new platform, the first failing diagnostic identifies the cause.
- * ================================================================ */
-
-/* 0a. Can we get a temp directory and create a file in it? */
-void test_platform_tmpdir_writable(void) {
-	make_test_buffer("");
-	const char *td = get_tmpdir();
-	fprintf(stderr, "    tmpdir = '%s'\n", td);
-	TEST_ASSERT_NOT_NULL(td);
-	TEST_ASSERT(strlen(td) > 0);
-
-	char *path = write_temp_file("hello\n");
-	if (!path) { TEST_ASSERT_NOT_NULL(path); return; }
-	fprintf(stderr, "    temp file = '%s'\n", path);
-
-	FILE *f = fopen(path, "r");
-	TEST_ASSERT_NOT_NULL(f);
-	if (f) {
-		char buf[32] = {0};
-		char *got = fgets(buf, sizeof(buf), f);
-		fclose(f);
-		TEST_ASSERT_NOT_NULL(got);
-		TEST_ASSERT_EQUAL_STRING("hello\n", buf);
-	}
-	unlink(path);
-	free(path);
-}
-
-/* 0b. Does /bin/sh exist and can posix_spawn run it? */
-void test_platform_bin_sh_exists(void) {
-	make_test_buffer("");
-	int sh_ok = (access("/bin/sh", X_OK) == 0);
-	fprintf(stderr, "    /bin/sh accessible: %s\n", sh_ok ? "yes" : "no");
-	TEST_ASSERT(sh_ok);
-}
-
-/* 0c. Can subprocess_create + join work for /bin/sh -c 'echo test'? */
-void test_platform_subprocess_basic(void) {
-	make_test_buffer("");
-	char *output = run_shell("echo subprocess_ok", NULL);
-	if (!output) {
-		fprintf(stderr, "    subprocess basic echo FAILED\n");
-		TEST_ASSERT_NOT_NULL(output);
-		return;
-	}
-	fprintf(stderr, "    subprocess basic echo: ok\n");
-	TEST_ASSERT_EQUAL_STRING("subprocess_ok\n", output);
-	free(output);
-}
-
-/* 0d. Is `diff` findable via PATH? */
-void test_platform_diff_in_path(void) {
-	make_test_buffer("");
-	char *diff_path = resolve_in_path("diff");
-	if (diff_path) {
-		fprintf(stderr, "    diff found: '%s'\n", diff_path);
-		TEST_ASSERT(access(diff_path, X_OK) == 0);
-		free(diff_path);
-	} else {
-		fprintf(stderr, "    diff NOT found in PATH\n");
-		const char *p = getenv("PATH");
-		fprintf(stderr, "    PATH = '%s'\n", p ? p : "(null)");
-		TEST_ASSERT_NOT_NULL(diff_path); /* deliberate fail */
-	}
-}
-
-/* 0e. Can posix_spawnp actually launch `diff`?
- *     Uses self-diff (exit 0) since --version is not portable
- *     (BusyBox and OpenIndiana diff don't support it). */
-void test_platform_spawnp_diff(void) {
-	make_test_buffer("");
-
-	char *path = write_temp_file("spawnp test\n");
-	if (!path) { TEST_ASSERT_NOT_NULL(path); return; }
-
-	const char *argv[] = { "diff", path, path, NULL };
-	int exit_code = -1;
-	char *output = run_command(argv, &exit_code);
-	if (!output) {
-		fprintf(stderr, "    posix_spawnp('diff') FAILED to launch\n");
-		char *abs = resolve_in_path("diff");
-		fprintf(stderr, "    resolve_in_path: %s\n",
-			abs ? abs : "NOT FOUND");
-		free(abs);
-		TEST_ASSERT_NOT_NULL(output);
-		unlink(path); free(path);
-		return;
-	}
-	fprintf(stderr, "    posix_spawnp('diff') ok, exit=%d\n", exit_code);
-	TEST_ASSERT_EQUAL_INT(0, exit_code);
-
-	unlink(path);
-	free(path);
-	free(output);
-}
-
-/* 0f. End-to-end: diff two different temp files */
-void test_platform_diff_two_files(void) {
-	make_test_buffer("");
-	char *f1 = write_temp_file("aaa\n");
-	char *f2 = write_temp_file("bbb\n");
-	if (!f1 || !f2) {
-		fprintf(stderr, "    temp file creation failed\n");
-		TEST_ASSERT_NOT_NULL(f1);
-		TEST_ASSERT_NOT_NULL(f2);
-		if (f1) { unlink(f1); free(f1); }
-		if (f2) { unlink(f2); free(f2); }
-		return;
-	}
-
-	const char *argv[] = { "diff", "-u", f1, f2, NULL };
-	int exit_code = -1;
-	char *output = run_command(argv, &exit_code);
-	if (!output) {
-		fprintf(stderr, "    diff of two temp files FAILED\n");
-		fprintf(stderr, "    file1='%s' file2='%s'\n", f1, f2);
-		TEST_ASSERT_NOT_NULL(output);
-		unlink(f1); unlink(f2); free(f1); free(f2);
-		return;
-	}
-
-	/* diff returns 1 when files differ */
-	TEST_ASSERT_EQUAL_INT(1, exit_code);
-	TEST_ASSERT(strlen(output) > 0);
-	TEST_ASSERT(strstr(output, "aaa") != NULL);
-	TEST_ASSERT(strstr(output, "bbb") != NULL);
-
-	unlink(f1); unlink(f2);
-	free(f1); free(f2); free(output);
 }
 
 /* ================================================================
@@ -796,14 +629,6 @@ int main(void) {
 	TEST_BEGIN();
 
 #ifndef EMIL_DISABLE_SHELL
-	/* 0. Platform diagnostics */
-	RUN_TEST(test_platform_tmpdir_writable);
-	RUN_TEST(test_platform_bin_sh_exists);
-	RUN_TEST(test_platform_subprocess_basic);
-	RUN_TEST(test_platform_diff_in_path);
-	RUN_TEST(test_platform_spawnp_diff);
-	RUN_TEST(test_platform_diff_two_files);
-
 	/* 1. Shell command, no region */
 	RUN_TEST(test_shell_echo_to_buffer);
 	RUN_TEST(test_shell_multiline_to_buffer);

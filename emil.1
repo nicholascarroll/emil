@@ -441,6 +441,10 @@ aims for Emacs compatibility but has some differences in functionality: it uses 
 In Emacs, this is the user defined keybinding prefix. In
 .Nm ,
 it copies to the system clipboard (OSC 52) as well as the kill ring.
+.It Cm C-x C-s
+In Emacs, if the file was externally modified, the user is prompted to confirm overwrite. In
+.Nm ,
+there is no such prompt, instead presenting the FILE MODIFIED status bar indicator.
 .It Cm C-x C-z
 In Emacs, this suspends and clears the screen. In
 .Nm ,

@@ -102,10 +102,11 @@ int probeLock(const char *filename) {
 	return pid;
 }
 
-/* Try to acquire an advisory write lock on a file.
- * Returns 0 on success (lock acquired), -1 if already locked (sets
- * status message with the blocking PID), or -2 on error.
- * On success, bufr->lock_fd is set and must be released later. */
+/* Try to acquire an advisory write lock on a file.  Returns one of
+ * the enum lockResult values (see fileio.h).  On LOCK_ACQUIRED,
+ * bufr->lock_fd is set and must be released later.  On LOCK_CONFLICT,
+ * bufr->lock_blocked_pid names the holder (or is -1 if F_GETLK does
+ * not name one).  No other outcome touches lock_blocked_pid. */
 int lockFile(struct buffer *bufr, const char *filename) {
 	/* Try O_RDWR first (needed for F_WRLCK per POSIX).
 	 * Fall back to O_RDONLY + F_RDLCK if the file isn't writable. */
@@ -113,10 +114,18 @@ int lockFile(struct buffer *bufr, const char *filename) {
 	int use_rdlck = 0;
 	if (fd < 0) {
 		if (errno == ENOENT)
-			return -2; /* file doesn't exist yet: nothing to lock */
+			return LOCK_UNAVAILABLE; /* nothing to lock */
+		/* EINTR is not a permission failure.  The background
+		 * check arms a SIGALRM deadline around this very call,
+		 * so an interrupted open used to fall through to the
+		 * O_RDONLY retry and take an F_RDLCK on a perfectly
+		 * writable file -- reporting the file as unwritable
+		 * because our own watchdog fired. */
+		if (errno == EINTR)
+			return LOCK_RETRY;
 		fd = open(filename, O_RDONLY);
 		if (fd < 0)
-			return -2;
+			return errno == EINTR ? LOCK_RETRY : LOCK_UNAVAILABLE;
 		use_rdlck = 1;
 	}
 
@@ -136,12 +145,14 @@ int lockFile(struct buffer *bufr, const char *filename) {
 		if (fstat(fd, &st) == 0)
 			bufr->open_mtime = st.st_mtime;
 
-		return 0;
+		return LOCK_ACQUIRED;
 	}
 
-	/* Lock failed: find out who holds it, record on the buffer for
-	 * the persistent status-bar warning. */
-	if (errno == EACCES || errno == EAGAIN) {
+	int lock_errno = errno;
+
+	/* A genuine conflict: find out who holds it and record that on
+	 * the buffer for the persistent status-bar warning. */
+	if (lock_errno == EACCES || lock_errno == EAGAIN) {
 		struct flock query;
 		memset(&query, 0, sizeof(query));
 		query.l_type = F_WRLCK;
@@ -155,21 +166,49 @@ int lockFile(struct buffer *bufr, const char *filename) {
 		} else {
 			bufr->lock_blocked_pid = -1; /* unknown holder */
 		}
+		close(fd);
+		return LOCK_CONFLICT;
 	}
 
 	close(fd);
-	return -1;
+	if (lock_errno == EINTR)
+		return LOCK_RETRY;
+
+	/* ENOLCK and friends: locking is not available here at all.
+	 * There is no holder to wait for, so the caller must stop
+	 * asking rather than probe a dead lock manager forever. */
+	return LOCK_UNAVAILABLE;
 }
 
-/* Release the advisory lock held by this buffer.*/
-
+/* Release the advisory lock held by this buffer.
+ *
+ * Deliberately does NOT clear open_mtime.  The lock lifetime and the
+ * external-modification baseline are unrelated: this is called from
+ * markBufferClean on the dirty->clean edge, which a plain run of C-_
+ * back to the start of the session reaches.  Zeroing open_mtime there
+ * disabled the FILE MODIFIED check for the rest of the buffer's life,
+ * because checkFileModified's job 1 is gated on open_mtime != 0.
+ * Callers that genuinely change which file the buffer refers to
+ * (saveAs) clear the baseline themselves. */
 void releaseLock(struct buffer *bufr) {
 	if (bufr->lock_fd >= 0) {
 		close(bufr->lock_fd);
 		bufr->lock_fd = -1;
 	}
-	bufr->open_mtime = 0;
 	bufr->lock_blocked_pid = 0;
+}
+
+/* The advisory lock is no longer held by anyone else -- or can no
+ * longer be determined at all.  Clear the warning, and lift a
+ * read-only that we imposed for the lock.  A read-only set because
+ * access(W_OK) failed, or because the user pressed C-x C-q, is not
+ * ours to undo and is left alone. */
+static void clearLockWarning(struct buffer *bufr) {
+	bufr->lock_blocked_pid = 0;
+	if (bufr->read_only_by_lock) {
+		bufr->read_only = 0;
+		bufr->read_only_by_lock = 0;
+	}
 }
 
 /* Check whether the underlying file has been modified externally,
@@ -189,29 +228,44 @@ void releaseLock(struct buffer *bufr) {
  *   1. Set bufr->external_mod if mtime has drifted since open/save.
  *      One-shot: skipped if the flag is already set.
  *
- *   2. Re-probe the advisory lock when we know we have a stale
- *      warning to clear: the buffer is dirty, we previously tried
- *      and failed to acquire the lock (lock_blocked_pid != 0), and
- *      we still don't hold it (lock_fd < 0).
+ *   2. Clear a stale lock warning once the holder has released.
+ *      Runs while lock_blocked_pid is set and we do not hold the
+ *      lock, whether or not the buffer is dirty -- a buffer opened
+ *      read-only BECAUSE of a lock can never become dirty, so the
+ *      old dirty gate excluded the single most common way the
+ *      warning appears, and it displayed a PID that had long since
+ *      exited for the rest of the session.
+ *
+ *      A dirty buffer wants the lock, so it tries to acquire it.  A
+ *      clean one only wants to know whether the holder is gone, so
+ *      it probes without acquiring: the lock is held while there are
+ *      unsaved changes and at no other time.
  *
  *      Job 2 is gated on !external_mod: if the blocking process
  *      saved changes before releasing the lock, Job 1 will have
  *      already set external_mod from the mtime drift, and we
  *      deliberately don't acquire a lock we'd use to overwrite
- *      those changes. */
+ *      those changes.
+ *
+ * The timeout is advisory in BOTH jobs.  It never invalidates a
+ * result: if the underlying syscall returned successfully, that
+ * answer is used even though the alarm was delivered during it.  The
+ * flag says the operation was slow, not that its result is wrong. */
 
 void checkFileModified(void) {
-	if (E.buf->filename == NULL)
+	if (E.buf->filename == NULL || E.buf->special_buffer)
 		return;
 
-	/* Throttle: skip if we checked recently. */
+	/* Throttle: skip if we checked recently.  Fails closed -- if
+	 * the clock is unreadable we skip the check rather than run it
+	 * unthrottled on every frame. */
 	struct timespec now;
-	if (clock_gettime(CLOCK_MONOTONIC, &now) == 0) {
-		long elapsed = now.tv_sec - E.last_file_check.tv_sec;
-		if (elapsed >= 0 && elapsed < FILE_CHECK_INTERVAL_SEC)
-			return;
-		E.last_file_check = now;
-	}
+	if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+		return;
+	long elapsed = now.tv_sec - E.last_file_check.tv_sec;
+	if (elapsed >= 0 && elapsed < FILE_CHECK_INTERVAL_SEC)
+		return;
+	E.last_file_check = now;
 
 	/* Job 1: mtime check. */
 	if (E.buf->open_mtime != 0 && !E.buf->external_mod) {
@@ -220,43 +274,53 @@ void checkFileModified(void) {
 		armTimer();
 		int rc = stat(iopath, &st);
 		disarmTimer();
-		if (rc == 0 && !file_check_timed_out) {
-			if (st.st_mtime != E.buf->open_mtime) {
-				E.buf->external_mod = 1;
-				setStatusMessage("Warning: %s modified on disk",
-						 E.buf->filename);
-			}
+		if (rc == 0 && st.st_mtime != E.buf->open_mtime) {
+			E.buf->external_mod = 1;
+			setStatusMessage("Warning: %s modified on disk",
+					 E.buf->filename);
 		}
 		free(iopath);
 	}
 
-	/* Job 2: stale-lock re-probe. */
-	if (E.buf->dirty && E.buf->lock_blocked_pid != 0 &&
-	    E.buf->lock_fd < 0 && !E.buf->external_mod) {
+	/* Job 2: stale-lock clearing. */
+	if (E.buf->lock_blocked_pid != 0 && E.buf->lock_fd < 0 &&
+	    !E.buf->external_mod) {
 		char *iopath = expandTilde(E.buf->filename);
-		armTimer();
-		int rc = lockFile(E.buf, iopath);
-		disarmTimer();
-		if (rc == 0) {
-			/* Acquired: warning clears.  Do NOT gate this
-			 * on !file_check_timed_out: on a slow filesystem
-			 * every syscall inside lockFile can succeed
-			 * individually while their sum exceeds the 50ms
-			 * deadline.  lock_fd is held either way, and
-			 * since this job only runs while lock_fd < 0,
-			 * skipping the clear here would latch the
-			 * contradictory state "lock held + blocked by
-			 * PID" (and its status-bar warning) for the
-			 * rest of the session.  The timeout flag only
-			 * says the probe was slow, not that its result
-			 * is invalid: an interrupted syscall makes
-			 * lockFile fail, landing in the rc != 0 path. */
-			E.buf->lock_blocked_pid = 0;
-			setStatusMessage("File lock acquired");
+		if (E.buf->dirty) {
+			/* We want the lock: try to take it. */
+			armTimer();
+			int rc = lockFile(E.buf, iopath);
+			disarmTimer();
+			if (rc == LOCK_ACQUIRED || rc == LOCK_UNAVAILABLE) {
+				/* Acquired, or there is nothing here to
+				 * wait for.  Either way the warning is
+				 * no longer true; stop repeating it and,
+				 * for LOCK_UNAVAILABLE, stop asking.
+				 *
+				 * Silent: the user did not ask to take a
+				 * lock, and announcing it from a
+				 * background poll would clobber whatever
+				 * message they were reading. */
+				clearLockWarning(E.buf);
+			}
+			/* LOCK_CONFLICT: lockFile has refreshed
+			 * lock_blocked_pid to the current holder, which
+			 * may be a different process from before.
+			 * LOCK_RETRY: leave the state alone and try
+			 * again on the next tick. */
+		} else {
+			/* We do not want the lock, only to know whether
+			 * it is still held. */
+			armTimer();
+			int pid = probeLock(iopath);
+			disarmTimer();
+			if (pid == 0 || pid == -2) {
+				/* Free, or no longer answerable. */
+				clearLockWarning(E.buf);
+			} else {
+				E.buf->lock_blocked_pid = pid;
+			}
 		}
-		/* On failure lockFile has already refreshed
-		 * lock_blocked_pid to reflect the current holder
-		 * (possibly a different process from before). */
 		free(iopath);
 	}
 }
@@ -529,7 +593,15 @@ int editorOpen(struct buffer *bufr, const char *filename) {
 		}
 	}
 
-	if (lock_pid != 0) {
+	/* probeLock returns -2 on error (unreadable, vanished), which is
+	 * not a lock and must not reach lock_blocked_pid: the status bar
+	 * would render it as "-2 LOCK". */
+	if (lock_pid > 0 || lock_pid == -1) {
+		/* Only claim the read-only as ours if nothing else has
+		 * already imposed it -- otherwise releasing the lock
+		 * would make an unwritable file writable. */
+		if (!bufr->read_only)
+			bufr->read_only_by_lock = 1;
 		bufr->read_only = 1;
 		bufr->lock_blocked_pid = lock_pid;
 		if (lock_pid > 0)
@@ -876,6 +948,56 @@ static void saveBuffer(void) {
 	free(iopath);
 }
 
+/* Ask a y/N question in the minibuffer.  Returns 1 for yes. */
+static int confirmYN(const char *msg) {
+	setStatusMessage("%s", msg);
+	refreshScreen();
+	int c = readKey();
+	clearStatusMessage();
+	return (c == 'y' || c == 'Y');
+}
+
+/* The authoritative external-modification check, run immediately
+ * before writing.  Returns 1 to proceed with the save, 0 to abandon
+ * it.
+ *
+ * This is the check whose freshness matters, because it is the only
+ * one on the same code path as the rename().  No polling interval can
+ * close the window between a check and a write -- another process can
+ * always write in the microsecond after a poll returns -- so the
+ * question is settled at the moment of writing.  The background check
+ * in checkFileModified exists only to light the status-bar indicator
+ * early, and nothing depends on its freshness for correctness.
+ *
+ * The prompt is suppressed when the status bar is already warning
+ * about this file.  The indicator IS the warning; a user who has had
+ * it in front of them and pressed C-x C-s anyway has made a deliberate
+ * choice, and asking again would be nagging.  external_mod is set
+ * before prompting, so answering "n" leaves the indicator lit and a
+ * subsequent save proceeds without re-asking. */
+static int preSaveCheck(struct buffer *buf) {
+	if (buf->filename == NULL || buf->special_buffer)
+		return 1;
+	if (buf->open_mtime == 0)
+		return 1; /* no baseline: nothing to compare against */
+
+	char *iopath = expandTilde(buf->filename);
+	struct stat st;
+	int rc = stat(iopath, &st);
+	free(iopath);
+
+	int vanished = (rc != 0);
+	if (!vanished && st.st_mtime == buf->open_mtime)
+		return 1; /* unchanged */
+
+	buf->external_mod = 1;
+
+	return confirmYN(
+		vanished ?
+			"File no longer exists on disk. Save anyway? (y or n)" :
+			"File has changed on disk since it was read. Save anyway? (y or n)");
+}
+
 /* C-x C-s.  A buffer that already matches its file is not rewritten:
  * the write is not free (atomic temp file, rename, two fsyncs, an
  * mtime bump that every other process watching the file will see), and
@@ -887,6 +1009,10 @@ static void saveBuffer(void) {
 void save(void) {
 	if (E.buf->filename != NULL && !E.buf->dirty) {
 		setStatusMessage("(No changes need to be saved)");
+		return;
+	}
+	if (!preSaveCheck(E.buf)) {
+		setStatusMessage("Save aborted.");
 		return;
 	}
 	saveBuffer();
@@ -907,8 +1033,16 @@ void saveAs(void) {
 	free(E.buf->filename);
 	E.buf->filename = collapseHome(new_filename);
 	free(new_filename);
-	/* Release lock on the old file before saving to the new one */
+	/* Release lock on the old file before saving to the new one.
+	 * The buffer now refers to a different file, so the
+	 * external-modification baseline and any lock-imposed
+	 * read-only both belong to the old one and are discarded here
+	 * -- releaseLock deliberately no longer does this, because the
+	 * dirty->clean edge must not. */
 	releaseLock(E.buf);
+	E.buf->open_mtime = 0;
+	E.buf->external_mod = 0;
+	E.buf->read_only_by_lock = 0;
 	computeDisplayNames();
 	saveBuffer();
 }
@@ -989,7 +1123,11 @@ void findFile(int read_only) {
 			struct buffer *buf = switchToFile(gl.gl_pathv[i]);
 			if (buf) {
 				if (read_only) {
+					/* Explicit user request: not
+					 * ours to lift when a lock
+					 * clears. */
 					buf->read_only = 1;
+					buf->read_only_by_lock = 0;
 					setStatusMessage("Buffer is read-only");
 				}
 				last = buf;
@@ -1027,7 +1165,10 @@ void findFile(int read_only) {
 	free(prompt);
 	if (buf) {
 		if (read_only) {
+			/* Explicit user request: not ours to lift when a
+			 * lock clears. */
 			buf->read_only = 1;
+			buf->read_only_by_lock = 0;
 			setStatusMessage("Buffer is read-only");
 		}
 		refreshScreen();

@@ -179,7 +179,7 @@ static void mutateReplaceEx(struct buffer *buf, int startx, int starty,
 	 * empty: in the latter case this ins is the "first record" and
 	 * takes the chain. */
 	if (repl_len > 0) {
-			struct dbuf adata = DBUF_INIT;
+		struct dbuf adata = DBUF_INIT;
 		dbuf_append(&adata, repl, repl_len);
 
 		struct undo *ins = newUndo();

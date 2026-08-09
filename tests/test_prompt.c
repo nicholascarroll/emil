@@ -12,7 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-/* ---- B1: a nested prompt must not clobber the outer prompt's saved
+/* B1: a nested prompt must not clobber the outer prompt's saved
  * editor buffer.
  *
  * editorPrompt saves E.buf into E.edbuf on entry and restores from it
@@ -70,7 +70,7 @@ void test_double_nested_prompt_preserves_buffer(void) {
 	cleanupTestEditor();
 }
 
-/* ---- B3: zap-to-char must not split a UTF-8 character.
+/* B3: zap-to-char must not split a UTF-8 character.
  *
  * readKey() returns key tokens >= 1000 for navigation keys.  zapToChar
  * compared row bytes against (uint8_t)c, and truncating those tokens

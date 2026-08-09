@@ -3,11 +3,12 @@
  *
  * Covers the two pure functions behind replaceRegex:
  * replacementTemplateError (template validation) and
- * regexSubstituteAll (matching and expansion).  Going through the
- * pure functions rather than replaceRegex itself keeps the prompts
- * out of the way, and lets the cross-line cases below be pinned
- * down even though no UI path can currently put a newline into a
- * pattern. */
+ * regexSubstituteAll (matching and expansion).  Driving the pure
+ * functions rather than replaceRegex keeps the prompts out of the way.
+ *
+ * Patterns containing a literal newline are reachable from the UI via
+ * C-q C-j, so the cross-line cases below are live behaviour, not
+ * hypotheticals. */
 
 #include "test.h"
 #include "test_harness.h"

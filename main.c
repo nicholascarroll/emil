@@ -145,7 +145,6 @@ void editorCleanup(void) {
 	freeHistory(&E.search_history);
 	freeHistory(&E.replace_history);
 	freeHistory(&E.rect_history);
-	freeHistory(&E.buffer_history);
 	freeHistory(&E.kill_history);
 
 	/* Free registers */
@@ -186,7 +185,6 @@ static void initEditor(void) {
 	memset(E.registers, 0, sizeof(E.registers));
 	setupCommands();
 	E.lastVisitedBuffer = NULL;
-	E.macro_depth = 0;
 
 	initHistory(&E.file_history);
 	initHistory(&E.command_history);
@@ -194,7 +192,6 @@ static void initEditor(void) {
 	initHistory(&E.search_history);
 	initHistory(&E.replace_history);
 	initHistory(&E.rect_history);
-	initHistory(&E.buffer_history);
 	initHistory(&E.kill_history);
 	E.kill_ring_pos = -1;
 

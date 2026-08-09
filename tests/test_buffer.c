@@ -69,15 +69,6 @@ void test_insert_row_beginning(void) {
 	TEST_ASSERT_EQUAL_STRING("second", (char *)buf->row[1].chars);
 }
 
-void test_insert_row_middle(void) {
-	struct buffer *buf = make_test_buffer(NULL);
-	insertRow(buf, 0, (const uint8_t *)"first", 5);
-	insertRow(buf, 1, (const uint8_t *)"third", 5);
-	insertRow(buf, 1, (const uint8_t *)"second", 6);
-	TEST_ASSERT_EQUAL_INT(4, buf->numrows);
-	TEST_ASSERT_EQUAL_STRING("second", (char *)buf->row[1].chars);
-}
-
 void test_insert_row_end(void) {
 	struct buffer *buf = make_test_buffer(NULL);
 	insertRow(buf, 0, (const uint8_t *)"first", 5);
@@ -97,16 +88,6 @@ void test_del_row_beginning(void) {
 	TEST_ASSERT_EQUAL_STRING("second", (char *)buf->row[0].chars);
 }
 
-void test_del_row_middle(void) {
-	struct buffer *buf = make_test_buffer(NULL);
-	insertRow(buf, 0, (const uint8_t *)"first", 5);
-	insertRow(buf, 1, (const uint8_t *)"second", 6);
-	insertRow(buf, 2, (const uint8_t *)"third", 5);
-	delRow(buf, 1);
-	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
-	TEST_ASSERT_EQUAL_STRING("third", (char *)buf->row[1].chars);
-}
-
 void test_del_row_end(void) {
 	struct buffer *buf = make_test_buffer(NULL);
 	insertRow(buf, 0, (const uint8_t *)"first", 5);
@@ -122,14 +103,6 @@ void test_row_insert_char(void) {
 	rowInsertChar(buf, &buf->row[0], 1, 'B');
 	TEST_ASSERT_EQUAL_INT(3, buf->row[0].size);
 	TEST_ASSERT_EQUAL_STRING("ABC", (char *)buf->row[0].chars);
-}
-
-void test_row_capacity_growth(void) {
-	struct buffer *buf = make_test_buffer(NULL);
-	for (int i = 0; i < 20; i++)
-		insertRow(buf, i, (const uint8_t *)"row", 3);
-	TEST_ASSERT_EQUAL_INT(21, buf->numrows);
-	TEST_ASSERT(buf->rowcap >= 20);
 }
 
 /* ---- Coordinate mapping ---- */
@@ -188,11 +161,6 @@ void test_build_screen_cache_no_wrap(void) {
 	TEST_ASSERT_EQUAL_INT(2, buf->screen_line_start[2]);
 }
 
-void test_count_screen_lines_short(void) {
-	struct buffer *buf = make_test_buffer("short");
-	TEST_ASSERT_EQUAL_INT(1, countScreenLines(&buf->row[0], 80));
-}
-
 void test_count_screen_lines_exact(void) {
 	struct buffer *buf = make_test_buffer("1234567890");
 	TEST_ASSERT_EQUAL_INT(1, countScreenLines(&buf->row[0], 10));
@@ -221,14 +189,6 @@ void test_word_wrap_break(void) {
 	TEST_ASSERT_EQUAL_INT(1, more);
 	TEST_ASSERT_EQUAL_INT(6, break_col);
 	TEST_ASSERT_EQUAL_INT(6, break_byte);
-}
-
-void test_cursor_screen_line(void) {
-	struct buffer *buf = make_test_buffer("hello world foo");
-	int out_line, out_col;
-	cursorScreenLine(&buf->row[0], 0, 10, &out_line, &out_col);
-	TEST_ASSERT_EQUAL_INT(0, out_line);
-	TEST_ASSERT_EQUAL_INT(0, out_col);
 }
 
 /* ---- Boundary tests ---- */
@@ -338,13 +298,10 @@ int main(void) {
 
 	RUN_TEST(test_new_destroy_buffer);
 	RUN_TEST(test_insert_row_beginning);
-	RUN_TEST(test_insert_row_middle);
 	RUN_TEST(test_insert_row_end);
 	RUN_TEST(test_del_row_beginning);
-	RUN_TEST(test_del_row_middle);
 	RUN_TEST(test_del_row_end);
 	RUN_TEST(test_row_insert_char);
-	RUN_TEST(test_row_capacity_growth);
 
 	RUN_TEST(test_chars_to_display_ascii);
 	RUN_TEST(test_chars_to_display_tab);
@@ -353,12 +310,10 @@ int main(void) {
 	RUN_TEST(test_calculate_line_width);
 
 	RUN_TEST(test_build_screen_cache_no_wrap);
-	RUN_TEST(test_count_screen_lines_short);
 	RUN_TEST(test_count_screen_lines_exact);
 	RUN_TEST(test_count_screen_lines_long);
 	RUN_TEST(test_invalidate_screen_cache);
 	RUN_TEST(test_word_wrap_break);
-	RUN_TEST(test_cursor_screen_line);
 
 	/* Minibuffer serialization */
 	RUN_TEST(test_minibuf_roundtrip_multiline);

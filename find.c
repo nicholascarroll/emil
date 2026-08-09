@@ -571,8 +571,7 @@ void queryReplace(void) {
 
 	if (strchr((const char *)replace_orig, '\n')) {
 		free(replace_orig);
-		setStatusMessage(
-			"query-replace cannot match across lines; use replace-regexp");
+		setStatusMessage("query-replace cannot match across lines");
 		replace_orig = saved_orig;
 		replace_repl = saved_repl;
 		return;

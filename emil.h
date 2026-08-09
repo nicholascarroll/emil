@@ -137,6 +137,12 @@ struct buffer {
 	int word_wrap;
 	int rectangle_mode;
 	int read_only;
+	/* 1 when read_only was imposed by us because another process
+	 * held an advisory lock at open time, and NOT by a failed
+	 * access(W_OK) or by the user's own C-x C-q.  Only a read-only
+	 * flagged this way may be lifted when the lock goes away; the
+	 * other two reasons are not ours to undo. */
+	int read_only_by_lock;
 	int lock_fd; /* fd holding advisory lock, or -1 */
 	/* Only used for equality comparison with stat().st_mtime.
 	 * Safe across the 2038 boundary.  Do NOT do arithmetic on
@@ -296,8 +302,6 @@ struct config {
 	 * other commands must read the value through UARG_COUNT, which
 	 * maps both 0 and UARG_REVERSE to a count of 1. */
 	int uarg;
-	int macro_depth; /* Current macro execution depth to prevent infinite
-                      recursion */
 
 	struct history file_history;
 	struct history command_history;
@@ -305,7 +309,6 @@ struct config {
 	struct history search_history;
 	struct history replace_history;
 	struct history rect_history;
-	struct history buffer_history;
 	struct history kill_history;
 	int kill_ring_pos;   /* Current position in kill ring for M-y */
 	int self_insert_key; /* Stashed key for CMD_SELF_INSERT */

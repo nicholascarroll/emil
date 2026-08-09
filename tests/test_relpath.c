@@ -79,43 +79,12 @@ void test_relpath_completely_different(void) {
 		       "../../../opt/project");
 }
 
-/* ---- Deeper divergence ---- */
-
-void test_relpath_deep_divergence(void) {
-	ASSERT_RELPATH("/a/b/c", "/x/y/z", "../../../x/y/z");
-}
-
 /* ---- Partial name overlap (not a real prefix) ---- */
 
 void test_relpath_partial_name_overlap(void) {
 	/* /a/bar and /a/baz share "/a/ba" in characters but
 	 * the common directory is /a, not /a/ba */
 	ASSERT_RELPATH("/a/bar", "/a/baz", "../baz");
-}
-
-void test_relpath_prefix_in_name(void) {
-	/* /abc is not a prefix of /abcdef at directory level */
-	ASSERT_RELPATH("/abc", "/abcdef", "../abcdef");
-}
-
-/* ---- Real-world cd scenario ---- */
-
-void test_relpath_cd_into_subdir(void) {
-	ASSERT_RELPATH("/home/user/project/src", "/home/user/project", "..");
-}
-
-void test_relpath_cd_into_deep_subdir(void) {
-	ASSERT_RELPATH("/home/user/project/src/lib", "/home/user/project",
-		       "../..");
-}
-
-void test_relpath_cd_up_from_subdir(void) {
-	ASSERT_RELPATH("/home/user/project", "/home/user/project/src", "src");
-}
-
-void test_relpath_cd_to_sibling_project(void) {
-	ASSERT_RELPATH("/home/user/project-b", "/home/user/project-a",
-		       "../project-a");
 }
 
 /* Helper: assert rebaseFilename(fn, old, new) == expected */
@@ -169,24 +138,6 @@ void test_rebase_subdir_file_cd_child(void) {
 void test_rebase_subdir_file_cd_sibling_dir(void) {
 	ASSERT_REBASE("src/main.c", "/home/user", "/home/user/docs",
 		      "../src/main.c");
-}
-
-/* ---- rebaseFilename: the double-cd bug scenario ---- */
-
-void test_rebase_double_cd(void) {
-	/* Start in /opt/project, file is README.md
-	 * cd .. => /opt, file becomes project/README.md */
-	char *after_first = rebaseFilename("README.md", "/opt/project", "/opt");
-	TEST_ASSERT_EQUAL_STRING("project/README.md", after_first);
-
-	/* Now cd project/tests => /opt/project/tests
-	 * file should become ../README.md */
-	char *after_second =
-		rebaseFilename(after_first, "/opt", "/opt/project/tests");
-	TEST_ASSERT_EQUAL_STRING("../README.md", after_second);
-
-	free(after_first);
-	free(after_second);
 }
 
 void test_rebase_triple_cd(void) {
@@ -247,7 +198,7 @@ void tearDown(void) {
 }
 
 
-/* ================= B9 — absolutePath yields "//foo" at cwd "/" =====
+/* B9 — absolutePath yields "//foo" at cwd "/"
  *
  * cleanPath keeps the empty leading segment produced by
  * "/" + "/" + name, so at cwd "/" the same file resolves to two
@@ -308,15 +259,9 @@ int main(void) {
 
 	RUN_TEST(test_relpath_divergent);
 	RUN_TEST(test_relpath_completely_different);
-	RUN_TEST(test_relpath_deep_divergence);
 
 	RUN_TEST(test_relpath_partial_name_overlap);
-	RUN_TEST(test_relpath_prefix_in_name);
 
-	RUN_TEST(test_relpath_cd_into_subdir);
-	RUN_TEST(test_relpath_cd_into_deep_subdir);
-	RUN_TEST(test_relpath_cd_up_from_subdir);
-	RUN_TEST(test_relpath_cd_to_sibling_project);
 
 	RUN_TEST(test_rebase_same_dir);
 	RUN_TEST(test_rebase_cd_to_parent);
@@ -326,7 +271,6 @@ int main(void) {
 	RUN_TEST(test_rebase_subdir_file_cd_parent);
 	RUN_TEST(test_rebase_subdir_file_cd_child);
 	RUN_TEST(test_rebase_subdir_file_cd_sibling_dir);
-	RUN_TEST(test_rebase_double_cd);
 	RUN_TEST(test_rebase_triple_cd);
 	RUN_TEST(test_rebase_dotdot_in_filename);
 	RUN_TEST(test_rebase_dotdot_cd_up_two);

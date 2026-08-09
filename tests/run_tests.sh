@@ -278,13 +278,11 @@ FUZZ_SEQS="${FUZZ_SEQS:-10000}"
 FUZZ_SEED="${FUZZ_SEED:-1}"
 if [ "$FUZZ_SEQS" -gt 0 ]; then
     printf '%-14s ' "  fuzz_undo"
-    # -Itests because fuzz_undo.c lives in the repo root and includes
-    # test_harness.h; the unit tests get that path for free.
     if ! $CC $TEST_CFLAGS -Itests $SANITIZER_FLAGS -o tests/fuzz_undo \
-        fuzz_undo.c $TEST_OBJECTS $LDFLAGS 2>/dev/null; then
+        tests/fuzz_undo.c $TEST_OBJECTS $LDFLAGS 2>/dev/null; then
         echo "BUILD FAIL"
         $CC $TEST_CFLAGS -Itests $SANITIZER_FLAGS -o tests/fuzz_undo \
-            fuzz_undo.c $TEST_OBJECTS $LDFLAGS 2>&1 | tail -5
+            tests/fuzz_undo.c $TEST_OBJECTS $LDFLAGS 2>&1 | tail -5
         ANY_FAIL=1
     else
         fuzz_out=$(./tests/fuzz_undo "$FUZZ_SEQS" "$FUZZ_SEED" 2>&1)

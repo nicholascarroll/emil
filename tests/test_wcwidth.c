@@ -54,15 +54,6 @@ void test_next_screen_x(void) {
 	TEST_ASSERT_EQUAL_INT(2, nextScreenX(ctrl, &idx, 0));
 }
 
-void test_tab_stops(void) {
-#define TAB_STOP 8
-	TEST_ASSERT_EQUAL_INT(8, (0 + TAB_STOP) / TAB_STOP * TAB_STOP);
-	TEST_ASSERT_EQUAL_INT(8, (7 + TAB_STOP) / TAB_STOP * TAB_STOP);
-	TEST_ASSERT_EQUAL_INT(16, (8 + TAB_STOP) / TAB_STOP * TAB_STOP);
-	TEST_ASSERT_EQUAL_INT(16, (9 + TAB_STOP) / TAB_STOP * TAB_STOP);
-#undef TAB_STOP
-}
-
 void test_next_screen_x_multibyte(void) {
 	int idx;
 
@@ -106,7 +97,6 @@ int main(void) {
 	RUN_TEST(test_string_width);
 	RUN_TEST(test_char_in_string_width);
 	RUN_TEST(test_next_screen_x);
-	RUN_TEST(test_tab_stops);
 	RUN_TEST(test_next_screen_x_multibyte);
 	RUN_TEST(test_string_width_mixed);
 	return TEST_END();

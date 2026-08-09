@@ -20,6 +20,8 @@
 #include "buffer.h"
 #include "region.h"
 #include "keymap.h"
+#include "undo.h"
+#include "util.h"
 #include <string.h>
 
 
@@ -279,6 +281,99 @@ void test_negative_arg_preserves_kill_ring_pos(void) {
 	TEST_ASSERT_EQUAL_INT(0, E.uarg); /* consumed by dispatch */
 }
 
+/* --- 10. yank at end of buffer, where the yank provokes a
+ * final-newline repair, still permits M-y -------------------------
+ *
+ * The repair chains a paired record on top of the yank's insert.
+ * Locked in because it is the case the undo-stack test was suspected
+ * of breaking; measured, the repair record is itself an insert, so
+ * it never did.  The test documents that rather than guarding a
+ * regression. */
+void test_yank_pop_after_final_newline_repair(void) {
+	struct buffer *buf = make_test_buffer("hello");
+
+	kill_range(buf, 0, 0, 5, 0); /* kill "hello" */
+	buf->cx = 0;
+	buf->cy = 0;
+	insertRow(buf, 0, (const uint8_t *)"second", 6);
+	kill_range(buf, 0, 0, 6, 0); /* kill "second" */
+	TEST_ASSERT_EQUAL_INT(2, E.kill_history.count);
+
+	/* Yank at the very end of the buffer. */
+	buf->cy = buf->numrows - 1;
+	buf->cx = buf->row[buf->cy].size;
+	processKeypress(CMD_YANK);
+	TEST_ASSERT(E.kill_ring_pos >= 0);
+
+	/* M-y must be accepted and must cycle to the older kill. */
+	processKeypress(CMD_YANK_POP);
+	TEST_ASSERT(strstr(E.statusmsg, "not a yank") == NULL);
+}
+
+/* --- 11. M-y with no preceding yank is still refused -------------- */
+void test_yank_pop_without_preceding_yank_refused(void) {
+	struct buffer *buf = make_test_buffer("abc");
+
+	kill_range(buf, 0, 0, 3, 0);
+	buf->cx = 0;
+	buf->cy = 0;
+
+	/* Never yanked: kill_ring_pos is -1. */
+	TEST_ASSERT_EQUAL_INT(-1, E.kill_ring_pos);
+	yankPop(0);
+	TEST_ASSERT(strstr(E.statusmsg, "not a yank") != NULL);
+}
+
+/* --- 12. an intervening command breaks the yank chain ------------- */
+void test_intervening_command_breaks_yank_chain(void) {
+	struct buffer *buf = make_test_buffer("abc def ghi");
+
+	kill_range(buf, 0, 0, 3, 0);
+	kill_range(buf, 0, 0, 4, 0);
+	buf->cx = buf->row[0].size;
+	buf->cy = 0;
+
+	processKeypress(CMD_YANK);
+	TEST_ASSERT(E.kill_ring_pos >= 0);
+
+	/* Any other command resets the flag (processKeypress does it). */
+	processKeypress(CMD_FORWARD_CHAR);
+	TEST_ASSERT_EQUAL_INT(-1, E.kill_ring_pos);
+
+	processKeypress(CMD_YANK_POP);
+	TEST_ASSERT(strstr(E.statusmsg, "not a yank") != NULL);
+}
+
+/* --- 13. M-y with kill_ring_pos set but the undo stack cleared ----
+ *
+ * Reachable from a prompt: C-y dispatches through processKeypress
+ * (so kill_ring_pos is set), but Up is handled by the prompt loop
+ * itself, and replaceMinibufferText clears the minibuffer's undo
+ * history.  M-y must refuse rather than yank a second copy on top
+ * of the first. */
+void test_yank_pop_refused_when_undo_cleared(void) {
+	struct buffer *buf = make_test_buffer("abc def ghi");
+
+	kill_range(buf, 0, 0, 3, 0);
+	kill_range(buf, 0, 0, 4, 0);
+	buf->cx = buf->row[0].size;
+	buf->cy = 0;
+
+	processKeypress(CMD_YANK);
+	TEST_ASSERT(E.kill_ring_pos >= 0);
+	const char *after_yank = row_str(buf, 0);
+	char snapshot[128];
+	emil_strlcpy(snapshot, after_yank, sizeof(snapshot));
+
+	/* Simulate the prompt's history browse. */
+	clearUndosAndRedos(buf);
+
+	yankPop(0);
+	TEST_ASSERT(strstr(E.statusmsg, "not a yank") != NULL);
+	/* Buffer untouched: no duplicated text. */
+	TEST_ASSERT_EQUAL_STRING(snapshot, row_str(buf, 0));
+}
+
 int main(void) {
 	TEST_BEGIN();
 	RUN_TEST(test_yank_returns_most_recent_kill);
@@ -290,5 +385,9 @@ int main(void) {
 	RUN_TEST(test_reverse_yank_pop_cycles_forward);
 	RUN_TEST(test_reverse_modifier_noop_combinations);
 	RUN_TEST(test_negative_arg_preserves_kill_ring_pos);
+	RUN_TEST(test_yank_pop_after_final_newline_repair);
+	RUN_TEST(test_yank_pop_without_preceding_yank_refused);
+	RUN_TEST(test_intervening_command_breaks_yank_chain);
+	RUN_TEST(test_yank_pop_refused_when_undo_cleared);
 	return TEST_END();
 }

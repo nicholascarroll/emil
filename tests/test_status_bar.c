@@ -59,7 +59,16 @@ void tearDown(void) {
 	cleanupTestEditor();
 }
 
-/* 1. Dirty + read-only flags show **% */
+/* The two-character flag field: left column is read-only, right is
+ * modified, each doubling the other when it has nothing to say.
+ *
+ *   --   clean, writable
+ *   **   modified, writable
+ *   %%   clean, read-only
+ *   %*   modified, read-only
+ */
+
+/* Dirty + read-only shows %* */
 static void test_dirty_readonly_flags(void) {
 	struct buffer *buf = make_test_buffer("hello");
 	buf->filename = xstrdup("test.c");
@@ -68,12 +77,11 @@ static void test_dirty_readonly_flags(void) {
 	buf->read_only = 1;
 
 	char *s = render_status();
-	/* Flags field should contain **% */
-	TEST_ASSERT(strstr(s, "**%") != NULL);
+	TEST_ASSERT(strstr(s, "test.c %*") != NULL);
 	free(s);
 }
 
-/* 2. Clean + writable flags show --- */
+/* Clean + writable shows -- */
 static void test_clean_flags(void) {
 	struct buffer *buf = make_test_buffer("hello");
 	buf->filename = xstrdup("test.c");
@@ -82,12 +90,37 @@ static void test_clean_flags(void) {
 	buf->read_only = 0;
 
 	char *s = render_status();
-	TEST_ASSERT(strstr(s, "-- ") != NULL);
+	TEST_ASSERT(strstr(s, "test.c --") != NULL);
 	free(s);
 }
 
-/* 3. Rectangle mode: (Rect) does not appear — it was removed.
- *    Instead test word_wrap shows (Wrap). */
+/* Dirty + writable shows ** */
+static void test_dirty_writable_flags(void) {
+	struct buffer *buf = make_test_buffer("hello");
+	buf->filename = xstrdup("test.c");
+	computeDisplayNames();
+	buf->dirty = 1;
+	buf->read_only = 0;
+
+	char *s = render_status();
+	TEST_ASSERT(strstr(s, "test.c **") != NULL);
+	free(s);
+}
+
+/* Clean + read-only shows %% */
+static void test_clean_readonly_flags(void) {
+	struct buffer *buf = make_test_buffer("hello");
+	buf->filename = xstrdup("test.c");
+	computeDisplayNames();
+	buf->dirty = 0;
+	buf->read_only = 1;
+
+	char *s = render_status();
+	TEST_ASSERT(strstr(s, "test.c %%") != NULL);
+	free(s);
+}
+
+/* Word wrap shows (Wrap) in the right block. */
 static void test_wrap_indicator(void) {
 	struct buffer *buf = make_test_buffer("hello world");
 	buf->filename = xstrdup("test.c");
@@ -99,7 +132,7 @@ static void test_wrap_indicator(void) {
 	free(s);
 }
 
-/* 4. Macro recording shows (Macro) */
+/* Macro recording shows (Macro). */
 static void test_macro_indicator(void) {
 	struct buffer *buf = make_test_buffer("hello");
 	buf->filename = xstrdup("test.c");
@@ -111,7 +144,8 @@ static void test_macro_indicator(void) {
 	free(s);
 }
 
-/* 5. external_mod shows DISK CHANGED and preempts (Macro) */
+/* A warning outranks a mode indicator: external_mod lights
+ * FILE MODIFIED and suppresses (Macro). */
 static void test_disk_changed_preempts_macro(void) {
 	struct buffer *buf = make_test_buffer("hello");
 	buf->filename = xstrdup("test.c");
@@ -120,15 +154,12 @@ static void test_disk_changed_preempts_macro(void) {
 	E.recording = 1;
 
 	char *s = render_status();
-	/* Should contain the disk-changed warning */
-	TEST_ASSERT(strstr(s, "FILE") != NULL ||
-		    strstr(s, "MOD") != NULL);
-	/* Should NOT contain (Macro) */
+	TEST_ASSERT(strstr(s, "FILE MODIFIED") != NULL);
 	TEST_ASSERT(strstr(s, "(Macro)") == NULL);
 	free(s);
 }
 
-/* 6. Narrow screen: basename always visible even when name is long */
+/* min_name_len is a hard floor: the basename survives a squeeze. */
 static void test_narrow_screen_shows_basename(void) {
 	E.screencols = 40;
 	struct buffer *buf = make_test_buffer("x");
@@ -140,7 +171,7 @@ static void test_narrow_screen_shows_basename(void) {
 	free(s);
 }
 
-/* 7. Line:col position shows in middle block */
+/* The middle block shows line:col, 1-indexed row, 0-indexed column. */
 static void test_linecol_position(void) {
 	struct buffer *buf = make_test_buffer("hello");
 	buf->filename = xstrdup("test.c");
@@ -154,7 +185,7 @@ static void test_linecol_position(void) {
 	free(s);
 }
 
-/* 8. Status bar width matches screencols */
+/* The bar fills exactly screencols cells. */
 static void test_status_bar_width(void) {
 	E.screencols = 60;
 	struct buffer *buf = make_test_buffer("hello");
@@ -209,7 +240,7 @@ static char *strip_escapes_n(const char *in, int len, int *out_len) {
 	return out;
 }
 
-/* ================= B12 — statusLeft truncates mid-character ========
+/* B12 — statusLeft truncates mid-character
  *
  * `snprintf(trunc, ..., "...%s", dname + dlen - tail)` is byte
  * arithmetic against a *column* budget, so the tail pointer can land
@@ -245,7 +276,7 @@ void test_b12_statusleft_truncation_stays_valid_utf8(void) {
 	free(raw);
 }
 
-/* ================= B13 — statusLeft returns snprintf's length ======
+/* B13 — statusLeft returns snprintf's length
  *
  * `left` is char[512]; statusLeft returns snprintf's would-be length,
  * and the caller does abAppend(ab, left, left_len).  With screencols
@@ -291,6 +322,8 @@ int main(void) {
 	TEST_BEGIN();
 	RUN_TEST(test_dirty_readonly_flags);
 	RUN_TEST(test_clean_flags);
+	RUN_TEST(test_dirty_writable_flags);
+	RUN_TEST(test_clean_readonly_flags);
 	RUN_TEST(test_wrap_indicator);
 	RUN_TEST(test_macro_indicator);
 	RUN_TEST(test_disk_changed_preempts_macro);

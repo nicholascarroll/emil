@@ -479,6 +479,259 @@ void test_revert_clears_external_mod(void) {
 	free(path);
 }
 
+/* ---- regressions ---- */
+
+/* releaseLock used to zero open_mtime unconditionally.  markBufferClean
+ * calls it on the dirty->clean edge, which a plain run of C-_ back to
+ * the start of the session reaches -- and checkFileModified's job 1 is
+ * gated on open_mtime != 0, so external-modification detection went
+ * permanently dead for that buffer.  The lock lifetime and the mtime
+ * baseline are unrelated and must not share a reset. */
+void test_open_mtime_survives_clean_transition(void) {
+	char *path = make_temp_file("original\n");
+	TEST_ASSERT_NOT_NULL(path);
+
+	struct buffer *b = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, editorOpen(b, path));
+	TEST_ASSERT(b->open_mtime != 0);
+
+	/* Edit, then undo all the way back to clean. */
+	markBufferDirty(b);
+	markBufferClean(b);
+	TEST_ASSERT_FALSE(b->dirty);
+	TEST_ASSERT_EQUAL_INT(-1, b->lock_fd);
+
+	/* The baseline must still be there... */
+	TEST_ASSERT(b->open_mtime != 0);
+
+	/* ...and detection must still work. */
+	bump_mtime(path, 2);
+	resetThrottle();
+	checkFileModified();
+	TEST_ASSERT_TRUE(b->external_mod);
+
+	unlink(path);
+	free(path);
+}
+
+/* A buffer opened read-only BECAUSE another process held the lock can
+ * never become dirty, so the old dirty-gated job 2 never ran for it and
+ * the status bar displayed a PID that had long since exited for the
+ * rest of the session.  The re-probe must run for a clean buffer too,
+ * and clearing the lock must lift the read-only we imposed for it. */
+void test_readonly_lifted_when_lock_released(void) {
+	char *path = make_temp_file("shared\n");
+	TEST_ASSERT_NOT_NULL(path);
+
+	int release_fd, ready_fd;
+	pid_t child = fork_lock_holder(path, &release_fd, &ready_fd);
+	TEST_ASSERT(child > 0);
+	char rbuf;
+	TEST_ASSERT_EQUAL_INT(1, read(ready_fd, &rbuf, 1));
+
+	struct buffer *b = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, editorOpen(b, path));
+	TEST_ASSERT_TRUE(b->read_only);
+	TEST_ASSERT_TRUE(b->read_only_by_lock);
+	TEST_ASSERT_EQUAL_INT((int)child, b->lock_blocked_pid);
+
+	/* Holder exits.  The buffer is clean, so the check probes
+	 * rather than acquiring: the lock is held only while there
+	 * are unsaved changes. */
+	release_and_reap(child, release_fd, ready_fd);
+	resetThrottle();
+	checkFileModified();
+
+	TEST_ASSERT_EQUAL_INT(0, b->lock_blocked_pid);
+	TEST_ASSERT_FALSE(b->read_only);
+	TEST_ASSERT_FALSE(b->read_only_by_lock);
+	/* Probed, not acquired. */
+	TEST_ASSERT_EQUAL_INT(-1, b->lock_fd);
+
+	unlink(path);
+	free(path);
+}
+
+/* A read-only imposed by anything other than the lock is not ours to
+ * undo.  Here the user asked for it explicitly (C-x C-q / find-file
+ * read-only), so releasing the lock must leave it alone. */
+void test_user_readonly_not_lifted_by_lock_release(void) {
+	char *path = make_temp_file("shared\n");
+	TEST_ASSERT_NOT_NULL(path);
+
+	int release_fd, ready_fd;
+	pid_t child = fork_lock_holder(path, &release_fd, &ready_fd);
+	TEST_ASSERT(child > 0);
+	char rbuf;
+	TEST_ASSERT_EQUAL_INT(1, read(ready_fd, &rbuf, 1));
+
+	struct buffer *b = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, editorOpen(b, path));
+	TEST_ASSERT_TRUE(b->read_only_by_lock);
+
+	/* User makes the read-only their own choice. */
+	b->read_only_by_lock = 0;
+
+	release_and_reap(child, release_fd, ready_fd);
+	resetThrottle();
+	checkFileModified();
+
+	TEST_ASSERT_EQUAL_INT(0, b->lock_blocked_pid);
+	TEST_ASSERT_TRUE(b->read_only); /* still the user's choice */
+
+	unlink(path);
+	free(path);
+}
+
+/* checkFileModified must not run against a special buffer.  Its name
+ * is non-NULL ("*scratch*", "*stdin*", "*Shell Output*"), so the
+ * filename guard alone let it through to stat() a literal "*stdin*"
+ * in the cwd every two seconds. */
+void test_special_buffer_is_not_checked(void) {
+	struct buffer *b = make_test_buffer("output\n");
+	b->filename = xstrdup("*stdin*");
+	b->special_buffer = 1;
+	b->open_mtime = 1;
+	b->lock_blocked_pid = 4242;
+
+	resetThrottle();
+	checkFileModified();
+
+	TEST_ASSERT_FALSE(b->external_mod);
+	TEST_ASSERT_EQUAL_INT(4242, b->lock_blocked_pid);
+}
+
+/* ---- pre-save confirmation ---- */
+
+/* Read the file back so the test can tell whether the write landed. */
+static char *slurp(const char *path) {
+	FILE *fp = fopen(path, "r");
+	if (!fp)
+		return NULL;
+	static char buf[512];
+	size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
+	buf[n] = '\0';
+	fclose(fp);
+	return buf;
+}
+
+/* The authoritative check: an external write that the background poll
+ * never saw must still be caught at save time, and answering "n" must
+ * leave the file alone. */
+void test_presave_prompt_refused_leaves_file(void) {
+	char *path = make_temp_file("original\n");
+	TEST_ASSERT_NOT_NULL(path);
+
+	struct buffer *b = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, editorOpen(b, path));
+	markBufferDirty(b);
+
+	/* Someone else rewrites the file.  No poll runs, so the status
+	 * bar never lit: external_mod is still clear. */
+	FILE *fp = fopen(path, "w");
+	TEST_ASSERT_NOT_NULL(fp);
+	fputs("theirs\n", fp);
+	fclose(fp);
+	bump_mtime(path, 2);
+	TEST_ASSERT_FALSE(b->external_mod);
+
+	int keys[] = { 'n' };
+	scriptKeys(keys, 1);
+	muteStdout();
+	save();
+	unmuteStdout();
+	clearKeys();
+
+	/* Refused: their content survives, ours stays unsaved. */
+	TEST_ASSERT_EQUAL_STRING("theirs\n", slurp(path));
+	TEST_ASSERT_TRUE(b->dirty);
+	/* ...and the indicator is now lit, so the next save won't ask. */
+	TEST_ASSERT_TRUE(b->external_mod);
+
+	unlink(path);
+	free(path);
+}
+
+/* Answering "y" goes through and clobbers, as asked. */
+void test_presave_prompt_accepted_writes(void) {
+	char *path = make_temp_file("original\n");
+	TEST_ASSERT_NOT_NULL(path);
+
+	struct buffer *b = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, editorOpen(b, path));
+	b->cx = 0;
+	b->cy = 0;
+	insertRow(b, 0, (const uint8_t *)"ours", 4);
+	markBufferDirty(b);
+
+	FILE *fp = fopen(path, "w");
+	TEST_ASSERT_NOT_NULL(fp);
+	fputs("theirs\n", fp);
+	fclose(fp);
+	bump_mtime(path, 2);
+
+	int keys[] = { 'y' };
+	scriptKeys(keys, 1);
+	muteStdout();
+	save();
+	unmuteStdout();
+	clearKeys();
+
+	TEST_ASSERT(strstr(slurp(path), "ours") != NULL);
+	TEST_ASSERT_FALSE(b->dirty);
+
+	unlink(path);
+	free(path);
+}
+
+/* Suppression: if the status bar was already warning, the save is a
+ * deliberate act and must not be second-guessed.  No key is scripted,
+ * so a prompt here would consume the stub's default 0 and abort. */
+void test_presave_prompt_suppressed_when_already_warned(void) {
+	char *path = make_temp_file("original\n");
+	TEST_ASSERT_NOT_NULL(path);
+
+	struct buffer *b = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, editorOpen(b, path));
+	markBufferDirty(b);
+
+	bump_mtime(path, 2);
+	resetThrottle();
+	checkFileModified();
+	TEST_ASSERT_TRUE(b->external_mod); /* indicator lit */
+
+	clearKeys();
+	muteStdout();
+	save();
+	unmuteStdout();
+
+	TEST_ASSERT_FALSE(b->dirty); /* went through without asking */
+
+	unlink(path);
+	free(path);
+}
+
+/* An unmodified file is saved with no prompt at all. */
+void test_presave_no_prompt_when_unchanged(void) {
+	char *path = make_temp_file("original\n");
+	TEST_ASSERT_NOT_NULL(path);
+
+	struct buffer *b = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, editorOpen(b, path));
+	markBufferDirty(b);
+
+	clearKeys();
+	muteStdout();
+	save();
+	unmuteStdout();
+
+	TEST_ASSERT_FALSE(b->dirty);
+	TEST_ASSERT_FALSE(b->external_mod);
+
+	unlink(path);
+	free(path);
+}
+
 /* ---- setUp / tearDown / main ---- */
 
 void setUp(void) {
@@ -503,8 +756,18 @@ int main(void) {
 	RUN_TEST(test_checkFileModified_reacquires_stale_lock);
 	RUN_TEST(test_checkFileModified_does_not_reacquire_if_file_changed);
 
+	RUN_TEST(test_open_mtime_survives_clean_transition);
+	RUN_TEST(test_readonly_lifted_when_lock_released);
+	RUN_TEST(test_user_readonly_not_lifted_by_lock_release);
+	RUN_TEST(test_special_buffer_is_not_checked);
+
 	RUN_TEST(test_save_clears_external_mod);
 	RUN_TEST(test_revert_clears_external_mod);
+
+	RUN_TEST(test_presave_prompt_refused_leaves_file);
+	RUN_TEST(test_presave_prompt_accepted_writes);
+	RUN_TEST(test_presave_prompt_suppressed_when_already_warned);
+	RUN_TEST(test_presave_no_prompt_when_unchanged);
 
 	return TEST_END();
 }

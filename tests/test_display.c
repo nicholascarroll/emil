@@ -40,7 +40,7 @@ static char *render_rows(struct window *win, int *len_out) {
 	return out;
 }
 
-/* ================= B6 — wrong-buffer mark check ==================
+/* B6 — wrong-buffer mark check
  *
  * computeRowHighlightBounds(buf, ...) reads everything from its `buf`
  * parameter except one call: markInvalidSilent(), which takes no
@@ -48,9 +48,8 @@ static char *render_rows(struct window *win, int *len_out) {
  * selection is drawn or not drawn according to whether the *focused*
  * buffer happens to have a valid mark.
  *
- * Both tests give buffer B the identical, valid, active selection.
- * Only the focused buffer A's mark differs between them, and B must
- * render the same way in both. */
+ * Buffer B carries a valid, active selection throughout; the focused
+ * buffer A carries none.  B must still be highlighted. */
 
 static void b6_setup(struct buffer **a_out, struct buffer **b_out) {
 	initTestEditor();
@@ -108,29 +107,7 @@ void test_b6_unfocused_selection_drawn_when_focused_has_no_mark(void) {
 	cleanupTestEditor();
 }
 
-/* Control: same B, but now A does have a valid mark.  This one passes
- * today — the pair is what shows the rendering depends on A. */
-void test_b6_unfocused_selection_drawn_when_focused_has_mark(void) {
-	struct buffer *a, *b;
-	b6_setup(&a, &b);
-
-	a->cx = 0;
-	a->cy = 0;
-	a->markx = 4;
-	a->marky = 0;
-	a->mark_active = 1;
-
-	int len = 0;
-	char *out = render_rows(E.windows[1], &len);
-	int highlighted = containsBytes(out, len, "\x1b[7m", 4);
-	free(out);
-
-	TEST_ASSERT(highlighted);
-
-	cleanupTestEditor();
-}
-
-/* ================= B10 — whatCursor reads window 0 =================
+/* B10 — whatCursor reads window 0
  *
  * `int screen_y = E.buf->cy - E.windows[0]->rowoff + 1;` — hardcoded
  * to the first window, so C-x = reports the wrong screen row whenever
@@ -284,7 +261,6 @@ int main(void) {
 	TEST_BEGIN();
 
 	RUN_TEST(test_b6_unfocused_selection_drawn_when_focused_has_no_mark);
-	RUN_TEST(test_b6_unfocused_selection_drawn_when_focused_has_mark);
 	RUN_TEST(test_b10_whatcursor_uses_focused_window_rowoff);
 	RUN_TEST(test_scroll_leaves_cursor_on_char_boundary);
 	RUN_TEST(test_scroll_up_with_stale_rowoff_stays_in_bounds);

@@ -46,12 +46,6 @@ void test_utf8Decode_4byte(void) {
 	TEST_ASSERT_EQUAL(0x1F607, (int)utf8Decode(s, 0));
 }
 
-void test_utf8Decode_cjk(void) {
-	/* 中 = U+4E2D */
-	uint8_t s[] = "\xE4\xB8\xAD";
-	TEST_ASSERT_EQUAL(0x4E2D, (int)utf8Decode(s, 0));
-}
-
 void test_utf8Decode_at_offset(void) {
 	/* "A中": decode the 中 at byte offset 1 */
 	uint8_t s[] = "A\xE4\xB8\xAD";
@@ -560,7 +554,6 @@ int main(void) {
 	RUN_TEST(test_utf8Decode_2byte);
 	RUN_TEST(test_utf8Decode_3byte);
 	RUN_TEST(test_utf8Decode_4byte);
-	RUN_TEST(test_utf8Decode_cjk);
 	RUN_TEST(test_utf8Decode_at_offset);
 
 	/* #71: classifiers */

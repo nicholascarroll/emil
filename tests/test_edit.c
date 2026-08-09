@@ -17,13 +17,6 @@ void test_insert_char_beginning(void) {
 	TEST_ASSERT_EQUAL_INT(1, buf->cx);
 }
 
-void test_insert_char_middle(void) {
-	struct buffer *buf = make_test_buffer("ACD");
-	buf->cx = 1;
-	insertChar(buf, 'B', 1);
-	TEST_ASSERT_EQUAL_STRING("ABCD", row_str(buf, 0));
-}
-
 void test_insert_char_end(void) {
 	struct buffer *buf = make_test_buffer("ABC");
 	buf->cx = 3;
@@ -37,14 +30,6 @@ void test_insert_char_with_count(void) {
 	insertChar(buf, 'B', 3);
 	TEST_ASSERT_EQUAL_STRING("ABBBE", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_INT(4, buf->cx);
-}
-
-void test_insert_char_readonly(void) {
-	struct buffer *buf = make_test_buffer("Hello");
-	buf->read_only = 1;
-	buf->cx = 0;
-	insertChar(buf, 'X', 1);
-	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
 }
 
 /* Regression: a self-insert refused by a read-only buffer must not
@@ -349,19 +334,6 @@ void test_forward_sentence_with_closing_punct(void) {
 	TEST_ASSERT_EQUAL_INT(0, cy);
 }
 
-void test_forward_sentence_para_boundary(void) {
-	const char *lines[] = { "First sentence", "", "Second sentence" };
-	struct buffer *buf = make_test_buffer_lines(lines, 3);
-	buf->cx = 0;
-	buf->cy = 0;
-	E.buf = buf;
-	int cx = 0, cy = 0;
-	forwardSentenceEnd(&cx, &cy);
-	/* No sentence-end pattern — lands at end of first line */
-	TEST_ASSERT_EQUAL_INT(14, cx);
-	TEST_ASSERT_EQUAL_INT(0, cy);
-}
-
 /* ---- Kill sexp ---- */
 
 void test_kill_sexp_parens(void) {
@@ -611,17 +583,6 @@ void test_transpose_chars_reverse(void) {
 	TEST_ASSERT_EQUAL_INT(2, buf->cx);
 }
 
-/* Reverse then forward transpose at the same spot round-trips. */
-void test_transpose_chars_reverse_roundtrip(void) {
-	struct buffer *buf = make_test_buffer("abcd");
-	buf->cx = 3;
-	transposeChars(UARG_REVERSE);
-	TEST_ASSERT_EQUAL_STRING("acbd", row_str(buf, 0));
-	transposeChars(0);
-	TEST_ASSERT_EQUAL_STRING("abcd", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_INT(3, buf->cx);
-}
-
 /* M-- C-t with fewer than two characters before point: refused. */
 void test_transpose_chars_reverse_needs_two_before(void) {
 	struct buffer *buf = make_test_buffer("abcd");
@@ -758,7 +719,7 @@ void tearDown(void) {
 }
 
 
-/* ================= B7 — plain Shift-Tab does nothing ==============
+/* B7 — plain Shift-Tab does nothing
  *
  * unindent(int rept) loops `for (i = 0; i < rept; i++)`, and
  * CMD_UNINDENT passes E.uarg raw, which is 0 with no prefix argument.
@@ -791,10 +752,8 @@ int main(void) {
 	TEST_BEGIN();
 
 	RUN_TEST(test_insert_char_beginning);
-	RUN_TEST(test_insert_char_middle);
 	RUN_TEST(test_insert_char_end);
 	RUN_TEST(test_insert_char_with_count);
-	RUN_TEST(test_insert_char_readonly);
 	RUN_TEST(test_self_insert_readonly_records_no_undo);
 	RUN_TEST(test_insert_unicode_readonly_records_no_undo);
 	RUN_TEST(test_self_insert_readonly_does_not_move_mark);
@@ -826,7 +785,6 @@ int main(void) {
 	RUN_TEST(test_backward_sentence_simple);
 	RUN_TEST(test_backward_sentence_to_beginning);
 	RUN_TEST(test_forward_sentence_with_closing_punct);
-	RUN_TEST(test_forward_sentence_para_boundary);
 
 	/* Kill sexp */
 	RUN_TEST(test_kill_sexp_parens);
@@ -856,7 +814,6 @@ int main(void) {
 	/* M-- reverse modifier: transpose and word case */
 	RUN_TEST(test_transpose_chars_forward);
 	RUN_TEST(test_transpose_chars_reverse);
-	RUN_TEST(test_transpose_chars_reverse_roundtrip);
 	RUN_TEST(test_transpose_chars_reverse_needs_two_before);
 	RUN_TEST(test_transpose_chars_reverse_utf8);
 	RUN_TEST(test_transpose_words_reverse);

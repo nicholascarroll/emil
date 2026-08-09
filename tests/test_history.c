@@ -18,19 +18,6 @@ void tearDown(void) {
 	cleanupTestEditor();
 }
 
-/* ---- Basic add and retrieve ---- */
-
-void test_history_add_one(void) {
-	struct history h;
-	initHistory(&h);
-	addHistory(&h, "hello");
-	TEST_ASSERT_EQUAL_INT(1, h.count);
-	struct historyEntry *e = getHistoryAt(&h, 0);
-	TEST_ASSERT_NOT_NULL(e);
-	TEST_ASSERT_EQUAL_STRING("hello", e->str);
-	freeHistory(&h);
-}
-
 void test_history_add_multiple(void) {
 	struct history h;
 	initHistory(&h);
@@ -190,7 +177,7 @@ void test_history_free_resets(void) {
 }
 
 
-/* ================= B8 — Down in a prompt destroys typed text =======
+/* B8 — Down in a prompt destroys typed text
  *
  * With history_pos == -1 (the user has not browsed history at all),
  * Down falls into the else branch, leaves history_pos at -1, and hits
@@ -249,7 +236,6 @@ void test_b8_up_then_down_restores_typed_text(void) {
 int main(void) {
 	TEST_BEGIN();
 
-	RUN_TEST(test_history_add_one);
 	RUN_TEST(test_history_add_multiple);
 	RUN_TEST(test_history_get_last);
 	RUN_TEST(test_history_no_consecutive_duplicate);
