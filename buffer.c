@@ -338,6 +338,7 @@ struct buffer *findOrCreateSpecialBuffer(const char *name) {
 	buf = newBuffer();
 	buf->filename = xstrdup(name);
 	buf->special_buffer = 1;
+	buf->read_only = 1;
 	buf->next = E.headbuf;
 	E.headbuf = buf;
 	return buf;
