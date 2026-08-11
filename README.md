@@ -9,7 +9,7 @@ Written in C99, `emil` is single-threaded and runs on any system providing POSIX
 
 ## Capabilities
 
-- Edit any left-to-right Unicode script
+- Edit any left-to-right Unicode script (cursor movement and deletion operate on codepoints, not grapheme clusters)
 - Visual text selection
 - Edit rectangular text regions
 - Kill ring ("clipboard history")
