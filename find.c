@@ -65,8 +65,23 @@ static int regexCacheEnsure(const uint8_t *pattern) {
 			free(re_cache_pat);
 		}
 		re_cache_pat = xstrdup((const char *)pattern);
+		/* REG_NEWLINE, matching the query-replace path in
+		 * region.c.  The two regex paths compiled with
+		 * different flags until now, which was invisible only
+		 * because this one runs against a single row at a time:
+		 * a row holds no newline, so nothing REG_NEWLINE
+		 * governs can be observed.  Adding it here is therefore
+		 * a no-op today (tests/test_find.c) and a requirement
+		 * once search runs over a whole buffer, where its
+		 * absence would anchor '^' at offset 0 alone and let a
+		 * greedy quantifier run past end of line.
+		 *
+		 * It does not prevent matching a newline entered with
+		 * C-q C-n: the flag changes what the metacharacters
+		 * match, not what a literal byte matches.  See
+		 * tests/test_regex_semantics.c. */
 		re_cache_ok = (regcomp(&re_cache, (const char *)pattern,
-				       REG_EXTENDED) == 0);
+				       REG_EXTENDED | REG_NEWLINE) == 0);
 	}
 	return re_cache_ok;
 }

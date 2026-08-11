@@ -181,10 +181,10 @@ echo "Unit tests:"
 # a deliberate act.  The count check below catches the matching mistake:
 # a new tests/test_*.c that nobody added here would otherwise be silently
 # skipped rather than reported.
-SUITES="decoder unicode wcwidth buffer undo coalesce edit fileio relpath
+SUITES="decoder unicode wcwidth buffer undo coalesce edit fileio relpath offset
     visual_line utf8_validate rect replace transform subprocess shell adjust
     history abuf tilde keymap kill_ring insert_file status_bar cjk_indic
-    warnings ctags find display prompt"
+    warnings ctags find display prompt regex_semantics"
 
 listed=$(echo $SUITES | wc -w)
 present=$(ls tests/test_*.c 2>/dev/null | wc -l)

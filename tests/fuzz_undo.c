@@ -4,13 +4,18 @@
  * Drives random sequences of real commands through processKeypress and
  * checks, after every operation:
  *
+ *   - the flattened text is valid UTF-8 and ends in a newline
+ *   - point converts to an in-bounds offset on a character boundary
+ *   - bufOffset()/bufPos() round trip, and bufTextLen() agrees with
+ *     the flattened text
  *   - every row is valid UTF-8
  *   - the cursor is in bounds and on a character boundary
  *   - the buffer ends in a newline unless it is empty
  *
  * and, after the whole sequence:
  *
- *   - undoing everything restores the original buffer content
+ *   - undoing everything restores the original bytes exactly
+ *     (length plus memcmp, per design §10.1)
  *
  * A failing sequence is then delta-debugged: operations are dropped one
  * at a time for as long as the failure persists, which usually reduces a
@@ -48,14 +53,46 @@ static uint32_t rnd(void) {
 	return rng_state;
 }
 
-static char *contentOf(struct buffer *buf) {
+/* ---- flat oracle (design §10.1) ----
+ *
+ * G0 stores a buffer as one contiguous byte array, so the undo oracle
+ * becomes a length comparison and a memcmp rather than a walk over
+ * rows.  Taking the flat form now means the oracle already speaks the
+ * post-G0 model before the storage changes under it.
+ *
+ * Length-and-memcmp rather than strcmp: strcmp stops at the first NUL
+ * byte, so a mutation that introduced one would compare equal to a
+ * buffer truncated at that point.  Null bytes are rejected at load
+ * (design §8.1) and so should never appear, which is exactly why the
+ * oracle should be the thing that notices if one does. */
+struct snapshot {
+	uint8_t *bytes;
 	size_t len;
-	char *raw = rowsToString(buf, &len);
-	char *out = xmalloc(len + 1);
-	memcpy(out, raw, len);
-	out[len] = '\0';
+};
+
+static struct snapshot contentOf(struct buffer *buf) {
+	struct snapshot s;
+	char *raw = rowsToString(buf, &s.len);
+	s.bytes = xmalloc(s.len + 1);
+	memcpy(s.bytes, raw, s.len);
+	s.bytes[s.len] = '\0';
 	free(raw);
-	return out;
+	return s;
+}
+
+static int snapshotEqual(const struct snapshot *a, const struct snapshot *b) {
+	return a->len == b->len && memcmp(a->bytes, b->bytes, a->len) == 0;
+}
+
+/* Offset of the first differing byte, for the failure message.  Equal
+ * snapshots never reach this. */
+static size_t firstDifference(const struct snapshot *a,
+			      const struct snapshot *b) {
+	size_t n = a->len < b->len ? a->len : b->len;
+	for (size_t i = 0; i < n; i++)
+		if (a->bytes[i] != b->bytes[i])
+			return i;
+	return n;
 }
 
 /* ---- the command set --------------------------------------------- */
@@ -149,7 +186,88 @@ static const char *UNICHARS[] = { "\xc3\xa9", "\xe6\x97\xa5",
 
 static char fail_reason[256];
 
+/* ---- flat invariants (design §2.4) ----
+ *
+ * The row-model checks below stay: they are still true, and during the
+ * migration they catch a row array that has drifted from the text it
+ * is supposed to represent.  These flat checks are the ones that
+ * outlive it -- each is B-1, B-2 or B-3 stated against the byte string
+ * rather than against rows -- plus the round trip that every caller
+ * converted to offsets depends on.
+ *
+ * Checking both models against each other is the point.  A defect that
+ * corrupts rows but leaves the flattened text intact, or the reverse,
+ * shows up here as a disagreement rather than passing both. */
+static int checkFlatInvariants(struct buffer *buf) {
+	struct snapshot flat = contentOf(buf);
+	int ok = 1;
+
+	/* B-2: the whole buffer is valid UTF-8, not merely each row.
+	 * A row-at-a-time check cannot see a sequence broken across a
+	 * row boundary; under G0 there are no boundaries to hide it. */
+	if (!utf8_validate(flat.bytes, flat.len)) {
+		snprintf(fail_reason, sizeof(fail_reason),
+			 "flat text is not valid UTF-8 (%zu bytes)", flat.len);
+		ok = 0;
+	}
+
+	/* B-1: a non-empty buffer ends in a newline. */
+	if (ok && flat.len > 0 && flat.bytes[flat.len - 1] != '\n') {
+		snprintf(fail_reason, sizeof(fail_reason),
+			 "flat text does not end in a newline (last byte 0x%02x)",
+			 flat.bytes[flat.len - 1]);
+		ok = 0;
+	}
+
+	/* bufTextLen() must agree with the text it claims to measure. */
+	if (ok && bufTextLen(buf) != flat.len) {
+		snprintf(fail_reason, sizeof(fail_reason),
+			 "bufTextLen %zu but flat text is %zu bytes",
+			 bufTextLen(buf), flat.len);
+		ok = 0;
+	}
+
+	if (ok) {
+		size_t off = bufOffset(buf, buf->cx, buf->cy);
+
+		/* Point is addressable within the text. */
+		if (off > flat.len) {
+			snprintf(fail_reason, sizeof(fail_reason),
+				 "point offset %zu past end of text %zu", off,
+				 flat.len);
+			ok = 0;
+		}
+		/* B-3: point is on a character boundary in flat space.
+		 * The row-model check below asserts the same thing per
+		 * row; this one would still hold if rows vanished. */
+		else if (off < flat.len && utf8_isCont(flat.bytes[off])) {
+			snprintf(fail_reason, sizeof(fail_reason),
+				 "point offset %zu is mid-character", off);
+			ok = 0;
+		} else {
+			/* The round trip every offset-converted caller
+			 * relies on.  If this fails, a caller reading
+			 * through bufPos() is addressing the wrong byte
+			 * while both models look individually sane. */
+			int bx, by;
+			bufPos(buf, off, &bx, &by);
+			if (bx != buf->cx || by != buf->cy) {
+				snprintf(fail_reason, sizeof(fail_reason),
+					 "offset round trip: (%d,%d) -> %zu -> "
+					 "(%d,%d)",
+					 buf->cx, buf->cy, off, bx, by);
+				ok = 0;
+			}
+		}
+	}
+
+	free(flat.bytes);
+	return ok;
+}
+
 static int checkInvariants(struct buffer *buf) {
+	if (!checkFlatInvariants(buf))
+		return 0;
 	for (int i = 0; i < buf->numrows; i++) {
 		if (!utf8_validate(buf->row[i].chars, buf->row[i].size)) {
 			snprintf(fail_reason, sizeof(fail_reason),
@@ -213,7 +331,7 @@ static int runSequence(const struct step *steps, int n) {
 	muteStdout();
 
 	struct buffer *buf = make_test_buffer_lines(START_LINES, NSTART);
-	char *original = contentOf(buf);
+	struct snapshot original = contentOf(buf);
 	int rc = 0;
 
 	for (int i = 0; i < n && rc == 0; i++) {
@@ -249,17 +367,19 @@ static int runSequence(const struct step *steps, int n) {
 	}
 
 	if (rc == 0 && getenv("EMIL_FUZZ_SKIP_UNDO") == NULL) {
-		char *restored = contentOf(buf);
-		if (strcmp(original, restored) != 0) {
+		struct snapshot restored = contentOf(buf);
+		if (!snapshotEqual(&original, &restored)) {
+			size_t at = firstDifference(&original, &restored);
 			snprintf(fail_reason, sizeof(fail_reason),
-				 "undo did not restore: %zu bytes vs %zu",
-				 strlen(original), strlen(restored));
+				 "undo did not restore: %zu bytes vs %zu, "
+				 "first difference at offset %zu",
+				 original.len, restored.len, at);
 			rc = 1;
 		}
-		free(restored);
+		free(restored.bytes);
 	}
 
-	free(original);
+	free(original.bytes);
 	clearText(&E.kill);
 	cleanupTestEditor();
 	unmuteStdout();

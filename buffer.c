@@ -849,3 +849,59 @@ void clampPositions(struct buffer *buf) {
 	if (buf->marky >= 0)
 		clampToBuffer(buf, &buf->markx, &buf->marky);
 }
+
+/* ---- G0 offset shims (design §11 step 2) ----
+ *
+ * See the contract in buffer.h.  These define the flat offset space
+ * against the row array so callers can migrate to offsets before the
+ * storage changes. */
+
+size_t bufTextLen(struct buffer *bufr) {
+	size_t total = 0;
+	for (int i = 0; i < bufr->numrows; i++)
+		total += (size_t)bufr->row[i].size;
+	/* One separator between each pair of rows.  Matches
+	 * rowsToString(), which emits '\n' before every row but the
+	 * first, so an N-row buffer carries N-1 separators. */
+	if (bufr->numrows > 1)
+		total += (size_t)bufr->numrows - 1;
+	return total;
+}
+
+size_t bufOffset(struct buffer *bufr, int cx, int cy) {
+	if (cy < 0)
+		return 0;
+	if (cy > bufr->numrows - 1)
+		cy = bufr->numrows - 1;
+	size_t off = 0;
+	for (int i = 0; i < cy; i++)
+		off += (size_t)bufr->row[i].size + 1;
+	if (cx < 0)
+		cx = 0;
+	if (cx > bufr->row[cy].size)
+		cx = bufr->row[cy].size;
+	return off + (size_t)cx;
+}
+
+void bufPos(struct buffer *bufr, size_t off, int *cx, int *cy) {
+	size_t walked = 0;
+	for (int i = 0; i < bufr->numrows; i++) {
+		size_t rowlen = (size_t)bufr->row[i].size;
+		/* off == walked + rowlen is the end-of-row position,
+		 * which belongs to this row rather than to the start of
+		 * the next: the cursor sits after the last byte, not
+		 * before the first byte of what follows.  The last row
+		 * is the only one where that position is also the end
+		 * of the buffer. */
+		if (off <= walked + rowlen) {
+			*cy = i;
+			*cx = (int)(off - walked);
+			return;
+		}
+		walked += rowlen + 1; /* + the separator newline */
+	}
+	/* Past the end: clamp to the last valid position.  numrows >= 1
+	 * is an invariant, so row[numrows - 1] exists. */
+	*cy = bufr->numrows - 1;
+	*cx = bufr->row[*cy].size;
+}
