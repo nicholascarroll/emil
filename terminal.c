@@ -53,7 +53,13 @@ void die(const char *s) {
  * fatal errors.  Best-effort by design: this runs during exit
  * processing, where routing a failure through die() would call
  * exit() inside exit() (undefined behavior).  If tcsetattr fails
- * here the terminal is beyond saving anyway. */
+ * here the terminal is beyond saving anyway.
+ *
+ * Also called from the fatal-signal handler in main.c, so it must
+ * stay async-signal-safe: tcsetattr() and write() are on POSIX's
+ * list, and nothing else may be added here without checking that it
+ * is too.  A printf() here would be invisible on the exit path and
+ * undefined on the crash path. */
 void disableRawMode(void) {
 	IGNORE_RETURN(tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_termios));
 	IGNORE_RETURN(write(STDOUT_FILENO, CSI "?1049l", 8));

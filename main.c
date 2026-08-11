@@ -78,6 +78,42 @@ static void sigwinchHandler(int sig) {
 }
 #endif
 
+/* Fatal signals: hand the terminal back, then die of the same signal.
+ *
+ * A crash -- a real fault, or emil's own abort() from the allocation
+ * guards in util.c -- otherwise leaves the tty in raw mode on the
+ * alternate screen.  The shell the user drops back into then echoes
+ * nothing, reads no lines and ignores Ctrl-C, and the way out is to
+ * type `reset` blind.  The terminal is a persistent object: its
+ * settings outlive the process that made them, which is what turns a
+ * crash into a second, separate problem for the user.
+ *
+ * Async-signal-safe only.  tcsetattr(), write(), signal() and raise()
+ * are all on POSIX's list; perror() and free() are not, which is why
+ * this cannot route through die() or editorCleanup().
+ * disableRawMode() is exactly one tcsetattr() and one write() -- the
+ * same restore the clean exit path uses, so there is one restore and
+ * not two -- and terminal.c records that this handler depends on it
+ * staying that way.
+ *
+ * The disposition is reset before the restore so that a fault inside
+ * the restore cannot re-enter this handler, and re-raised after it
+ * (SA_NODEFER, so it lands inside the handler rather than on return
+ * from one that must not return) so the process still dies of what
+ * killed it: the shell still reports the crash and the kernel still
+ * writes the core.  A handler that tidied up and exited would leave a
+ * clean terminal and no evidence, which is worse than the bug.
+ *
+ * Not routed through the got_* flag mechanism the other handlers use:
+ * those signals are ones the main loop will live to see.
+ */
+static void handleFatalSignal(int sig) {
+	signal(sig, SIG_DFL);
+	disableRawMode();
+	raise(sig);
+	_exit(128 + sig); /* not reached; raise() above is fatal */
+}
+
 static void handleSigterm(int sig) {
 	(void)sig;
 	got_sigterm = 1;
@@ -134,6 +170,16 @@ void setupHandlers(void) {
 	installHandler(SIGTSTP, editorSuspend, SA_NODEFER);
 	installHandler(SIGTERM, handleSigterm, 0);
 	installHandler(SIGHUP, handleSighup, 0);
+
+	/* Installed here rather than once in main() so that the resume
+	 * path re-asserts them along with the rest; re-installing an
+	 * identical disposition costs nothing.  SIGBUS is XSI where
+	 * SIGSEGV and SIGABRT are ISO C, so it is guarded. */
+	installHandler(SIGSEGV, handleFatalSignal, SA_NODEFER);
+	installHandler(SIGABRT, handleFatalSignal, SA_NODEFER);
+#ifdef SIGBUS
+	installHandler(SIGBUS, handleFatalSignal, SA_NODEFER);
+#endif
 }
 
 void editorCleanup(void) {

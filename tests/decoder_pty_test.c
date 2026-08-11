@@ -592,6 +592,76 @@ static void scenarioCtrlCSurvivesAfterSuspend(const char *label,
 	finish();
 }
 
+/* ---- crash paths (invariant 4.5 under a fatal signal) ---------- */
+
+/* A crash must hand the terminal back before dying.
+ *
+ * Without a handler the default action kills the process outright,
+ * leaving the tty in raw mode on the alternate screen: the shell the
+ * user drops back into echoes nothing and interprets nothing, and the
+ * only way out is to type `reset` blind.  The pty here is the same
+ * kind of persistent object as that shell's tty -- the settings
+ * outlive the process that made them, which is exactly why this is a
+ * user-visible bug and not merely untidy.
+ *
+ * Three things are asserted, and all three are needed:
+ *   1. cooked mode is back (ECHO/ICANON/ISIG on) -- the shell works;
+ *   2. the alternate screen was exited -- the user's scrollback is
+ *      back;
+ *   3. the process still died *of that signal* -- so the shell still
+ *      reports the crash and the kernel still writes a core.  A
+ *      handler that tidied up and called exit(1) would pass 1 and 2
+ *      while quietly hiding every crash from the user and from any
+ *      core-dump-based debugging, so 3 is the assertion that keeps
+ *      the fix honest.
+ *
+ * The signal is sent from here rather than provoked inside the editor
+ * because the handler must work for an asynchronous SIGSEGV/SIGBUS
+ * and for emil's own abort() alike, and only the sent form is
+ * reproducible. */
+static void scenarioTerminalRestoredAfterFatalSignal(const char *label,
+						     int sig) {
+	struct child c;
+	begin(label);
+	if (spawnEmil(&c) == 0) {
+		struct termios before, after;
+		int can_see = masterSeesSlaveTermios(&c, &before);
+
+		capReset();
+		kill(c.pid, sig);
+		pump(c.mfd, 400); /* collect the restore sequence */
+
+		int st = 0;
+		pid_t r = waitpid(c.pid, &st, 0);
+		expect(r == c.pid && WIFSIGNALED(st) && WTERMSIG(st) == sig,
+		       "editor did not die of the signal it was sent"
+		       " (no re-raise: crash hidden from the shell and"
+		       " no core dumped)");
+		expect(contains(cap, "\033[?1049l"),
+		       "alternate screen not exited on crash");
+
+		/* Same portability caveat as the suspend scenarios: on
+		 * illumos the master reports no termios of the slave,
+		 * so the mode half of this cannot be observed there.
+		 * The two assertions above still run. */
+		if (!can_see)
+			skip("master does not report slave termios");
+		else if (tcgetattr(c.mfd, &after) == 0) {
+			expect(after.c_lflag & ECHO,
+			       "ECHO left off after crash: shell echoes nothing");
+			expect(after.c_lflag & ICANON,
+			       "ICANON left off after crash: shell reads no lines");
+			expect(after.c_lflag & ISIG,
+			       "ISIG left off after crash: Ctrl-C does nothing");
+		}
+
+		/* Already reaped above; reap() would kill a pid that is
+		 * no longer ours. */
+		close(c.mfd);
+	}
+	finish();
+}
+
 /* ---- main ------------------------------------------------------ */
 
 int main(int argc, char **argv) {
@@ -642,6 +712,12 @@ int main(int argc, char **argv) {
 					  "\030z");
 	scenarioCtrlCSurvivesAfterSuspend(
 		"Ctrl-C after C-x C-z does not kill it", "\030\032");
+	scenarioTerminalRestoredAfterFatalSignal("terminal restored on SIGSEGV",
+						 SIGSEGV);
+	scenarioTerminalRestoredAfterFatalSignal("terminal restored on SIGABRT",
+						 SIGABRT);
+	scenarioTerminalRestoredAfterFatalSignal("terminal restored on SIGBUS",
+						 SIGBUS);
 
 	if (total_failures)
 		printf("decoder_pty_test: %d assertion(s) failed\n",
