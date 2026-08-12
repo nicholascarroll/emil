@@ -5,6 +5,7 @@
 #include "test_harness.h"
 #include "edit.h"
 #include "display.h"
+#include "wrap.h"
 #include <stdint.h>
 
 /* ---- Helper ---- */
@@ -363,8 +364,103 @@ void test_scroll_viewport_empty_wrap_buffer(void) {
 }
 
 
+/* ---- charsToDisplayColumn caching boundary ---- */
+
+/* char_pos == row->size is "the whole row" and must take the cached
+ * calculateLineWidth() path.  A `>` here instead of `>=` left the two
+ * drawRows() callers walking the row on every frame; on a long line
+ * that dominated the frame.  Asserting the cache was *populated* is
+ * what distinguishes the two paths -- both return the same number. */
+void test_ctdc_at_row_size_uses_cache(void) {
+	erow row = make_row("hello\tworld");
+	TEST_ASSERT_EQUAL_INT(-1, row.cached_width);
+	int w = charsToDisplayColumn(&row, row.size);
+	/* Order matters: calculateLineWidth() would populate the cache
+	 * itself, so the cache must be inspected before it is called. */
+	TEST_ASSERT_EQUAL_INT(w, row.cached_width);
+	TEST_ASSERT_EQUAL_INT(calculateLineWidth(&row), w);
+}
+
+void test_ctdc_past_row_size_uses_cache(void) {
+	erow row = make_row("hello\tworld");
+	int w = charsToDisplayColumn(&row, row.size + 100);
+	TEST_ASSERT_EQUAL_INT(w, row.cached_width);
+	TEST_ASSERT_EQUAL_INT(calculateLineWidth(&row), w);
+}
+
+/* The walk now delegates to nextScreenX().  These pin the agreement
+ * between the partial walk and the whole-row width it must build up
+ * to, for tabs, control characters and wide characters. */
+void test_ctdc_partial_matches_full(void) {
+	erow row = make_row("ab\tc\x01"
+			    "d\xe6\x97\xa5"
+			    "e");
+	int full = calculateLineWidth(&row);
+	erow scratch = make_row("ab\tc\x01"
+				"d\xe6\x97\xa5"
+				"e");
+	TEST_ASSERT_EQUAL_INT(full, charsToDisplayColumn(&scratch, row.size));
+	TEST_ASSERT_EQUAL_INT(0, charsToDisplayColumn(&scratch, 0));
+	TEST_ASSERT_EQUAL_INT(2, charsToDisplayColumn(&scratch, 2));
+	/* byte 2 is a tab: column advances to the next tab stop */
+	TEST_ASSERT_EQUAL_INT(EMIL_TAB_STOP,
+			      charsToDisplayColumn(&scratch, 3));
+	/* byte 4 is \x01, a control character, rendered as ^A */
+	TEST_ASSERT_EQUAL_INT(EMIL_TAB_STOP + 3,
+			      charsToDisplayColumn(&scratch, 5));
+}
+
+void test_ctdc_empty_row(void) {
+	erow row = make_row("");
+	TEST_ASSERT_EQUAL_INT(0, charsToDisplayColumn(&row, 0));
+	TEST_ASSERT_EQUAL_INT(0, charsToDisplayColumn(&row, 5));
+}
+
+/* The four tests above assert the cache is *populated*.  All four
+ * would still pass if the cache were never invalidated -- which is
+ * the failure §4.10 exists to prevent, and the one routing
+ * char_pos >= row->size through the cache makes worse: two drawRows()
+ * callers now read the cache every frame where they walked the row
+ * fresh before, so a missed invalidation renders wrongly continuously
+ * instead of on a rare path.
+ *
+ * So assert what the protocol promises rather than what the cache
+ * contains.  selfInsert()/delChar() rather than insertChar(): the
+ * latter is a raw primitive that calls rowInsertChar() directly and
+ * invalidates on the line below its own memmove, which is hard to get
+ * wrong.  A keystroke goes through the mutation layer to
+ * bulkInsert/bulkDelete, which is where an invalidation would actually
+ * go missing, and that is the path worth pinning. */
+void test_ctdc_width_follows_a_mutation(void) {
+	struct buffer *b = make_test_buffer("abc");
+
+	int w = charsToDisplayColumn(&b->row[0], b->row[0].size);
+	TEST_ASSERT_EQUAL_INT(3, w);
+	/* The cache is warm from here on, so a stale read is possible
+	 * and the assertions below can distinguish one. */
+	TEST_ASSERT_EQUAL_INT(3, b->row[0].cached_width);
+
+	b->cx = 3;
+	b->cy = 0;
+	selfInsert(b, '\t', 1); /* "abc\t" -- one tab stop wide */
+	w = charsToDisplayColumn(&b->row[0], b->row[0].size);
+	TEST_ASSERT_EQUAL_INT(EMIL_TAB_STOP, w);
+
+	b->cx = 3;
+	delChar(1); /* back to "abc" */
+	w = charsToDisplayColumn(&b->row[0], b->row[0].size);
+	TEST_ASSERT_EQUAL_INT(3, w);
+}
+
 int main(void) {
 	TEST_BEGIN();
+
+	/* charsToDisplayColumn */
+	RUN_TEST(test_ctdc_at_row_size_uses_cache);
+	RUN_TEST(test_ctdc_past_row_size_uses_cache);
+	RUN_TEST(test_ctdc_partial_matches_full);
+	RUN_TEST(test_ctdc_empty_row);
+	RUN_TEST(test_ctdc_width_follows_a_mutation);
 
 	/* displayColumnToByteOffset */
 	RUN_TEST(test_dcbo_simple_ascii);

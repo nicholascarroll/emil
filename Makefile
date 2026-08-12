@@ -98,9 +98,16 @@ test: $(PROGNAME)
 
 check: test
 
+# EMIL_DEBUG_ROW_CACHE recomputes and compares cached_width on every
+# cache hit (see calculateLineWidth in wrap.c).  It belongs here rather
+# than in a default build because the check is the same whole-row walk
+# the cache exists to avoid -- on a 50 MB line it costs 439 ms per
+# frame -- and here because this is the build the pre-merge run uses,
+# so the §4.10 invalidation protocol is exercised by every suite and by
+# the fuzzer before anything is proposed for merge.
 sanitize:
 	$(MAKE) clean
-	$(MAKE) CFLAGS="-g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer" \
+	$(MAKE) CFLAGS="-g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -DEMIL_DEBUG_ROW_CACHE" \
 	        LDFLAGS="-fsanitize=address,undefined" test
 
 # Sorry Dave

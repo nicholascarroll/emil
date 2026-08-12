@@ -58,7 +58,7 @@ static void computeRowHighlightBounds(struct buffer *buf, int filerow,
 				base_byte = i + 1;
 		}
 		hl->region_start = charsToDisplayColumn(row, base_byte);
-		hl->region_end = charsToDisplayColumn(row, row->size);
+		hl->region_end = calculateLineWidth(row);
 		return;
 	}
 
@@ -567,8 +567,7 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
 				/* Pad remainder of screen line so \x1b[K
 				 * is not needed (it would erase the last
 				 * column due to pending-wrap state). */
-				int rx = charsToDisplayColumn(row, row->size) -
-					 win->coloff;
+				int rx = calculateLineWidth(row) - win->coloff;
 				if (rx < 0)
 					rx = 0;
 				while (rx < screencols) {
