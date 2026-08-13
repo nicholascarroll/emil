@@ -226,7 +226,12 @@ void copyToClipboard(const uint8_t *text) {
 	memcpy(buf + 7, encoded, elen);
 	memcpy(buf + 7 + elen, "\033\\", 2);
 
-	IGNORE_RETURN(write(STDOUT_FILENO, buf, total));
+	/* Looped.  This payload reaches ~100000 bytes, an order of
+	 * magnitude past a pty's buffer, so a short write here is the
+	 * likeliest of them all -- and the least benign: it would put a
+	 * truncated base64 payload on the clipboard and leave the
+	 * terminal waiting for an ST that never arrives. */
+	IGNORE_RETURN(writeAll(STDOUT_FILENO, buf, total));
 
 	free(buf);
 	free(encoded);

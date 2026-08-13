@@ -8,10 +8,26 @@
 void dbuf_ensure(struct dbuf *d, int n) {
 	if (n <= 0)
 		return;
-	/* Overflow check: can we even represent len + n? */
+	/* Overflow check: can we even represent len + n?
+	 *
+	 * abort(), not xmalloc((size_t)INT_MAX + 1) as this used to do.
+	 * That was meant to "abort cleanly" by asking for an impossible
+	 * allocation, but on 64-bit it is not impossible: measured here,
+	 * a request one byte past INT_MAX SUCCEEDS.  So the guard leaked
+	 * 2 GiB and then fell straight through into `int need = d->len +
+	 * n` -- the signed overflow it exists to prevent -- while reading
+	 * as fixed to anyone who greps for it.  A guard that commits the
+	 * bug it guards against is worse than no guard, because it stops
+	 * the next reader looking.
+	 *
+	 * Whether any live dbuf can actually reach INT_MAX is not
+	 * established; the defect is real, its trigger is not
+	 * demonstrated.  abort() is right either way: there is no
+	 * recovery from a length that cannot be represented, and
+	 * util.c's allocation guards already end the process the same
+	 * way. */
 	if (d->len > INT_MAX - n) {
-		/* Pathological: abort cleanly via xmalloc(impossible). */
-		xmalloc((size_t)INT_MAX + 1);
+		abort();
 	}
 	int need = d->len + n;
 	if (need < d->cap)

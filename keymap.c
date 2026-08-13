@@ -53,13 +53,6 @@ static int uargScale(int uarg) {
 	return uarg * 4;
 }
 
-// Forward declarations for command functions
-
-static int compareCommands(const void *a, const void *b) {
-	return strcmp(((const struct command *)a)->key,
-		      ((const struct command *)b)->key);
-}
-
 void setupCommands(void) {
 	static struct command commands[] = {
 		{ "capitalize-region", capitalizeRegion },
@@ -78,9 +71,6 @@ void setupCommands(void) {
 
 	E.cmd = commands;
 	E.cmd_count = sizeof(commands) / sizeof(commands[0]);
-
-	// Sort the commands array
-	qsort(E.cmd, E.cmd_count, sizeof(struct command), compareCommands);
 }
 
 void runCommand(char *cmd) {
@@ -93,17 +83,14 @@ void runCommand(char *cmd) {
 		}
 		cmd[i] = c;
 	}
-
-	struct command key = { cmd, NULL };
-	struct command *found = bsearch(&key, E.cmd, E.cmd_count,
-					sizeof(struct command),
-					compareCommands);
-
-	if (found) {
-		found->cmd();
-	} else {
-		setStatusMessage("No command found");
+	for (int i = 0; i < E.cmd_count; i++) {
+		if (strcmp(E.cmd[i].key, cmd) == 0) {
+			E.cmd[i].cmd();
+			return;
+		}
 	}
+
+	setStatusMessage("No command found");
 }
 
 /*** editor operations ***/
@@ -1133,11 +1120,14 @@ static int dispatchMisc(int c, int uarg) {
 		struct window *w = E.windows[winIdx];
 		struct buffer *buf = w->buf;
 
+		int scx, scy;
+		screenCursorPos(w, -1, &scx, &scy);
+
 		setStatusMessage(
-			"(buf->cx%d,cy%d) (win->scx%d,scy%d) win->height=%d "
+			"(buf->cx%d,cy%d) (screen %d,%d) win->height=%d "
 			"screenrows=%d, rowoff=%d",
-			buf->cx, buf->cy, w->scx, w->scy, w->height,
-			E.screenrows, w->rowoff);
+			buf->cx, buf->cy, scx, scy, w->height, E.screenrows,
+			w->rowoff);
 	}
 		return 1;
 	case CMD_EXPAND:

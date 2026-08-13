@@ -59,11 +59,35 @@ static void capReset(void) {
 	cap_len = 0;
 }
 
+/* Multiplier applied to every settle window (see pump).  Every wait in
+ * this file is "give the editor time to produce its output", so
+ * stretching them can only reduce flakiness, never change what is
+ * asserted.  Needed where the editor is slower to respond than a
+ * native build on an idle machine: under a Wasm runtime, under an
+ * emulator, or on a loaded CI runner.  Set EMIL_PTY_TIME_SCALE=4 (or
+ * whatever) rather than editing the constants, so the native timings
+ * stay honest about how fast the editor actually is.
+ *
+ * Note this deliberately does NOT scale the deliberate *input* gaps
+ * (the 400ms split-sequence pause), which are part of what those
+ * scenarios assert rather than slack for the editor to use. */
+static int timeScale(void) {
+	static int scale = 0;
+	if (scale == 0) {
+		const char *s = getenv("EMIL_PTY_TIME_SCALE");
+		scale = s ? atoi(s) : 1;
+		if (scale < 1)
+			scale = 1;
+	}
+	return scale;
+}
+
 /* Collect output from the pty master for duration_ms, appending to
  * the capture buffer. */
 static void pump(int fd, int duration_ms) {
 	struct pollfd pfd;
 	int waited = 0;
+	duration_ms *= timeScale();
 	while (waited < duration_ms) {
 		pfd.fd = fd;
 		pfd.events = POLLIN;
@@ -123,9 +147,11 @@ struct child {
 	int mfd;
 };
 
-/* Spawn emil on a fresh 24x80 pty.  Returns 0 on success, -1 if no
- * pty is available (caller should SKIP), exits on setup bugs. */
-static int spawnEmil(struct child *c) {
+/* Spawn emil on a fresh pty of the given size, optionally opening a
+ * file.  Returns 0 on success, -1 if no pty is available (caller
+ * should SKIP), exits on setup bugs. */
+static int spawnEmilOpts(struct child *c, const char *file, int cols,
+			 int rows) {
 	int mfd = posix_openpt(O_RDWR | O_NOCTTY);
 	if (mfd == -1)
 		return -1;
@@ -175,8 +201,8 @@ static int spawnEmil(struct child *c) {
 		}
 #endif
 		struct winsize ws;
-		ws.ws_row = 24;
-		ws.ws_col = 80;
+		ws.ws_row = (unsigned short)rows;
+		ws.ws_col = (unsigned short)cols;
 		ws.ws_xpixel = 0;
 		ws.ws_ypixel = 0;
 		ioctl(sfd, TIOCSWINSZ, &ws);
@@ -186,7 +212,10 @@ static int spawnEmil(struct child *c) {
 		if (sfd > STDERR_FILENO)
 			close(sfd);
 		close(mfd);
-		execl(emil_path, emil_path, (char *)NULL);
+		if (file != NULL)
+			execl(emil_path, emil_path, file, (char *)NULL);
+		else
+			execl(emil_path, emil_path, (char *)NULL);
 		_exit(127);
 	}
 
@@ -197,15 +226,27 @@ static int spawnEmil(struct child *c) {
 	return 0;
 }
 
-static void send(struct child *c, const char *bytes, size_t n,
-		 int settle_ms) {
+/* Spawn emil on a fresh 24x80 pty with no file: what every scenario
+ * written before the frame-truncation one below wants. */
+static int spawnEmil(struct child *c) {
+	return spawnEmilOpts(c, NULL, 80, 24);
+}
+
+/* Named sendBytes, not send: send(2) is a POSIX socket function, and
+ * a static shadowing it compiles only for as long as no header in the
+ * include chain happens to declare it.  That held here by luck until a
+ * feature-test macro pulled in <sys/socket.h> on Darwin and the
+ * collision became a hard error.  Kept renamed now that the macro is
+ * gone, because the hazard was always latent. */
+static void sendBytes(struct child *c, const char *bytes, size_t n,
+		      int settle_ms) {
 	ssize_t w = write(c->mfd, bytes, n);
 	(void)w;
 	pump(c->mfd, settle_ms);
 }
 
 static void sendStr(struct child *c, const char *s, int settle_ms) {
-	send(c, s, strlen(s), settle_ms);
+	sendBytes(c, s, strlen(s), settle_ms);
 }
 
 static int childAlive(struct child *c) {
@@ -475,21 +516,107 @@ static void scenarioUtf8Typing(void) {
  * own, so the call simply fails.  That is a fact about the platform
  * rather than anything to do with the editor, so it is a SKIP.  The
  * end-to-end Ctrl-C scenario below needs no such visibility and
- * carries the assertion on those platforms. */
+ * carries the assertion on those platforms.
+ *
+ * The probe must not involve the editor.  An earlier version asked
+ * whether the master reported ECHO off while emil was running, and
+ * treated ECHO on as "the master is describing itself".  But ECHO left
+ * on is also precisely the defect these scenarios exist to catch, so a
+ * real failure to enter raw mode was indistinguishable from an
+ * unobservant platform -- and the probe won, turning a red scenario
+ * into a silent SKIP.  Verified by mutation: clearing ICANON but not
+ * ECHO or ISIG made all three suspend scenarios skip on Linux.
+ *
+ * This version opens its own pty pair, sets a known flag on the slave
+ * and reads it back through the master, twice and in both directions.
+ * No editor, so nothing it concludes can be confused with an editor
+ * bug.  Called once and cached: it is a property of the platform. */
+static int masterReflectsSlave(void) {
+	static int cached = -1;
+	if (cached >= 0)
+		return cached;
+
+	cached = 0;
+	int m = posix_openpt(O_RDWR | O_NOCTTY);
+	if (m == -1)
+		return cached;
+	if (grantpt(m) == -1 || unlockpt(m) == -1) {
+		close(m);
+		return cached;
+	}
+	const char *name = ptsname(m);
+	if (name == NULL) {
+		close(m);
+		return cached;
+	}
+	int s = open(name, O_RDWR | O_NOCTTY);
+	if (s == -1) {
+		close(m);
+		return cached;
+	}
+
+	struct termios slave, viaMaster;
+	if (tcgetattr(s, &slave) != 0) {
+		close(s);
+		close(m);
+		return cached;
+	}
+
+	/* Off, then on.  Both directions have to be reflected: a master
+	 * that happens to report ECHO off for its own reasons would pass
+	 * a one-sided check. */
+	struct termios t = slave;
+	t.c_lflag &= ~ECHO;
+	int ok = 0;
+	if (tcsetattr(s, TCSANOW, &t) == 0 &&
+	    tcgetattr(m, &viaMaster) == 0 && !(viaMaster.c_lflag & ECHO)) {
+		t.c_lflag |= ECHO;
+		if (tcsetattr(s, TCSANOW, &t) == 0 &&
+		    tcgetattr(m, &viaMaster) == 0 &&
+		    (viaMaster.c_lflag & ECHO))
+			ok = 1;
+	}
+
+	(void)tcsetattr(s, TCSANOW, &slave);
+	close(s);
+	close(m);
+	cached = ok;
+	return cached;
+}
+
+/* Read the editor's termios through the master.  Returns 0 only where
+ * the platform cannot report it at all -- never because of what the
+ * value turned out to be. */
 static int masterSeesSlaveTermios(struct child *c, struct termios *out) {
-	if (tcgetattr(c->mfd, out) != 0)
+	if (!masterReflectsSlave())
 		return 0;
-	/* Succeeded, but reports ECHO on while the editor is certainly in
-	 * raw mode: the master is describing itself, not the slave. */
-	if (out->c_lflag & ECHO)
-		return 0;
-	return 1;
+	return tcgetattr(c->mfd, out) == 0;
 }
 
 static void scenarioTerminalOwnedAfterSuspend(const char *label,
 					      const char *keys) {
 	struct child c;
 	begin(label);
+	/* SIGTSTP job control is not emulated by every host runtime.
+	 * wasmer delivers no SIGTSTP to the guest: the editor's
+	 * suspend handler never runs, so it neither restores the
+	 * terminal nor stops -- it exits instead, and ISIG is left as
+	 * the raw-mode setup left it.  Every assertion here then
+	 * reports the runtime's behaviour rather than emil's.
+	 *
+	 * Same shape as EMIL_PTY_NO_FATAL_SIGNALS above: a gap in
+	 * coverage on that target, not a gap in emil.  The native
+	 * build runs all six.  Note that two of the six passed under
+	 * wasmer by accident -- the editor was already gone, so
+	 * "Ctrl-C did not kill it" was trivially true -- which is a
+	 * second reason not to read any of them there. */
+	if (getenv("EMIL_PTY_NO_JOB_CONTROL")) {
+		skip("host runtime does not deliver SIGTSTP to the"
+		     " guest, so suspend never happens");
+		finish();
+		return;
+	}
+
 	if (spawnEmil(&c) == 0) {
 		struct termios before, after;
 		if (!masterSeesSlaveTermios(&c, &before)) {
@@ -568,6 +695,26 @@ static void scenarioCtrlCSurvivesAfterSuspend(const char *label,
 					      const char *keys) {
 	struct child c;
 	begin(label);
+	/* SIGTSTP job control is not emulated by every host runtime.
+	 * wasmer delivers no SIGTSTP to the guest: the editor's
+	 * suspend handler never runs, so it neither restores the
+	 * terminal nor stops -- it exits instead, and ISIG is left as
+	 * the raw-mode setup left it.  Every assertion here then
+	 * reports the runtime's behaviour rather than emil's.
+	 *
+	 * Same shape as EMIL_PTY_NO_FATAL_SIGNALS above: a gap in
+	 * coverage on that target, not a gap in emil.  The native
+	 * build runs all six.  Note that two of the six passed under
+	 * wasmer by accident -- the editor was already gone, so
+	 * "Ctrl-C did not kill it" was trivially true -- which is a
+	 * second reason not to read any of them there. */
+	if (getenv("EMIL_PTY_NO_JOB_CONTROL")) {
+		skip("host runtime does not deliver SIGTSTP to the"
+		     " guest, so suspend never happens");
+		finish();
+		return;
+	}
+
 	if (spawnEmil(&c) == 0) {
 		sendStr(&c, keys, 600);
 		switch (childState(&c)) {
@@ -623,6 +770,27 @@ static void scenarioTerminalRestoredAfterFatalSignal(const char *label,
 						     int sig) {
 	struct child c;
 	begin(label);
+
+	/* These three assertions are about emil's own fatal-signal
+	 * handler, and they are only meaningful when the process we
+	 * signal is emil.  Under a Wasm runtime it is not: the pid
+	 * belongs to the host runtime, which owns the process and
+	 * installs its own handlers.  Wasmer in particular reserves
+	 * SIGSEGV and SIGBUS for guard-page and trap handling and does
+	 * not die of them at all, so the waitpid() below would block
+	 * forever rather than fail -- a hung CI runner instead of a
+	 * red one.  Skip rather than hang, and say why.
+	 *
+	 * This is a gap in coverage, not a gap in emil: nothing here
+	 * can be asserted about a handler the runtime never lets run.
+	 * The native build still runs all three. */
+	if (getenv("EMIL_PTY_NO_FATAL_SIGNALS")) {
+		skip("editor runs under a host runtime that owns the"
+		     " process and intercepts fatal signals");
+		finish();
+		return;
+	}
+
 	if (spawnEmil(&c) == 0) {
 		struct termios before, after;
 		int can_see = masterSeesSlaveTermios(&c, &before);
@@ -662,6 +830,19 @@ static void scenarioTerminalRestoredAfterFatalSignal(const char *label,
 	finish();
 }
 
+/* ---- short writes (§H1) ---------------------------------------- */
+
+/* Count frames whose tail never arrived.
+ *
+ * Every frame begins CSI ?7l (auto-wrap off, cursor hidden follows)
+ * and ends CSI ?7h CSI ?25h.  A frame start with no CSI ?25h before
+ * the next frame start is a frame the terminal received without its
+ * tail, which leaves auto-wrap off and the cursor invisible until a
+ * later frame lands whole. */
+/* Local rather than memmem(): memmem is a GNU/BSD extension, not
+ * POSIX, and this suite has to build on illumos and macOS too.  The
+ * capture can contain NUL bytes, so this searches over an explicit
+ * length rather than using strstr. */
 /* ---- main ------------------------------------------------------ */
 
 int main(int argc, char **argv) {

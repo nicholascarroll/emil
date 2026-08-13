@@ -9,7 +9,7 @@ Written in C99, `emil` is single-threaded and runs on any system providing POSIX
 
 ## Capabilities
 
-- Edit any left-to-right Unicode script (cursor movement and deletion operate on codepoints, not grapheme clusters)
+- Edit any left-to-right Unicode script  [^1]
 - Visual text selection
 - Edit rectangular text regions
 - Kill ring ("clipboard history")
@@ -52,6 +52,29 @@ pacman -S msys2-devel msys2-runtime-devel
 make && make install
 ```
 
+**WebAssembly (WASIX)**
+
+`emil` builds as a standalone Wasm binary against
+[WASIX](https://wasix.org) using
+[wasi-sdk](https://github.com/WebAssembly/wasi-sdk) +
+[wasix-libc](https://github.com/wasix-org/wasix-libc), and runs on any
+[Wasmer](https://wasmer.io) host. 
+
+```bash
+./tests/wasix_setup.sh ~/opt          # pinned toolchain, one-time
+make wasix WASI_SDK=~/opt/wasi-sdk WASIX_SYSROOT=~/opt/wasix-sysroot/sysroot
+wasmer run emil.wasm --dir . -- FILE
+```
+- Shell integration is excluded. WASIX supplies `fork`, `exec` and
+  `posix_spawn`, so this is a deferral rather than a platform limit:
+  the shell drawer is left out because it has not been exercised under
+  a Wasm runtime.
+- Advisory file locking is unavailable. `wasix-libc` declares
+  `struct flock` but not the `F_GETLK`/`F_SETLK` commands, so the lock
+  is compiled out.
+- Hard links are not preserved on save.
+
+
 ## Getting Started
 
 Open a file:
@@ -83,7 +106,7 @@ man emil
 
 ## Shell-Oriented Editing
 
-`emil` is designed to be used with the shell set to *emacs-mode* [^1].
+`emil` is designed to be used with the shell set to *emacs-mode* [^2].
 In Bash the mode is set in the user's `~/.bashrc`:
 
 ```bash
@@ -153,14 +176,14 @@ Selections larger than  74,993 bytes are not sent to the clipboard and a status 
 
 ## Editing Large Files
 
-`emil` is not designed for editing very large files. Files larger than 1 GiB cannot be opened.
+`emil` is not designed for editing very large files. Files larger than 1 GiB cannot be opened. A very large file filled with only very short lines will consume a large amount of memory. On extremely long lines typing will be slow (but mitigated by keyboard bursting).
 
 
 ## Internals
 
 Each buffer is an array of logical lines (`erow`) holding raw UTF-8 bytes. Every buffer contains only valid UTF-8; files that fail validation are rejected at load time. Rendering and text layout never modify the buffer.
 
-Display widths are cached per row and recomputed only when a row is edited. A cumulative screen-line cache maps logical rows to screen positions.
+A row's display width is cached on the row and recomputed when the row is edited. The renderer calculates wrap positions only for the rows on screen, not for the whole buffer.
 
 On each frame, the renderer reads raw bytes from the buffer and emits terminal-ready sequences directly into an append buffer. No intermediate render buffers exist. The append buffer is then written to the terminal and truncated.
 
@@ -168,7 +191,7 @@ All input is processed in a single loop:
 
 1. Read keystroke
 2. Execute command (may modify buffer)
-3. Refresh screen: clamp window offsets, rebuild caches if stale, scroll, redraw, flush
+3. Refresh screen: clamp window offsets, scroll, redraw, flush
 
 
 ## Contributing
@@ -183,4 +206,5 @@ emil is a derivative of [`japanoise/emsys`](https://github.com/japanoise/emsys) 
 
 ---
 
-[^1]: Omitted from POSIX.1, see [Rationale](https://pubs.opengroup.org/onlinepubs/007904975/utilities/sh.html).
+[^1]: [^1]: Cursor movement and deletion step by codepoint, not grapheme cluster. Word wrap and sentence navigation use script-specific heuristics for CJK, Thai, Lao, Khmer, and Indic scripts.
+[^2]: Omitted from POSIX.1, see [Rationale](https://pubs.opengroup.org/onlinepubs/007904975/utilities/sh.html).

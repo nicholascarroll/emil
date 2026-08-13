@@ -1,4 +1,46 @@
 ## [Unreleased]
+- Fixed a window's top line going blank after an edit deleted the row
+  it was scrolled into. `adjustAllPoints` moved `rowoff` to the
+  deletion's first row but carried `skip_sublines` across unchanged, so
+  it could name a sub-line the surviving row does not have; `drawRows`
+  then skipped past the row's last sub-line and emitted nothing.
+  `scroll()` repaired this for the focused window, so it showed only in
+  a window that was not focused. Introduced with the `rowoff`
+  adjustment itself.
+- Fixed the same blank top line arising without a deletion: a top row
+  that shrank, or a terminal that widened, could leave a stored
+  `skip_sublines` past the row's last sub-line. `topSet()` deliberately
+  does not clamp on write (that would be a whole-row walk per write),
+  so `drawRows` now clamps on the read and draws the row's last
+  sub-line. Pre-existing.
+- Fixed the terminal-ownership pty scenarios silently skipping instead
+  of failing when the editor genuinely fails to enter raw mode. The
+  probe for "can this platform report the slave's termios through the
+  master" asked whether ECHO was off while the editor ran -- which is
+  also the defect the scenarios exist to catch, so a real failure was
+  indistinguishable from an unobservant platform, and the probe won.
+  It now opens its own pty pair and checks that a flag set on the slave
+  is reflected through the master in both directions, with no editor
+  involved. Confirmed by mutation: with ECHO and ISIG left on, three
+  scenarios previously skipped on Linux and now fail.
+- Corrected the WASIX skip rationale, which reasoned about `wasi-libc`
+  while the target builds against `wasix-libc`. Only the `warnings`
+  skip is a platform gap (no `F_GETLK`/`F_SETLK`); `subprocess` and
+  `shell` are skipped because this target chooses `-DEMIL_DISABLE_SHELL`,
+  and `writeall` fails to link for threading-model reasons rather than
+  for the absence of `fork` or of signals, both of which WASIX has.
+  No behaviour change; the same four suites are skipped. README
+  updated to match.
+- Corrected two comments that overstated the viewport rewrite.
+  Viewport questions are bounded by the window height in screen lines,
+  not in bytes: `screenWalkStart()` costs the bytes before its
+  sub-line, and `linesBack()` costs a whole row to learn its last
+  sub-line index. A frame is independent of `numrows`, which is what
+  #111 achieved, but still scales with the cursor's depth inside a
+  single long wrapped row. Measured on one 4 MB row: 0.06 ms at the
+  start, 167 ms at 3.2 MB in. Page-down on the same row improved from
+  1024 ms to 201 ms, and page-up on short rows regressed from 0.036 ms
+  to 0.072 ms, which the original notes recorded as a wash.
 - Fixed the hard-link tests failing on Haiku, where `link()` is not
   available. They asserted that the call succeeds, which is a claim about
   the filesystem rather than about emil -- and a filesystem without hard

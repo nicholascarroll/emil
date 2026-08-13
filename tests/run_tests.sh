@@ -5,6 +5,28 @@ CC=${CC:-cc}
 CFLAGS=${CFLAGS:-""}
 LDFLAGS=${LDFLAGS:-""}
 
+# Cross-target support.  All three default to the native behaviour, so
+# an ordinary `make test` runs exactly as it did before.
+#
+#   PROGNAME     name of the built editor binary (the wasix target
+#                builds emil.wasm rather than emil).
+#   RUNNER       command prefix used to execute a built binary.  Empty
+#                natively; for a Wasm target this is the host runtime,
+#                e.g. RUNNER="wasmer run --dir .".  Binaries are always
+#                invoked with a leading ./ so wasmer treats the argument
+#                as a path rather than a registry package name.
+#   SKIP_SUITES  space-separated suites to skip, for platforms that
+#                cannot build or run them.  Skips are announced, never
+#                silent: a suite that vanishes without saying so is how
+#                coverage is lost.
+#   RUNNER_SEP   separator inserted between the binary and its own
+#                arguments.  wasmer needs a literal -- there, or it
+#                consumes flags like --version itself.
+PROGNAME=${PROGNAME:-emil}
+RUNNER=${RUNNER:-}
+RUNNER_SEP=${RUNNER_SEP:-}
+SKIP_SUITES=${SKIP_SUITES:-}
+
 # How many individual failure lines to print per suite.  The failure
 # *count* is always reported in full; this caps only the detail.  0
 # means print everything.
@@ -25,13 +47,13 @@ done
 
 
 # Did the build produce a binary?
-if [ ! -f "./emil" ]; then
-    echo "✗ BUILD FAILURE: Binary 'emil' not found."
+if [ ! -f "./$PROGNAME" ]; then
+    echo "✗ BUILD FAILURE: Binary '$PROGNAME' not found."
     exit 1
 fi
 
 # Can it run? Also note the version
-VERSION_OUTPUT=$(./emil --version 2>&1)
+VERSION_OUTPUT=$($RUNNER "./$PROGNAME" $RUNNER_SEP --version 2>&1)
 rc=$?
 
 if [ $rc -ne 0 ]; then
@@ -184,7 +206,7 @@ echo "Unit tests:"
 SUITES="decoder unicode wcwidth buffer undo coalesce edit fileio relpath offset
     visual_line utf8_validate rect replace transform subprocess shell adjust
     history abuf tilde keymap kill_ring insert_file status_bar cjk_indic
-    warnings ctags find display prompt regex_semantics"
+    warnings ctags find display prompt regex_semantics writeall"
 
 listed=$(echo $SUITES | wc -w)
 present=$(ls tests/test_*.c 2>/dev/null | wc -l)
@@ -210,6 +232,18 @@ for suite in $SUITES; do
     bin="tests/test_${suite}"
     printf "  %-12s " "$suite"
 
+    skip_this=0
+    for skipped in $SKIP_SUITES; do
+        if [ "$suite" = "$skipped" ]; then
+            skip_this=1
+            break
+        fi
+    done
+    if [ "$skip_this" -eq 1 ]; then
+        echo "SKIP (unsupported on this target)"
+        continue
+    fi
+
     # Compile and link (use TEST_CFLAGS for the test source, LDFLAGS for
     # linking).  Diagnostics are kept rather than sent to /dev/null: a
     # warning in test code was invisible for as long as it was discarded,
@@ -229,7 +263,7 @@ for suite in $SUITES; do
     fi
 
     # Run
-    output=$(./$bin 2>&1)
+    output=$($RUNNER "./$bin" 2>&1)
     rc=$?
 
     if [ $rc -gt 128 ]; then
@@ -307,7 +341,7 @@ if [ "$FUZZ_SEQS" -gt 0 ]; then
         fuzz_nseeds=0
         for fuzz_seed in $FUZZ_SEEDS; do
             fuzz_nseeds=$((fuzz_nseeds + 1))
-            fuzz_out=$(./tests/fuzz_undo "$FUZZ_SEQS" "$fuzz_seed" 2>&1)
+            fuzz_out=$($RUNNER ./tests/fuzz_undo $RUNNER_SEP "$FUZZ_SEQS" "$fuzz_seed" 2>&1)
             fuzz_rc=$?
             # The fuzzer reports "N failure(s)" and exits non-zero on any.
             if [ $fuzz_rc -ne 0 ] ||
@@ -332,7 +366,7 @@ rm -f tests/stubs.o
 
 # Terminal-level integration: drive the built binary under a pty.
 # decoder_pty_test skips itself (exit 0) if no pty is available.
-if [ -x ./emil ]; then
+if [ -z "$RUNNER" ] && [ -x ./emil ]; then
     printf '%-14s ' "  decoder_pty"
     if $CC $TEST_CFLAGS tests/decoder_pty_test.c -o tests/decoder_pty_test \
         && ./tests/decoder_pty_test ./emil > /tmp/pty_test_out 2>&1; then
@@ -354,6 +388,12 @@ if [ -x ./emil ]; then
         ANY_FAIL=1
     fi
     rm -f tests/decoder_pty_test /tmp/pty_test_out
+elif [ -n "$RUNNER" ]; then
+    # decoder_pty_test is a host program that allocates a pty and execs
+    # the editor.  Under a Wasm runtime the editor is not directly
+    # executable, so this scenario is covered by tests/wasix_smoke.sh
+    # instead, which drives emil.wasm through the runtime under a pty.
+    echo "  decoder_pty   SKIP (cross target; see tests/wasix_smoke.sh)"
 else
     echo "  decoder_pty   SKIP (emil binary not built)"
 fi

@@ -339,6 +339,110 @@ void test_markring_multiple_entries_all_adjusted(void) {
 	TEST_ASSERT_EQUAL_INT(2, buf->mark_ring[2].cy); /* was 3 */
 }
 
+/* ----------------------------------------------------------------
+ * Viewport top (win->rowoff)
+ *
+ * rowoff is a tracked position that adjustAllPoints did not know
+ * about, so an edit above a window's viewport top slid the text under
+ * that window while its status bar line number -- taken from the
+ * adjusted cy -- stayed correct, and the two disagreed.
+ *
+ * rowoff is a row index, not a position, so it is adjusted at row
+ * granularity for EVERY window on the buffer, including the focused
+ * one: the command moves the focused window's cursor, but nothing
+ * moves its viewport.
+ * ---------------------------------------------------------------- */
+
+/* Two windows on one buffer; the second is scrolled down and
+ * unfocused.  Returns the buffer, with rows named L00..L19. */
+static struct buffer *two_windows_scrolled(int rowoff) {
+	E.windows = xrealloc(E.windows, 2 * sizeof(struct window *));
+	E.windows[1] = xcalloc(1, sizeof(struct window));
+	E.nwindows = 2;
+	E.windows[0]->focused = 1;
+	E.windows[1]->focused = 0;
+	E.windows[0]->height = 10;
+	E.windows[1]->height = 10;
+
+	static char names[20][16];
+	const char *lines[20];
+	for (int i = 0; i < 20; i++) {
+		snprintf(names[i], sizeof(names[i]), "L%02d", i);
+		lines[i] = names[i];
+	}
+	struct buffer *buf = make_test_buffer_lines(lines, 20);
+
+	E.windows[1]->buf = buf;
+	E.windows[1]->rowoff = rowoff;
+	E.windows[1]->cy = rowoff + 2;
+	E.windows[1]->cx = 0;
+	return buf;
+}
+
+void test_rowoff_tracks_text_across_delete_above(void) {
+	struct buffer *buf = two_windows_scrolled(10);
+
+	/* Delete L00 and L01 entirely, from the start of the buffer. */
+	deleteRange(0, 0, 0, 2, 0);
+
+	TEST_ASSERT_EQUAL_STRING("L02", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(8, E.windows[1]->rowoff);
+	/* The window still shows the same text, and its reported line
+	 * number still names the row it is looking at. */
+	TEST_ASSERT_EQUAL_STRING("L10", row_str(buf, E.windows[1]->rowoff));
+	TEST_ASSERT_EQUAL_INT(10, E.windows[1]->cy);
+}
+
+void test_rowoff_tracks_text_across_insert_above(void) {
+	struct buffer *buf = two_windows_scrolled(10);
+
+	/* Two whole lines inserted above the viewport top. */
+	buf->cx = 0;
+	buf->cy = 0;
+	insertNewline(2);
+
+	TEST_ASSERT_EQUAL_INT(12, E.windows[1]->rowoff);
+	TEST_ASSERT_EQUAL_STRING("L10", row_str(buf, E.windows[1]->rowoff));
+	TEST_ASSERT_EQUAL_INT(14, E.windows[1]->cy);
+}
+
+void test_rowoff_inside_deleted_span_collapses_to_first_row(void) {
+	struct buffer *buf = two_windows_scrolled(10);
+
+	/* The deletion spans the viewport top: rows 8..12 collapse into
+	 * one, so the top can only be the surviving row. */
+	deleteRange(0, 8, 0, 12, 0);
+
+	TEST_ASSERT_EQUAL_INT(8, E.windows[1]->rowoff);
+	TEST_ASSERT_EQUAL_STRING("L12", row_str(buf, 8));
+}
+
+void test_rowoff_unchanged_by_edit_below_viewport_top(void) {
+	struct buffer *buf = two_windows_scrolled(10);
+
+	buf->cx = 0;
+	buf->cy = 15;
+	insertNewline(1);
+
+	TEST_ASSERT_EQUAL_INT(10, E.windows[1]->rowoff);
+	TEST_ASSERT_EQUAL_STRING("L10", row_str(buf, E.windows[1]->rowoff));
+}
+
+void test_rowoff_adjusted_for_focused_window_too(void) {
+	struct buffer *buf = two_windows_scrolled(10);
+
+	/* Focus the second window: cx/cy are not adjusted for a focused
+	 * window because the command moves them, but nothing moves the
+	 * viewport, so rowoff still must be. */
+	E.windows[0]->focused = 0;
+	E.windows[1]->focused = 1;
+
+	deleteRange(0, 0, 0, 2, 0);
+
+	TEST_ASSERT_EQUAL_INT(8, E.windows[1]->rowoff);
+	TEST_ASSERT_EQUAL_STRING("L10", row_str(buf, E.windows[1]->rowoff));
+}
+
 int main(void) {
 	TEST_BEGIN();
 
@@ -369,6 +473,13 @@ int main(void) {
 	RUN_TEST(test_markring_pop_stays_on_char_boundary);
 	RUN_TEST(test_markring_pop_clamps_out_of_range_entry);
 	RUN_TEST(test_markring_multiple_entries_all_adjusted);
+
+	/* Viewport top */
+	RUN_TEST(test_rowoff_tracks_text_across_delete_above);
+	RUN_TEST(test_rowoff_tracks_text_across_insert_above);
+	RUN_TEST(test_rowoff_inside_deleted_span_collapses_to_first_row);
+	RUN_TEST(test_rowoff_unchanged_by_edit_below_viewport_top);
+	RUN_TEST(test_rowoff_adjusted_for_focused_window_too);
 
 	return TEST_END();
 }

@@ -23,6 +23,7 @@ Position the cursor at line
 of the first file.
 .It Cm --version
 Display version information and exit.
+.El
 .Sh CONCEPTS
 .Nm
 follows Emacs paradigms.
@@ -152,8 +153,6 @@ Scroll up one line.
 Scroll down one line.
 .It Cm C-l
 Centre the screen on the cursor's current line.
-On terminals where the operating system cannot report the window size
-(such as serial consoles), also re-queries the terminal for its size.
 .It Cm M-g
 Go to specific line number.
 .It Cm C-x =
@@ -464,7 +463,7 @@ Validation at file load and inserting text in the buffer disallow  null bytes (0
 When saving,
 .Nm
 writes the complete buffer to the associated file.
-A buffer with no unsaved changes is not rewritten.
+A buffer with no unsaved changes is not rewritten. 
 The editor normally writes a temporary file and renames it over the target, so an interrupted save cannot leave a half-written file.
 Some targets cannot be replaced that way: a hard-linked file, whose other names would keep the old contents; a device node, FIFO or socket, which would become a regular file; and a file whose directory is not writable, where no temporary file can be created.
 For these

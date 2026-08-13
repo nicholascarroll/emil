@@ -10,6 +10,7 @@
 #include "region.h"
 #include "unicode.h"
 #include "util.h"
+#include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -58,9 +59,7 @@ static void bulkInsertRaw(struct buffer *buf, int startx, int starty,
 		memcpy(&row->chars[startx], data, datalen);
 		row->size += datalen;
 		row->cached_width = -1;
-		row->cached_sublines = -1;
 		markBufferDirty(buf);
-		invalidateScreenCache(buf);
 		return;
 	}
 
@@ -91,7 +90,6 @@ static void bulkInsertRaw(struct buffer *buf, int startx, int starty,
 	row->size = new_size;
 	row->chars[row->size] = '\0';
 	row->cached_width = -1;
-	row->cached_sublines = -1;
 
 	/* Walk remaining data, inserting interior and final lines */
 	int insert_at = starty + 1;
@@ -114,7 +112,6 @@ static void bulkInsertRaw(struct buffer *buf, int startx, int starty,
 			free(combined);
 			free(suffix);
 			markBufferDirty(buf);
-			invalidateScreenCache(buf);
 			return;
 		}
 		/* Interior complete line */
@@ -133,7 +130,6 @@ static void bulkInsertRaw(struct buffer *buf, int startx, int starty,
 	}
 	free(suffix);
 	markBufferDirty(buf);
-	invalidateScreenCache(buf);
 }
 
 /* Bulk-insert text from 'data' (length 'datalen') into 'buf' at the
@@ -196,9 +192,7 @@ void bulkDelete(struct buffer *buf, int startx, int starty, int endx,
 			row->size - endx + 1); /* +1 for NUL */
 		row->size -= endx - startx;
 		row->cached_width = -1;
-		row->cached_sublines = -1;
 		markBufferDirty(buf);
-		invalidateScreenCache(buf);
 	} else {
 		/* Multi-row deletion:
 		 *   1. Delete interior rows (between starty and endy).
@@ -222,10 +216,8 @@ void bulkDelete(struct buffer *buf, int startx, int starty, int endx,
 		first->size = new_size;
 		first->chars[first->size] = '\0';
 		first->cached_width = -1;
-		first->cached_sublines = -1;
 		delRow(buf, starty + 1);
 		markBufferDirty(buf);
-		invalidateScreenCache(buf);
 	}
 }
 
@@ -352,13 +344,40 @@ void undoReplaceData(struct undo *u, int newsize) {
  * that is too tight only costs the user extra keypresses. */
 #define UNDO_MERGE_LIMIT 20
 
-/* Grow u->data to hold at least 'needed' bytes plus a NUL. */
+/* Grow u->data to hold at least 'needed' bytes plus a NUL.
+ *
+ * The overflow guard is the one dbuf_ensure() has and this twin did
+ * not.  Latent rather than live: undoMerge is the only caller and it
+ * reaches here with small values.  But `newsize *= 2` unchecked is a
+ * signed overflow one caller away, and two functions doing the same
+ * job by different rules is how the next reader gets it wrong.
+ *
+ * `needed == INT_MAX` aborts rather than being clamped, because the
+ * NUL this function promises would need byte INT_MAX + 1 and there is
+ * no such int.  Clamping to INT_MAX would return a buffer one byte
+ * short of what every caller is entitled to assume, which is worse
+ * than stopping.  abort() for the same reason as dbuf.c: a length
+ * that cannot be represented has no recovery, and util.c's allocation
+ * guards already end the process the same way.
+ *
+ * Not covered by a test: no caller can reach either branch, and a
+ * test would have to call undoEnsureData() directly past the API it
+ * is reached through.  Verified by inspection and by deliberately
+ * lowering the thresholds to check the branches are live (see the
+ * commit message); marked here so it is not mistaken for tested. */
 static void undoEnsureData(struct undo *u, int needed) {
+	if (needed < 0 || needed == INT_MAX)
+		abort();
 	if (needed + 1 <= u->datasize)
 		return;
 	int newsize = u->datasize ? u->datasize : 22;
-	while (newsize < needed + 1)
+	while (newsize < needed + 1) {
+		if (newsize > INT_MAX / 2) {
+			newsize = needed + 1;
+			break;
+		}
 		newsize *= 2;
+	}
 	u->data = xrealloc(u->data, newsize);
 	u->datasize = newsize;
 }

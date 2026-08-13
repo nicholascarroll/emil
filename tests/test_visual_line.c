@@ -343,7 +343,6 @@ void tearDown(void) {
 	cleanupTestEditor();
 }
 
-
 /* ---- scrollViewport on an empty wrap buffer ---- */
 
 void test_scroll_viewport_empty_wrap_buffer(void) {
@@ -363,14 +362,13 @@ void test_scroll_viewport_empty_wrap_buffer(void) {
 	TEST_ASSERT_EQUAL_INT(0, E.windows[0]->skip_sublines);
 }
 
-
 /* ---- charsToDisplayColumn caching boundary ---- */
 
 /* char_pos == row->size is "the whole row" and must take the cached
- * calculateLineWidth() path.  A `>` here instead of `>=` left the two
- * drawRows() callers walking the row on every frame; on a long line
- * that dominated the frame.  Asserting the cache was *populated* is
- * what distinguishes the two paths -- both return the same number. */
+ * calculateLineWidth() path.  A `>` here instead of `>=` sends a cursor
+ * at end of line down the whole-row walk every frame.  Asserting the
+ * cache was *populated* is what distinguishes the two paths -- both
+ * return the same number. */
 void test_ctdc_at_row_size_uses_cache(void) {
 	erow row = make_row("hello\tworld");
 	TEST_ASSERT_EQUAL_INT(-1, row.cached_width);
@@ -403,8 +401,7 @@ void test_ctdc_partial_matches_full(void) {
 	TEST_ASSERT_EQUAL_INT(0, charsToDisplayColumn(&scratch, 0));
 	TEST_ASSERT_EQUAL_INT(2, charsToDisplayColumn(&scratch, 2));
 	/* byte 2 is a tab: column advances to the next tab stop */
-	TEST_ASSERT_EQUAL_INT(EMIL_TAB_STOP,
-			      charsToDisplayColumn(&scratch, 3));
+	TEST_ASSERT_EQUAL_INT(EMIL_TAB_STOP, charsToDisplayColumn(&scratch, 3));
 	/* byte 4 is \x01, a control character, rendered as ^A */
 	TEST_ASSERT_EQUAL_INT(EMIL_TAB_STOP + 3,
 			      charsToDisplayColumn(&scratch, 5));
@@ -419,10 +416,10 @@ void test_ctdc_empty_row(void) {
 /* The four tests above assert the cache is *populated*.  All four
  * would still pass if the cache were never invalidated -- which is
  * the failure §4.10 exists to prevent, and the one routing
- * char_pos >= row->size through the cache makes worse: two drawRows()
- * callers now read the cache every frame where they walked the row
- * fresh before, so a missed invalidation renders wrongly continuously
- * instead of on a rare path.
+ * char_pos >= row->size through the cache makes worse: the status bar
+ * and the cursor placement read the cache every frame with the cursor
+ * at end of line, so a missed invalidation renders wrongly
+ * continuously instead of on a rare path.
  *
  * So assert what the protocol promises rather than what the cache
  * contains.  selfInsert()/delChar() rather than insertChar(): the
@@ -452,6 +449,27 @@ void test_ctdc_width_follows_a_mutation(void) {
 	TEST_ASSERT_EQUAL_INT(3, w);
 }
 
+/* §4.10's other half is gone with the field it protected.
+ *
+ * cached_sublines was a remembered wrap count, and the test that stood
+ * here drove the protocol keeping it honest: mutate, warm the width
+ * from a display path, and check the sub-line count had not survived.
+ * There is nothing to keep honest now -- the count is computed from the
+ * row at the moment it is wanted (#108) -- so what is worth pinning is
+ * that it stays derived, with no invalidation call anywhere in sight. */
+void test_sublines_are_derived_not_remembered(void) {
+	struct buffer *b = make_test_buffer("abcde");
+	b->word_wrap = 1;
+
+	TEST_ASSERT_EQUAL_INT(1, countScreenLines(&b->row[0], 10));
+
+	b->cx = 5;
+	b->cy = 0;
+	selfInsert(b, 'x', 8); /* "abcdexxxxxxxx" -- 13 cols, wraps */
+
+	TEST_ASSERT_EQUAL_INT(2, countScreenLines(&b->row[0], 10));
+}
+
 int main(void) {
 	TEST_BEGIN();
 
@@ -461,6 +479,7 @@ int main(void) {
 	RUN_TEST(test_ctdc_partial_matches_full);
 	RUN_TEST(test_ctdc_empty_row);
 	RUN_TEST(test_ctdc_width_follows_a_mutation);
+	RUN_TEST(test_sublines_are_derived_not_remembered);
 
 	/* displayColumnToByteOffset */
 	RUN_TEST(test_dcbo_simple_ascii);

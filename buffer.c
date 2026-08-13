@@ -77,7 +77,16 @@ void markBufferClean(struct buffer *buf) {
 void rowEnsureCap(erow *row, int needed) {
 	if (needed <= row->charcap)
 		return;
-	int new_cap = row->charcap < 16 ? 16 : row->charcap * 2;
+	/* `charcap * 2` was unchecked.  Latent: a row is bounded by
+	 * EMIL_MAX_FILE_SIZE (1 GiB) at load, but nothing re-imposes
+	 * that during editing, so the doubling is the caller's problem
+	 * and the caller does not know it has one.  Cap the doubling
+	 * instead of overflowing into a negative capacity, which would
+	 * make the `new_cap < needed` line below silently allocate too
+	 * little. */
+	int new_cap = row->charcap < 16		 ? 16 :
+		      row->charcap > INT_MAX / 2 ? INT_MAX :
+						   row->charcap * 2;
 	if (new_cap < needed)
 		new_cap = needed;
 	row->chars = xrealloc(row->chars, new_cap);
@@ -88,7 +97,14 @@ void rowEnsureCap(erow *row, int needed) {
 static void bufEnsureRowCap(struct buffer *bufr) {
 	if (bufr->numrows < bufr->rowcap)
 		return;
-	int new_cap = bufr->rowcap ? bufr->rowcap * 2 : 16;
+	/* Same unchecked doubling as rowEnsureCap had.  The row count
+	 * is bounded at INT_MAX / 2 by the load path (§2.4.1), so the
+	 * cap below is reached before the multiplication can overflow;
+	 * it is here so the bound is stated in the code that depends on
+	 * it rather than only in a document. */
+	int new_cap = !bufr->rowcap		 ? 16 :
+		      bufr->rowcap > INT_MAX / 2 ? INT_MAX :
+						   bufr->rowcap * 2;
 	bufr->row = xrealloc(bufr->row, sizeof(erow) * new_cap);
 	memset(&bufr->row[bufr->rowcap], 0,
 	       sizeof(erow) * (new_cap - bufr->rowcap));
@@ -113,11 +129,9 @@ void insertRow(struct buffer *bufr, int at, const uint8_t *s, size_t len) {
 	bufr->row[at].chars[len] = '\0';
 
 	bufr->row[at].cached_width = -1;
-	bufr->row[at].cached_sublines = -1;
 
 	bufr->numrows++;
 	markBufferDirty(bufr);
-	invalidateScreenCache(bufr);
 }
 
 /* Append a row without side effects.  Used by `editorOpen` when the
@@ -133,7 +147,6 @@ void appendRowRaw(struct buffer *bufr, const uint8_t *s, size_t len) {
 	memcpy(bufr->row[at].chars, s, len);
 	bufr->row[at].chars[len] = '\0';
 	bufr->row[at].cached_width = -1;
-	bufr->row[at].cached_sublines = -1;
 
 	bufr->numrows++;
 }
@@ -155,7 +168,6 @@ void delRow(struct buffer *bufr, int at) {
 		bufr->numrows--;
 	}
 	markBufferDirty(bufr);
-	invalidateScreenCache(bufr);
 }
 
 void rowInsertChar(struct buffer *bufr, erow *row, int at, int c) {
@@ -169,8 +181,6 @@ void rowInsertChar(struct buffer *bufr, erow *row, int at, int c) {
 	row->chars[at] = c;
 	markBufferDirty(bufr);
 	row->cached_width = -1;
-	row->cached_sublines = -1;
-	invalidateScreenCache(bufr);
 }
 
 struct buffer *newBuffer(void) {
@@ -213,16 +223,11 @@ struct buffer *newBuffer(void) {
 	ret->next = NULL;
 	ret->word_wrap = 0;
 	ret->rectangle_mode = 0;
-	ret->screen_line_start = NULL;
-	ret->screen_line_cache_size = 0;
-	ret->screen_line_cache_valid = 0;
-	ret->screen_cache_cols = 0; /* no real width is 0, so the first
-				     * buildScreenCache always takes the
-				     * column-change path */
 	ret->read_only = 0;
 	ret->read_only_by_lock = 0;
 	ret->lock_fd = -1;
 	ret->open_mtime = 0;
+	ret->open_size = 0;
 	ret->external_mod = 0;
 	ret->lock_blocked_pid = 0;
 	ret->internal_mod = 0;
@@ -278,7 +283,6 @@ void destroyBuffer(struct buffer *buf) {
 	free(buf->filename);
 	free(buf->display_name);
 	free(buf->query);
-	free(buf->screen_line_start);
 	free(buf->completionState.last_completed_text);
 	if (buf->completionState.matches) {
 		for (int i = 0; i < buf->completionState.n_matches; i++)
@@ -295,9 +299,7 @@ void destroyBuffer(struct buffer *buf) {
 void updateBuffer(struct buffer *buf) {
 	for (int i = 0; i < buf->numrows; i++) {
 		buf->row[i].cached_width = -1;
-		buf->row[i].cached_sublines = -1;
 	}
-	invalidateScreenCache(buf);
 }
 
 struct buffer *findBufferByName(const char *name) {

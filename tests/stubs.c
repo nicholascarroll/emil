@@ -46,10 +46,9 @@ int readKey(void) {
 	return 0;
 }
 
-int getWindowSize(int *rows, int *cols) {
+void getWindowSize(int *rows, int *cols) {
 	*rows = 24;
 	*cols = 80;
-	return 0;
 }
 
 void copyToClipboard(const uint8_t *text) {

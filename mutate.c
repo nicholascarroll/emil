@@ -205,7 +205,6 @@ static void mutateReplaceEx(struct buffer *buf, int startx, int starty,
 	restoreFinalNewline(buf);
 
 	markBufferDirty(buf);
-	invalidateScreenCache(buf);
 
 	if (out_endx)
 		*out_endx = iex;
@@ -304,5 +303,4 @@ void mutateExtendRows(struct buffer *buf, int from_row, int n_rows) {
 	adjustAllPoints(buf, ext->startx, ext->starty, ext->endx, ext->endy, 0);
 
 	markBufferDirty(buf);
-	invalidateScreenCache(buf);
 }

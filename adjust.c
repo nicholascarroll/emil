@@ -55,6 +55,49 @@ int adjustPoint(int *px, int *py, int startx, int starty, int endx, int endy,
 	}
 }
 
+/* Adjust a tracked viewport top: a row index and the sub-line within
+ * that row.  The row has no column, so it moves at row granularity: a
+ * deletion spanning rows shifts it up by the rows removed and collapses
+ * to the deletion's first row if it sat inside the span; an insertion
+ * shifts it down.
+ *
+ * The sub-line is only ever zeroed, never renumbered.  Where the top
+ * row survives the mutation its wrap points may move, but the walkers
+ * clamp a sub-line past the row's last when they reach it (§D), so
+ * nothing has to be recomputed here -- and recomputing would mean a
+ * whole-row walk on every mutation.  Where the top row does NOT survive
+ * the sub-line has to go, which is the case below. */
+static void adjustRowIndex(int *py, int *skip, int starty, int endy,
+			   int is_delete) {
+	int lines_delta = endy - starty;
+
+	if (lines_delta == 0)
+		return;
+
+	if (is_delete) {
+		if (*py <= starty)
+			return;
+		if (*py <= endy) {
+			*py = starty; /* rows starty..endy became one */
+			/* The skip counted sub-lines of a row that no
+			 * longer exists; carried onto the surviving row
+			 * it can name a sub-line that row does not have.
+			 * drawRows() then skips past its last sub-line
+			 * and emits nothing, leaving the window's top
+			 * line blank.  scroll() would repair it, but
+			 * scroll() runs for the focused window only, so
+			 * an unfocused window keeps the blank line
+			 * across a full frame. */
+			*skip = 0;
+		} else {
+			*py -= lines_delta;
+		}
+	} else {
+		if (*py > starty)
+			*py += lines_delta;
+	}
+}
+
 void adjustAllPoints(struct buffer *buf, int startx, int starty, int endx,
 		     int endy, int is_delete) {
 	/* Nothing to adjust if the mutation is a no-op */
@@ -70,10 +113,18 @@ void adjustAllPoints(struct buffer *buf, int startx, int starty, int endx,
 	 * this buffer.  When the same buffer is displayed in multiple
 	 * windows, the non-focused windows store a snapshot of cx/cy
 	 * that becomes stale after mutations. */
+	/* rowoff is adjusted for EVERY window on the buffer, including
+	 * the focused one: the command moves the focused window's
+	 * cursor, but nothing moves its viewport. */
 	for (int i = 0; i < E.nwindows; i++) {
-		if (!E.windows[i]->focused && E.windows[i]->buf == buf)
+		if (E.windows[i]->buf != buf)
+			continue;
+		if (!E.windows[i]->focused)
 			adjustPoint(&E.windows[i]->cx, &E.windows[i]->cy,
 				    startx, starty, endx, endy, is_delete);
+		adjustRowIndex(&E.windows[i]->rowoff,
+			       &E.windows[i]->skip_sublines, starty, endy,
+			       is_delete);
 	}
 
 	/* Adjust the mark ring.  Ring entries are byte offsets just

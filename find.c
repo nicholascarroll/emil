@@ -56,7 +56,17 @@ static regex_t re_cache;
 static int re_cache_ok = 0;
 
 /* Compile 'pattern' if it is not already the cached one.  Returns
- * nonzero when the cached pattern is usable. */
+ * nonzero when the cached pattern is usable.
+ *
+ * Keyed on the pattern string alone.  That is correct only while the
+ * regcomp() *cflags* below are constant, which they are -- note that
+ * the REG_NOTBOL regexSearch() now varies is an *execution* flag,
+ * passed to regexec() per call and not baked into the compiled object,
+ * so it does not belong in this key.  If a variable cflag ever arrives
+ * -- case folding via REG_ICASE being the obvious candidate -- this
+ * key must include it, or a search would silently reuse a compile made
+ * under the other setting.  A composite key is not worth building
+ * before then. */
 static int regexCacheEnsure(const uint8_t *pattern) {
 	if (!re_cache_pat || strcmp(re_cache_pat, (const char *)pattern) != 0) {
 		if (re_cache_pat) {
@@ -86,8 +96,30 @@ static int regexCacheEnsure(const uint8_t *pattern) {
 	return re_cache_ok;
 }
 
-/* On a match, *match_len receives the byte length actually matched. */
-static uint8_t *regexSearch(uint8_t *text, uint8_t *pattern, int *match_len) {
+/* On a match, *match_len receives the byte length actually matched.
+ *
+ * `eflags` is the caller's, not inferred here.  regexSearch() receives
+ * a bare pointer and cannot tell whether it addresses the start of a
+ * row or a slice of one, so a version that guessed would be wrong the
+ * first time someone passed it a slice for another reason.  Every call
+ * site already knows the answer.
+ *
+ * What it is for: POSIX treats the first byte of the subject as a line
+ * beginning unless REG_NOTBOL is passed, so an anchored pattern
+ * matched at whatever offset a mid-row restart happened to land on.
+ * `C-M-s` for `^foo` with point past column 0 reported a match
+ * mid-line, and searchRowBackward -- which restarts from match + 1 and
+ * keeps the last match before its limit -- turned that into a
+ * consistently wrong result rather than an intermittent one, since
+ * every restart position matched.  Reproduced against glibc 2.39:
+ * subject "xfoo bar" from column 1 matches `^foo`, and does not with
+ * REG_NOTBOL.
+ *
+ * region.c's replace-regexp scanner has applied this rule on every
+ * mid-subject restart all along; this brings find.c in line with it
+ * rather than inventing a second convention. */
+static uint8_t *regexSearch(uint8_t *text, uint8_t *pattern, int *match_len,
+			    int eflags) {
 	*match_len = 0;
 	if (!pattern || !text || pattern[0] == '\0') {
 		return NULL;
@@ -97,7 +129,7 @@ static uint8_t *regexSearch(uint8_t *text, uint8_t *pattern, int *match_len) {
 		return NULL;
 
 	regmatch_t match[1];
-	if (regexec(&re_cache, (const char *)text, 1, match, 0) == 0) {
+	if (regexec(&re_cache, (const char *)text, 1, match, eflags) == 0) {
 		*match_len = (int)(match[0].rm_eo - match[0].rm_so);
 		return text + match[0].rm_so;
 	}
@@ -184,7 +216,41 @@ static uint8_t *strReplace(uint8_t *text, const uint8_t *rep,
  * "Begins strictly before the limit" mirrors the forward convention
  * one block down, where a match must begin strictly after the cursor.
  * Keeping the two symmetric is what makes repeated C-r step backward
- * one match at a time instead of sticking on the match under point. */
+ * one match at a time instead of sticking on the match under point.
+ *
+ * Cost, measured rather than reasoned about (this loop in isolation;
+ * gcc 13.3.0 -O2, glibc 2.39, Ubuntu 24.04, x86-64; one row of a
+ * single repeated byte, a query matching at every position, limit at
+ * end of row -- the worst case for iteration count):
+ *
+ *	row size	literal 	regex
+ *	100 KB		0.78 ms 	  55 ms
+ *	400 KB		3.08 ms 	 833 ms
+ *	800 KB		6.18 ms 	3454 ms
+ *
+ * The literal path is linear in row size, not quadratic: strstr()
+ * resumes at p and stops at the first match, so the only call that
+ * reaches end of row is the last one, which finds nothing.
+ *
+ * The regex path is quadratic, but not because it rescans looking for
+ * a match -- in that measurement every call matched at its own first
+ * byte.  regexec() takes a NUL-terminated subject and pays a cost
+ * proportional to the whole of it before reporting anything: timed on
+ * its own, one call with the match at byte 0 costs 1.26 us at 100 KB
+ * and 9.16 us at 800 KB.  Restarting at match + 1 therefore re-reads
+ * the tail of the row on every one of the matches, and the tail is
+ * what makes it quadratic.  Bounding that needs a length-taking
+ * regexec (REG_STARTEND), which is a BSD/GNU extension outside the
+ * POSIX.1-2001 baseline (EMIL-DESIGN.md §1.2), so it is not a change
+ * local to this function.
+ *
+ * Left alone deliberately.  The cost is bounded by the row, it is
+ * paid only by C-r with a regex on a row of six figures, and both
+ * fixes available are worse than the disease at that frequency.
+ * Revisit if a long-line report arrives.  region.c's
+ * regexSubstituteAll() restarts mid-subject the same way and has the
+ * same bound for the same reason; it is not the search path, so it is
+ * recorded here rather than changed. */
 static uint8_t *searchRowBackward(erow *row, uint8_t *query, int limit,
 				  int regex, int *match_len) {
 	if (limit <= 0)
@@ -199,7 +265,12 @@ static uint8_t *searchRowBackward(erow *row, uint8_t *query, int limit,
 		int mlen = 0;
 		uint8_t *match;
 		if (regex) {
-			match = regexSearch(p, query, &mlen);
+			/* p advances past each match, so every restart
+			 * but the first is mid-row.  Without this the
+			 * loop kept whatever anchored "match" sat just
+			 * under limit instead of the real last one. */
+			match = regexSearch(p, query, &mlen,
+					    p > row->chars ? REG_NOTBOL : 0);
 		} else {
 			match = (uint8_t *)strstr((const char *)p,
 						  (const char *)query);
@@ -327,7 +398,8 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 			int start = fresh ? from_cx : from_cx + 1;
 			if (regex_mode) {
 				match = regexSearch(&(row->chars[start]), query,
-						    &mlen);
+						    &mlen,
+						    start > 0 ? REG_NOTBOL : 0);
 			} else {
 				match = (uint8_t *)strstr(
 					(const char *)&(row->chars[start]),
@@ -368,7 +440,9 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 			match = searchRowBackward(row, query, row->size,
 						  regex_mode, &mlen);
 		} else if (regex_mode) {
-			match = regexSearch(row->chars, query, &mlen);
+			/* Whole row, so byte 0 of the subject really is
+			 * the line beginning: no REG_NOTBOL. */
+			match = regexSearch(row->chars, query, &mlen, 0);
 		} else {
 			match = (uint8_t *)strstr((const char *)row->chars,
 						  (const char *)query);

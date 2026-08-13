@@ -60,26 +60,30 @@ enum promptType {
 
 /* Type policy:
  * Positions (cx, cy, markx, marky): int, signed for sentinels
- * Sizes (erow.size, abuf.len): int, bounded by EMIL_MAX_FILE_SIZE
- * Accumulations to malloc: size_t (e.g. rowsToString totlen)  */
+ * Sizes (erow.size, abuf.len): int, NOT bounded by anything at runtime
+ * Accumulations to malloc: size_t (e.g. rowsToString totlen)
+ *
+ * This used to say erow.size and abuf.len were bounded by
+ * EMIL_MAX_FILE_SIZE.  They are not.  The load path bounds a *file* to
+ * that size at admission (§3.21.1); nothing re-imposes it once editing
+ * starts, and a buffer can grow without limit from there.  So any code
+ * growing one of these values owns its own overflow guard -- see
+ * dbuf_ensure(), undoEnsureData(), rowEnsureCap().  The claim was true
+ * under the older EMIL_BYTES_BUDGET and was left behind when that
+ * went.  */
 
 typedef struct erow {
 	int size;
 	int charcap; /* bytes allocated (>= size + 1) */
 	uint8_t *chars;
-	int cached_width;    /* display width in columns, or -1 if stale */
-	int cached_sublines; /* wrapped screen-line count at the last
-			      * buildScreenCache column width, or -1 if
-			      * stale.  INVARIANT: any code that
-			      * modifies row text must set BOTH
-			      * cached_width and cached_sublines to -1.
-			      * Do not rely on cached_sublines being
-			      * derived from a stale cached_width:
-			      * calculateLineWidth() can re-validate
-			      * cached_width at any time (it is called
-			      * from display paths), which would leave
-			      * a width-only invalidation with a stale
-			      * but apparently valid subline count. */
+	int cached_width; /* display width in columns, or -1 if stale.
+			   * INVARIANT (§4.10): any code that modifies
+			   * row text must set this to -1.  It is now
+			   * the only derived field on a row: the wrap
+			   * count that sat beside it went with the
+			   * screen-line cache (#108), and the width
+			   * does not depend on the terminal's, so a
+			   * resize does not stale it. */
 } erow;
 
 struct undo {
@@ -148,6 +152,11 @@ struct buffer {
 	 * Safe across the 2038 boundary.  Do NOT do arithmetic on
 	 * this field. */
 	time_t open_mtime;    /* st_mtime at open/save, 0 if unset */
+	off_t open_size;      /* st_size at the same moment; only
+	                       * meaningful when open_mtime != 0.
+	                       * st_mtime is whole seconds, so a write
+	                       * in the load's second is invisible to
+	                       * it alone. */
 	int external_mod;     /* 1 if file changed on disk since open/save */
 	int lock_blocked_pid; /* PID holding the lock we couldn't acquire,
 	                       * or -1 if held by unknown process, or 0
@@ -166,19 +175,12 @@ struct buffer {
 	struct undo *undo;
 	struct undo *redo;
 	struct buffer *next;
-	int *screen_line_start;
-	int screen_line_cache_size;
-	int screen_line_cache_valid;
-	int screen_cache_cols; /* screencols at last buildScreenCache;
-				* a change invalidates every row's
-				* cached_sublines */
 	struct completionState completionState;
 };
 
 struct window {
 	int focused;
 	struct buffer *buf;
-	int scx, scy;
 	int cx, cy; // Buffer cx,cy  (only updated when switching windows)
 	int rowoff;
 	int coloff;
@@ -288,6 +290,19 @@ struct config {
 	int recording;
 	struct macro macro;
 	int playback;
+	/* The command that just ran, when it changes what the *next*
+	 * keystroke means.  The only such case today is CMD_REDO:
+	 * after a C-/ that leaves more to redo, a following C-_ or
+	 * C-/ continues redoing rather than undoing (keymap.c's redo
+	 * chain).  Every other key clears it, so it never outlives
+	 * the keystroke after the one that set it.
+	 *
+	 * emil-findings.md §F6 lists this as vestigial.  It is not:
+	 * keymap.c:1170 reads it, and without that read C-_ after a
+	 * redo would reach dispatchMisc's plain doUndo() and undo the
+	 * redo just applied -- so C-_ and C-/ would oscillate over one
+	 * change instead of walking back up the redo stack.  Read from
+	 * the dispatch path, not exercised against a running editor. */
 	int micro;
 	struct command *cmd;
 	int cmd_count;

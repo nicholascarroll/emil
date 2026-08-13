@@ -148,18 +148,7 @@ void test_calculate_line_width(void) {
 	TEST_ASSERT_EQUAL_INT(9, calculateLineWidth(&buf->row[1 - 1]));
 }
 
-/* ---- Screen cache ---- */
-
-void test_build_screen_cache_no_wrap(void) {
-	const char *lines[] = { "line 0", "line 1", "line 2" };
-	struct buffer *buf = make_test_buffer_lines(lines, 3);
-	buf->word_wrap = 0;
-	buildScreenCache(buf, 80);
-	TEST_ASSERT_EQUAL_INT(1, buf->screen_line_cache_valid);
-	TEST_ASSERT_EQUAL_INT(0, buf->screen_line_start[0]);
-	TEST_ASSERT_EQUAL_INT(1, buf->screen_line_start[1]);
-	TEST_ASSERT_EQUAL_INT(2, buf->screen_line_start[2]);
-}
+/* ---- Screen line counting ---- */
 
 void test_count_screen_lines_exact(void) {
 	struct buffer *buf = make_test_buffer("1234567890");
@@ -170,15 +159,6 @@ void test_count_screen_lines_long(void) {
 	struct buffer *buf = make_test_buffer("abcdefghijklmnopqrstuvwxy");
 	int lines = countScreenLines(&buf->row[0], 10);
 	TEST_ASSERT(lines >= 2);
-}
-
-void test_invalidate_screen_cache(void) {
-	struct buffer *buf = make_test_buffer("hello");
-	buf->word_wrap = 0;
-	buildScreenCache(buf, 80);
-	TEST_ASSERT_EQUAL_INT(1, buf->screen_line_cache_valid);
-	invalidateScreenCache(buf);
-	TEST_ASSERT_EQUAL_INT(0, buf->screen_line_cache_valid);
 }
 
 void test_word_wrap_break(void) {
@@ -309,10 +289,8 @@ int main(void) {
 	RUN_TEST(test_chars_to_display_multibyte);
 	RUN_TEST(test_calculate_line_width);
 
-	RUN_TEST(test_build_screen_cache_no_wrap);
 	RUN_TEST(test_count_screen_lines_exact);
 	RUN_TEST(test_count_screen_lines_long);
-	RUN_TEST(test_invalidate_screen_cache);
 	RUN_TEST(test_word_wrap_break);
 
 	/* Minibuffer serialization */

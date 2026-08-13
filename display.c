@@ -8,6 +8,7 @@
 #include "history.h"
 
 #include "region.h"
+#include "wrap.h"
 #include "terminal.h"
 #include "unicode.h"
 #include "util.h"
@@ -36,8 +37,12 @@ struct rowHighlight {
 	int match_end;	  /* search match end column, or -1 */
 };
 
+/* max_col bounds a highlight that runs to end of line.  The bound is
+ * the viewport's, not the row's: a region ending past the last column
+ * the window can draw is indistinguishable from one ending at it, and
+ * asking the row for its total width is an O(row length) walk (§C2). */
 static void computeRowHighlightBounds(struct buffer *buf, int filerow,
-				      struct rowHighlight *hl) {
+				      int max_col, struct rowHighlight *hl) {
 	hl->region_start = -1;
 	hl->region_end = -1;
 	hl->match_start = -1;
@@ -58,7 +63,7 @@ static void computeRowHighlightBounds(struct buffer *buf, int filerow,
 				base_byte = i + 1;
 		}
 		hl->region_start = charsToDisplayColumn(row, base_byte);
-		hl->region_end = calculateLineWidth(row);
+		hl->region_end = max_col;
 		return;
 	}
 
@@ -102,7 +107,7 @@ static void computeRowHighlightBounds(struct buffer *buf, int filerow,
 				} else if (filerow == sr) {
 					hl->region_start =
 						charsToDisplayColumn(row, sc);
-					hl->region_end = INT_MAX;
+					hl->region_end = max_col;
 				} else if (filerow == er) {
 					hl->region_start = 0;
 					hl->region_end =
@@ -110,7 +115,7 @@ static void computeRowHighlightBounds(struct buffer *buf, int filerow,
 				} else {
 					/* Middle row: entire row highlighted */
 					hl->region_start = 0;
-					hl->region_end = INT_MAX;
+					hl->region_end = max_col;
 				}
 			}
 		}
@@ -146,6 +151,235 @@ static void updateHighlight(struct abuf *ab, int *current, int desired) {
 	}
 }
 
+/* ---- Viewport arithmetic, in screen lines relative to the top ----
+ *
+ * Every viewport question this file asks is a difference or a
+ * comparison, and every one of them is bounded by the window height in
+ * SCREEN LINES: a row contributes at least one screen line, so a
+ * position more than `height` lines from the top is off screen and the
+ * answer is "not visible" rather than a number.  Nothing needs an
+ * absolute screen-line index, so nothing computes one (#111).
+ *
+ * Bounded in screen lines is not bounded in bytes.  Naming a position
+ * inside a wrapped row costs the bytes before it in that row, because
+ * wrap points are only discoverable by walking: screenWalkStart() pays
+ * it to position, and linesBack() pays a whole row to learn its last
+ * sub-line index.  Both are independent of numrows -- which is what
+ * #111 was for -- but a frame with the cursor deep inside a single
+ * multi-megabyte row still costs a multiple of that depth.  Removing
+ * that would need a per-row wrap cache, which is what #108 deleted and
+ * §4.10 exists to avoid re-introducing.
+ *
+ * The top itself is (rowoff, skip_sublines) -- a row and a sub-line
+ * within it.  These four helpers are the only things here that reason
+ * about distance between screen lines. */
+
+/* The viewport top: a row and a sub-line within it.
+ *
+ * topRead() and topSet() are the only things that touch rowoff and
+ * skip_sublines, so the non-wrap rule -- there are no sub-lines, the
+ * skip is always zero -- lives in them rather than being repeated as a
+ * guard at every caller.
+ *
+ * Neither clamps the sub-line against the row's sub-line count.  A
+ * width change moves wrap points under a stored skip, and the walkers
+ * clamp it when they reach it, which costs nothing; asking the row for
+ * its sub-line count here would be an O(row length) walk on every
+ * read.  Clamp on read, not on resize (§D). */
+struct viewportTop {
+	int row;
+	int subline;
+};
+
+static inline struct viewportTop topRead(struct window *win,
+					 struct buffer *buf) {
+	struct viewportTop t;
+	t.row = win->rowoff;
+	if (t.row < 0)
+		t.row = 0;
+	if (t.row > buf->numrows - 1)
+		t.row = buf->numrows - 1;
+	t.subline = buf->word_wrap && win->skip_sublines > 0 ?
+			    win->skip_sublines :
+			    0;
+	return t;
+}
+
+/* Move the top to (row, subline).  A row outside the buffer is clamped
+ * and lands on that row's first screen line: a sub-line offset into a
+ * row the caller could not have been looking at means nothing. */
+static inline void topSet(struct window *win, struct buffer *buf, int row,
+			  int subline) {
+	int clamped = row;
+	if (clamped < 0)
+		clamped = 0;
+	if (clamped > buf->numrows - 1)
+		clamped = buf->numrows - 1;
+	win->rowoff = clamped;
+	win->skip_sublines =
+		(clamped != row || !buf->word_wrap || subline < 0) ? 0 :
+								     subline;
+}
+
+/* Screen lines from the viewport top to (row, subline): 0 if that is
+ * the top line itself.  Returns -1 if the position is above the top or
+ * more than `max` lines below it, which is the only answer a caller
+ * wants for something off screen. */
+static inline int linesFromTop(struct window *win, struct buffer *buf, int row,
+			       int subline, int max) {
+	struct viewportTop top = topRead(win, buf);
+	if (row < top.row)
+		return -1;
+	if (!buf->word_wrap)
+		return row - top.row <= max ? row - top.row : -1;
+	if (row == top.row) {
+		/* Sub-lines of one row are consecutive screen lines, so
+		 * this is a subtraction.  Worth its own branch: reaching
+		 * a sub-line by walking costs the bytes before it, which
+		 * on a single multi-megabyte wrapped row -- the whole
+		 * viewport being inside one row -- is the frame. */
+		int d = subline - top.subline;
+		return d >= 0 && d <= max ? d : -1;
+	}
+
+	struct screenWalk w;
+	screenWalkStart(&w, buf, E.screencols, top.row, top.subline);
+	for (int n = 0; n <= max; n++) {
+		if (w.row == row && w.subline == subline)
+			return n;
+		if (w.row > row)
+			return -1;
+		if (!screenWalkNext(&w))
+			return -1;
+	}
+	return -1;
+}
+
+/* Screen lines from the viewport top to the end of the buffer, counting
+ * the top line itself.  Stops at cap + 1, so a caller asking "does the
+ * buffer end within `cap` lines" walks no further than the window. */
+static inline int linesToEnd(struct window *win, struct buffer *buf, int cap) {
+	struct viewportTop top = topRead(win, buf);
+	if (!buf->word_wrap) {
+		int n = buf->numrows - top.row;
+		return n > cap ? cap + 1 : n;
+	}
+
+	struct screenWalk w;
+	screenWalkStart(&w, buf, E.screencols, top.row, top.subline);
+	int n = 1;
+	while (n <= cap) {
+		if (!screenWalkNext(&w))
+			return n;
+		n++;
+	}
+	return cap + 1;
+}
+
+/* How many screen lines the viewport may move, given a request of `n`.
+ *
+ * One rule for both modes, stated in screen lines: scrolling down stops
+ * when the buffer's last screen line is within height - 2 lines of the
+ * top, i.e. with two blank lines showing.  This is what the non-wrap
+ * `numrows - height + 2` bound and the wrap `last_end <= top + height
+ * - 2` test each said separately (§D.2).
+ *
+ * A count rather than the predicate this used to be.  The predicate
+ * could only answer "are we there yet", so a caller had to step and
+ * re-ask, and the one that did got the sense of the answer backwards
+ * (see scrollViewport).  A count has no sense to get backwards: it is
+ * applied once, and each step down brings the end of the buffer one
+ * screen line closer, so the rule has a closed form and never needs
+ * re-evaluating per step.
+ *
+ * The result may be negative, which is not an error: it means the top
+ * already sits below the rule -- after a resize, or a deletion -- and
+ * the distance back up is the same arithmetic.  It is clamped to n, so
+ * a request is never exceeded in either direction.
+ *
+ * A window too short for the rule (height <= 2) gives a negative cap,
+ * which no count can be under, so scrolling is bounded only by the end
+ * of the buffer -- as it was before. */
+static inline int scrollAllowance(struct window *win, struct buffer *buf,
+				  int n) {
+	/* Going up is bounded by the start of the buffer, which
+	 * topSet() clamps -- not by the rule. */
+	if (n < 0)
+		return n;
+
+	int cap = win->height - 2;
+	int steps = linesToEnd(win, buf, cap + n) - cap;
+	/* A top already below the rule -- after a resize or a deletion
+	 * -- gives a negative count, which would turn a request to go
+	 * down into a jump backwards. */
+	if (steps < 0)
+		steps = 0;
+	return steps > n ? n : steps;
+}
+
+/* Walk back `n` screen lines from (row, subline), reporting where it
+ * lands.  Stops at the start of the buffer.  Sub-lines within the
+ * starting row cost nothing; each earlier row costs its own wrap.
+ *
+ * That per-row cost is a whole-row walk, not a bounded one: entering a
+ * row from below means starting at its LAST sub-line, and the only way
+ * to number that is countScreenLines() over the entire row.  Under
+ * wrap this is the dominant cost of scroll()'s below-window branch, of
+ * page-up and of recenter() on long rows.  It is stated rather than
+ * fixed: the fix is a cached sub-line count per row, which is exactly
+ * what #108 removed. */
+static inline void linesBack(struct buffer *buf, int row, int subline, int n,
+			     int *out_row, int *out_subline) {
+	while (n > 0) {
+		if (subline > 0) {
+			subline--;
+		} else {
+			if (row <= 0)
+				break;
+			row--;
+			subline = buf->word_wrap ?
+					  countScreenLines(&buf->row[row],
+							   E.screencols) -
+						  1 :
+					  0;
+		}
+		n--;
+	}
+	*out_row = row;
+	*out_subline = subline;
+}
+
+/* Move the viewport top one screen line, down (dir > 0) or up.
+ * Returns 0 if it could not move.  The non-wrap case is a row step
+ * with no sub-line to carry, which is a branch here rather than a
+ * guard at every caller. */
+static inline int topAdvance(struct window *win, struct buffer *buf, int dir) {
+	struct viewportTop top = topRead(win, buf);
+
+	if (dir > 0) {
+		if (buf->word_wrap) {
+			struct screenWalk w;
+			screenWalkStart(&w, buf, E.screencols, top.row,
+					top.subline);
+			if (!screenWalkNext(&w))
+				return 0;
+			topSet(win, buf, w.row, w.subline);
+			return 1;
+		}
+		if (top.row >= buf->numrows - 1)
+			return 0;
+		topSet(win, buf, top.row + 1, 0);
+		return 1;
+	}
+
+	if (top.row <= 0 && top.subline <= 0)
+		return 0;
+	int row, subline;
+	linesBack(buf, top.row, top.subline, 1, &row, &subline);
+	topSet(win, buf, row, subline);
+	return 1;
+}
+
 /* Scroll the viewport by `n` screen lines.  Positive = down (content
  * moves up), negative = up (content moves down).  Handles both wrap
  * and non-wrap modes, managing rowoff and skip_sublines.
@@ -160,77 +394,53 @@ void scrollViewport(struct window *win, struct buffer *buf, int n) {
 	 * it, but that is a per-frame guarantee and a macro or a
 	 * uarg-repeated command runs many operations between frames,
 	 * while the word-wrap path below dereferences buf->row[rowoff]
-	 * directly.  Clamp on entry rather than rely on refresh timing. */
-	if (win->rowoff > buf->numrows - 1) {
-		win->rowoff = buf->numrows - 1;
-		win->skip_sublines = 0;
-	}
-	if (win->rowoff < 0) {
-		win->rowoff = 0;
-		win->skip_sublines = 0;
-	}
+	 * directly.  Clamp on entry rather than rely on refresh timing;
+	 * topSet() is where the clamp lives. */
+	topSet(win, buf, win->rowoff, win->skip_sublines);
 
 	if (!buf->word_wrap) {
-		win->rowoff += n;
-		if (win->rowoff < 0)
-			win->rowoff = 0;
-		int max_rowoff = buf->numrows - win->height + 2;
-		if (max_rowoff < 0)
-			max_rowoff = 0;
-		if (win->rowoff > max_rowoff)
-			win->rowoff = max_rowoff;
-		win->skip_sublines = 0;
+		/* A screen line is a row here, so applying the rule is
+		 * the whole of it: no walking, and one expression for
+		 * both directions.
+		 *
+		 * This replaces a pull-back loop whose stop test was
+		 * inverted: it stepped the top back while the end of the
+		 * buffer was NOT yet in view, which is every ordinary
+		 * page-down, so C-v walked rowoff to 0 and the viewport
+		 * never moved.  The wrapped path was unaffected, which
+		 * is why the suites stayed green -- nothing asserted on
+		 * a non-wrap page-down. */
+		topSet(win, buf, win->rowoff + scrollAllowance(win, buf, n), 0);
 		return;
 	}
 
-	/* Word-wrap mode: scroll by individual screen lines */
-	buildScreenCache(buf, E.screencols);
-
+	/* Word-wrap mode: one screen line per step.  topAdvance carries
+	 * from the sub-line into the row and back, so neither direction
+	 * spells that out here. */
 	if (n > 0) {
-		/* Scroll down */
-		int last = buf->numrows - 1;
-		int last_end = getScreenLineForRow(buf, last, E.screencols) +
-			       countScreenLines(&buf->row[last], E.screencols);
-
-		for (int i = 0; i < n; i++) {
-			if (win->rowoff >= buf->numrows)
+		/* The same rule the non-wrap branch applies (§D.2); here
+		 * it says how many steps to take rather than where to
+		 * land, because a screen line is not a row. */
+		int steps = scrollAllowance(win, buf, n);
+		/* One walk for the whole descent: stepping through
+		 * topAdvance would re-enter the row to find its sub-line
+		 * on every step, which is quadratic within a row long
+		 * enough to fill the window by itself. */
+		struct viewportTop top = topRead(win, buf);
+		struct screenWalk w;
+		screenWalkStart(&w, buf, E.screencols, top.row, top.subline);
+		int moved = 0;
+		for (int i = 0; i < steps; i++) {
+			if (!screenWalkNext(&w))
 				break;
-
-			/* Stop if the last buffer line is already visible
-			 * in the window (with a couple of blank lines). */
-			int top = getScreenLineForRow(buf, win->rowoff,
-						      E.screencols) +
-				  win->skip_sublines;
-			if (last_end <= top + win->height - 2)
-				break;
-
-			int row_lines = countScreenLines(&buf->row[win->rowoff],
-							 E.screencols);
-
-			if (win->skip_sublines < row_lines - 1) {
-				win->skip_sublines++;
-			} else {
-				win->rowoff++;
-				win->skip_sublines = 0;
-				if (win->rowoff >= buf->numrows)
-					break;
-			}
+			moved++;
 		}
+		if (moved > 0)
+			topSet(win, buf, w.row, w.subline);
 	} else {
-		/* Scroll up */
-		int up = -n;
-		for (int i = 0; i < up; i++) {
-			if (win->rowoff <= 0 && win->skip_sublines <= 0)
+		for (int i = 0; i < -n; i++) {
+			if (!topAdvance(win, buf, -1))
 				break;
-
-			if (win->skip_sublines > 0) {
-				win->skip_sublines--;
-			} else {
-				win->rowoff--;
-				int prev_lines = countScreenLines(
-					&buf->row[win->rowoff], E.screencols);
-				win->skip_sublines = prev_lines - 1;
-			}
 		}
 	}
 }
@@ -241,20 +451,60 @@ static void updateEndFlag(struct window *win, struct buffer *buf) {
 		buf->end = (win->rowoff + win->height > buf->numrows);
 		return;
 	}
-	buildScreenCache(buf, E.screencols);
-	int last = buf->numrows - 1;
-	int last_end = getScreenLineForRow(buf, last, E.screencols) +
-		       countScreenLines(&buf->row[last], E.screencols);
-	int top = getScreenLineForRow(buf, win->rowoff, E.screencols) +
-		  win->skip_sublines;
-	buf->end = (last_end <= top + win->height);
+	/* Not "how far is the end of the buffer" but "does it fall within
+	 * the window": walk forward at most height lines and see whether
+	 * the buffer runs out (§D). */
+	buf->end = (linesToEnd(win, buf, win->height) <= win->height);
 }
 
-/* Return the absolute screen line for the top of the current viewport,
- * accounting for skip_sublines. */
-static int viewportTopScreenLine(struct window *win, struct buffer *buf) {
-	return getScreenLineForRow(buf, win->rowoff, E.screencols) +
-	       win->skip_sublines;
+/* Where the cursor sits within its own row: which sub-line, and which
+ * column of it.
+ *
+ * A cursor exactly at the right edge of a sub-line belongs on the next
+ * one.  scroll() and screenCursorPos() both need that rule and both
+ * applied it themselves; duplicated, it was the first thing a careless
+ * rewrite would let diverge, and the symptom is the viewport scrolled
+ * for one screen line while the cursor is drawn on another (§D). */
+static inline void cursorSubline(struct buffer *buf, int cursor_col,
+				 int *sub_line, int *sub_col) {
+	*sub_line = 0;
+	*sub_col = cursor_col;
+	if (!buf->word_wrap)
+		return;
+
+	cursorScreenLine(&buf->row[buf->cy], cursor_col, E.screencols, sub_line,
+			 sub_col);
+	if (*sub_col >= E.screencols) {
+		(*sub_line)++;
+		*sub_col = 0;
+	}
+}
+
+/* Does this row's own first screen line sit above the viewport top?
+ * True for any row before the top row, and for the top row itself when
+ * the window starts part-way down it. */
+static inline int rowStartsAboveTop(struct window *win, struct buffer *buf,
+				    int row) {
+	struct viewportTop top = topRead(win, buf);
+	return row < top.row || (row == top.row && top.subline > 0);
+}
+
+/* The last row with any screen line in the window: walk forward from
+ * the top for the window's height and see where it stops. */
+static inline int lastVisibleRow(struct window *win, struct buffer *buf) {
+	struct viewportTop top = topRead(win, buf);
+	if (!buf->word_wrap) {
+		int last = top.row + win->height - 1;
+		return last > buf->numrows - 1 ? buf->numrows - 1 : last;
+	}
+
+	struct screenWalk w;
+	screenWalkStart(&w, buf, E.screencols, top.row, top.subline);
+	for (int n = 1; n < win->height; n++) {
+		if (!screenWalkNext(&w))
+			break;
+	}
+	return w.row;
 }
 
 /* Ensure the cursor is within the visible viewport.  If it has fallen
@@ -266,31 +516,21 @@ void clampCursorToViewport(struct window *win, struct buffer *buf) {
 			buf->cy = win->rowoff;
 		else if (buf->cy >= win->rowoff + win->height)
 			buf->cy = win->rowoff + win->height - 1;
-	} else {
-		buildScreenCache(buf, E.screencols);
-		int top = viewportTopScreenLine(win, buf);
-
-		int cursor_screen =
-			getScreenLineForRow(buf, buf->cy, E.screencols);
-
-		if (cursor_screen < top) {
-			while (buf->cy < buf->numrows - 1) {
-				buf->cy++;
-				cursor_screen = getScreenLineForRow(
-					buf, buf->cy, E.screencols);
-				if (cursor_screen >= top)
-					break;
-			}
-			buf->cx = 0;
-		} else if (cursor_screen >= top + win->height) {
-			while (buf->cy > 0) {
-				cursor_screen = getScreenLineForRow(
-					buf, buf->cy, E.screencols);
-				if (cursor_screen < top + win->height)
-					break;
-				buf->cy--;
-			}
+	} else if (rowStartsAboveTop(win, buf, buf->cy)) {
+		/* Above the window: down to the first row that starts
+		 * within it. */
+		while (buf->cy < buf->numrows - 1) {
+			buf->cy++;
+			if (!rowStartsAboveTop(win, buf, buf->cy))
+				break;
 		}
+		buf->cx = 0;
+	} else {
+		/* Below the window: up to the last row it shows.  Found
+		 * by one bounded walk rather than a test per row. */
+		int last = lastVisibleRow(win, buf);
+		if (buf->cy > last)
+			buf->cy = last;
 	}
 
 	if (buf->cy < 0)
@@ -313,11 +553,15 @@ void clampCursorToViewport(struct window *win, struct buffer *buf) {
  * start_byte: byte offset in row->chars corresponding to start_col,
  *             or -1 to scan from the beginning.  The word-wrap caller
  *             already knows the byte offset; passing it in avoids an
- *             O(line-length) skip loop for every wrapped sub-line. */
-static void renderLineWithHighlighting(erow *row, struct abuf *ab,
-				       int start_col, int end_col,
-				       const struct rowHighlight *hl,
-				       int start_byte) {
+ *             O(line-length) skip loop for every wrapped sub-line.
+ *
+ * Returns the display column rendering stopped at -- end_col if the row
+ * ran past the right edge, otherwise the row's width.  The caller pads
+ * from it rather than asking the row how wide it is (§C2). */
+static int renderLineWithHighlighting(erow *row, struct abuf *ab, int start_col,
+				      int end_col,
+				      const struct rowHighlight *hl,
+				      int start_byte) {
 	int render_x = 0;
 	int char_idx = 0;
 	int current_highlight = 0;
@@ -400,60 +644,59 @@ static void renderLineWithHighlighting(erow *row, struct abuf *ab,
 	}
 
 	updateHighlight(ab, &current_highlight, 0);
+	return render_x;
 }
 
 /* Display functions */
-void setScxScy(struct window *win) {
+
+/* The cursor's position within its window, in screen cells relative to
+ * the window's top-left corner.  Derived wholly from the window and its
+ * buffer, and read only for the focused window when placing the cursor
+ * at the end of a frame, so it is returned rather than stored.
+ *
+ * cursor_col is the display column of (cx, cy), which scroll() has
+ * already computed for the same position this frame; -1 means compute
+ * it here.  Recomputing it is O(cx), so on a long line the duplicate
+ * cost the frame as much as the walk itself (§C2). */
+void screenCursorPos(struct window *win, int cursor_col, int *scx_out,
+		     int *scy_out) {
 	struct buffer *buf = win->buf;
 	erow *row = &buf->row[buf->cy]; /* cy < numrows (#105) */
+	int total_width = cursor_col >= 0 ? cursor_col :
+					    charsToDisplayColumn(row, buf->cx);
+	int sub_line, sub_col;
+	cursorSubline(buf, total_width, &sub_line, &sub_col);
 
-	win->scy = 0;
-	win->scx = 0;
+	int scx = buf->word_wrap ? sub_col : total_width - win->coloff;
+	if (scx < 0)
+		scx = 0;
 
-	if (buf->word_wrap) {
-		int cursor_screen_line =
-			getScreenLineForRow(buf, buf->cy, E.screencols);
-		int rowoff_screen_line =
-			getScreenLineForRow(buf, win->rowoff, E.screencols);
-		win->scy = cursor_screen_line - rowoff_screen_line -
-			   win->skip_sublines;
-	} else {
-		win->scy = buf->cy - win->rowoff;
+	/* Screen lines from the top of the window to the cursor's own
+	 * screen line.  Off screen has no distance to report, and the
+	 * frame has to put the cursor somewhere, so it goes on the
+	 * nearest edge -- which is what the clamps here did before. */
+	int scy = linesFromTop(win, buf, buf->cy, sub_line, win->height - 1);
+	if (scy < 0) {
+		struct viewportTop top = topRead(win, buf);
+		int above = buf->cy < top.row ||
+			    (buf->cy == top.row && sub_line < top.subline);
+		scy = above ? 0 : win->height - 1;
 	}
 
-	int total_width = charsToDisplayColumn(row, buf->cx);
-
-	if (!buf->word_wrap) {
-		win->scx = total_width - win->coloff;
-	} else {
-		int sub_line, sub_col;
-		cursorScreenLine(row, total_width, E.screencols, &sub_line,
-				 &sub_col);
-		win->scy += sub_line;
-		win->scx = sub_col;
-	}
-
-	if (win->scx < 0)
-		win->scx = 0;
-	/* A cursor sitting exactly at the right edge of a wrapped
-	 * sub-line belongs on the next screen line.  This must happen
-	 * BEFORE the height clamp: applying it afterwards could push
-	 * scy back to win->height, i.e. onto the status bar row.
-	 * scroll() applies the same bump so the viewport has already
-	 * been scrolled to keep this line visible. */
-	if (buf->word_wrap && win->scx >= E.screencols) {
-		win->scy++;
-		win->scx = 0;
-	}
-	if (win->scy < 0)
-		win->scy = 0;
-	if (win->scy >= win->height)
-		win->scy = win->height - 1;
+	*scx_out = scx;
+	*scy_out = scy;
 }
 
-void scroll(void) {
+/* Returns the display column of the focused cursor, which it computes
+ * to place the viewport.  screenCursorPos() and the status bar want the
+ * same number for the same position, and each walk is O(cx). */
+int scroll(void) {
 	struct window *win = E.windows[windowFocusedIdx()];
 	struct buffer *buf = win->buf;
+	/* Both branches below assign it; initialised because they are
+	 * two separate ifs on the same condition, which the compiler
+	 * does not read as exhaustive. */
+	int cursor_col = 0;
 
 	if (buf->cy > buf->numrows - 1) {
 		buf->cy = buf->numrows - 1;
@@ -463,67 +706,40 @@ void scroll(void) {
 	}
 
 	if (buf->word_wrap) {
-		/* Ensure cache is built (it should already be by refreshScreen) */
-		buildScreenCache(buf, E.screencols);
+		cursor_col = charsToDisplayColumn(&buf->row[buf->cy], buf->cx);
+		int cursor_sub_line, sub_col;
+		cursorSubline(buf, cursor_col, &cursor_sub_line, &sub_col);
 
-		/* Cursor's absolute screen line position. */
-		int cursor_sub_line = 0;
-		int cursor_screen_line =
-			getScreenLineForRow(buf, buf->cy, E.screencols);
-		int render_pos =
-			charsToDisplayColumn(&buf->row[buf->cy], buf->cx);
-		int sub_col;
-		cursorScreenLine(&buf->row[buf->cy], render_pos, E.screencols,
-				 &cursor_sub_line, &sub_col);
-		/* Mirror the bump setScxScy() applies: a cursor at the
-		 * right edge of a sub-line is drawn on the following
-		 * screen line, so the scroll decision must be made
-		 * against that line. */
-		if (sub_col >= E.screencols)
-			cursor_sub_line++;
-		cursor_screen_line += cursor_sub_line;
+		struct viewportTop top = topRead(win, buf);
+		int above =
+			buf->cy < top.row ||
+			(buf->cy == top.row && cursor_sub_line < top.subline);
 
-		int rowoff_screen_line =
-			getScreenLineForRow(buf, win->rowoff, E.screencols);
-		/* Account for current skip_sublines in the effective
-		 * top-of-window position */
-		int effective_top = rowoff_screen_line + win->skip_sublines;
-
-		if (cursor_screen_line < effective_top) {
-			/* Cursor above window: snap rowoff to cursor row */
-			win->rowoff = buf->cy;
-			win->skip_sublines = cursor_sub_line;
-		} else if (cursor_screen_line >= effective_top + win->height) {
-			/* Cursor below window: find new rowoff using
-			 * cache-based target_top search (§5.3) */
-			int target_top = cursor_screen_line - win->height + 1;
-
-			/* Walk backwards from cursor row to find
-			 * rowoff where screen_line_start[rowoff]
-			 * <= target_top */
-			int r = buf->cy;
-			if (r >= buf->numrows)
-				r = buf->numrows - 1;
-			while (r > 0 &&
-			       getScreenLineForRow(buf, r, E.screencols) >
-				       target_top)
-				r--;
-			win->rowoff = r;
-			win->skip_sublines =
-				target_top -
-				getScreenLineForRow(buf, r, E.screencols);
+		if (above) {
+			/* Above the window: the cursor's own screen line
+			 * becomes the top one. */
+			topSet(win, buf, buf->cy, cursor_sub_line);
+		} else if (linesFromTop(win, buf, buf->cy, cursor_sub_line,
+					win->height - 1) < 0) {
+			/* Below it: put the cursor on the window's last
+			 * screen line by walking back height - 1 from it.
+			 * The old form built the same position out of an
+			 * absolute target line and a backward search for
+			 * the row containing it. */
+			int row, subline;
+			linesBack(buf, buf->cy, cursor_sub_line,
+				  win->height - 1, &row, &subline);
+			topSet(win, buf, row, subline);
 		}
-		/* Otherwise: cursor is visible, keep rowoff and
-		 * skip_sublines as they are */
+		/* Otherwise the cursor is visible and the top stays. */
 	} else {
-		/* Reset skip_sublines in non-wrap mode */
-		win->skip_sublines = 0;
-
-		if (buf->cy < win->rowoff) {
-			win->rowoff = buf->cy;
-		} else if (buf->cy >= win->rowoff + win->height) {
-			win->rowoff = buf->cy - win->height + 1;
-		}
+		/* topSet() zeroes the skip: there are no sub-lines here. */
+		if (buf->cy < win->rowoff)
+			topSet(win, buf, buf->cy, 0);
+		else if (buf->cy >= win->rowoff + win->height)
+			topSet(win, buf, buf->cy - win->height + 1, 0);
+		else
+			topSet(win, buf, win->rowoff, 0);
 	}
 
 	if (!buf->word_wrap) {
@@ -531,6 +747,7 @@ void scroll(void) {
 		if (buf->cy < buf->numrows) {
 			rx = charsToDisplayColumn(&buf->row[buf->cy], buf->cx);
 		}
+		cursor_col = rx;
 		if (rx < win->coloff) {
 			win->coloff = rx;
 		} else if (rx >= win->coloff + E.screencols) {
@@ -540,7 +757,7 @@ void scroll(void) {
 		win->coloff = 0;
 	}
 
-	setScxScy(win);
+	return cursor_col;
 }
 
 void drawRows(struct window *win, struct abuf *ab, int screenrows,
@@ -559,15 +776,20 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
 			erow *row = &buf->row[filerow];
 			if (!buf->word_wrap) {
 				// Truncated mode with visual marking
+				int end_col = win->coloff + screencols;
 				struct rowHighlight hl;
-				computeRowHighlightBounds(buf, filerow, &hl);
-				renderLineWithHighlighting(
-					row, ab, win->coloff,
-					win->coloff + screencols, &hl, -1);
+				computeRowHighlightBounds(buf, filerow, end_col,
+							  &hl);
 				/* Pad remainder of screen line so \x1b[K
 				 * is not needed (it would erase the last
-				 * column due to pending-wrap state). */
-				int rx = calculateLineWidth(row) - win->coloff;
+				 * column due to pending-wrap state).  The
+				 * renderer has just emitted this content and
+				 * knows the column it stopped at; asking the
+				 * row for its full width instead was an
+				 * O(row length) walk per frame (§C2). */
+				int emitted = renderLineWithHighlighting(
+					row, ab, win->coloff, end_col, &hl, -1);
+				int rx = emitted - win->coloff;
 				if (rx < 0)
 					rx = 0;
 				while (rx < screencols) {
@@ -583,8 +805,13 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
 				int line_start_byte = 0;
 				int sub_line_idx = 0;
 
+				/* Wrapped columns accumulate across
+				 * sub-lines, so the row's own columns run
+				 * past the window width; INT_MAX is the
+				 * bound here. */
 				struct rowHighlight hl;
-				computeRowHighlightBounds(buf, filerow, &hl);
+				computeRowHighlightBounds(buf, filerow, INT_MAX,
+							  &hl);
 
 				while (line_start_byte < row->size &&
 				       y < screenrows) {
@@ -598,12 +825,29 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
 					 * visible area (only for the first
 					 * rendered row, i.e. rowoff) */
 					if (sub_line_idx < skip) {
-						sub_line_idx++;
-						if (!more)
-							break;
-						line_start_col = break_col;
-						line_start_byte = break_byte;
-						continue;
+						if (more) {
+							sub_line_idx++;
+							line_start_col =
+								break_col;
+							line_start_byte =
+								break_byte;
+							continue;
+						}
+						/* The skip names a sub-line
+						 * this row does not have: the
+						 * row shrank, or the terminal
+						 * widened, under a stored top.
+						 * Nothing clamps it on write
+						 * -- topSet() deliberately
+						 * does not, since that would
+						 * be a whole-row walk per
+						 * write (§D) -- so clamp it
+						 * here, on the read, and draw
+						 * the row's last sub-line.
+						 * Breaking out instead left
+						 * the window's top line blank.
+						 */
+						skip = sub_line_idx;
 					}
 
 					/* --- Render the span --- */
@@ -766,15 +1010,49 @@ static int statusLeft(const struct buffer *bufr, char *out, int cap,
 
 /* Middle block: line:col + position indicator, padded to STATUS_BLOCK.
  * Returns byte count written (always STATUS_BLOCK on success). */
-static int statusMid(const struct window *win, char *out, char fc) {
+static int statusMid(const struct window *win, char *out, char fc,
+		     int cursor_col) {
 	struct buffer *bufr = win->buf;
 	const char *sep = win->focused ? "  " : "--";
 
+	/* The column is a DISPLAY column, not a byte offset.  `cx` is a
+	 * byte offset within the logical line; printing it under a
+	 * `line:col` label agrees with the on-screen cell only for ASCII
+	 * without tabs, so it diverged on exactly the content emil
+	 * advertises support for -- CJK, combining marks, tabs.  The same
+	 * conflation was already found and fixed locally in the prompt
+	 * cursor path; this is the systematic fix (design Appendix C.6).
+	 *
+	 * Line stays one-based and column zero-based, matching Emacs
+	 * including its asymmetry.
+	 *
+	 * Cost: the walk is O(the cursor's distance from its line start),
+	 * which on a long line is the frame's whole budget.  The focused
+	 * window does not pay it: scroll() computed this exact column for
+	 * this exact position earlier in the frame and passes it in as
+	 * cursor_col.  A non-focused window reports its own saved cursor,
+	 * which nothing else in the frame asks about, so it computes. */
 	int ry = win->focused ? bufr->cy + 1 : win->cy + 1;
-	int rx = win->focused ? bufr->cx : win->cx;
+	int cur_y = win->focused ? bufr->cy : win->cy;
+	int cur_x = win->focused ? bufr->cx : win->cx;
+	int rx = cur_x;
+	if (cursor_col >= 0)
+		rx = cursor_col;
+	else if (cur_y >= 0 && cur_y < bufr->numrows)
+		rx = charsToDisplayColumn(&bufr->row[cur_y], cur_x);
 	char linecol[24];
 	int linecol_len =
 		snprintf(linecol, sizeof(linecol), "%s%d:%d", sep, ry, rx);
+	if (linecol_len < 0)
+		linecol_len = 0;
+	/* snprintf returns negative on an encoding error.  Nothing here
+	 * formats anything but integers and a two-byte separator, so
+	 * this is not believed reachable -- but `lc` below feeds a
+	 * memcpy() length, which takes it as size_t, so the cost of
+	 * being wrong is a wild copy and the cost of the guard is two
+	 * lines.  §H4's clang-analyzer hit at this line models exactly
+	 * this path; static tracing said false positive, and static
+	 * tracing is not proof. */
 
 	char pos[8];
 	if (bufferIsEmpty(bufr))
@@ -786,8 +1064,27 @@ static int statusMid(const struct window *win, char *out, char fc) {
 	else if (win->rowoff == 0)
 		memcpy(pos, "Top", 4);
 	else
+		/* 100LL, so the multiplication is done at 64 bits.
+		 * rowoff can reach numrows, whose ceiling is
+		 * INT_MAX / 2, so rowoff * 100 overflows for rowoff
+		 * above ~21.4 M -- signed overflow, undefined, and
+		 * reached before the division can bring the value back
+		 * into range.  That is not hypothetical at emil's
+		 * stated 1 GiB ceiling: a 1 GiB file of 40-byte lines
+		 * is ~26 M rows.  Found while chasing the
+		 * clang-analyzer hit a few lines below, which is itself
+		 * a likely false positive.
+		 *
+		 * This was `(long)` until the wasm32 and armv7 CI jobs
+		 * failed on it.  `long` is 32 bits on ILP32, so the
+		 * cast widened nothing and the overflow it was written
+		 * to prevent still happened: the product wrapped to
+		 * -1794967296 and the bar read "-69%".  C99 guarantees
+		 * long long is at least 64 bits; `long` guarantees
+		 * only 32.  The fix was verified on LP64 alone, which
+		 * is exactly where it cannot fail. */
 		snprintf(pos, sizeof(pos), "%2d%%",
-			 (win->rowoff * 100) / bufr->numrows);
+			 (int)((win->rowoff * 100LL) / bufr->numrows));
 
 	int lc = linecol_len < STATUS_BLOCK ? linecol_len : STATUS_BLOCK;
 	int pos_len = strlen(pos);
@@ -907,7 +1204,10 @@ static void joinStatusBlocks(struct abuf *ab, const char *left, int left_len,
 		abAppend(ab, rhs, rhs_bytes);
 }
 
-void drawStatusBar(struct window *win, struct abuf *ab, int line) {
+/* cursor_col is the display column of the cursor this bar reports, or
+ * -1 to compute it.  Only the focused window's caller knows it. */
+void drawStatusBar(struct window *win, struct abuf *ab, int line,
+		   int cursor_col) {
 	char buf[32];
 	snprintf(buf, sizeof(buf), CSI "%d;%dH", line, 1);
 	abAppend(ab, buf, strlen(buf));
@@ -961,7 +1261,7 @@ void drawStatusBar(struct window *win, struct abuf *ab, int line) {
 	char mid[16];
 	int mid_len = 0;
 	if (have_mid)
-		mid_len = statusMid(win, mid, fc);
+		mid_len = statusMid(win, mid, fc, cursor_col);
 
 	char rhs[64];
 	int rhs_bytes = 0, rhs_cols = 0;
@@ -1065,22 +1365,13 @@ void refreshScreen(void) {
 	abAppend(ab, "\x1b[?25l", 6); // Hide cursor
 	abAppend(ab, "\x1b[H", 3);    // Move cursor to top-left corner
 
-	/* Mandatory bounds clamp for all windows (§7.2) */
+	/* Mandatory bounds clamp for all windows: every window's
+	 * rowoff must name a row that exists (§4.9 -- there is always
+	 * at least one).  Cited as §7.2; the document has no §7. */
 	for (int i = 0; i < E.nwindows; i++) {
 		struct window *w = E.windows[i];
 		struct buffer *b = w->buf;
-		if (w->rowoff >= b->numrows) {
-			w->rowoff = b->numrows - 1;
-			w->skip_sublines = 0;
-		}
-	}
-
-	/* Build screen line cache for each visible buffer (§4.2) */
-	for (int i = 0; i < E.nwindows; i++) {
-		struct buffer *b = E.windows[i]->buf;
-		if (!b->screen_line_cache_valid) {
-			buildScreenCache(b, E.screencols);
-		}
+		topSet(w, b, w->rowoff, w->skip_sublines);
 	}
 
 	int focusedIdx = windowFocusedIdx();
@@ -1136,15 +1427,20 @@ void refreshScreen(void) {
 		}
 	}
 
+	/* The focused cursor's display column, computed once by scroll()
+	 * and reused by the status bar and the cursor placement below. */
+	int cursor_col = -1;
+
 	for (int i = 0; i < E.nwindows; i++) {
 		struct window *win = E.windows[i];
 
 		if (win->focused)
-			scroll();
+			cursor_col = scroll();
 		drawRows(win, ab, win->height, E.screencols);
 		updateEndFlag(win, win->buf);
 		cumulative_height += win->height + statusbar_height;
-		drawStatusBar(win, ab, cumulative_height);
+		drawStatusBar(win, ab, cumulative_height,
+			      win->focused ? cursor_col : -1);
 	}
 
 	drawMinibuffer(ab);
@@ -1156,7 +1452,10 @@ void refreshScreen(void) {
 	struct window *focusedWin = E.windows[focusedIdx];
 	char buf[32];
 
-	int cursor_y = focusedWin->scy + 1; // 1-based index
+	int scx, scy;
+	screenCursorPos(focusedWin, cursor_col, &scx, &scy);
+
+	int cursor_y = scy + 1; // 1-based index
 	for (int i = 0; i < focusedIdx; i++) {
 		cursor_y += E.windows[i]->height + statusbar_height;
 	}
@@ -1166,13 +1465,16 @@ void refreshScreen(void) {
 		cursor_y = cumulative_height - statusbar_height;
 	}
 
-	snprintf(buf, sizeof(buf), "\x1b[%d;%dH", cursor_y,
-		 focusedWin->scx + 1);
+	snprintf(buf, sizeof(buf), "\x1b[%d;%dH", cursor_y, scx + 1);
 	abAppend(ab, buf, strlen(buf));
 	abAppend(ab, "\x1b[?7h", 5);  // Enable auto-wrap
 	abAppend(ab, "\x1b[?25h", 6); // Show cursor
 
-	IGNORE_RETURN(write(STDOUT_FILENO, ab->b, ab->len));
+	/* Looped: a signal landing mid-write returns a short count and
+	 * would drop the frame's tail (CSI ?7h, CSI ?25h), leaving
+	 * auto-wrap off and the cursor hidden until the next full frame.
+	 * Reachable at ordinary terminal sizes -- see writeAll(). */
+	IGNORE_RETURN(writeAll(STDOUT_FILENO, ab->b, ab->len));
 }
 
 void cursorBottomLine(int curs) {
@@ -1201,16 +1503,27 @@ void cursorBottomLine(int curs) {
 	IGNORE_RETURN(write(STDOUT_FILENO, cbuf, strlen(cbuf)));
 }
 
-void resizeScreen(int sig) {
-	(void)sig; /* SIGWINCH handler: signature fixed by sigaction(2) */
+/* Re-measure the terminal and rebuild the layout.
+ *
+ * NOT a signal handler, despite what the `int sig` parameter this used
+ * to carry implied.  SIGWINCH is handled by sigwinchHandler(), which
+ * only sets a flag; handlePendingSignals() calls this from the main
+ * loop.  The parameter was left behind when that split was made, and
+ * with it this function stayed assignable to sigaction() with no
+ * diagnostic -- which is how emil-findings.md §B1 came to describe
+ * this body as running in the handler and to propose a fix for it.
+ * It read the signature.  Removing the parameter makes the wiring a
+ * compile error rather than a plausible mistake.
+ *
+ * There is nothing per-row left to invalidate.  cached_width is a row's
+ * width in display cells, which a terminal resize does not change; it
+ * was invalidated here only because buildScreenCache read a stale width
+ * as its signal to recount that row's sub-lines, and both of those are
+ * gone (#108).  Sub-line counts are now derived per frame from the
+ * current width, and a stored skip_sublines is clamped where it is read
+ * (§D), so a resize invalidates nothing at all. */
+void resizeScreen(void) {
 	getWindowSize(&E.screenrows, &E.screencols);
-	for (struct buffer *b = E.headbuf; b != NULL; b = b->next) {
-		for (int i = 0; i < b->numrows; i++) {
-			b->row[i].cached_width = -1;
-			b->row[i].cached_sublines = -1;
-		}
-		b->screen_line_cache_valid = 0;
-	}
 	/* Reset window heights so they get recalculated */
 	for (int i = 0; i < E.nwindows; i++) {
 		E.windows[i]->height = 0;
@@ -1255,17 +1568,29 @@ void whatCursor(void) {
 		E.screencols, E.screenrows);
 }
 
+/* Put the cursor's screen line in the middle of the window by walking
+ * back half a window of screen lines from it.  Subtracting half the
+ * height from cy walked back half a window of *rows*, which under wrap
+ * is several times too far and left C-l needing a second rule to land
+ * anywhere near centre (§D.4). */
 void recenter(struct window *win) {
-	win->rowoff = win->buf->cy - (win->height / 2);
-	if (win->rowoff < 0) {
-		win->rowoff = 0;
+	struct buffer *buf = win->buf;
+	int subline = 0;
+
+	if (buf->word_wrap) {
+		erow *row = &buf->row[buf->cy];
+		int col;
+		cursorScreenLine(row, charsToDisplayColumn(row, buf->cx),
+				 E.screencols, &subline, &col);
 	}
-	win->skip_sublines = 0;
+
+	int row, sub;
+	linesBack(buf, buf->cy, subline, win->height / 2, &row, &sub);
+	topSet(win, buf, row, sub);
 }
 
 void toggleVisualLineMode(void) {
 	E.buf->word_wrap = !E.buf->word_wrap;
-	invalidateScreenCache(E.buf);
 	setStatusMessage(E.buf->word_wrap ? "Visual line mode enabled" :
 					    "Visual line mode disabled");
 }

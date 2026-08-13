@@ -146,7 +146,7 @@ void handlePendingSignals(void) {
 		applyRawMode();
 		for (int i = 0; i < E.nwindows; i++)
 			E.windows[i]->height = 0;
-		resizeScreen(0);
+		resizeScreen();
 		resetFileCheckThrottle();
 		/* resizeScreen() above already re-measured the
 		 * terminal, so a resize that landed while we were
@@ -156,7 +156,7 @@ void handlePendingSignals(void) {
 
 	if (got_sigwinch) {
 		got_sigwinch = 0;
-		resizeScreen(0);
+		resizeScreen();
 	}
 }
 
@@ -329,7 +329,7 @@ int main(int argc, char *argv[]) {
 				free(stdin_data);
 				disableRawMode();
 				fprintf(stderr, "stdin: %s\n",
-					"Exceeds 1 GB limit");
+					"Exceeds 1 GiB limit");
 				exit(1);
 			}
 			struct buffer *stdinBuf =

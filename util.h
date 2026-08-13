@@ -30,6 +30,11 @@ size_t emil_strlcat(char *dst, const char *src, size_t dsize);
 char *expandTilde(const char *path);  /* ~/foo → /home/u/foo; caller frees */
 char *collapseHome(const char *path); /* /home/u/foo → ~/foo; caller frees */
 
+/* write(2) that does not stop part-way.  Returns 0 when every byte was
+ * written, -1 otherwise with errno set.  See util.c for why the plain
+ * write() this replaces was not enough. */
+int writeAll(int fd, const void *buf, size_t len);
+
 /* Character classification */
 int isWordBoundary(uint8_t c);
 

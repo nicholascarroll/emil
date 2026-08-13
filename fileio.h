@@ -25,6 +25,12 @@ enum lockResult {
 int probeLock(const char *filename);
 int lockFile(struct buffer *bufr, const char *filename);
 void releaseLock(struct buffer *bufr);
+
+/* Re-assert every advisory lock emil believes it holds.  Must be
+ * called after any operation that opens and closes a file, because
+ * closing any descriptor on an inode drops every lock this process
+ * holds on it -- see the comment on the definition in fileio.c. */
+void relockAll(void);
 void checkFileModified(void);
 void initFileCheck(void);
 void resetFileCheckThrottle(void);

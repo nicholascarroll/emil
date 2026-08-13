@@ -286,6 +286,145 @@ void test_forward_search_backspace_returns_to_origin(void) {
 	cleanupTestEditor();
 }
 
+/* A1: `^` must not match at a mid-row restart.
+ *
+ * POSIX treats the first byte of the subject as a line beginning
+ * unless REG_NOTBOL is passed, and the forward-repeat path searches
+ * &row->chars[start].  With point past column 0 an anchored pattern
+ * therefore matched at whatever offset `start` happened to be.
+ * Reproduced directly against glibc 2.39: subject "xfoo bar" from
+ * column 1 matches `^foo`; with REG_NOTBOL it does not.
+ *
+ * Point starts at column 1 of "xfoo", i.e. on the 'f', which is NOT a
+ * line beginning.  The only true `^foo` in the buffer is on the row
+ * below, so the two behaviours land point in different places rather
+ * than merely succeeding or failing: unfixed lands on (0,1), fixed on
+ * (1,0).  A negative assertion would have been muddied by incremental
+ * search moving point as each character of the pattern is typed --
+ * `^` on its own matches the start of any row. */
+void test_regex_bol_does_not_match_mid_row(void) {
+	initTestEditor();
+	makeMinibuffer();
+	const char *lines[] = { "xfoo", "foo" };
+	struct buffer *buf = make_test_buffer_lines(lines, 2);
+	buf->cy = 0;
+	buf->cx = 1;
+
+	int keys[] = { '^', 'f', 'o', 'o', '\r' };
+	scriptKeys(keys, 5);
+	muteStdout();
+	regexFind();
+	unmuteStdout();
+	clearKeys();
+
+	TEST_ASSERT_EQUAL_INT(1, E.buf->cy); /* was 0: matched inside xfoo */
+	TEST_ASSERT_EQUAL_INT(0, E.buf->cx); /* was 1 */
+
+	freeMinibuffer();
+	cleanupTestEditor();
+}
+
+/* The other half of A1: REG_NOTBOL must NOT be passed when the subject
+ * really does begin at byte 0, or `^` would stop working entirely.
+ *
+ * Point starts on row 0, so a working `^foo` has to move it to row 1.
+ * An earlier version of this test put point at (0,0) on a buffer whose
+ * only row was "foo" and asserted point stayed at (0,0) -- which a
+ * search that found nothing at all also satisfies.  It passed with
+ * REG_NOTBOL applied unconditionally, i.e. it was testing nothing.
+ * Requiring the match to move point is what makes the failure
+ * distinguishable from the search failing. */
+void test_regex_bol_matches_at_row_start(void) {
+	initTestEditor();
+	makeMinibuffer();
+	const char *lines[] = { "zzz", "foo" };
+	struct buffer *buf = make_test_buffer_lines(lines, 2);
+	buf->cy = 0;
+	buf->cx = 0;
+
+	int keys[] = { '^', 'f', 'o', 'o', '\r' };
+	scriptKeys(keys, 5);
+	muteStdout();
+	regexFind();
+	unmuteStdout();
+	clearKeys();
+
+	TEST_ASSERT_EQUAL_INT(1, E.buf->cy);
+	TEST_ASSERT_EQUAL_INT(0, E.buf->cx);
+
+	freeMinibuffer();
+	cleanupTestEditor();
+}
+
+/* An unanchored pattern must be unaffected by the new flag: REG_NOTBOL
+ * governs `^` only.  Point at column 1, so the match at 0 is behind us
+ * and the one at 8 is the answer.
+ *
+ * Characterisation, not regression: this is asserted because §A1 asks
+ * for it, but no variant of this change makes it fail -- REG_NOTBOL
+ * cannot affect a pattern with no anchor.  Recorded as such rather
+ * than left looking like a test that has been shown to bite. */
+void test_regex_unanchored_unaffected_by_notbol(void) {
+	initTestEditor();
+	makeMinibuffer();
+	struct buffer *buf = make_test_buffer("foo bar foo");
+	buf->cy = 0;
+	buf->cx = 1;
+
+	int keys[] = { 'f', 'o', 'o', '\r' };
+	scriptKeys(keys, 4);
+	muteStdout();
+	regexFind();
+	unmuteStdout();
+	clearKeys();
+
+	TEST_ASSERT_EQUAL_INT(0, E.buf->cy);
+	TEST_ASSERT_EQUAL_INT(8, E.buf->cx);
+
+	freeMinibuffer();
+	cleanupTestEditor();
+}
+
+/* A2: searchRowBackward amplifies A1 into a consistently wrong result.
+ *
+ * The loop restarts from match + 1 and keeps the last match before its
+ * limit.  With `^` matching at every restart position (A1), `best`
+ * walked forward to whatever offset sat just under the limit rather
+ * than staying on the real match.
+ *
+ * The pattern matters.  §A2 of the findings proposes `^foo` against
+ * "foo x foo", but that does not discriminate: after the match at 0
+ * the loop restarts at byte 1, where the subject is "oo x foo", `^foo`
+ * fails immediately and the loop breaks with best still 0.  The
+ * unfixed code returns the right answer there by accident.  The
+ * amplification needs a pattern that matches at *consecutive* restart
+ * positions, so `best` can walk.  `^a` against "aaa" does: unfixed it
+ * matches at 0, then 1, then 2, and returns 2; fixed, only the restart
+ * at byte 0 is a line beginning and it returns 0.
+ *
+ * No separate fix -- this falls out of passing REG_NOTBOL for
+ * p > row->chars. */
+void test_regex_backward_bol_finds_real_match(void) {
+	initTestEditor();
+	makeMinibuffer();
+	struct buffer *buf = make_test_buffer("aaa");
+	buf->cy = 0;
+	buf->cx = 3; /* end of row: search the whole row backwards */
+
+	int keys[] = { '^', 'a', '\r' };
+	scriptKeys(keys, 3);
+	muteStdout();
+	backwardRegexFind();
+	unmuteStdout();
+	clearKeys();
+
+	TEST_ASSERT_EQUAL_INT(0, E.buf->cy);
+	TEST_ASSERT_EQUAL_INT(0, E.buf->cx); /* was 2: last restart under limit */
+
+	freeMinibuffer();
+	cleanupTestEditor();
+}
+
 /* These tests manage the editor themselves. */
 void setUp(void) {
 }
@@ -306,6 +445,12 @@ int main(void) {
 	RUN_TEST(test_forward_search_repeat_wraps_after_failing);
 	RUN_TEST(test_reverse_search_does_not_wrap_on_first_pass);
 	RUN_TEST(test_forward_search_backspace_returns_to_origin);
+
+	/* A1/A2: regex anchoring at mid-row restarts */
+	RUN_TEST(test_regex_bol_does_not_match_mid_row);
+	RUN_TEST(test_regex_bol_matches_at_row_start);
+	RUN_TEST(test_regex_unanchored_unaffected_by_notbol);
+	RUN_TEST(test_regex_backward_bol_finds_real_match);
 
 	return TEST_END();
 }

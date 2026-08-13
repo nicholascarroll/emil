@@ -623,8 +623,16 @@ void test_kill_rect_utf8_interior_row(void) {
 
 void test_kill_rect_utf8_whole_char_covered(void) {
 	/* Cols [1,4) fully cover 日 on the interior row: it must be
-	 * extracted, not skipped. */
-	const char *lines[] = { "aaaaa", "a" NIHONGO, "aaaaa" };
+	 * extracted, not skipped.
+	 *
+	 * The parentheses are not decoration.  Concatenating two string
+	 * literals inside an array initialiser is exactly what a missing
+	 * comma looks like, so clang warns (-Wstring-concatenation, on
+	 * under -Wextra since at least clang 18) and `hal` builds tests
+	 * with -Werror.  Parenthesising is clang's own suggested way to
+	 * say the concatenation is deliberate.  gcc has no such warning,
+	 * and `hal` runs CC=cc, which is why this went unnoticed. */
+	const char *lines[] = { "aaaaa", ("a" NIHONGO), "aaaaa" };
 	struct buffer *buf = make_test_buffer_lines(lines, 3);
 
 	buf->cx = 1;

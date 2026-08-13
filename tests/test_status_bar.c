@@ -10,6 +10,7 @@
 #include "util.h"
 #include <string.h>
 #include <stdlib.h>
+#include <locale.h>
 
 /* Strip ANSI escape sequences and the leading CSI cursor-position
  * sequence from the abuf, leaving only visible characters.
@@ -44,7 +45,7 @@ static char *strip_escapes(const struct abuf *ab) {
  * Caller frees. */
 static char *render_status(void) {
 	struct abuf ab = ABUF_INIT;
-	drawStatusBar(E.windows[0], &ab, 1);
+	drawStatusBar(E.windows[0], &ab, 1, -1);
 	char *visible = strip_escapes(&ab);
 	abFree(&ab);
 	return visible;
@@ -185,6 +186,112 @@ static void test_linecol_position(void) {
 	free(s);
 }
 
+/* The column is a DISPLAY column, not a byte offset.
+ *
+ * Row is "\ta\x01b日c".  Byte offset and display column diverge from
+ * the first character on: a tab is one byte but eight cells, a control
+ * character is one byte but two (rendered ^A), and 日 is three bytes
+ * but two cells.
+ *
+ *   byte   0    1   2    3   4       7
+ *   char   \t   a   ^A   b   日      c
+ *   col    0    8   9    11  12      14
+ *
+ * Every offset asserted below differs from its own display column, so
+ * a regression to printing cx raw cannot pass any of them by
+ * coincidence.  The wide-character case needs an LC_CTYPE locale under
+ * which wcwidth() is meaningful; main() sets one, as test_cjk_indic.c
+ * does. */
+static void test_linecol_is_display_column(void) {
+	struct buffer *buf = make_test_buffer("\ta\x01" "b\xE6\x97\xA5"
+					      "c");
+	buf->filename = xstrdup("test.c");
+	computeDisplayNames();
+	buf->cy = 0;
+
+	buf->cx = 1; /* after the tab: byte 1, cell 8 */
+	char *s = render_status();
+	TEST_ASSERT(strstr(s, "1:8") != NULL);
+	free(s);
+
+	buf->cx = 3; /* after ^A: byte 3, cell 11 */
+	s = render_status();
+	TEST_ASSERT(strstr(s, "1:11") != NULL);
+	free(s);
+
+	buf->cx = 4; /* after 'b': byte 4, cell 12 */
+	s = render_status();
+	TEST_ASSERT(strstr(s, "1:12") != NULL);
+	free(s);
+
+	buf->cx = 7; /* after 日: byte 7, cell 14 */
+	s = render_status();
+	TEST_ASSERT(strstr(s, "1:14") != NULL);
+	TEST_ASSERT(strstr(s, "1:7") == NULL);
+	free(s);
+
+	buf->cx = 8; /* end of line: byte 8, cell 15 */
+	s = render_status();
+	TEST_ASSERT(strstr(s, "1:15") != NULL);
+	free(s);
+}
+
+/* Plain ASCII must be unchanged: byte offset and display column
+ * coincide, so the conversion must be invisible on the common case. */
+static void test_linecol_ascii_unchanged(void) {
+	struct buffer *buf = make_test_buffer("hello world");
+	buf->filename = xstrdup("test.c");
+	computeDisplayNames();
+	buf->cx = 7;
+	buf->cy = 0;
+
+	char *s = render_status();
+	TEST_ASSERT(strstr(s, "1:7") != NULL);
+	free(s);
+}
+
+/* The scroll percentage must not overflow.
+ *
+ * `rowoff * 100` was computed in int.  rowoff can reach numrows, whose
+ * ceiling is INT_MAX / 2, so the product overflows above ~21.4 M rows
+ * -- signed overflow, undefined, and reached before the division can
+ * bring it back into range.  Not hypothetical at emil's 1 GiB ceiling:
+ * a 1 GiB file of 40-byte lines is ~26 M rows.
+ *
+ * numrows and rowoff are set directly rather than by building 26 M
+ * real rows, which would cost ~624 MB and minutes.  The percentage
+ * branch reads only these two fields, so the arithmetic under test is
+ * the arithmetic that runs; nothing here depends on rows existing
+ * beyond row[0], which does.
+ *
+ * Unfixed, this prints "-69%": the product wraps to -1794967296 and
+ * the division carries the sign through.  So the test fails loudly at
+ * -O2 as well as trapping under UBSan. */
+static void test_scroll_percent_no_overflow(void) {
+	struct buffer *buf = make_test_buffer("x");
+	buf->filename = xstrdup("test.c");
+	computeDisplayNames();
+
+	int real_numrows = buf->numrows;
+	buf->numrows = 26000000; /* ~1 GiB of 40-byte lines */
+	buf->end = 0;
+	E.windows[0]->rowoff = 25000000;
+
+	char *s = render_status();
+	TEST_ASSERT(strstr(s, "96%") != NULL);
+	/* The specific wrong value, not "no minus sign anywhere": an
+	 * unmodified buffer's flag string is "--". */
+	TEST_ASSERT(strstr(s, "-69%") == NULL);
+	free(s);
+
+	/* Restore the real count, not a hardcoded 1: newBuffer() seeds a
+	 * trailing empty row, so this buffer has two, and destroyBuffer()
+	 * frees numrows of them.  Getting this wrong leaks the second
+	 * row's byte -- which is how LeakSanitizer found it. */
+	buf->numrows = real_numrows;
+	E.windows[0]->rowoff = 0;
+}
+
 /* The bar fills exactly screencols cells. */
 static void test_status_bar_width(void) {
 	E.screencols = 60;
@@ -202,7 +309,7 @@ static void test_status_bar_width(void) {
 /* Render the status bar for a window.  Caller frees. */
 static char *render_status_win(struct window *win, int *len_out) {
 	struct abuf ab = ABUF_INIT;
-	drawStatusBar(win, &ab, 1);
+	drawStatusBar(win, &ab, 1, -1);
 	char *out = xmalloc(ab.len + 1);
 	memcpy(out, ab.b, ab.len);
 	out[ab.len] = '\0';
@@ -319,6 +426,13 @@ void test_b13_statusleft_does_not_overrun_its_buffer(void) {
 }
 
 int main(void) {
+	/* wcwidth() only reports 2 for a CJK character under a UTF-8
+	 * LC_CTYPE; without this the display-column test below would
+	 * measure 日 as one cell.  Same call, same reason, as
+	 * test_cjk_indic.c.  No test in this file depends on the C
+	 * locale's widths. */
+	setlocale(LC_CTYPE, "C.UTF-8");
+
 	TEST_BEGIN();
 	RUN_TEST(test_dirty_readonly_flags);
 	RUN_TEST(test_clean_flags);
@@ -329,6 +443,9 @@ int main(void) {
 	RUN_TEST(test_disk_changed_preempts_macro);
 	RUN_TEST(test_narrow_screen_shows_basename);
 	RUN_TEST(test_linecol_position);
+	RUN_TEST(test_linecol_is_display_column);
+	RUN_TEST(test_linecol_ascii_unchanged);
+	RUN_TEST(test_scroll_percent_no_overflow);
 	RUN_TEST(test_status_bar_width);
 
 	RUN_TEST(test_b12_statusleft_truncation_stays_valid_utf8);

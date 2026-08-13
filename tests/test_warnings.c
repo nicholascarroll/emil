@@ -706,6 +706,330 @@ void test_presave_no_prompt_when_unchanged(void) {
 	free(path);
 }
 
+/* ---- §F2: a second open+close of an already-locked file ---------- */
+
+/* Does *some* process hold an advisory write lock on `path`?
+ *
+ * Must be asked from another process.  POSIX F_GETLK reports F_UNLCK
+ * for a lock the calling process holds itself, so emil cannot see its
+ * own lock and a same-process probe would answer "no" even while the
+ * lock is held.  That is also why the defect below is silent: nothing
+ * inside emil can notice the lock has gone. */
+static int lock_held_on(const char *path) {
+	pid_t pid = fork();
+	if (pid < 0)
+		return -1;
+	if (pid == 0) {
+		int fd = open(path, O_RDONLY);
+		if (fd < 0)
+			_exit(2);
+		struct flock q;
+		memset(&q, 0, sizeof(q));
+		q.l_type = F_WRLCK;
+		q.l_whence = SEEK_SET;
+		q.l_start = 0;
+		q.l_len = 0;
+		int held = (fcntl(fd, F_GETLK, &q) == 0 && q.l_type != F_UNLCK);
+		close(fd);
+		_exit(held ? 1 : 0);
+	}
+	int st = 0;
+	if (waitpid(pid, &st, 0) != pid || !WIFEXITED(st))
+		return -1;
+	return WEXITSTATUS(st) == 1;
+}
+
+/* Are two names for one file one lockable object on this platform?
+ *
+ * The three symlink tests below all rest on the POSIX ownership rule:
+ * a record lock belongs to (process, inode), so a lock taken through
+ * one name is reported on the other, and closing any descriptor on
+ * the inode drops every lock the process holds on it.  That rule is
+ * what makes the sibling defect possible and its repair observable.
+ *
+ * It does not hold everywhere, and the failure is silent.  On MSYS2
+ * (Cygwin's emulation of POSIX record locking) CI failed
+ * test_release_of_one_lock_keeps_same_inode_siblings on exactly the
+ * one assertion that needs cross-name identity, while every
+ * single-name assertion in this file passed: the same-path close
+ * still dropped the lock, and relockAll()'s re-assert on the retained
+ * descriptor was still visible to an outside prober.  Only the lock
+ * taken through the symlink was not reported on the target.  So the
+ * two descriptors are not one lockable object there.  That reading is
+ * inferred from the CI log; no MSYS2 host was available to reproduce
+ * it, and which half of the emulation causes it -- lock records keyed
+ * by something other than the inode, or a symlink that is not one --
+ * is not established.
+ *
+ * Either way the question is answerable at runtime instead of assumed,
+ * and answering it is what this does: lock a scratch file through a
+ * symlink to it and ask another process whether the lock is visible on
+ * the target.  Where it is not, the defect these tests describe cannot
+ * arise and its repair cannot be observed, so they skip rather than
+ * pass while asserting nothing. */
+static int symlink_names_share_locks(void) {
+	char *target = make_temp_file("x\n");
+	if (target == NULL)
+		return 0;
+
+	char link[80];
+	emil_strlcpy(link, "/tmp/emil_warn_pre_XXXXXX", sizeof(link));
+	int lfd = mkstemp(link);
+	if (lfd < 0) {
+		unlink(target);
+		free(target);
+		return 0;
+	}
+	close(lfd);
+	unlink(link);
+
+	int shared = 0;
+	if (symlink(target, link) == 0) {
+		int fd = open(link, O_RDWR);
+		if (fd >= 0) {
+			struct flock fl;
+			memset(&fl, 0, sizeof(fl));
+			fl.l_type = F_WRLCK;
+			fl.l_whence = SEEK_SET;
+			fl.l_start = 0;
+			fl.l_len = 0;
+			if (fcntl(fd, F_SETLK, &fl) == 0)
+				shared = (lock_held_on(target) == 1);
+			close(fd);
+		}
+		unlink(link);
+	}
+
+	unlink(target);
+	free(target);
+	return shared;
+}
+
+/* C-x i on the file the buffer is already visiting.
+ *
+ * insertFileAtPath fopen()s the path and fclose()s it.  POSIX drops
+ * every lock a process holds on an inode when it closes *any*
+ * descriptor referring to it, so that fclose silently released the
+ * lock taken by markBufferDirty -- while lock_fd stayed open, so emil
+ * went on believing it held one.  The two assertions at the end are
+ * the whole defect: emil's belief, and the truth. */
+void test_insert_file_keeps_our_lock(void) {
+	char *path = make_temp_file("content\n");
+	TEST_ASSERT_NOT_NULL(path);
+
+	struct buffer *buf = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, editorOpen(buf, path));
+	markBufferDirty(buf);
+	TEST_ASSERT_TRUE(buf->lock_fd >= 0);
+	TEST_ASSERT_EQUAL_INT(1, lock_held_on(path)); /* baseline */
+
+	TEST_ASSERT_EQUAL_INT(0, insertFileAtPath(buf, path, path));
+
+	TEST_ASSERT_TRUE(buf->lock_fd >= 0);
+	TEST_ASSERT_EQUAL_INT(1, lock_held_on(path));
+
+	unlink(path);
+	free(path);
+}
+
+/* C-x C-f on a symlink to the open, dirty file.
+ *
+ * Same mechanism through a different door: editorOpen on a second
+ * buffer opens and closes the same inode.  The symlink is what stops
+ * the find-file path recognising it as a file already open, but the
+ * inode is what the kernel cares about, so the first buffer's lock
+ * goes.  The second buffer is chained onto E.headbuf because the fix
+ * walks the buffer list. */
+void test_open_second_buffer_keeps_first_buffers_lock(void) {
+	if (!symlink_names_share_locks()) {
+		TEST_SKIP("a lock taken through a symlink is not reported "
+			  "on its target here");
+		return;
+	}
+	char *path = make_temp_file("content\n");
+	TEST_ASSERT_NOT_NULL(path);
+	/* Named via mkstemp rather than built from `path` with a "%s"
+	 * format: gcc cannot see that TEST_ASSERT_NOT_NULL returned, so
+	 * the latter draws -Wformat-truncation on the sanitizer build. */
+	char linkpath[80];
+	emil_strlcpy(linkpath, "/tmp/emil_warn_lnk_XXXXXX", sizeof(linkpath));
+	int lfd = mkstemp(linkpath);
+	TEST_ASSERT_TRUE(lfd >= 0);
+	close(lfd);
+	unlink(linkpath);
+	TEST_ASSERT_EQUAL_INT(0, symlink(path, linkpath));
+
+	struct buffer *buf = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, editorOpen(buf, path));
+	markBufferDirty(buf);
+	TEST_ASSERT_EQUAL_INT(1, lock_held_on(path));
+
+	struct buffer *other = newBuffer();
+	buf->next = other;
+	TEST_ASSERT_EQUAL_INT(0, editorOpen(other, linkpath));
+
+	TEST_ASSERT_TRUE(buf->lock_fd >= 0);
+	TEST_ASSERT_EQUAL_INT(1, lock_held_on(path));
+
+	unlink(linkpath);
+	unlink(path);
+	free(path);
+}
+
+/* The window between the close and the re-assert is real, and this is
+ * what happens when a rival wins it.
+ *
+ * relockAll() must not pretend: it has to leave lock_fd < 0 (emil holds
+ * nothing) and name the holder in lock_blocked_pid, which is what
+ * routes into the existing LOCK_CONFLICT presentation and re-arms the
+ * background re-probe -- that retry is gated on
+ * lock_blocked_pid != 0 && lock_fd < 0, so a lock_fd left dangling
+ * would also stop emil ever noticing the rival went away.
+ *
+ * The drop is staged by hand rather than by calling insertFileAtPath,
+ * because the rival has to take the lock inside a window that a real
+ * fopen/fclose pair closes far too fast to hit reliably. */
+void test_relock_reports_conflict_when_rival_takes_the_lock(void) {
+	char *path = make_temp_file("content\n");
+	TEST_ASSERT_NOT_NULL(path);
+
+	struct buffer *buf = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, editorOpen(buf, path));
+	markBufferDirty(buf);
+	TEST_ASSERT_TRUE(buf->lock_fd >= 0);
+	TEST_ASSERT_EQUAL_INT(1, lock_held_on(path));
+
+	/* Exactly what an unrelated fclose() does to us. */
+	int scratch = open(path, O_RDONLY);
+	TEST_ASSERT_TRUE(scratch >= 0);
+	close(scratch);
+	TEST_ASSERT_EQUAL_INT(0, lock_held_on(path));
+
+	int release_fd, ready_fd;
+	pid_t child = fork_lock_holder(path, &release_fd, &ready_fd);
+	TEST_ASSERT(child > 0);
+	char ready;
+	TEST_ASSERT_EQUAL_INT(1, (int)read(ready_fd, &ready, 1));
+
+	relockAll();
+
+	TEST_ASSERT_EQUAL_INT(-1, buf->lock_fd);
+	TEST_ASSERT_EQUAL_INT((int)child, buf->lock_blocked_pid);
+
+	release_and_reap(child, release_fd, ready_fd);
+	unlink(path);
+	free(path);
+}
+
+/* The background poll opens and closes the file too.
+ *
+ * checkFileModified's stale-lock job calls probeLock(), which is one
+ * open() and one close() on the buffer's inode -- the same pair that
+ * dropped the lock in the two tests above, arriving on a timer instead
+ * of a keystroke.  Reachable when the focused buffer carries a stale
+ * lock warning while another buffer holds a lock on the same inode
+ * through a symlink.
+ *
+ * The stale warning is staged by hand rather than with
+ * fork_lock_holder, because it cannot be manufactured honestly here: a
+ * rival cannot take the lock while `buf` holds it, and the state being
+ * simulated -- a holder that has exited since the warning was set -- is
+ * ordinary, since unfocused buffers never poll and their warnings go
+ * stale as a matter of course. */
+void test_lock_poll_probe_keeps_other_buffers_lock(void) {
+	if (!symlink_names_share_locks()) {
+		TEST_SKIP("a lock taken through a symlink is not reported "
+			  "on its target here");
+		return;
+	}
+	char *path = make_temp_file("content\n");
+	TEST_ASSERT_NOT_NULL(path);
+	char linkpath[80];
+	emil_strlcpy(linkpath, "/tmp/emil_warn_lnk_XXXXXX", sizeof(linkpath));
+	int lfd = mkstemp(linkpath);
+	TEST_ASSERT_TRUE(lfd >= 0);
+	close(lfd);
+	unlink(linkpath);
+	TEST_ASSERT_EQUAL_INT(0, symlink(path, linkpath));
+
+	struct buffer *buf = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, editorOpen(buf, path));
+	markBufferDirty(buf);
+	TEST_ASSERT_TRUE(buf->lock_fd >= 0);
+	TEST_ASSERT_EQUAL_INT(1, lock_held_on(path));
+
+	struct buffer *other = newBuffer();
+	buf->next = other;
+	TEST_ASSERT_EQUAL_INT(0, editorOpen(other, linkpath));
+	TEST_ASSERT_EQUAL_INT(1, lock_held_on(path)); /* survived the open */
+
+	/* A departed rival's warning, not yet re-probed. */
+	other->lock_blocked_pid = 999999;
+	other->lock_fd = -1;
+	other->external_mod = 0;
+	TEST_ASSERT_FALSE(other->dirty); /* so the poll probes, not locks */
+
+	E.buf = other;
+	resetThrottle();
+	checkFileModified();
+	E.buf = buf;
+
+	TEST_ASSERT_TRUE(buf->lock_fd >= 0); /* emil's belief... */
+	TEST_ASSERT_EQUAL_INT(1, lock_held_on(path)); /* ...and the truth */
+
+	unlink(linkpath);
+	unlink(path);
+	free(path);
+}
+
+/* Releasing one buffer's lock must not release its sibling's.
+ *
+ * Two dirty buffers on one inode (again through a symlink) each hold a
+ * lock_fd, but the kernel holds one per-process lock record between
+ * them.  releaseLock() on either buffer close()s a descriptor on the
+ * inode, which drops that shared record -- so saving or killing one
+ * buffer silently unlocked the other, which is still dirty and still
+ * believes it is protected.  markBufferClean() is the save-path door
+ * to it, exercised here; destroyBuffer() is the other. */
+void test_release_of_one_lock_keeps_same_inode_siblings(void) {
+	if (!symlink_names_share_locks()) {
+		TEST_SKIP("a lock taken through a symlink is not reported "
+			  "on its target here");
+		return;
+	}
+	char *path = make_temp_file("content\n");
+	TEST_ASSERT_NOT_NULL(path);
+	char linkpath[80];
+	emil_strlcpy(linkpath, "/tmp/emil_warn_lnk_XXXXXX", sizeof(linkpath));
+	int lfd = mkstemp(linkpath);
+	TEST_ASSERT_TRUE(lfd >= 0);
+	close(lfd);
+	unlink(linkpath);
+	TEST_ASSERT_EQUAL_INT(0, symlink(path, linkpath));
+
+	struct buffer *buf = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, editorOpen(buf, path));
+	markBufferDirty(buf);
+	TEST_ASSERT_TRUE(buf->lock_fd >= 0);
+
+	struct buffer *other = newBuffer();
+	buf->next = other;
+	TEST_ASSERT_EQUAL_INT(0, editorOpen(other, linkpath));
+	markBufferDirty(other);
+	/* Same process, so no conflict: both buffers now hold fds. */
+	TEST_ASSERT_TRUE(other->lock_fd >= 0);
+	TEST_ASSERT_EQUAL_INT(1, lock_held_on(path));
+
+	markBufferClean(buf); /* the save path's release */
+
+	TEST_ASSERT_TRUE(other->lock_fd >= 0); /* still dirty, still believes */
+	TEST_ASSERT_EQUAL_INT(1, lock_held_on(path));
+
+	unlink(linkpath);
+	unlink(path);
+	free(path);
+}
+
 /* ---- setUp / tearDown / main ---- */
 
 void setUp(void) {
@@ -741,6 +1065,12 @@ int main(void) {
 	RUN_TEST(test_presave_prompt_refused_leaves_file);
 	RUN_TEST(test_presave_prompt_accepted_writes);
 	RUN_TEST(test_presave_no_prompt_when_unchanged);
+
+	RUN_TEST(test_insert_file_keeps_our_lock);
+	RUN_TEST(test_open_second_buffer_keeps_first_buffers_lock);
+	RUN_TEST(test_relock_reports_conflict_when_rival_takes_the_lock);
+	RUN_TEST(test_lock_poll_probe_keeps_other_buffers_lock);
+	RUN_TEST(test_release_of_one_lock_keeps_same_inode_siblings);
 
 	return TEST_END();
 }

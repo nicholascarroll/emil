@@ -163,6 +163,51 @@ size_t emil_strlcat(char *dst, const char *src, size_t dsize) {
 	return (dlen + (src - osrc)); /* count does not include NUL */
 }
 
+/* write(2) retried until the whole buffer is gone.
+ *
+ * A blocking tty write is not all-or-nothing.  Once the terminal's
+ * buffer is full the write sleeps, and a signal delivered while it
+ * sleeps makes it return the count transferred so far -- emil installs
+ * no handler with SA_RESTART, so SIGWINCH, SIGCONT and the file-check
+ * SIGALRM all do this.  Measured on Linux/glibc, x86-64: a write of
+ * more than a pty's 10240-byte buffer with the reader stalled returns
+ * exactly 10240 when a SIGWINCH lands, and blocks indefinitely rather
+ * than returning short when no signal does -- so the signal is the
+ * whole mechanism, and emil raises those signals routinely.
+ *
+ * Two callers exceeded that buffer.  A frame is 1935 bytes at 80x24
+ * but 11967 at 200x60 and 39847 at 400x100 (measured, gcc 13.3.0 /
+ * Ubuntu 24.04 / x86-64, 400-byte lines), so an ordinary maximised
+ * terminal is already past it; and an OSC 52 clipboard sequence runs
+ * to nearly 100000 bytes by design.  The frame case is self-healing
+ * and cosmetic -- a truncated frame loses its trailing CSI ?7h and
+ * CSI ?25h, leaving auto-wrap off and the cursor hidden until the next
+ * complete frame.  The clipboard case is not: a truncated base64
+ * payload with no terminating ST puts corrupt text on the system
+ * clipboard and leaves the terminal consuming what follows as part of
+ * an unterminated OSC string.
+ *
+ * n == 0 is treated as failure rather than retried.  write() returning
+ * 0 for a non-zero count means no progress is being made, and looping
+ * on it would spin the editor forever in preference to dropping a
+ * frame. */
+int writeAll(int fd, const void *buf, size_t len) {
+	const char *p = (const char *)buf;
+	while (len > 0) {
+		ssize_t n = write(fd, p, len);
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			return -1;
+		}
+		if (n == 0)
+			return -1;
+		p += (size_t)n;
+		len -= (size_t)n;
+	}
+	return 0;
+}
+
 int isWordBoundary(uint8_t c) {
 	return !(c > '~') && /* Anything outside ASCII is not a boundary */
 	       !('a' <= c && c <= 'z') && /* Lower case ASCII not boundaries */

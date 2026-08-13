@@ -9,82 +9,6 @@
 #include <stdlib.h>
 #endif
 
-void invalidateScreenCache(struct buffer *buf) {
-	buf->screen_line_cache_valid = 0;
-}
-
-void buildScreenCache(struct buffer *buf, int screencols) {
-	if (buf->screen_line_cache_valid)
-		return;
-
-	if (buf->screen_line_cache_size < buf->numrows) {
-		size_t new_size = buf->numrows;
-		if (new_size <= SIZE_MAX - 100) {
-			new_size += 100;
-		}
-		if (new_size > SIZE_MAX / sizeof(int)) {
-			return;
-		}
-		buf->screen_line_cache_size = new_size;
-		buf->screen_line_start =
-			xrealloc(buf->screen_line_start,
-				 buf->screen_line_cache_size * sizeof(int));
-	}
-
-	if (!buf->screen_line_start)
-		return;
-
-	/* A column-width change invalidates every row's cached subline
-	 * count (the wrap points move even though the text didn't). */
-	if (buf->screen_cache_cols != screencols) {
-		for (int i = 0; i < buf->numrows; i++)
-			buf->row[i].cached_sublines = -1;
-		buf->screen_cache_cols = screencols;
-	}
-
-	int screen_line = 0;
-	for (int i = 0; i < buf->numrows; i++) {
-		buf->screen_line_start[i] = screen_line;
-		if (!buf->word_wrap) {
-			screen_line += 1;
-		} else {
-			/* Recompute the subline count only for rows
-			 * marked stale (-1) by a mutation site.
-			 *
-			 * The width-stale check below is a safety net
-			 * only, NOT the invalidation mechanism: it
-			 * cannot be relied on because
-			 * calculateLineWidth() (called from display
-			 * paths) may re-validate cached_width before
-			 * this rebuild runs, hiding the staleness.
-			 * The real invariant lives at the mutation
-			 * sites: every one must set BOTH cached_width
-			 * and cached_sublines to -1 (see erow in
-			 * emil.h). */
-			if (buf->row[i].cached_width < 0) {
-				buf->row[i].cached_width =
-					calculateLineWidth(&buf->row[i]);
-				buf->row[i].cached_sublines = -1;
-			}
-			if (buf->row[i].cached_sublines < 0)
-				buf->row[i].cached_sublines = countScreenLines(
-					&buf->row[i], screencols);
-			screen_line += buf->row[i].cached_sublines;
-		}
-	}
-
-	buf->screen_line_cache_valid = 1;
-}
-
-int getScreenLineForRow(struct buffer *buf, int row, int screencols) {
-	if (!buf->screen_line_cache_valid) {
-		buildScreenCache(buf, screencols);
-	}
-	if (row >= buf->numrows || row < 0)
-		return 0;
-	return buf->screen_line_start[row];
-}
-
 /* The whole-row walk, factored out so the cache-miss path and the
  * debug check below cannot drift apart.  A check computing the value
  * a second way would eventually disagree for its own reasons and be
@@ -102,23 +26,18 @@ static int walkLineWidth(erow *row) {
  *
  * EMIL_DEBUG_ROW_CACHE recomputes on every cache hit and aborts on a
  * mismatch.  §4.10 obliges every mutation site to set cached_width to
- * -1 by hand; there is no mechanical check (Appendix C.2), and
- * charsToDisplayColumn() now routes char_pos >= row->size here, which
- * put two per-frame drawRows() callers on the cached path that were
- * walking the row fresh before.  A missed invalidation used to show up
- * only on the rare char_pos > row->size path; now it renders wrongly
- * every frame.  That is a good trade -- it is the whole point of the
- * change -- but it wants a net.
+ * -1 by hand and there is no mechanical check (Appendix C.2), so the
+ * remaining readers want a net.  drawRows() is no longer one of them:
+ * §C2 pads from the column the renderer stopped at.  What is left
+ * reaches here through charsToDisplayColumn(row, cx) with the cursor
+ * at end of line, where char_pos >= row->size makes the whole row the
+ * answer.
  *
  * Not gated on NDEBUG, which the Makefile never defines, so it would
  * be on in the build users get.  The check IS the walk the cache
- * exists to avoid.  Measured on a 50 MB single line at 80 columns
- * (gcc 13 -O2), the four charsToDisplayColumn(row, row->size) calls
- * drawRows() makes on a non-editing frame: 409 ms before this change,
- * 0.00 ms after it, 439 ms after it with the check on.  An always-on
- * check would not dilute this change, it would reverse it.  The
- * sanitize target defines the macro instead, which is what the
- * pre-merge run uses. */
+ * exists to avoid, and on a multi-megabyte line it costs more than the
+ * walk it guards.  The sanitize target defines the macro instead,
+ * which is what the pre-merge run uses. */
 int calculateLineWidth(erow *row) {
 	if (row->cached_width >= 0) {
 #ifdef EMIL_DEBUG_ROW_CACHE
@@ -142,10 +61,11 @@ int calculateLineWidth(erow *row) {
  *
  * char_pos >= row->size means "the whole row", which is exactly what
  * calculateLineWidth() computes and caches.  The comparison must be
- * >=, not >: the two hot callers in drawRows() pass row->size itself,
- * and a > here sent them down the O(row->size) walk on every frame
- * while the cached answer sat unused.  On a 50 MB line that was 53 ms
- * per call against 0.0001 ms cached.
+ * >=, not >: a > here sends a cursor at end of line down the
+ * O(row->size) walk while the cached answer sits unused.  Since §C2
+ * the frame computes this column once and passes it to the status bar
+ * and the cursor placement, so the cache serves repeat frames on an
+ * unedited row rather than repeat callers within one frame.
  *
  * The walk delegates to nextScreenX() rather than repeating its width
  * rules.  An earlier copy here drifted from it and was the reason two
@@ -356,6 +276,55 @@ int countScreenLines(erow *row, int screencols) {
 	} while (line_start_byte < row->size);
 
 	return lines;
+}
+
+void screenWalkStart(struct screenWalk *w, struct buffer *buf, int screencols,
+		     int row, int subline) {
+	w->buf = buf;
+	w->screencols = screencols;
+	w->row = row < 0 ? 0 : row;
+	if (w->row > buf->numrows - 1)
+		w->row = buf->numrows - 1;
+	w->subline = 0;
+	w->col = 0;
+	w->byte = 0;
+
+	if (!buf->word_wrap || subline <= 0)
+		return;
+
+	erow *r = &buf->row[w->row];
+	while (w->subline < subline) {
+		int bc, bb;
+		if (!wordWrapBreak(r, screencols, w->col, w->byte, &bc, &bb))
+			break; /* subline past the last: clamp */
+		w->subline++;
+		w->col = bc;
+		w->byte = bb;
+	}
+}
+
+int screenWalkNext(struct screenWalk *w) {
+	struct buffer *buf = w->buf;
+
+	if (buf->word_wrap) {
+		int bc, bb;
+		if (wordWrapBreak(&buf->row[w->row], w->screencols, w->col,
+				  w->byte, &bc, &bb)) {
+			w->subline++;
+			w->col = bc;
+			w->byte = bb;
+			return 1;
+		}
+	}
+
+	if (w->row >= buf->numrows - 1)
+		return 0;
+
+	w->row++;
+	w->subline = 0;
+	w->col = 0;
+	w->byte = 0;
+	return 1;
 }
 
 /* Find which screen line and column a cursor position falls on

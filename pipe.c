@@ -441,7 +441,10 @@ void diffBufferWithFile(void) {
 		return;
 	}
 
-	if (!bufr->dirty) {
+	/* A clean buffer matches its file unless another process
+	 * rewrote it underneath (#112) -- the case where a diff is
+	 * most wanted, and where the old message was false. */
+	if (!bufr->dirty && !bufr->external_mod) {
 		setStatusMessage("Buffer matches file");
 		return;
 	}

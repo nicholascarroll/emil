@@ -138,7 +138,7 @@ void destroyOtherWindows(void) {
 	free(E.windows);
 	E.windows = windows;
 
-	resizeScreen(0);
+	resizeScreen();
 }
 
 /* Resize windows so that the popup at win_idx fits its content while

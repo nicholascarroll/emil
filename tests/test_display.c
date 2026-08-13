@@ -5,6 +5,7 @@
 #include "unicode.h"
 #include "test_harness.h"
 #include "display.h"
+#include "wrap.h"
 #include "window.h"
 #include "abuf.h"
 #include "edit.h"
@@ -156,10 +157,8 @@ void test_scroll_leaves_cursor_on_char_boundary(void) {
 	/* Row 0 is three 3-byte characters; row 1 is ASCII and longer,
 	 * so a byte offset legal on row 1 falls inside a character on
 	 * row 0. */
-	static const char *lines[2] = {
-		"\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e",
-		"abcdefghij"
-	};
+	static const char *lines[2] = { "\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e",
+					"abcdefghij" };
 	struct buffer *buf = make_test_buffer_lines(lines, 2);
 	E.buf = buf;
 	E.windows[0]->buf = buf;
@@ -205,7 +204,6 @@ void test_scroll_up_with_stale_rowoff_stays_in_bounds(void) {
 		delRow(buf, buf->numrows - 1);
 	buf->cy = 0;
 	buf->cx = 0;
-	invalidateScreenCache(buf);
 
 	scrollViewport(E.windows[0], buf, -1);
 
@@ -242,7 +240,6 @@ void test_scroll_down_with_stale_rowoff_stays_in_bounds(void) {
 		delRow(buf, buf->numrows - 1);
 	buf->cy = 0;
 	buf->cx = 0;
-	invalidateScreenCache(buf);
 
 	scrollViewport(E.windows[0], buf, 1);
 
@@ -273,7 +270,6 @@ void test_clamp_cursor_zero_height_window_stays_in_bounds(void) {
 		delRow(buf, buf->numrows - 1);
 	buf->cy = 0;
 	buf->cx = 0;
-	invalidateScreenCache(buf);
 
 	clampCursorToViewport(E.windows[0], buf);
 
@@ -302,13 +298,296 @@ void test_page_down_zero_height_window_stays_in_bounds(void) {
 		delRow(buf, buf->numrows - 1);
 	buf->cy = 0;
 	buf->cx = 0;
-	invalidateScreenCache(buf);
 
 	pageDown(1);
 
 	TEST_ASSERT(buf->cy >= 0);
 	TEST_ASSERT(buf->cy < buf->numrows);
 	TEST_ASSERT(buf->cx <= buf->row[buf->cy].size);
+	cleanupTestEditor();
+}
+
+/* ---- §C2: the frame stops computing full row widths ----
+ *
+ * A row far wider than the viewport was walked end to end every frame
+ * to decide where padding starts, and again to report the status bar
+ * column.  Both answers are now produced by work the frame already
+ * does, so nothing asks the row for its total width.
+ *
+ * cached_width is the observable: calculateLineWidth() is the only
+ * thing that populates it, so a row still holding -1 after a frame is
+ * proof that no full-row walk happened.  Asserting on elapsed time
+ * would test the machine. */
+
+static struct buffer *wide_row_buffer(void) {
+	initTestEditor();
+	static char wide[5001];
+	memset(wide, 'a', 5000);
+	wide[5000] = '\0';
+	const char *lines[1] = { wide };
+	struct buffer *buf = make_test_buffer_lines(lines, 1);
+	E.buf = buf;
+	E.windows[0]->buf = buf;
+	E.windows[0]->height = 4;
+	buf->word_wrap = 0;
+	buf->row[0].cached_width = -1;
+	return buf;
+}
+
+void test_drawrows_wide_row_does_not_compute_full_width(void) {
+	struct buffer *buf = wide_row_buffer();
+	buf->cx = 0;
+	buf->cy = 0;
+
+	free(render_rows(E.windows[0], NULL));
+
+	TEST_ASSERT_EQUAL_INT(-1, buf->row[0].cached_width);
+	cleanupTestEditor();
+}
+
+/* The padding decision still has to be right: a row narrower than the
+ * viewport is filled to the full width with spaces, and no \x1b[K is
+ * emitted (it would erase the last column under pending-wrap). */
+void test_drawrows_pads_short_row_to_full_width(void) {
+	initTestEditor();
+	static const char *lines[1] = { "abc" };
+	struct buffer *buf = make_test_buffer_lines(lines, 1);
+	E.buf = buf;
+	E.windows[0]->buf = buf;
+	E.windows[0]->height = 1;
+	E.screenrows = 1; /* render_rows draws E.screenrows lines */
+	buf->word_wrap = 0;
+
+	int len = 0;
+	char *out = render_rows(E.windows[0], &len);
+
+	TEST_ASSERT_EQUAL_INT(E.screencols, len);
+	TEST_ASSERT_EQUAL_INT(0, memcmp(out, "abc", 3));
+	int spaces = 1;
+	for (int i = 3; i < len; i++)
+		if (out[i] != ' ')
+			spaces = 0;
+	TEST_ASSERT(spaces);
+	free(out);
+	cleanupTestEditor();
+}
+
+/* The status bar takes the column scroll() already computed.  A hint
+ * the row's own text could not produce shows it is used rather than
+ * recomputed -- and the row is left uncached, so nothing walked it. */
+void test_statusbar_uses_the_frames_cursor_column(void) {
+	struct buffer *buf = wide_row_buffer();
+	buf->cx = buf->row[0].size;
+	buf->cy = 0;
+
+	struct abuf ab = ABUF_INIT;
+	drawStatusBar(E.windows[0], &ab, 1, 4242);
+	int found = containsBytes(ab.b, ab.len, "1:4242", 6);
+	abFree(&ab);
+
+	TEST_ASSERT(found);
+	TEST_ASSERT_EQUAL_INT(-1, buf->row[0].cached_width);
+	cleanupTestEditor();
+}
+
+/* And the hint must be the number the status bar would have computed,
+ * or the bar reports a wrong column with no way to notice.  A tab and
+ * a wide character make byte offset and display column diverge. */
+void test_scroll_returns_the_cursor_display_column(void) {
+	initTestEditor();
+	static const char *lines[1] = { "a\tb\xe6\x97\xa5"
+					"c" };
+	struct buffer *buf = make_test_buffer_lines(lines, 1);
+	E.buf = buf;
+	E.windows[0]->buf = buf;
+	E.windows[0]->height = 4;
+	buf->word_wrap = 0;
+	buf->cy = 0;
+
+	for (int cx = 0; cx <= buf->row[0].size; cx++) {
+		if (cx < buf->row[0].size && utf8_isCont(buf->row[0].chars[cx]))
+			continue;
+		buf->cx = cx;
+		int expected = charsToDisplayColumn(&buf->row[0], cx);
+		TEST_ASSERT_EQUAL_INT(expected, scroll());
+	}
+	cleanupTestEditor();
+}
+
+/* ---- §D.4: C-l centres in screen lines ----
+ *
+ * recenter subtracted half the window height from cy, which is half a
+ * window of *rows*.  Under wrap a row is several screen lines, so the
+ * cursor landed far below centre -- and the further down a wrapped
+ * buffer, the worse.  Walking back height/2 screen lines puts it on
+ * the middle line by construction, in both modes. */
+void test_recenter_centres_in_screen_lines_under_wrap(void) {
+	initTestEditor();
+	/* Each row is 200 columns: three sub-lines at 80 columns. */
+	static char wide[201];
+	memset(wide, 'a', 200);
+	wide[200] = '\0';
+	const char *lines[10];
+	for (int i = 0; i < 10; i++)
+		lines[i] = wide;
+	struct buffer *buf = make_test_buffer_lines(lines, 10);
+	E.buf = buf;
+	E.windows[0]->buf = buf;
+	E.windows[0]->height = 10;
+	buf->word_wrap = 1;
+	buf->cy = 5;
+	buf->cx = 0;
+
+	recenter(E.windows[0]);
+
+	/* Five screen lines back from (row 5, sub 0): 4.2, 4.1, 4.0,
+	 * 3.2, 3.1.  The row-count form landed on row 0 instead, which
+	 * is fifteen screen lines up. */
+	TEST_ASSERT_EQUAL_INT(3, E.windows[0]->rowoff);
+	TEST_ASSERT_EQUAL_INT(1, E.windows[0]->skip_sublines);
+	cleanupTestEditor();
+}
+
+/* With wrap off a row is a screen line, so the walk must land exactly
+ * where the subtraction did. */
+void test_recenter_unchanged_without_wrap(void) {
+	initTestEditor();
+	const char *lines[20];
+	for (int i = 0; i < 20; i++)
+		lines[i] = "short line";
+	struct buffer *buf = make_test_buffer_lines(lines, 20);
+	E.buf = buf;
+	E.windows[0]->buf = buf;
+	E.windows[0]->height = 10;
+	buf->word_wrap = 0;
+	buf->cy = 12;
+	buf->cx = 0;
+
+	recenter(E.windows[0]);
+
+	TEST_ASSERT_EQUAL_INT(7, E.windows[0]->rowoff);
+	TEST_ASSERT_EQUAL_INT(0, E.windows[0]->skip_sublines);
+	cleanupTestEditor();
+}
+
+/* ---- Viewport assertions, stated relative to the window ----
+ *
+ * These name distances from the window's own top -- which screen line
+ * the cursor lands on, which text the first line shows -- rather than
+ * a screen line counted from the start of the buffer.  An absolute
+ * index is exactly what #111 removed, so a suite that asserted on one
+ * would be pinning a quantity the editor no longer computes. */
+
+/* Ten rows of 200 columns: three sub-lines each at 80 columns. */
+static struct buffer *wrapped_buffer(int rows, int height) {
+	initTestEditor();
+	static char wide[201];
+	memset(wide, 'a', 200);
+	wide[200] = '\0';
+	const char *lines[32];
+	for (int i = 0; i < rows && i < 32; i++)
+		lines[i] = wide;
+	struct buffer *buf = make_test_buffer_lines(lines, rows);
+	E.buf = buf;
+	E.windows[0]->buf = buf;
+	E.windows[0]->height = height;
+	E.windows[0]->focused = 1;
+	buf->word_wrap = 1;
+	return buf;
+}
+
+/* Scrolling down stops with two blank lines showing, counted in screen
+ * lines.  Ten rows of three sub-lines plus the buffer's own final empty
+ * row (§4.9) is 31 screen lines; a ten-line window therefore stops with
+ * its top on screen line 23, which is row 7's third sub-line.  Asking
+ * for more must not move it. */
+void test_scroll_to_end_of_buffer_with_wrap_stops_at_the_bottom(void) {
+	struct buffer *buf = wrapped_buffer(10, 10);
+	TEST_ASSERT_EQUAL_INT(11, buf->numrows);
+
+	scrollViewport(E.windows[0], buf, 100);
+	TEST_ASSERT_EQUAL_INT(7, E.windows[0]->rowoff);
+	TEST_ASSERT_EQUAL_INT(2, E.windows[0]->skip_sublines);
+
+	scrollViewport(E.windows[0], buf, 100);
+	TEST_ASSERT_EQUAL_INT(7, E.windows[0]->rowoff);
+	TEST_ASSERT_EQUAL_INT(2, E.windows[0]->skip_sublines);
+	cleanupTestEditor();
+}
+
+/* A cursor below the window brings the viewport to it, landing on the
+ * window's last screen line.  Stated as a distance from the top, which
+ * is the only thing the renderer needs to know. */
+void test_scroll_puts_a_cursor_below_the_window_on_its_last_line(void) {
+	struct buffer *buf = wrapped_buffer(10, 10);
+	E.windows[0]->rowoff = 0;
+	E.windows[0]->skip_sublines = 0;
+	buf->cy = 5; /* nine sub-lines below the window */
+	buf->cx = 0;
+
+	int cursor_col = scroll();
+	int scx, scy;
+	screenCursorPos(E.windows[0], cursor_col, &scx, &scy);
+
+	TEST_ASSERT_EQUAL_INT(E.windows[0]->height - 1, scy);
+	TEST_ASSERT_EQUAL_INT(0, scx);
+	cleanupTestEditor();
+}
+
+/* And a cursor above it becomes the top line. */
+void test_scroll_puts_a_cursor_above_the_window_on_its_first_line(void) {
+	struct buffer *buf = wrapped_buffer(10, 10);
+	E.windows[0]->rowoff = 6;
+	E.windows[0]->skip_sublines = 2;
+	buf->cy = 1;
+	buf->cx = 0;
+
+	int cursor_col = scroll();
+	int scx, scy;
+	screenCursorPos(E.windows[0], cursor_col, &scx, &scy);
+
+	TEST_ASSERT_EQUAL_INT(0, scy);
+	TEST_ASSERT_EQUAL_INT(0, scx);
+	cleanupTestEditor();
+}
+
+/* An edit above a non-focused window's top must leave that window
+ * showing the same text.  4.1 asserts the anchor moves; this asserts
+ * what the user sees, which is the thing that was wrong. */
+void test_viewport_stable_across_an_edit_above_a_non_focused_window(void) {
+	initTestEditor();
+	E.windows = xrealloc(E.windows, 2 * sizeof(struct window *));
+	E.windows[1] = xcalloc(1, sizeof(struct window));
+	E.nwindows = 2;
+	E.windows[0]->focused = 1;
+	E.windows[1]->focused = 0;
+	E.windows[0]->height = 5;
+	E.windows[1]->height = 5;
+	E.screenrows = 5;
+
+	static char names[20][16];
+	const char *lines[20];
+	for (int i = 0; i < 20; i++) {
+		snprintf(names[i], sizeof(names[i]), "L%02d", i);
+		lines[i] = names[i];
+	}
+	struct buffer *buf = make_test_buffer_lines(lines, 20);
+	E.windows[1]->buf = buf;
+	E.windows[1]->rowoff = 10;
+
+	int len = 0;
+	char *before = render_rows(E.windows[1], &len);
+	TEST_ASSERT_EQUAL_INT(0, memcmp(before, "L10", 3));
+	free(before);
+
+	/* Two whole lines inserted above that window's top. */
+	buf->cx = 0;
+	buf->cy = 0;
+	insertNewline(2);
+
+	char *after = render_rows(E.windows[1], &len);
+	TEST_ASSERT_EQUAL_INT(0, memcmp(after, "L10", 3));
+	free(after);
 	cleanupTestEditor();
 }
 
@@ -329,6 +608,23 @@ int main(void) {
 	RUN_TEST(test_scroll_down_with_stale_rowoff_stays_in_bounds);
 	RUN_TEST(test_clamp_cursor_zero_height_window_stays_in_bounds);
 	RUN_TEST(test_page_down_zero_height_window_stays_in_bounds);
+
+	/* §C2 */
+	RUN_TEST(test_drawrows_wide_row_does_not_compute_full_width);
+	RUN_TEST(test_drawrows_pads_short_row_to_full_width);
+	RUN_TEST(test_statusbar_uses_the_frames_cursor_column);
+	RUN_TEST(test_scroll_returns_the_cursor_display_column);
+
+	/* §D.4 */
+	RUN_TEST(test_recenter_centres_in_screen_lines_under_wrap);
+	RUN_TEST(test_recenter_unchanged_without_wrap);
+
+	/* Window-relative viewport assertions */
+	RUN_TEST(test_scroll_to_end_of_buffer_with_wrap_stops_at_the_bottom);
+	RUN_TEST(test_scroll_puts_a_cursor_below_the_window_on_its_last_line);
+	RUN_TEST(test_scroll_puts_a_cursor_above_the_window_on_its_first_line);
+	RUN_TEST(
+		test_viewport_stable_across_an_edit_above_a_non_focused_window);
 
 	return TEST_END();
 }

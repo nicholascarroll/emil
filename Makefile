@@ -88,7 +88,7 @@ uninstall:
 
 # Cleanup
 clean:
-	rm -f $(OBJECTS) $(PROGNAME)
+	rm -f $(OBJECTS) $(PROGNAME) emil.wasm tests/*.wasm
 
 # Testing
 test: $(PROGNAME)
@@ -105,10 +105,28 @@ check: test
 # frame -- and here because this is the build the pre-merge run uses,
 # so the §4.10 invalidation protocol is exercised by every suite and by
 # the fuzzer before anything is proposed for merge.
+# -fPIE/-pie are explicit rather than left to the toolchain default.
+# The sanitizer link is a PIE link, and a PIE link of objects compiled
+# as non-PIC fails with
+#     relocation R_X86_64_32 against `.data' can not be used when
+#     making a PIE object; recompile with -fPIE
+# which is the DT_TEXTREL failure the project instructions describe.
+# It does not occur where the compiler defaults to PIE -- Ubuntu's gcc
+# is built --enable-default-pie, which is why this target linked clean
+# without these flags in three independent runs here.  Reproduced on
+# that same toolchain by forcing the mismatch (compile -fno-pie, link
+# with the sanitizer), which is the configuration a compiler without
+# that default puts you in.
+#
+# Stated as flags rather than as prose in the instructions because as
+# shipped this target was broken exactly where the note applied and
+# worked only for someone who already knew.  Verified harmless on a
+# toolchain that does not need them: the full suite is green under
+# this target with them present.
 sanitize:
 	$(MAKE) clean
-	$(MAKE) CFLAGS="-g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -DEMIL_DEBUG_ROW_CACHE" \
-	        LDFLAGS="-fsanitize=address,undefined" test
+	$(MAKE) CFLAGS="-g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -fPIE -DEMIL_DEBUG_ROW_CACHE" \
+	        LDFLAGS="-fsanitize=address,undefined -pie" test
 
 # Sorry Dave
 HAL_WARNINGS = -Wall -Wextra -Wpedantic \
@@ -168,6 +186,109 @@ solaris:
 darwin:
 	$(MAKE) CC=clang CFLAGS="$(CFLAGS) -D_DARWIN_C_SOURCE" $(PROGNAME)
 
+# WebAssembly via WASIX (https://wasix.org)
+#
+# Toolchain: wasi-sdk supplies clang and wasm-ld; wasix-libc supplies the
+# sysroot.  Point WASI_SDK and WASIX_SYSROOT at unpacked copies of each,
+# or run tests/wasix_setup.sh to fetch the pinned versions.
+#
+# Three details are load-bearing and easy to get wrong:
+#
+#  1. The clang major version must match the one wasix-libc's sysroot was
+#     built with.  A mismatch is not a build error -- it links cleanly and
+#     then corrupts memory at run time, because the prebuilt libc keeps
+#     path-resolution state in thread-local storage and an older wasm-ld
+#     lays that segment out differently.  The symptom is a trap in strcpy
+#     inside __wasilibc_find_relpath_alloc on the first open().  See
+#     WASIX_CLANG_MAJOR in tests/wasix_setup.sh.
+#
+#  2. The target and sysroot flags have to be repeated in LDFLAGS.  The
+#     link rule uses LDFLAGS but not CFLAGS, so without them the link
+#     silently falls back to wasi-sdk's own sysroot and fails on every
+#     termios and signal symbol.
+#
+#  3. Do NOT define _WASI_EMULATED_SIGNAL.  WASIX has real signals and
+#     ships no libwasi-emulated-signal.a; the macro only redirects SIG_IGN
+#     to a __SIG_IGN that nothing defines.  The mman and process-clocks
+#     emulation libraries do exist and are used.
+#
+# -nodefaultlibs with an explicit library list is deliberate: clang looks
+# for compiler-rt builtins under a wasm32-wasmer-wasi directory that
+# wasi-sdk does not ship, so the sysroot's own copy is named directly.
+# This keeps the build hermetic rather than patching the SDK tree.
+# Plain '=', not '?=': the conditional assignment operator was not
+# standardised until POSIX Issue 8 (2024), and this project targets
+# POSIX.1-2001, so Solaris make rejects '?=' outright -- "Badly formed
+# macro assignment", before any target is considered.  A command-line
+# assignment still overrides these, which is how CI supplies both.
+WASI_SDK      = $(HOME)/opt/wasi-sdk
+WASIX_SYSROOT = $(HOME)/opt/wasix-sysroot/sysroot
+WASIX_LIBDIR   = $(WASIX_SYSROOT)/lib/wasm32-wasi
+WASIX_TARGET   = --target=wasm32-wasmer-wasi --sysroot=$(WASIX_SYSROOT) \
+                 -matomics -mbulk-memory -mmutable-globals
+WASIX_LIBS     = -nodefaultlibs -lc -lm \
+                 -lwasi-emulated-mman -lwasi-emulated-process-clocks \
+                 $(WASIX_LIBDIR)/libclang_rt.builtins-wasm32.a
+
+# Suites not run under WASIX.  These were previously all described as
+# platform gaps; that is true of one of them.  Stated accurately here,
+# because the earlier text reasoned about wasi-libc while this target
+# builds against wasix-libc, and the two differ in exactly the places
+# the reasoning depended on.  wasix-libc's sysroot ships fork, vfork,
+# the execv family, waitpid, pipe, select, kill, raise, sigaction and
+# the whole posix_spawn family, and its libc.imports names proc_fork,
+# proc_spawn, proc_join and proc_signal on the runtime side.
+#
+#   warnings -- a real platform gap.  Needs POSIX record locking, and
+#     wasix-libc's fcntl.h defines struct flock and F_RDLCK/F_WRLCK/
+#     F_UNLCK but not the F_GETLK/F_SETLK commands.  fileio.c already
+#     guards on exactly that (#if !defined(F_GETLK) || !defined(F_SETLK)),
+#     so the lock is compiled out and the suite has nothing to assert.
+#     Note F_OFD_SETLK *is* defined; whether the runtime honours it is
+#     untested, and an OFD-based lock would be the way to close this.
+#
+#   subprocess, shell -- NOT a platform gap.  They are skipped because
+#     this target passes -DEMIL_DISABLE_SHELL below, which compiles the
+#     shell drawer out.  That flag is a deferral, not a necessity: the
+#     symbols emil_subprocess.c needs are all present in the sysroot.
+#     Removing it is unfinished work, not an impossibility.
+#
+#   writeall -- forks a reader and signals it to force a short write.
+#     The suite does not link under this toolchain: it drags in
+#     wasi_thread_start.o and fails on __wasm_init_tls.  That is a
+#     toolchain/threading-model problem, not an absence of fork or of
+#     signals -- WASIX has both, which is also why item 3 above says
+#     not to define _WASI_EMULATED_SIGNAL.  The property under test
+#     (writeAll() loops over a short write) is reachable on this
+#     target; it is the harness that does not build.
+WASIX_SKIP_SUITES = subprocess shell warnings writeall
+
+# -DEMIL_DISABLE_SHELL here is a deferral, not a platform requirement.
+# WASIX supplies posix_spawn, fork and exec, so the shell drawer could
+# build; it has not been exercised under a Wasm runtime, so it is left
+# out rather than shipped untested.  See WASIX_SKIP_SUITES above.
+wasix:
+	$(MAKE) CC="$(WASI_SDK)/bin/clang" \
+	CFLAGS="$(CFLAGS) $(WASIX_TARGET) -Wno-deprecated \
+	-D_WASI_EMULATED_MMAN -D_WASI_EMULATED_PROCESS_CLOCKS \
+	-DEMIL_DISABLE_SHELL" \
+	LDFLAGS="$(WASIX_TARGET) $(WASIX_LIBS)" \
+	PROGNAME=emil.wasm
+
+wasix-test: wasix
+	@echo "Makefile: Launching WASIX tests under wasmer"
+	CC="$(WASI_SDK)/bin/clang" \
+	CFLAGS="$(DEFAULT_CFLAGS) $(CFLAGS) $(WASIX_TARGET) -Wno-deprecated \
+	-D_WASI_EMULATED_MMAN -D_WASI_EMULATED_PROCESS_CLOCKS \
+	-DEMIL_DISABLE_SHELL" \
+	LDFLAGS="$(WASIX_TARGET) $(WASIX_LIBS)" \
+	PROGNAME=emil.wasm \
+	RUNNER="wasmer run --dir ." \
+	RUNNER_SEP="--" \
+	SKIP_SUITES="$(WASIX_SKIP_SUITES)" \
+	./tests/run_tests.sh
+	./tests/wasix_smoke.sh
+
 
 # Help
 help:
@@ -183,11 +304,13 @@ help:
 	@echo "  msys2     Build for MSYS2"
 	@echo "  minimal   Build minimal version"
 	@echo "  solaris   Build for Solaris Developer Studio"
+	@echo "  wasix     Build emil.wasm for WASIX (see tests/wasix_setup.sh)"
+	@echo "  wasix-test Build and test emil.wasm under wasmer"
 	@echo "  check     Alias for test"
 	@echo "  format    Format code with clang-format"
 	@echo "  hal       HAL-9000 compliance"
 
-.PHONY: all install uninstall clean test check sanitize hal debug format android msys2 minimal solaris darwin help
+.PHONY: all install uninstall clean test check sanitize hal debug format android msys2 minimal solaris darwin wasix wasix-test help
 
 # Terminal-level integration tests: drives the real binary under a
 # pseudo-terminal (also run at the end of `make test`).

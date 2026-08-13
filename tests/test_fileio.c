@@ -12,6 +12,10 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+/* Defined further down, beside the inode test that shares its
+ * reasoning about hosts that synthesise stat() fields. */
+static int linkCountsAreObservable(void);
+
 /* ---- emil_getline ---- */
 
 void test_getline_short(void) {
@@ -665,6 +669,12 @@ void test_write_strategy_hard_linked_file_is_in_place(void) {
 		TEST_SKIP("no hard links on this filesystem");
 		return;
 	}
+	if (!linkCountsAreObservable()) {
+		unlink(linkname);
+		unlink(tmpname);
+		TEST_SKIP("filesystem does not report link counts");
+		return;
+	}
 
 	const char *reason = NULL;
 	TEST_ASSERT_EQUAL_INT(WRITE_IN_PLACE,
@@ -682,8 +692,17 @@ void test_write_strategy_hard_linked_file_is_in_place(void) {
 
 /* A FIFO, socket or device node would be replaced by a plain file --
  * the same mistake as clobbering a symlink.  A FIFO stands in for the
- * class here because it needs no privileges to create. */
+ * class here because it needs no privileges to create.
+ *
+ * WASI/WASIX has no FIFOs and does not declare mkfifo at all, so on
+ * that target the call below is not merely a runtime failure but a
+ * compile error.  The body already treats "mkfifo did not work here"
+ * as nothing to assert; this guard extends the same tolerance to
+ * platforms that lack the declaration. */
 void test_write_strategy_non_regular_file_is_in_place(void) {
+#ifdef __wasi__
+	TEST_SKIP("no FIFO support on this platform");
+#else
 	char tmpname[] = "/tmp/emil_test_XXXXXX";
 	int fd = mkstemp(tmpname);
 	TEST_ASSERT(fd >= 0);
@@ -699,6 +718,7 @@ void test_write_strategy_non_regular_file_is_in_place(void) {
 	TEST_ASSERT_NOT_NULL(reason);
 
 	unlink(tmpname);
+#endif /* __wasi__ */
 }
 
 /* End to end: the links survive, both names see the new text, and a
@@ -715,6 +735,12 @@ void test_save_hard_linked_file_keeps_links(void) {
 	if (link(tmpname, linkname) != 0) {
 		unlink(tmpname);
 		TEST_SKIP("no hard links on this filesystem");
+		return;
+	}
+	if (!linkCountsAreObservable()) {
+		unlink(linkname);
+		unlink(tmpname);
+		TEST_SKIP("filesystem does not report link counts");
 		return;
 	}
 
@@ -755,6 +781,41 @@ void test_save_hard_linked_file_keeps_links(void) {
 	unlink(tmpname);
 }
 
+/* Does this host model POSIX link counts?
+ *
+ * link() succeeding is not enough.  Wasmer's WASIX filesystem creates
+ * the second name happily and still reports st_nlink == 1, so code
+ * that decides what to do by inspecting the link count cannot see a
+ * hard link at all.  A host like that cannot exhibit the behaviour the
+ * hard-link tests assert, and cannot exhibit the bug they guard
+ * against either; the same hosts do not give a renamed-over file a new
+ * st_ino.  Probe once, rather than naming platforms: any filesystem
+ * that synthesises these fields gets the same treatment.
+ *
+ * Returns 1 if a freshly linked file reports two links. */
+static int linkCountsAreObservable(void) {
+	static int cached = -1;
+	if (cached != -1)
+		return cached;
+
+	cached = 0;
+	char tmpname[] = "/tmp/emil_nlink_XXXXXX";
+	int fd = mkstemp(tmpname);
+	if (fd >= 0) {
+		close(fd);
+		char linkname[64];
+		snprintf(linkname, sizeof(linkname), "%s.lnk", tmpname);
+		if (link(tmpname, linkname) == 0) {
+			struct stat st;
+			if (stat(tmpname, &st) == 0 && st.st_nlink >= 2)
+				cached = 1;
+			unlink(linkname);
+		}
+		unlink(tmpname);
+	}
+	return cached;
+}
+
 /* An ordinary file still goes through the atomic path, which replaces
  * the inode.  This is the guarantee the other cases trade away, so it
  * is worth asserting that they did not trade it away for everyone. */
@@ -780,7 +841,12 @@ void test_save_plain_file_still_replaces_inode(void) {
 
 	struct stat after;
 	TEST_ASSERT_EQUAL_INT(0, stat(tmpname, &after));
-	TEST_ASSERT(before.st_ino != after.st_ino);
+	/* The status-message assertions above are the ones about emil:
+	 * they show it chose the atomic path rather than writing in
+	 * place, and they hold everywhere.  Only the inode identity
+	 * needs a filesystem that gives a replaced file a new one. */
+	if (linkCountsAreObservable())
+		TEST_ASSERT(before.st_ino != after.st_ino);
 
 	unlink(tmpname);
 }

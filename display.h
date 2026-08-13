@@ -20,14 +20,16 @@ extern const int statusbar_height;
 void refreshScreen(void);
 void drawRows(struct window *win, struct abuf *ab, int screenrows,
 	      int screencols);
-void drawStatusBar(struct window *win, struct abuf *ab, int line);
+void drawStatusBar(struct window *win, struct abuf *ab, int line,
+		   int cursor_col);
 void drawMinibuffer(struct abuf *ab);
-void scroll(void);
+int scroll(void);
 void scrollViewport(struct window *win, struct buffer *buf, int n);
 void clampCursorToViewport(struct window *win, struct buffer *buf);
-void setScxScy(struct window *win);
+void screenCursorPos(struct window *win, int cursor_col, int *scx_out,
+		     int *scy_out);
 void cursorBottomLine(int curs);
-void resizeScreen(int sig);
+void resizeScreen(void);
 void recenter(struct window *win);
 void toggleVisualLineMode(void);
 void editorVersion(void);

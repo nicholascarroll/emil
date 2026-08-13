@@ -229,4 +229,93 @@ jobs:
             echo "--- Running Tests ---"
             make test
 
+  wasix:
+    runs-on: ubuntu-latest
+    env:
+      WASIX_PREFIX: ${{ github.workspace }}/.wasix-toolchain
+    steps:
+      - uses: actions/checkout@v4
 
+      # The unpacked toolchain is large, so it is cached.  The key is the
+      # setup script itself, which is where every pinned version lives:
+      # editing a pin necessarily invalidates the cache.
+      - name: Cache WASIX toolchain
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.WASIX_PREFIX }}
+          key: wasix-${{ runner.os }}-${{ hashFiles('tests/wasix_setup.sh') }}
+
+      - name: Install WASIX toolchain
+        run: ./tests/wasix_setup.sh "$WASIX_PREFIX"
+
+      - name: Add wasmer to PATH
+        run: echo "$HOME/.wasmer/bin" >> "$GITHUB_PATH"
+
+      # Builds emil.wasm, runs the unit suites under wasmer, then the
+      # end-to-end smoke test.  The smoke test matters most here: a
+      # wasi-sdk/wasix-libc version mismatch links cleanly and only shows
+      # up as a trap on the first open(), so a build-only job would go
+      # green on a binary that cannot read a file.
+      - name: Build and Test for WASIX
+        run: |
+          make wasix-test \
+            WASI_SDK="$WASIX_PREFIX/wasi-sdk" \
+            WASIX_SYSROOT="$WASIX_PREFIX/wasix-sysroot/sysroot"
+
+      - name: Upload emil.wasm
+        uses: actions/upload-artifact@v4
+        with:
+          name: emil-wasm
+          path: emil.wasm
+          if-no-files-found: error
+
+  # Advisory only.  These scenarios drive the real binary through a pty,
+  # and under a Wasm runtime their timing is not reliable enough to gate
+  # a merge on: wasmer adds startup and syscall latency, and it does not
+  # propagate the guest's termios to the host pty, so assertions that
+  # read tty state from the master side see stale or absent settings.
+  # Run it for the signal; do not block on it.
+  wasix-pty-advisory:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      WASIX_PREFIX: ${{ github.workspace }}/.wasix-toolchain
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache WASIX toolchain
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.WASIX_PREFIX }}
+          key: wasix-${{ runner.os }}-${{ hashFiles('tests/wasix_setup.sh') }}
+
+      - name: Install WASIX toolchain
+        run: ./tests/wasix_setup.sh "$WASIX_PREFIX"
+
+      - name: Add wasmer to PATH
+        run: echo "$HOME/.wasmer/bin" >> "$GITHUB_PATH"
+
+      - name: Build for WASIX
+        run: |
+          make wasix \
+            WASI_SDK="$WASIX_PREFIX/wasi-sdk" \
+            WASIX_SYSROOT="$WASIX_PREFIX/wasix-sysroot/sysroot"
+
+      - name: Terminal scenarios under a pty
+        run: |
+          printf '#!/bin/sh\nexec wasmer run --dir . ./emil.wasm\n' > ./emil-wasix-run
+          chmod +x ./emil-wasix-run
+          cc -std=c99 -o /tmp/decoder_pty_test tests/decoder_pty_test.c
+          # A generous settle multiplier for the runtime's latency, and no
+          # fatal-signal scenarios: wasmer reserves SIGSEGV and SIGBUS for
+          # its own trap handling and does not die of them, so waitpid()
+          # would block forever and wedge the runner.
+          # wasmer does not deliver SIGTSTP to the guest, so the
+          # editor exits on C-z instead of suspending and every
+          # job-control assertion reports the runtime rather than
+          # emil.  Two of the six even passed by accident, the editor
+          # having already gone.
+          EMIL_PTY_TIME_SCALE=6 \
+          EMIL_PTY_NO_FATAL_SIGNALS=1 \
+          EMIL_PTY_NO_JOB_CONTROL=1 \
+          timeout 600 /tmp/decoder_pty_test ./emil-wasix-run
