@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <termios.h>
 #include <time.h>
+#include <sys/types.h>
 
 /*** util ***/
 
