@@ -464,12 +464,7 @@ When saving,
 .Nm
 writes the complete buffer to the associated file.
 A buffer with no unsaved changes is not rewritten. 
-The editor normally writes a temporary file and renames it over the target, so an interrupted save cannot leave a half-written file.
-Some targets cannot be replaced that way: a hard-linked file, whose other names would keep the old contents; a device node, FIFO or socket, which would become a regular file; and a file whose directory is not writable, where no temporary file can be created.
-For these
-.Nm
-writes in place instead, preserving the inode, its links and its metadata, and says so in the status line.
-An in-place write is not atomic, and an interrupted one leaves the file partly updated.
+The write is not atomic, and an interrupted write leaves the file partly updated.
 Symbolic links are followed and the file they name is written.
 No automatic backup or "auto-save" files are generated.
 .Ss Advisory Locking
