@@ -474,10 +474,6 @@ static inline void cursorSubline(struct buffer *buf, int cursor_col,
 
 	cursorScreenLine(&buf->row[buf->cy], cursor_col, E.screencols, sub_line,
 			 sub_col);
-	if (*sub_col >= E.screencols) {
-		(*sub_line)++;
-		*sub_col = 0;
-	}
 }
 
 /* Does this row's own first screen line sit above the viewport top?
