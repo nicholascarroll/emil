@@ -72,7 +72,6 @@ wasmer run emil.wasm --dir . -- FILE
 - Advisory file locking is unavailable. `wasix-libc` declares
   `struct flock` but not the `F_GETLK`/`F_SETLK` commands, so the lock
   is compiled out.
-- Hard links are not preserved on save.
 
 
 ## Getting Started

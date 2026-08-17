@@ -68,13 +68,4 @@ char *rebaseFilename(const char *filename, const char *old_cwd,
 char *readAllFromFd(int fd, size_t *out_len);
 struct buffer *loadStdinBuffer(const char *data, size_t len);
 
-/* Which writer a save to `path` needs, and why.  The atomic path
- * replaces the file, which is wrong for targets that must keep their
- * inode; see fileio.c for the cases.  *reason is NULL for
- * WRITE_ATOMIC, else a short phrase for the status line.
- *
- * Exposed for tests/test_fileio.c; the decision is otherwise internal
- * to the save path. */
-enum writeStrategy { WRITE_ATOMIC, WRITE_IN_PLACE };
-enum writeStrategy chooseWriteStrategy(const char *path, const char **reason);
 #endif /* EMIL_FILEIO_H */

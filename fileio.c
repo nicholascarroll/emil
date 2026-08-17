@@ -868,114 +868,13 @@ void revert(void) {
 	destroyBuffer(buf);
 }
 
-static int writeAtomic(const char *iopath, const char *buf, size_t len) {
-	/* Follow symlinks: if iopath is a symlink, we want to replace
-	 * the file it points at, not clobber the link with a regular
-	 * file (which would orphan e.g. a dotfile managed in a repo).
-	 * realpath resolves the link; on a new file it fails with
-	 * ENOENT and we keep the original path. */
-	char resolved[PATH_MAX];
-	const char *target = iopath;
-	if (realpath(iopath, resolved) != NULL)
-		target = resolved;
-
-	char tmpname[PATH_MAX];
-	if ((size_t)snprintf(tmpname, sizeof(tmpname), "%s.tmpXXXXXX",
-			     target) >= sizeof(tmpname)) {
-		errno = ENAMETOOLONG;
-		return -1;
-	}
-
-	int fd = mkstemp(tmpname);
-	if (fd == -1)
-		return -1;
-
-	struct stat st;
-	if (stat(target, &st) == 0) {
-		if (fchown(fd, st.st_uid, st.st_gid) == -1 && errno != EPERM) {
-			close(fd);
-			unlink(tmpname);
-			return -1;
-		}
-		fchmod(fd, st.st_mode);
-	} else {
-		mode_t um = umask(0);
-		umask(um);
-		fchmod(fd, 0644 & ~um);
-	}
-
-	size_t total = 0;
-	while (total < len) {
-		ssize_t n = write(fd, buf + total, len - total);
-		if (n < 0) {
-			if (errno == EINTR)
-				continue;
-			close(fd);
-			unlink(tmpname);
-			return -1;
-		}
-		if (n == 0) {
-			close(fd);
-			unlink(tmpname);
-			errno = EIO;
-			return -1;
-		}
-		total += (size_t)n;
-	}
-
-	if (fsync(fd) == -1) {
-		close(fd);
-		unlink(tmpname);
-		return -1;
-	}
-
-	if (close(fd) == -1) {
-		unlink(tmpname);
-		return -1;
-	}
-
-	if (rename(tmpname, target) == -1) {
-		unlink(tmpname);
-		return -1;
-	}
-
-	/* The fsync above got the file's contents onto stable storage;
-	 * rename() only altered the parent directory, whose entry is
-	 * still just dirty page cache.  Without this second sync a power
-	 * loss can lose the rename and leave the old file in place, so
-	 * the save silently reverts.  Errors are deliberately ignored:
-	 * the data is already durable and the rename has succeeded, so
-	 * the file is intact either way, and some filesystems reject
-	 * fsync on a directory fd with EINVAL.  Reporting failure here
-	 * would tell the user the save failed when it did not. */
-	char dirpath[PATH_MAX];
-	const char *slash = strrchr(target, '/');
-	if (slash == NULL) {
-		dirpath[0] = '.';
-		dirpath[1] = '\0';
-	} else {
-		size_t dlen = (slash == target) ? 1 : (size_t)(slash - target);
-		memcpy(dirpath, target, dlen);
-		dirpath[dlen] = '\0';
-	}
-
-	int dfd = open(dirpath, O_RDONLY);
-	if (dfd != -1) {
-		fsync(dfd);
-		close(dfd);
-	}
-
-	return 0;
-}
-
 /* Write in place: same inode, same links, same metadata.
- *
- * Not atomic -- a crash mid-write leaves a partly updated file -- so
- * this is used only where rename is impossible or would be wrong (see
- * chooseWriteStrategy).  No O_TRUNC: the bytes are overwritten in
- * place and the file is cut to length afterwards, so it is never
- * observably empty and a failed write leaves the old tail rather than
- * nothing.  Mode is only supplied for the O_CREAT case; an existing
+ * Acrash mid-write leaves a partly updated file. Atomic used to be 
+ * implemented but it creates its own issues and isn't worth it. 
+ * No O_TRUNC: the bytes are overwritten in  place and the file is cut 
+ * to length afterwards, so it is never observably empty and a failed
+ * write leaves the old tail rather than  nothing.  
+ * Mode is only supplied for the O_CREAT case; an existing
  * file keeps its own, along with its owner, ACLs and xattrs, none of
  * which the temp-file path can carry across. */
 static int writeInPlace(const char *iopath, const char *buf, size_t len) {
@@ -1024,82 +923,6 @@ static int writeInPlace(const char *iopath, const char *buf, size_t len) {
 	return close(fd);
 }
 
-/* Which of the two writers this file needs.
- *
- * The atomic path replaces the file: it writes a new inode beside the
- * old one and renames over it.  That is the right default -- a crash
- * mid-save cannot leave a half-written file -- but for some targets it
- * is either impossible or destroys something the user meant to keep,
- * and no error code tells us that after the fact.  Decide from the
- * file itself, before writing.
- *
- *   Not a regular file.  A FIFO, socket or device node would be
- *   replaced by a plain file: saving /dev/null as root turns it into a
- *   2-byte regular file.  Same class of mistake as clobbering a
- *   symlink, which the realpath() above already avoids.
- *
- *   More than one link.  rename() detaches this name from the inode,
- *   so every other name keeps the old content while emil reports
- *   success.  Nothing warns the user that the file they just edited is
- *   no longer the file their other name refers to.
- *
- *   Unwritable parent directory.  A temp file cannot be created there
- *   at all, though the file itself may be perfectly writable -- an
- *   everyday shape in /etc and in shared directories.
- *
- * In place is not atomic, and that trade is unavoidable: one inode
- * cannot both be replaced and be kept.  vim resolves it the same way
- * (backupcopy=auto), as does Emacs (backup-by-copying-when-linked).
- *
- * There is a TOCTOU window -- the file could gain a link between this
- * stat and the rename -- which is inherent and no worse than today. */
-enum writeStrategy chooseWriteStrategy(const char *iopath,
-				       const char **reason) {
-	*reason = NULL;
-
-	/* Resolve first, as writeAtomic does: the temp file is created
-	 * beside the link's target, so that is the directory whose
-	 * writability decides whether the atomic path can work at all. */
-	char resolved[PATH_MAX];
-	const char *target = iopath;
-	if (realpath(iopath, resolved) != NULL)
-		target = resolved;
-
-	struct stat st;
-	if (stat(target, &st) == 0) {
-		if (!S_ISREG(st.st_mode)) {
-			*reason = "not a regular file";
-			return WRITE_IN_PLACE;
-		}
-		if (st.st_nlink > 1) {
-			*reason = "hard-linked";
-			return WRITE_IN_PLACE;
-		}
-	}
-
-	char dirpath[PATH_MAX];
-	const char *slash = strrchr(target, '/');
-	if (slash == NULL) {
-		dirpath[0] = '.';
-		dirpath[1] = '\0';
-	} else {
-		size_t dlen = (slash == target) ? 1 : (size_t)(slash - target);
-		if (dlen >= sizeof(dirpath))
-			return WRITE_ATOMIC;
-		memcpy(dirpath, target, dlen);
-		dirpath[dlen] = '\0';
-	}
-	if (access(dirpath, W_OK) != 0) {
-		*reason = "directory not writable";
-		return WRITE_IN_PLACE;
-	}
-
-	return WRITE_ATOMIC;
-}
-
-/* The write itself, with no "is this worth doing" question attached.
- * saveAs uses this directly: it has just pointed the buffer at a file
- * that does not exist yet, so a clean buffer still needs writing. */
 static void saveBuffer(void) {
 	if (E.recording || E.playback) {
 		setStatusMessage("Not available during macro");
@@ -1146,20 +969,8 @@ static void saveBuffer(void) {
 	size_t len;
 	char *buf = rowsToString(E.buf, &len);
 
-	/* Pick the writer from what the file is, not from how the atomic
-	 * write failed.  The old code fell back to a direct overwrite on
-	 * ENOSPC only: a narrow win (the temp file needs the size twice
-	 * over, a direct write does not) bought with a y/N prompt at the
-	 * worst possible moment, and answering it destroyed the original
-	 * before attempting a write that could fail the same way.  A full
-	 * disk is now reported like any other failure, with the file left
-	 * intact. */
-	const char *in_place_reason = NULL;
 	int rc;
-	if (chooseWriteStrategy(iopath, &in_place_reason) == WRITE_IN_PLACE)
-		rc = writeInPlace(iopath, buf, len);
-	else
-		rc = writeAtomic(iopath, buf, len);
+	rc = writeInPlace(iopath, buf, len);
 
 	/* Both writers open and close the file, so both drop any lock
 	 * this process holds on that inode -- not this buffer's, which
@@ -1200,29 +1011,12 @@ static void saveBuffer(void) {
 	/* Lock is released on clean by markBufferClean above; reacquired
 	 * on the next clean→dirty transition. */
 
-	/* Say when the save was not atomic, and why.  Stated rather than
-	 * asked: by the time the file is hard-linked or is a device node
-	 * there is no choice left for the user to make, but they should
-	 * know the crash guarantee did not apply to this write. */
-	if (in_place_reason != NULL) {
-		int n = snprintf(NULL, 0, "Wrote %d bytes to %s (in place: %s)",
-				 (int)len, E.buf->filename, in_place_reason);
-		char *showName = leftTruncate(E.buf->filename,
-					      nameFit(E.buf->filename, n));
-		setStatusMessage("Wrote %d bytes to %s (in place: %s)",
-				 (int)len, showName, in_place_reason);
-		free(showName);
-		free(iopath);
-		return;
-	}
-
 	int n = snprintf(NULL, 0, "Wrote %d bytes to %s", (int)len,
 			 E.buf->filename);
 	char *showName =
 		leftTruncate(E.buf->filename, nameFit(E.buf->filename, n));
 	setStatusMessage("Wrote %d bytes to %s", (int)len, showName);
 	free(showName);
-
 	free(iopath);
 }
 
