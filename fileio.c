@@ -868,19 +868,159 @@ void revert(void) {
 	destroyBuffer(buf);
 }
 
-/* Write in place: same inode, same links, same metadata.
- * Acrash mid-write leaves a partly updated file. Atomic used to be 
- * implemented but it creates its own issues and isn't worth it. 
- * No O_TRUNC: the bytes are overwritten in  place and the file is cut 
- * to length afterwards, so it is never observably empty and a failed
- * write leaves the old tail rather than  nothing.  
- * Mode is only supplied for the O_CREAT case; an existing
- * file keeps its own, along with its owner, ACLs and xattrs, none of
- * which the temp-file path can carry across. */
-static int writeInPlace(const char *iopath, const char *buf, size_t len) {
-	int fd = open(iopath, O_WRONLY | O_CREAT, 0644);
-	if (fd == -1)
+/*** Backup and Write Strategy (Vim backupcopy=yes style) ***/
+
+static int create_backup_exclusive(const char *name) {
+	int fd;
+	do {
+		fd = open(name, O_WRONLY | O_CREAT | O_EXCL, 0600);
+	} while (fd == -1 && errno == EINTR);
+
+	if (fd != -1)
+		(void)fcntl(fd, F_SETFD, FD_CLOEXEC);
+
+	return fd;
+}
+
+static int backup_create(const char *path, char *backup, size_t backup_size) {
+	size_t len;
+	size_t char_start;
+	size_t new_len;
+	int fd;
+
+	if (path == NULL || backup == NULL) {
+		errno = EINVAL;
 		return -1;
+	}
+
+	len = strlen(path);
+	if (len == 0) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (len + 2 > backup_size) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+
+	memcpy(backup, path, len);
+	backup[len] = '~';
+	backup[len + 1] = '\0';
+
+	fd = create_backup_exclusive(backup);
+	if (fd != -1)
+		return fd;
+
+	if (errno != EEXIST)
+		return -1;
+
+	char_start = len;
+	while (char_start > 0 && utf8_isCont((uint8_t)path[char_start - 1]))
+		char_start--;
+
+	new_len = char_start + 1;
+	if (new_len + 2 > backup_size) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+
+	memcpy(backup, path, char_start);
+	backup[new_len] = '~';
+	backup[new_len + 1] = '\0';
+
+	for (int c = 'z'; c >= 'a'; c--) {
+		backup[char_start] = (char)c;
+
+		fd = create_backup_exclusive(backup);
+		if (fd != -1)
+			return fd;
+
+		if (errno != EEXIST)
+			return -1;
+	}
+
+	errno = EEXIST;
+	return -1;
+}
+
+static int writeWithBackup(const char *iopath, const char *buf, size_t len,
+			   int skip_backup, int *file_damaged,
+			   char *backup_path_out, size_t backup_path_size) {
+	struct stat st;
+	int has_orig = (stat(iopath, &st) == 0 && S_ISREG(st.st_mode));
+	char backup_path[PATH_MAX] = { 0 };
+
+	*file_damaged = 0;
+	if (backup_path_out && backup_path_size > 0)
+		backup_path_out[0] = '\0';
+
+	if (has_orig && !skip_backup) {
+		int bfd =
+			backup_create(iopath, backup_path, sizeof(backup_path));
+		if (bfd != -1) {
+			int orig_fd = open(iopath, O_RDONLY);
+			if (orig_fd == -1) {
+				close(bfd);
+				unlink(backup_path);
+				return -1;
+			}
+
+			char copy_buf[8192];
+			ssize_t n;
+			int copy_failed = 0;
+
+			while (1) {
+				n = read(orig_fd, copy_buf, sizeof(copy_buf));
+				if (n < 0) {
+					if (errno == EINTR)
+						continue;
+					copy_failed = 1;
+					break;
+				}
+				if (n == 0)
+					break;
+
+				ssize_t written = 0;
+				while (written < n) {
+					ssize_t w = write(bfd,
+							  copy_buf + written,
+							  n - written);
+					if (w < 0) {
+						if (errno == EINTR)
+							continue;
+						copy_failed = 1;
+						break;
+					}
+					written += w;
+				}
+				if (copy_failed)
+					break;
+			}
+			close(orig_fd);
+
+			if (copy_failed) {
+				close(bfd);
+				unlink(backup_path);
+				return -1;
+			}
+
+			fsync(bfd);
+			close(bfd);
+		} else {
+			return -1;
+		}
+	}
+
+	int fd = open(iopath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	if (fd == -1) {
+		*file_damaged = 0;
+		if (backup_path[0] != '\0' && backup_path_out) {
+			emil_strlcpy(backup_path_out, backup_path,
+				     backup_path_size);
+		}
+		return -1;
+	}
 
 	size_t total = 0;
 	while (total < len) {
@@ -889,38 +1029,64 @@ static int writeInPlace(const char *iopath, const char *buf, size_t len) {
 			if (errno == EINTR)
 				continue;
 			close(fd);
+			*file_damaged = 1;
+
+			if (backup_path[0] != '\0' && backup_path_out) {
+				emil_strlcpy(backup_path_out, backup_path,
+					     backup_path_size);
+			}
 			return -1;
 		}
 		if (n == 0) {
 			close(fd);
+			*file_damaged = 1;
+			if (backup_path[0] != '\0' && backup_path_out) {
+				emil_strlcpy(backup_path_out, backup_path,
+					     backup_path_size);
+			}
 			errno = EIO;
 			return -1;
 		}
 		total += (size_t)n;
 	}
 
-	/* Truncation and durability both only mean something for a
-	 * regular file.  On a device or FIFO ftruncate and fsync fail
-	 * with EINVAL, which would report a write that in fact succeeded
-	 * as a failed save. */
-	struct stat st;
-	int regular = (fstat(fd, &st) == 0 && S_ISREG(st.st_mode));
-
+	struct stat st2;
+	int regular = (fstat(fd, &st2) == 0 && S_ISREG(st2.st_mode));
 	if (regular) {
-		/* Cut any tail left over from a longer previous version.
-		 * After the write, not before it, so the old content
-		 * survives a failure above. */
 		if (ftruncate(fd, (off_t)len) == -1) {
 			close(fd);
+			*file_damaged = 1;
+			if (backup_path[0] != '\0' && backup_path_out) {
+				emil_strlcpy(backup_path_out, backup_path,
+					     backup_path_size);
+			}
 			return -1;
 		}
 		if (fsync(fd) == -1) {
 			close(fd);
+			*file_damaged = 1;
+			if (backup_path[0] != '\0' && backup_path_out) {
+				emil_strlcpy(backup_path_out, backup_path,
+					     backup_path_size);
+			}
 			return -1;
 		}
 	}
 
-	return close(fd);
+	if (close(fd) == -1) {
+		*file_damaged = 1;
+		if (backup_path[0] != '\0' && backup_path_out) {
+			emil_strlcpy(backup_path_out, backup_path,
+				     backup_path_size);
+		}
+		return -1;
+	}
+
+	/* Success - delete backup */
+	if (backup_path[0] != '\0') {
+		unlink(backup_path);
+	}
+	return 0;
 }
 
 static void saveBuffer(void) {
@@ -929,25 +1095,11 @@ static void saveBuffer(void) {
 		return;
 	}
 
-	/* All load paths refuse files that fail UTF-8 validation, so
-	 * writing invalid content would produce a file emil itself
-	 * cannot reopen.  Refuse the save instead.  The buffer
-	 * invariant (every buffer contains only valid UTF-8) makes
-	 * this unreachable except through a bug, and this check keeps
-	 * such a bug from turning into silent data loss on disk.
-	 * Checked before the filename prompt so an unsavable buffer
-	 * is refused up front rather than after the user types a
-	 * path. */
 	if (!checkUTF8Validity(E.buf)) {
 		setStatusMessage("Save failed: buffer contains invalid UTF-8");
 		return;
 	}
 
-	/* A special buffer carries its display name in ->filename, so
-	 * it looks named while naming no file: left to reach the
-	 * writer, C-x C-s in *Diff* created a file called "*Diff*".
-	 * Treat it as unnamed and ask for a real path, which also
-	 * turns it into an ordinary, editable buffer. */
 	if (E.buf->filename == NULL || E.buf->special_buffer) {
 		char *input = (char *)editorPrompt(
 			E.buf, "Save as: ", PROMPT_FILES, NULL);
@@ -955,8 +1107,7 @@ static void saveBuffer(void) {
 			setStatusMessage("Save aborted.");
 			return;
 		}
-		free(E.buf->filename); /* NULL when unnamed; the display
-					* name when special */
+		free(E.buf->filename);
 		E.buf->filename = collapseHome(input);
 		free(input);
 		E.buf->special_buffer = 0;
@@ -969,24 +1120,53 @@ static void saveBuffer(void) {
 	size_t len;
 	char *buf = rowsToString(E.buf, &len);
 
+	int skip_backup = 0;
 	int rc;
-	rc = writeInPlace(iopath, buf, len);
+	int file_damaged;
+	char backup_path[PATH_MAX];
 
-	/* Both writers open and close the file, so both drop any lock
-	 * this process holds on that inode -- not this buffer's, which
-	 * markBufferClean() releases below anyway, but a second buffer's
-	 * on the same inode, reachable through a symlink.  Inferred from
-	 * the same POSIX rule as the rest of relockAll(); unlike the
-	 * `C-x i` and `C-x C-f` paths this one was not reproduced. */
-	relockAll();
+	while (1) {
+		rc = writeWithBackup(iopath, buf, len, skip_backup,
+				     &file_damaged, backup_path,
+				     sizeof(backup_path));
+		if (rc == 0) {
+			break;
+		}
 
-	if (rc == -1) {
-		free(buf);
-		free(iopath);
-		setStatusMessage("Save failed: %s", strerror(errno));
-		return;
+		/* Build error message with conditional segments */
+		char msg[PATH_MAX + 256];
+		msg[0] = '\0'; /* Must be initialized for strlcat */
+
+		emil_strlcat(msg, file_damaged ? "Write" : "Save", sizeof(msg));
+		emil_strlcat(msg, " failed: ", sizeof(msg));
+		emil_strlcat(msg, strerror(errno), sizeof(msg));
+
+		if (file_damaged)
+			emil_strlcat(msg, ". File data is now invalid",
+				     sizeof(msg));
+
+		if (backup_path[0] != '\0') {
+			emil_strlcat(msg,
+				     ". A backup of the pre-save state is in ",
+				     sizeof(msg));
+			emil_strlcat(msg, backup_path, sizeof(msg));
+		}
+
+		emil_strlcat(msg, ". Retry? (y/n)", sizeof(msg));
+
+		setStatusMessage("%s", msg);
+		refreshScreen();
+		int c = readKey();
+		clearStatusMessage();
+		if (c != 'y' && c != 'Y') {
+			free(buf);
+			free(iopath);
+			setStatusMessage("Save aborted.");
+			return;
+		}
 	}
-	/* Success  */
+
+	relockAll();
 
 	free(buf);
 	markBufferClean(E.buf);
@@ -1007,9 +1187,6 @@ static void saveBuffer(void) {
 
 	E.buf->external_mod = 0;
 	E.buf->internal_mod = 1;
-
-	/* Lock is released on clean by markBufferClean above; reacquired
-	 * on the next clean→dirty transition. */
 
 	int n = snprintf(NULL, 0, "Wrote %d bytes to %s", (int)len,
 			 E.buf->filename);
