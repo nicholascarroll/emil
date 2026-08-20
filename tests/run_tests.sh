@@ -16,9 +16,7 @@ LDFLAGS=${LDFLAGS:-""}
 #                invoked with a leading ./ so wasmer treats the argument
 #                as a path rather than a registry package name.
 #   SKIP_SUITES  space-separated suites to skip, for platforms that
-#                cannot build or run them.  Skips are announced, never
-#                silent: a suite that vanishes without saying so is how
-#                coverage is lost.
+#                cannot build or run them.
 #   RUNNER_SEP   separator inserted between the binary and its own
 #                arguments.  wasmer needs a literal -- there, or it
 #                consumes flags like --version itself.
@@ -409,8 +407,8 @@ elif [ "$ANY_WARN" -ne 0 ]; then
     # Not fatal here: the portability matrix builds with compilers that
     # each warn about different things.  make hal compiles the tests with
     # -Werror, which is where a warning has to be fixed.
-    echo "TEST STATUS: ALL PASSED (with warnings)"
-    exit 0
+    echo "TEST STATUS: ALL PASSED (with compiler warnings)"
+    exit 1
 else
     echo "TEST STATUS: ALL PASSED"
     exit 0

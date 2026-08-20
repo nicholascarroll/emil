@@ -12,9 +12,6 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-/* Defined further down, beside the inode test that shares its
- * reasoning about hosts that synthesise stat() fields. */
-static int linkCountsAreObservable(void);
 
 /* ---- emil_getline ---- */
 
@@ -626,41 +623,6 @@ void test_revert_existing_file_still_reloads(void) {
 	free(path);
 }
 
-
-/* Does this host model POSIX link counts?
- *
- * link() succeeding is not enough.  Wasmer's WASIX filesystem creates
- * the second name happily and still reports st_nlink == 1, so code
- * that decides what to do by inspecting the link count cannot see a
- * hard link at all.  A host like that cannot exhibit the behaviour the
- * hard-link tests assert, and cannot exhibit the bug they guard
- * against either; the same hosts do not give a renamed-over file a new
- * st_ino.  Probe once, rather than naming platforms: any filesystem
- * that synthesises these fields gets the same treatment.
- *
- * Returns 1 if a freshly linked file reports two links. */
-static int linkCountsAreObservable(void) {
-	static int cached = -1;
-	if (cached != -1)
-		return cached;
-
-	cached = 0;
-	char tmpname[] = "/tmp/emil_nlink_XXXXXX";
-	int fd = mkstemp(tmpname);
-	if (fd >= 0) {
-		close(fd);
-		char linkname[64];
-		snprintf(linkname, sizeof(linkname), "%s.lnk", tmpname);
-		if (link(tmpname, linkname) == 0) {
-			struct stat st;
-			if (stat(tmpname, &st) == 0 && st.st_nlink >= 2)
-				cached = 1;
-			unlink(linkname);
-		}
-		unlink(tmpname);
-	}
-	return cached;
-}
 
 
 int main(void) {
