@@ -824,7 +824,7 @@ static int dispatchBuffer(int c, int uarg) {
 		quit();
 		return 1;
 	case CMD_SAVE:
-		save();
+		save(uarg);
 		return 1;
 	case CMD_SAVE_AS:
 		saveAs();

@@ -944,257 +944,188 @@ static int backup_create(const char *path, char *backup, size_t backup_size) {
 	return -1;
 }
 
-static int writeWithBackup(const char *iopath, const char *buf, size_t len,
-			   int skip_backup, int *file_damaged,
-			   char *backup_path_out, size_t backup_path_size) {
-	struct stat st;
-	int has_orig = (stat(iopath, &st) == 0 && S_ISREG(st.st_mode));
-	char backup_path[PATH_MAX] = { 0 };
-
-	*file_damaged = 0;
-	if (backup_path_out && backup_path_size > 0)
-		backup_path_out[0] = '\0';
-
-	if (has_orig && !skip_backup) {
-		int bfd =
-			backup_create(iopath, backup_path, sizeof(backup_path));
-		if (bfd != -1) {
-			int orig_fd = open(iopath, O_RDONLY);
-			if (orig_fd == -1) {
-				close(bfd);
-				unlink(backup_path);
-				return -1;
-			}
-
-			char copy_buf[8192];
-			ssize_t n;
-			int copy_failed = 0;
-
-			while (1) {
-				n = read(orig_fd, copy_buf, sizeof(copy_buf));
-				if (n < 0) {
-					if (errno == EINTR)
-						continue;
-					copy_failed = 1;
-					break;
-				}
-				if (n == 0)
-					break;
-
-				ssize_t written = 0;
-				while (written < n) {
-					ssize_t w = write(bfd,
-							  copy_buf + written,
-							  n - written);
-					if (w < 0) {
-						if (errno == EINTR)
-							continue;
-						copy_failed = 1;
-						break;
-					}
-					written += w;
-				}
-				if (copy_failed)
-					break;
-			}
-			close(orig_fd);
-
-			if (copy_failed) {
-				close(bfd);
-				unlink(backup_path);
-				return -1;
-			}
-
-			fsync(bfd);
-			close(bfd);
-		} else {
-			return -1;
-		}
-	}
-
-	int fd = open(iopath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-	if (fd == -1) {
-		*file_damaged = 0;
-		if (backup_path[0] != '\0' && backup_path_out) {
-			emil_strlcpy(backup_path_out, backup_path,
-				     backup_path_size);
-		}
-		return -1;
-	}
-
+/*
+ * Write all bytes to fd, retrying on EINTR and handling short writes.
+ */
+static int write_all(int fd, const char *buf, size_t len) {
 	size_t total = 0;
+
 	while (total < len) {
 		ssize_t n = write(fd, buf + total, len - total);
+
 		if (n < 0) {
 			if (errno == EINTR)
 				continue;
-			close(fd);
-			*file_damaged = 1;
-
-			if (backup_path[0] != '\0' && backup_path_out) {
-				emil_strlcpy(backup_path_out, backup_path,
-					     backup_path_size);
-			}
 			return -1;
 		}
+
 		if (n == 0) {
-			close(fd);
-			*file_damaged = 1;
-			if (backup_path[0] != '\0' && backup_path_out) {
-				emil_strlcpy(backup_path_out, backup_path,
-					     backup_path_size);
-			}
 			errno = EIO;
 			return -1;
 		}
+
 		total += (size_t)n;
 	}
 
-	struct stat st2;
-	int regular = (fstat(fd, &st2) == 0 && S_ISREG(st2.st_mode));
-	if (regular) {
-		if (ftruncate(fd, (off_t)len) == -1) {
-			close(fd);
-			*file_damaged = 1;
-			if (backup_path[0] != '\0' && backup_path_out) {
-				emil_strlcpy(backup_path_out, backup_path,
-					     backup_path_size);
-			}
-			return -1;
-		}
-		if (fsync(fd) == -1) {
-			close(fd);
-			*file_damaged = 1;
-			if (backup_path[0] != '\0' && backup_path_out) {
-				emil_strlcpy(backup_path_out, backup_path,
-					     backup_path_size);
-			}
-			return -1;
-		}
-	}
-
-	if (close(fd) == -1) {
-		*file_damaged = 1;
-		if (backup_path[0] != '\0' && backup_path_out) {
-			emil_strlcpy(backup_path_out, backup_path,
-				     backup_path_size);
-		}
-		return -1;
-	}
-
-	/* Success - delete backup */
-	if (backup_path[0] != '\0') {
-		unlink(backup_path);
-	}
 	return 0;
 }
 
-static void saveBuffer(void) {
-	if (E.recording || E.playback) {
-		setStatusMessage("Not available during macro");
-		return;
-	}
-
-	if (!checkUTF8Validity(E.buf)) {
-		setStatusMessage("Save failed: buffer contains invalid UTF-8");
-		return;
-	}
-
-	if (E.buf->filename == NULL || E.buf->special_buffer) {
-		char *input = (char *)editorPrompt(
-			E.buf, "Save as: ", PROMPT_FILES, NULL);
-		if (input == NULL) {
-			setStatusMessage("Save aborted.");
-			return;
-		}
-		free(E.buf->filename);
-		E.buf->filename = collapseHome(input);
-		free(input);
-		E.buf->special_buffer = 0;
-		E.buf->read_only = 0;
-		computeDisplayNames();
-	}
-
-	char *iopath = expandTilde(E.buf->filename);
-
-	size_t len;
-	char *buf = rowsToString(E.buf, &len);
-
-	int skip_backup = 0;
-	int rc;
-	int file_damaged;
-	char backup_path[PATH_MAX];
+/*
+ * Copy all bytes from from_fd to to_fd.
+ */
+static int copy_fd(int from_fd, int to_fd) {
+	char buf[8192];
 
 	while (1) {
-		rc = writeWithBackup(iopath, buf, len, skip_backup,
-				     &file_damaged, backup_path,
-				     sizeof(backup_path));
-		if (rc == 0) {
-			break;
+		ssize_t n = read(from_fd, buf, sizeof(buf));
+
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			return -1;
 		}
 
-		/* Build error message with conditional segments */
-		char msg[PATH_MAX + 256];
-		msg[0] = '\0'; /* Must be initialized for strlcat */
+		if (n == 0)
+			return 0;
 
-		emil_strlcat(msg, file_damaged ? "Write" : "Save", sizeof(msg));
-		emil_strlcat(msg, " failed: ", sizeof(msg));
-		emil_strlcat(msg, strerror(errno), sizeof(msg));
+		size_t off = 0;
 
-		if (file_damaged)
-			emil_strlcat(msg, ". File data is now invalid",
-				     sizeof(msg));
+		while (off < (size_t)n) {
+			ssize_t w = write(to_fd, buf + off, (size_t)n - off);
 
-		if (backup_path[0] != '\0') {
-			emil_strlcat(msg,
-				     ". A backup of the pre-save state is in ",
-				     sizeof(msg));
-			emil_strlcat(msg, backup_path, sizeof(msg));
-		}
+			if (w < 0) {
+				if (errno == EINTR)
+					continue;
+				return -1;
+			}
 
-		emil_strlcat(msg, ". Retry? (y/n)", sizeof(msg));
+			if (w == 0) {
+				errno = EIO;
+				return -1;
+			}
 
-		setStatusMessage("%s", msg);
-		refreshScreen();
-		int c = readKey();
-		clearStatusMessage();
-		if (c != 'y' && c != 'Y') {
-			free(buf);
-			free(iopath);
-			setStatusMessage("Save aborted.");
-			return;
+			off += (size_t)w;
 		}
 	}
+}
 
-	relockAll();
+/*
+ * Create a backup of path using backup_create(), then verify that the
+ * backup was fully written, fsynced, and closed.
+ *
+ * On failure, remove the partial backup and return -1.
+ */
+static int make_verified_backup(const char *path, char *backup_path,
+				size_t backup_path_size) {
+	int bfd;
+	int fd;
+	int saved_errno;
 
-	free(buf);
-	markBufferClean(E.buf);
+	bfd = backup_create(path, backup_path, backup_path_size);
+	if (bfd == -1)
+		return -1;
 
-	for (int i = 0; i < E.buf->numrows; i++) {
-		erow *row = &E.buf->row[i];
-		if (row->charcap > row->size + 1) {
-			row->chars = xrealloc(row->chars, row->size + 1);
-			row->charcap = row->size + 1;
-		}
+	fd = open(path, O_RDONLY);
+	if (fd == -1) {
+		saved_errno = errno;
+		close(bfd);
+		unlink(backup_path);
+		errno = saved_errno;
+		return -1;
 	}
 
-	struct stat save_st;
-	if (stat(iopath, &save_st) == 0) {
-		E.buf->open_mtime = save_st.st_mtime;
-		E.buf->open_size = save_st.st_size;
+	if (copy_fd(fd, bfd) == -1) {
+		saved_errno = errno;
+		close(fd);
+		close(bfd);
+		unlink(backup_path);
+		errno = saved_errno;
+		return -1;
 	}
 
-	E.buf->external_mod = 0;
-	E.buf->internal_mod = 1;
+	if (close(fd) == -1) {
+		saved_errno = errno;
+		close(bfd);
+		unlink(backup_path);
+		errno = saved_errno;
+		return -1;
+	}
 
-	int n = snprintf(NULL, 0, "Wrote %d bytes to %s", (int)len,
-			 E.buf->filename);
-	char *showName =
-		leftTruncate(E.buf->filename, nameFit(E.buf->filename, n));
-	setStatusMessage("Wrote %d bytes to %s", (int)len, showName);
-	free(showName);
-	free(iopath);
+	if (fsync(bfd) == -1) {
+		saved_errno = errno;
+		close(bfd);
+		unlink(backup_path);
+		errno = saved_errno;
+		return -1;
+	}
+
+	if (close(bfd) == -1) {
+		saved_errno = errno;
+		unlink(backup_path);
+		errno = saved_errno;
+		return -1;
+	}
+
+	return 0;
+}
+
+/*
+ * Open the target file, truncate it, write the new contents, fsync it,
+ * and close it.
+ *
+ * If require_regular is true, fail if the target descriptor is not a
+ * regular file.  This is used when a backup exists, because deleting a
+ * backup after writing to a non-regular file would be unsafe.
+ *
+ * On failure, set *damaged if the target file may now be invalid.
+ */
+static int write_in_place(const char *path, const char *buf, size_t len,
+			  int require_regular, int *damaged) {
+	int fd;
+	struct stat st;
+	int saved_errno;
+
+	if (damaged)
+		*damaged = 0;
+
+	fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	if (fd == -1)
+		return -1;
+
+	if (write_all(fd, buf, len) == -1)
+		goto fail;
+
+	if (fstat(fd, &st) == -1)
+		goto fail;
+
+	if (S_ISREG(st.st_mode)) {
+		if (ftruncate(fd, (off_t)len) == -1)
+			goto fail;
+
+		if (fsync(fd) == -1)
+			goto fail;
+	} else if (require_regular) {
+		errno = EIO;
+		goto fail;
+	}
+
+	if (close(fd) == -1) {
+		if (damaged)
+			*damaged = 1;
+		return -1;
+	}
+
+	return 0;
+
+fail:
+	saved_errno = errno;
+
+	if (damaged)
+		*damaged = 1;
+
+	close(fd);
+	errno = saved_errno;
+	return -1;
 }
 
 /* Ask a y/N question in the minibuffer.  Returns 1 for yes. */
@@ -1208,22 +1139,7 @@ static int confirmYN(const char *msg) {
 
 /* The authoritative external-modification check, run immediately
  * before writing.  Returns 1 to proceed with the save, 0 to abandon
- * it.
- *
- * This is the check whose freshness matters, because it is the only
- * one on the same code path as the rename().  No polling interval can
- * close the window between a check and a write -- another process can
- * always write in the microsecond after a poll returns -- so the
- * question is settled at the moment of writing.  The background check
- * in checkFileModified exists only to light the status-bar indicator
- * early, and nothing depends on its freshness for correctness.
- *
- * The prompt is suppressed when the status bar is already warning
- * about this file.  The indicator IS the warning; a user who has had
- * it in front of them and pressed C-x C-s anyway has made a deliberate
- * choice, and asking again would be nagging.  external_mod is set
- * before prompting, so answering "n" leaves the indicator lit and a
- * subsequent save proceeds without re-asking. */
+ */
 static int preSaveCheck(struct buffer *buf) {
 	if (buf->filename == NULL || buf->special_buffer)
 		return 1;
@@ -1248,65 +1164,260 @@ static int preSaveCheck(struct buffer *buf) {
 			"File has changed on disk since it was read. Save anyway? (y or n)");
 }
 
-/* C-x C-s.  A buffer that already matches its file is not rewritten:
- * the write is not free (atomic temp file, rename, two fsyncs, an
- * mtime bump that every other process watching the file will see), and
- * a no-op save should not look like a change to anything downstream.
+/*
+ * Save the current buffer.
  *
- * Gated on having a filename, so an unnamed buffer still reaches the
- * prompt in saveBuffer, and bypassed by saveAs, which needs to write a
- * clean buffer to a name it has only just been given.
+ * If skip_backup is nonzero, the user has explicitly requested an unsafe
+ * save without creating a backup.
  *
- * "Already matches its file" is a claim about the file, so preSaveCheck
- * runs FIRST (#112): a clean buffer whose file another process rewrote
- * does not match it, and refusing there stranded the user's only copy
- * of the earlier content.  Ordered rather than gated on external_mod,
- * which the background poll sets only when input arrives (§3.21.4);
- * preSaveCheck's stat is authoritative whatever the poll has done. */
-void save(void) {
+ * If skip_backup is zero and the target file already exists, attempt to
+ * create a verified backup.  If that fails, ask whether the user wants
+ * to continue without a backup.
+ */
+static void saveBuffer(int skip_backup) {
+	char *iopath = NULL;
+	char *buf = NULL;
+	size_t len = 0;
+
+	char backup_path[PATH_MAX] = { 0 };
+	int have_backup = 0;
+	int damaged = 0;
+
+	if (E.recording || E.playback) {
+		setStatusMessage("Not available during macro");
+		return;
+	}
+
+	if (!checkUTF8Validity(E.buf)) {
+		setStatusMessage("Save failed: buffer contains invalid UTF-8");
+		return;
+	}
+
+	if (E.buf->filename == NULL || E.buf->special_buffer) {
+		char *input = (char *)editorPrompt(
+			E.buf, "Save as: ", PROMPT_FILES, NULL);
+
+		if (input == NULL) {
+			setStatusMessage("Save aborted.");
+			return;
+		}
+
+		free(E.buf->filename);
+		E.buf->filename = collapseHome(input);
+		free(input);
+
+		E.buf->special_buffer = 0;
+		E.buf->read_only = 0;
+
+		computeDisplayNames();
+	}
+
+	iopath = expandTilde(E.buf->filename);
+	if (iopath == NULL) {
+		setStatusMessage("Save failed: cannot expand filename");
+		return;
+	}
+
+	buf = rowsToString(E.buf, &len);
+	if (buf == NULL) {
+		free(iopath);
+		setStatusMessage("Save failed: cannot read buffer");
+		return;
+	}
+
+	/*
+	 * Attempt to create a backup unless the user explicitly requested
+	 * an unsafe save.
+	 */
+	if (!skip_backup) {
+		struct stat st;
+
+		if (stat(iopath, &st) == 0 && S_ISREG(st.st_mode)) {
+			if (make_verified_backup(iopath, backup_path,
+						 sizeof(backup_path)) == 0) {
+				have_backup = 1;
+			} else {
+				char msg[PATH_MAX + 256];
+
+				msg[0] = '\0';
+				emil_strlcat(msg, "Cannot create backup: ",
+					     sizeof(msg));
+				emil_strlcat(msg, strerror(errno), sizeof(msg));
+				emil_strlcat(msg,
+					     ". Save without backup? (y/n)",
+					     sizeof(msg));
+
+				if (!confirmYN(msg)) {
+					setStatusMessage("Save aborted.");
+					goto out;
+				}
+
+				/*
+				 * The user accepted an unsafe save.  No backup
+				 * exists for this save operation.
+				 */
+			}
+		}
+	}
+
+	/*
+	 * Write loop.
+	 *
+	 * Backup creation is intentionally not repeated here.  If the first
+	 * write damages the file, retrying must not create a new backup of
+	 * the damaged file.
+	 */
+	while (1) {
+		if (write_in_place(iopath, buf, len, have_backup, &damaged) ==
+		    0) {
+			/*
+			 * Success.  Delete only a backup that this save
+			 * created.
+			 */
+			if (have_backup)
+				unlink(backup_path);
+			break;
+		}
+
+		char msg[PATH_MAX + 256];
+
+		msg[0] = '\0';
+
+		emil_strlcat(msg, damaged ? "Write" : "Save", sizeof(msg));
+		emil_strlcat(msg, " failed: ", sizeof(msg));
+		emil_strlcat(msg, strerror(errno), sizeof(msg));
+
+		if (damaged)
+			emil_strlcat(msg, ". File data is now invalid",
+				     sizeof(msg));
+
+		if (have_backup) {
+			emil_strlcat(msg, ". Backup is in ", sizeof(msg));
+			emil_strlcat(msg, backup_path, sizeof(msg));
+		}
+
+		emil_strlcat(msg, ". Retry? (y/n)", sizeof(msg));
+
+		if (!confirmYN(msg)) {
+			if (damaged && have_backup) {
+				setStatusMessage(
+					"Save aborted. File may be damaged; backup is in %s",
+					backup_path);
+			} else if (damaged) {
+				setStatusMessage(
+					"Save aborted. File may be damaged.");
+			} else if (have_backup) {
+				setStatusMessage(
+					"Save aborted. Backup left in %s",
+					backup_path);
+			} else {
+				setStatusMessage("Save aborted.");
+			}
+
+			goto out;
+		}
+	}
+
+	relockAll();
+	markBufferClean(E.buf);
+
+	for (int i = 0; i < E.buf->numrows; i++) {
+		erow *row = &E.buf->row[i];
+
+		if (row->charcap > row->size + 1) {
+			row->chars = xrealloc(row->chars, row->size + 1);
+			row->charcap = row->size + 1;
+		}
+	}
+
+	struct stat save_st;
+	if (stat(iopath, &save_st) == 0) {
+		E.buf->open_mtime = save_st.st_mtime;
+		E.buf->open_size = save_st.st_size;
+	}
+
+	E.buf->external_mod = 0;
+	E.buf->internal_mod = 1;
+
+	int n = snprintf(NULL, 0, "Wrote %d bytes to %s", (int)len,
+			 E.buf->filename);
+	char *showName =
+		leftTruncate(E.buf->filename, nameFit(E.buf->filename, n));
+
+	setStatusMessage("Wrote %d bytes to %s", (int)len, showName);
+
+	free(showName);
+
+out:
+	free(buf);
+	free(iopath);
+}
+
+/*
+ * Normal save command.
+ *
+ * A nonzero universal argument means: skip backup and perform an unsafe
+ * save.
+ */
+void save(int uarg) {
+	int skip_backup = (uarg != 0);
+
 	if (!preSaveCheck(E.buf)) {
 		setStatusMessage("Save aborted.");
 		return;
 	}
+
 	if (E.buf->filename != NULL && !E.buf->special_buffer &&
 	    !E.buf->dirty && !E.buf->external_mod) {
 		setStatusMessage("(No changes need to be saved)");
 		return;
 	}
-	saveBuffer();
+
+	saveBuffer(skip_backup);
 }
 
+/*
+ * Save As.
+ *
+ * This version does not take a universal argument.  If you want Save As to
+ * honor the universal argument too, change this to saveAs(int uarg) and call
+ * saveBuffer(uarg != 0).
+ */
 void saveAs(void) {
-	/* Not allowed during macro record/playback */
 	if (E.recording || E.playback) {
 		setStatusMessage("Not available during macro");
 		return;
 	}
+
 	char *new_filename =
 		(char *)editorPrompt(E.buf, "Save as: ", PROMPT_FILES, NULL);
+
 	if (new_filename == NULL) {
 		setStatusMessage("Save aborted.");
 		return;
 	}
+
 	free(E.buf->filename);
 	E.buf->filename = collapseHome(new_filename);
 	free(new_filename);
-	/* Release the lock on the old file before saving to the new one.
-	 * The buffer now refers to a different file, so the
-	 * external-modification baseline and any lock-imposed read-only
-	 * both belong to the old one and are discarded here. */
+
+	/*
+	 * The buffer now refers to a different file, so release the old
+	 * lock and discard the old external-modification baseline.
+	 */
 	releaseLock(E.buf);
+
 	E.buf->open_mtime = 0;
 	E.buf->open_size = 0;
 	E.buf->external_mod = 0;
 	E.buf->read_only_by_lock = 0;
-	/* The buffer now names a file the user chose, so it is an
-	 * ordinary one.  Without this saveBuffer would treat it as
-	 * unnamed and ask for the path a second time. */
+
 	E.buf->special_buffer = 0;
 	E.buf->read_only = 0;
+
 	computeDisplayNames();
-	saveBuffer();
+
+	saveBuffer(0);
 }
 
 /* Switch the focused window to the named file.  If a buffer with that
