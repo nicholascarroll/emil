@@ -42,11 +42,7 @@ static int initial_direction = 1;
 static int search_origin_cx = 0;
 static int search_origin_cy = 0;
 
-/* Set when a pass found nothing.  Emacs does not silently run past the
- * end of the buffer and come round the other side: it reports "Failing
- * I-search" and leaves point alone, and only a further C-s / C-r wraps.
- * Scanning straight through the wrap meant C-s could move point
- * *backwards* to a match above where the search started. */
+/* Set when a pass found nothing. */
 static int search_failing = 0;
 
 /* Compiled-pattern cache for regexSearch. The one live regex_t is 
@@ -56,17 +52,7 @@ static regex_t re_cache;
 static int re_cache_ok = 0;
 
 /* Compile 'pattern' if it is not already the cached one.  Returns
- * nonzero when the cached pattern is usable.
- *
- * Keyed on the pattern string alone.  That is correct only while the
- * regcomp() *cflags* below are constant, which they are -- note that
- * the REG_NOTBOL regexSearch() now varies is an *execution* flag,
- * passed to regexec() per call and not baked into the compiled object,
- * so it does not belong in this key.  If a variable cflag ever arrives
- * -- case folding via REG_ICASE being the obvious candidate -- this
- * key must include it, or a search would silently reuse a compile made
- * under the other setting.  A composite key is not worth building
- * before then. */
+ * nonzero when the cached pattern is usable.*/
 static int regexCacheEnsure(const uint8_t *pattern) {
 	if (!re_cache_pat || strcmp(re_cache_pat, (const char *)pattern) != 0) {
 		if (re_cache_pat) {
@@ -74,22 +60,6 @@ static int regexCacheEnsure(const uint8_t *pattern) {
 				regfree(&re_cache);
 			free(re_cache_pat);
 		}
-		re_cache_pat = xstrdup((const char *)pattern);
-		/* REG_NEWLINE, matching the query-replace path in
-		 * region.c.  The two regex paths compiled with
-		 * different flags until now, which was invisible only
-		 * because this one runs against a single row at a time:
-		 * a row holds no newline, so nothing REG_NEWLINE
-		 * governs can be observed.  Adding it here is therefore
-		 * a no-op today (tests/test_find.c) and a requirement
-		 * once search runs over a whole buffer, where its
-		 * absence would anchor '^' at offset 0 alone and let a
-		 * greedy quantifier run past end of line.
-		 *
-		 * It does not prevent matching a newline entered with
-		 * C-q C-n: the flag changes what the metacharacters
-		 * match, not what a literal byte matches.  See
-		 * tests/test_regex_semantics.c. */
 		re_cache_ok = (regcomp(&re_cache, (const char *)pattern,
 				       REG_EXTENDED | REG_NEWLINE) == 0);
 	}
@@ -100,24 +70,13 @@ static int regexCacheEnsure(const uint8_t *pattern) {
  *
  * `eflags` is the caller's, not inferred here.  regexSearch() receives
  * a bare pointer and cannot tell whether it addresses the start of a
- * row or a slice of one, so a version that guessed would be wrong the
- * first time someone passed it a slice for another reason.  Every call
- * site already knows the answer.
+ * row or a slice of one.
  *
- * What it is for: POSIX treats the first byte of the subject as a line
- * beginning unless REG_NOTBOL is passed, so an anchored pattern
- * matched at whatever offset a mid-row restart happened to land on.
- * `C-M-s` for `^foo` with point past column 0 reported a match
- * mid-line, and searchRowBackward -- which restarts from match + 1 and
- * keeps the last match before its limit -- turned that into a
- * consistently wrong result rather than an intermittent one, since
- * every restart position matched.  Reproduced against glibc 2.39:
+ * POSIX treats the first byte of the subject as a line beginning
+ * unless REG_NOTBOL is passed.
+ * e.g.
  * subject "xfoo bar" from column 1 matches `^foo`, and does not with
- * REG_NOTBOL.
- *
- * region.c's replace-regexp scanner has applied this rule on every
- * mid-subject restart all along; this brings find.c in line with it
- * rather than inventing a second convention. */
+ * REG_NOTBOL.*/
 static uint8_t *regexSearch(uint8_t *text, uint8_t *pattern, int *match_len,
 			    int eflags) {
 	*match_len = 0;
@@ -211,46 +170,7 @@ static uint8_t *strReplace(uint8_t *text, const uint8_t *rep,
  * primitives available scan forward, so walk forward collecting
  * candidates and keep the last one that still starts before the limit.
  * Advancing by a single byte rather than by the match length keeps
- * overlapping matches (searching "aa" in "aaa") reachable.
- *
- * "Begins strictly before the limit" mirrors the forward convention
- * one block down, where a match must begin strictly after the cursor.
- * Keeping the two symmetric is what makes repeated C-r step backward
- * one match at a time instead of sticking on the match under point.
- *
- * Cost, measured rather than reasoned about (this loop in isolation;
- * gcc 13.3.0 -O2, glibc 2.39, Ubuntu 24.04, x86-64; one row of a
- * single repeated byte, a query matching at every position, limit at
- * end of row -- the worst case for iteration count):
- *
- *	row size	literal 	regex
- *	100 KB		0.78 ms 	  55 ms
- *	400 KB		3.08 ms 	 833 ms
- *	800 KB		6.18 ms 	3454 ms
- *
- * The literal path is linear in row size, not quadratic: strstr()
- * resumes at p and stops at the first match, so the only call that
- * reaches end of row is the last one, which finds nothing.
- *
- * The regex path is quadratic, but not because it rescans looking for
- * a match -- in that measurement every call matched at its own first
- * byte.  regexec() takes a NUL-terminated subject and pays a cost
- * proportional to the whole of it before reporting anything: timed on
- * its own, one call with the match at byte 0 costs 1.26 us at 100 KB
- * and 9.16 us at 800 KB.  Restarting at match + 1 therefore re-reads
- * the tail of the row on every one of the matches, and the tail is
- * what makes it quadratic.  Bounding that needs a length-taking
- * regexec (REG_STARTEND), which is a BSD/GNU extension outside the
- * POSIX.1-2001 baseline (EMIL-DESIGN.md §1.2), so it is not a change
- * local to this function.
- *
- * Left alone deliberately.  The cost is bounded by the row, it is
- * paid only by C-r with a regex on a row of six figures, and both
- * fixes available are worse than the disease at that frequency.
- * Revisit if a long-line report arrives.  region.c's
- * regexSubstituteAll() restarts mid-subject the same way and has the
- * same bound for the same reason; it is not the search path, so it is
- * recorded here rather than changed. */
+ * overlapping matches (searching "aa" in "aaa") reachable.*/
 static uint8_t *searchRowBackward(erow *row, uint8_t *query, int limit,
 				  int regex, int *match_len) {
 	if (limit <= 0)
@@ -266,9 +186,7 @@ static uint8_t *searchRowBackward(erow *row, uint8_t *query, int limit,
 		uint8_t *match;
 		if (regex) {
 			/* p advances past each match, so every restart
-			 * but the first is mid-row.  Without this the
-			 * loop kept whatever anchored "match" sat just
-			 * under limit instead of the real last one. */
+			 * but the first is mid-row.*/
 			match = regexSearch(p, query, &mlen,
 					    p > row->chars ? REG_NOTBOL : 0);
 		} else {
@@ -291,7 +209,7 @@ static uint8_t *searchRowBackward(erow *row, uint8_t *query, int limit,
 	return best;
 }
 
-/* Put point on a match and record its extent for highlighting. */
+/* Put cursor on a match and record its extent for highlighting. */
 static void placeMatch(struct buffer *bufr, int rowidx, uint8_t *match,
 		       int mlen) {
 	erow *row = &bufr->row[rowidx];
@@ -317,8 +235,7 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 	bufr->match_len = 0;
 
 	/* Only a repeat that follows a failed pass may wrap round the end
-	 * of the buffer -- that is Emacs's second C-s, the one that turns
-	 * "Failing I-search" into "Wrapped I-search". */
+	 * of the buffer. */
 	int allow_wrap = 0;
 
 	if (key == CTRL('g') || key == CTRL('c') || key == '\r') {
@@ -392,9 +309,8 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 			match = NULL;
 		} else {
 			/* A fresh forward search accepts a match beginning
-			 * at point, as Emacs does.  A repeat has to start
-			 * strictly after it, or C-s would keep re-finding
-			 * the match it is already sitting on. */
+			 * at point.  A repeat has to start after it or C-s
+			 * would keep re-finding the match it is already on.*/
 			int start = fresh ? from_cx : from_cx + 1;
 			if (regex_mode) {
 				match = regexSearch(&(row->chars[start]), query,
@@ -466,8 +382,7 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 		}
 		search_failing = 0;
 	} else {
-		/* Point deliberately stays where it is, on the last match
-		 * that did succeed, as Emacs leaves it. */
+		/* Cursor stays where it is, on the last sucessful match.*/
 		setStatusMessage("Failing I-search: %s", query);
 		if (E.minibuf)
 			E.minibuf->completionState.preserve_message = 1;
@@ -571,12 +486,6 @@ static int findNextMatch(uint8_t *needle, int skip_current) {
 }
 
 void replaceString(void) {
-	/* The prompts below dispatch ordinary commands, so another
-	 * replace-string or query-replace can run nested inside this
-	 * one.  It would free these statics and NULL them, leaving the
-	 * outer invocation using freed memory.  Hold the caller's values
-	 * on the stack and put them back on every exit -- the same
-	 * treatment editorPrompt gives E.edbuf and E.prompt_type. */
 	uint8_t *saved_orig = replace_orig;
 	uint8_t *saved_repl = replace_repl;
 
@@ -589,7 +498,7 @@ void replaceString(void) {
 	}
 
 	/* Prompt is a plain prefix (see editorPrompt), so no percent
-	 * escaping -- but a literal newline in the pattern must be
+	 * escaping, but a literal newline in the pattern must be
 	 * shown as ^J, not fed raw to the terminal. */
 	char *esc = caretEscapeNewlines(replace_orig);
 	size_t psz = strlen(esc) + 20;
@@ -629,13 +538,6 @@ static char *qrStatusPrompt(void) {
 }
 
 void queryReplace(void) {
-	/* The prompts here, and the y/n loop's C-r and e/E prompts,
-	 * dispatch ordinary commands, so another query-replace or
-	 * replace-string can run nested inside this one.  It would free
-	 * these statics and NULL them, and the outer invocation would
-	 * then pass a dangling or NULL pattern to findNextMatch.  Hold
-	 * the caller's values on the stack and put them back on every
-	 * exit -- the same treatment editorPrompt gives E.edbuf. */
 	uint8_t *saved_orig = replace_orig;
 	uint8_t *saved_repl = replace_repl;
 
@@ -663,7 +565,7 @@ void queryReplace(void) {
 
 	/* Cap the displayed search string to 78 chars.  The prompt is a
 	 * plain prefix (see editorPrompt), so no percent escaping is
-	 * needed and %.78s truncation is safe. */
+	 * needed. */
 	char prompt_buf[192];
 	snprintf(prompt_buf, sizeof(prompt_buf),
 		 "Query replace %.78s with: ", replace_orig);

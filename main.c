@@ -51,8 +51,7 @@ static void editorSuspend(int sig) {
 	 * to a member of an orphaned process group, so raise() returns
 	 * at once and no SIGCONT ever arrives -- and an orphaned group
 	 * is ordinary for an editor run as EDITOR/GIT_EDITOR under a
-	 * daemon, a CI runner or setsid.  Without this the editor runs
-	 * on with the tty cooked, breaking invariant 4.5.
+	 * daemon, a CI runner or setsid. 
 	 *
 	 * handlePendingSignals() does the repair, including
 	 * reinstalling the handler the SIG_DFL above just cleared. */

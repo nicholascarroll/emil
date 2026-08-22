@@ -63,10 +63,9 @@ int adjustPoint(int *px, int *py, int startx, int starty, int endx, int endy,
  *
  * The sub-line is only ever zeroed, never renumbered.  Where the top
  * row survives the mutation its wrap points may move, but the walkers
- * clamp a sub-line past the row's last when they reach it (§D), so
- * nothing has to be recomputed here -- and recomputing would mean a
- * whole-row walk on every mutation.  Where the top row does NOT survive
- * the sub-line has to go, which is the case below. */
+ * clamp a sub-line past the row's last when they reach it, so nothing
+ * needs recomputing here.  Where the top row does NOT survive the
+ * sub-line has to go, which is the case below. */
 static void adjustRowIndex(int *py, int *skip, int starty, int endy,
 			   int is_delete) {
 	int lines_delta = endy - starty;

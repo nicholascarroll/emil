@@ -98,31 +98,7 @@ test: $(PROGNAME)
 
 check: test
 
-# EMIL_DEBUG_ROW_CACHE recomputes and compares cached_width on every
-# cache hit (see calculateLineWidth in wrap.c).  It belongs here rather
-# than in a default build because the check is the same whole-row walk
-# the cache exists to avoid -- on a 50 MB line it costs 439 ms per
-# frame -- and here because this is the build the pre-merge run uses,
-# so the §4.10 invalidation protocol is exercised by every suite and by
-# the fuzzer before anything is proposed for merge.
-# -fPIE/-pie are explicit rather than left to the toolchain default.
-# The sanitizer link is a PIE link, and a PIE link of objects compiled
-# as non-PIC fails with
-#     relocation R_X86_64_32 against `.data' can not be used when
-#     making a PIE object; recompile with -fPIE
-# which is the DT_TEXTREL failure the project instructions describe.
-# It does not occur where the compiler defaults to PIE -- Ubuntu's gcc
-# is built --enable-default-pie, which is why this target linked clean
-# without these flags in three independent runs here.  Reproduced on
-# that same toolchain by forcing the mismatch (compile -fno-pie, link
-# with the sanitizer), which is the configuration a compiler without
-# that default puts you in.
-#
-# Stated as flags rather than as prose in the instructions because as
-# shipped this target was broken exactly where the note applied and
-# worked only for someone who already knew.  Verified harmless on a
-# toolchain that does not need them: the full suite is green under
-# this target with them present.
+
 sanitize:
 	$(MAKE) clean
 	$(MAKE) CFLAGS="-g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -fPIE -DEMIL_DEBUG_ROW_CACHE" \

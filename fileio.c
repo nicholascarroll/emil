@@ -38,10 +38,7 @@
  * The handler deliberately does nothing.  Delivery is the whole
  * mechanism: with no SA_RESTART the interrupted call returns EINTR,
  * and every caller below distinguishes that from a real failure
- * itself (lockFile's LOCK_RETRY, timed_stat's return).  It carried a
- * `file_check_timed_out` flag that was set here, cleared in
- * armTimer() and read nowhere -- state that looked like a protocol
- * and was not one. */
+ * itself (lockFile's LOCK_RETRY, timed_stat's return). */
 static void fileCheckAlarm(int sig) {
 	(void)sig;
 }
@@ -90,12 +87,7 @@ void resetFileCheckThrottle(void) {
  * __wasilibc_unmodified_upstream guards in its <fcntl.h>.  Detect that
  * by the absence of the command constants rather than by testing for a
  * specific platform macro, so any libc making the same choice is
- * handled without further edits here.
- *
- * The fallback is not a new policy: it routes to the same conclusions
- * the runtime ENOLCK path already reaches on a POSIX host whose lock
- * manager is unavailable.  See the two stubs below for why each picks
- * the value it does. */
+ * handled without further edits here. */
 #if !defined(F_GETLK) || !defined(F_SETLK)
 #define EMIL_NO_FILE_LOCKING 1
 #endif
@@ -105,13 +97,6 @@ void resetFileCheckThrottle(void) {
  * or -2 on error (file doesn't exist, can't open, etc.). */
 #ifdef EMIL_NO_FILE_LOCKING
 int probeLock(const char *filename) {
-	/* 0 ("no lock held"), not -1 ("held, holder unknown").  With no
-	 * lock manager on the platform, no process can be holding an
-	 * advisory lock, so 0 is the honest answer rather than a
-	 * convenient one.  The distinction is load-bearing:
-	 * editorOpen() treats -1 as a real lock and opens the buffer
-	 * read-only, which would make every file in the session
-	 * unwritable. */
 	(void)filename;
 	return 0;
 }
@@ -143,11 +128,6 @@ int probeLock(const char *filename) {
  * not name one).  No other outcome touches lock_blocked_pid. */
 #ifdef EMIL_NO_FILE_LOCKING
 int lockFile(struct buffer *bufr, const char *filename) {
-	/* LOCK_UNAVAILABLE is the ENOLCK case: nothing to acquire and
-	 * nothing to wait for, so the background poll stops asking
-	 * instead of retrying a lock manager that will never exist.
-	 * lock_fd stays -1, which keeps releaseLock a no-op, and
-	 * lock_blocked_pid is left untouched per the contract above. */
 	(void)bufr;
 	(void)filename;
 	return LOCK_UNAVAILABLE;
@@ -161,10 +141,6 @@ int lockFile(struct buffer *bufr, const char *filename) {
 	if (fd < 0) {
 		if (errno == ENOENT)
 			return LOCK_UNAVAILABLE; /* nothing to lock */
-		/* EINTR is not a permission failure: the background check
-		 * arms a SIGALRM deadline around this very call, and
-		 * falling through to the O_RDONLY retry would take an
-		 * F_RDLCK on a writable file and report it unwritable. */
 		if (errno == EINTR)
 			return LOCK_RETRY;
 		fd = open(filename, O_RDONLY);
@@ -183,15 +159,6 @@ int lockFile(struct buffer *bufr, const char *filename) {
 	if (fcntl(fd, F_SETLK, &fl) == 0) {
 		/* Lock acquired */
 		bufr->lock_fd = fd;
-
-		/* open_mtime is deliberately NOT set here.  This runs
-		 * on the clean->dirty edge, so re-baselining would
-		 * adopt whatever another process wrote while the
-		 * buffer sat clean, and the pre-save check (§3.21.2)
-		 * would then find no drift.  relockAll() avoids
-		 * lockFile() for the same reason.  Load, save and
-		 * revert set the baseline. */
-
 		return LOCK_ACQUIRED;
 	}
 
@@ -220,35 +187,15 @@ int lockFile(struct buffer *bufr, const char *filename) {
 	close(fd);
 	if (lock_errno == EINTR)
 		return LOCK_RETRY;
-
-	/* ENOLCK and friends: locking is not available here at all.
-	 * There is no holder to wait for, so the caller must stop
-	 * asking rather than probe a dead lock manager forever. */
 	return LOCK_UNAVAILABLE;
 }
 #endif /* EMIL_NO_FILE_LOCKING */
 
-/* Release the advisory lock held by this buffer.
- *
- * Deliberately does NOT clear open_mtime.  The lock lifetime and the
- * external-modification baseline are unrelated: this runs on the
- * dirty->clean edge, which a plain run of C-_ back to the start of the
- * session reaches, and checkFileModified's job 1 is gated on
- * open_mtime != 0.  Callers that genuinely change which file the buffer
- * refers to (saveAs) clear the baseline themselves. */
+/* Release the advisory lock held by this buffer. */
 void releaseLock(struct buffer *bufr) {
 	if (bufr->lock_fd >= 0) {
 		close(bufr->lock_fd);
 		bufr->lock_fd = -1;
-		/* That close dropped every lock this process holds on
-		 * the inode, not just this buffer's (see relockAll): a
-		 * second dirty buffer visiting the same file through a
-		 * symlink holds its own lock_fd but shares the one
-		 * per-process lock record, so releasing here -- from
-		 * markBufferClean() on save, or destroyBuffer() on
-		 * kill -- silently unlocked it too.  Re-assert.  When
-		 * no sibling exists this finds nothing to do, so the
-		 * release still releases. */
 		relockAll();
 	}
 	bufr->lock_blocked_pid = 0;
@@ -258,29 +205,7 @@ void releaseLock(struct buffer *bufr) {
  *
  * POSIX record locks are owned by the process, not the descriptor:
  * closing *any* descriptor referring to an inode drops every lock the
- * process holds on it (APUE §14.3).  So an operation as ordinary as
- * `C-x i` on the file the buffer is already visiting -- one fopen()
- * and one fclose() -- silently released a lock taken by
- * markBufferDirty(), while lock_fd stayed open so emil went on
- * believing it held one.  Reproduced on Linux/glibc for `C-x i` and
- * for `C-x C-f` through a symlink to an open file; the mechanism is
- * the standard's, not a platform's.
- *
- * Nothing inside emil can notice this, because F_GETLK reports
- * F_UNLCK for a lock the calling process holds itself: the only
- * observer is the second emil instance that was supposed to be warned
- * off, and it is warned off no longer.  Repair rather than
- * prevention, because the only way to keep a lock across an unrelated
- * close is an open-file-description lock (F_OFD_SETLK), which is
- * Linux-only and outside the POSIX.1-2001 baseline (§1.2).
- *
- * Re-issued on the *retained* descriptor rather than by calling
- * lockFile() again, for two reasons.  lockFile() opens a fresh
- * descriptor, so the old one would have to be closed afterwards --
- * which would drop the lock just acquired.  And lockFile() resets
- * open_mtime from its fstat, which would silently move the
- * external-modification baseline (§3.21.4) on an operation that never
- * touched the file's contents. */
+ * process holds on it (APUE §14.3). */
 #ifdef EMIL_NO_FILE_LOCKING
 void relockAll(void) {
 	/* lockFile() never sets lock_fd on this platform, so no buffer
@@ -292,12 +217,6 @@ void relockAll(void) {
 		if (b->lock_fd < 0)
 			continue;
 
-		/* Which lock we took is recoverable from the descriptor
-		 * we took it on: lockFile() falls back to O_RDONLY +
-		 * F_RDLCK when the file is not writable, so the access
-		 * mode and the lock type agree by construction.  Asking
-		 * the fd avoids a second copy of that decision on the
-		 * buffer, which could then disagree with it. */
 		int mode = fcntl(b->lock_fd, F_GETFL);
 		struct flock fl;
 		memset(&fl, 0, sizeof(fl));
@@ -313,16 +232,10 @@ void relockAll(void) {
 
 		int lock_errno = errno;
 
-		/* We do not hold it, whatever the reason, so lock_fd
-		 * must stop claiming otherwise.  Dropping it to -1 is
-		 * also what re-arms the background re-probe, which is
-		 * gated on lock_blocked_pid != 0 && lock_fd < 0
-		 * (§3.21.3). */
 		if (lock_errno == EACCES || lock_errno == EAGAIN) {
 			/* Another process took it in the window between
 			 * the close and here.  Name the holder and route
-			 * into the existing LOCK_CONFLICT presentation
-			 * rather than inventing a second one. */
+			 * into the existing LOCK_CONFLICT presentation.*/
 			struct flock query;
 			memset(&query, 0, sizeof(query));
 			query.l_type = F_WRLCK;
@@ -337,11 +250,6 @@ void relockAll(void) {
 			close(b->lock_fd);
 			b->lock_fd = -1;
 		} else {
-			/* ENOLCK and friends: there is no holder to wait
-			 * for.  Same conclusion lockFile() draws with
-			 * LOCK_UNAVAILABLE -- leave lock_blocked_pid
-			 * alone so the poll does not chase a lock
-			 * manager that is not there. */
 			close(b->lock_fd);
 			b->lock_fd = -1;
 		}
@@ -349,11 +257,6 @@ void relockAll(void) {
 }
 #endif /* EMIL_NO_FILE_LOCKING */
 
-/* The advisory lock is no longer held by anyone else -- or can no
- * longer be determined at all.  Clear the warning, and lift a
- * read-only that we imposed for the lock.  A read-only set because
- * access(W_OK) failed, or because the user pressed C-x C-q, is not
- * ours to undo and is left alone. */
 static void clearLockWarning(struct buffer *bufr) {
 	bufr->lock_blocked_pid = 0;
 	if (bufr->read_only_by_lock) {
@@ -464,16 +367,6 @@ void checkFileModified(void) {
 				E.buf->lock_blocked_pid = pid;
 			}
 		}
-		/* Both branches opened and closed a descriptor on this
-		 * buffer's inode -- probeLock() always, lockFile() on
-		 * its failure paths -- and either close drops any lock
-		 * another buffer holds on the same inode through a
-		 * symlink (see relockAll).  This is the timer-driven
-		 * copy of the keystroke-driven drops fixed at
-		 * editorOpen and insertFileAtPath: the probe answers
-		 * "no lock held" precisely because F_GETLK cannot see
-		 * our own, so it both causes the drop and reports
-		 * nothing wrong. */
 		relockAll();
 		free(iopath);
 	}
@@ -483,7 +376,7 @@ void checkFileModified(void) {
 
 /* Serialise the buffer: rows joined by '\n', with no terminator.  A
  * trailing newline in the output comes from a trailing empty row, not
- * from this function -- see the invariant note in buffer.h.  The
+ * from this function (see the invariant note in buffer.h).  The
  * result is NUL-terminated for convenience; *buflen excludes it.
  *
  * Byte-exact against editorOpen for LF files.  CRLF input is
@@ -551,14 +444,7 @@ static int fileContainsNullBytes(FILE *fp) {
 
 static int editorOpenBody(struct buffer *bufr, const char *filename);
 
-/* The wrapper exists so that relockAll() cannot be bypassed.  The body
- * below opens the file, and so drops any lock this process holds on
- * that inode (see relockAll), on every one of its exits -- including
- * the failure exits, where the buffer that lost its lock is a
- * different one that is not being touched at all.  A call placed after
- * each `return` inside would be correct today and wrong the first time
- * someone adds an early return, which is exactly the kind of silent
- * data-safety regression this repairs. */
+/* The wrapper exists so that relockAll() cannot be bypassed. */
 int editorOpen(struct buffer *bufr, const char *filename) {
 	int rc = editorOpenBody(bufr, filename);
 	relockAll();
@@ -659,9 +545,7 @@ static int editorOpenBody(struct buffer *bufr, const char *filename) {
 		no_final_newline = (linelen == 0 || line[linelen - 1] != '\n');
 
 		/* A CR counts as a DOS ending only when it precedes the
-		 * '\n'.  A lone CR is an ordinary byte, kept as-is on
-		 * save, so flagging it would promise a conversion that
-		 * never happens. */
+		 * '\n'.  A lone CR is an ordinary byte, kept as-is on save.*/
 		if (linelen >= 2 && line[linelen - 1] == '\n' &&
 		    line[linelen - 2] == '\r')
 			dos_endings = 1;
@@ -676,14 +560,10 @@ static int editorOpenBody(struct buffer *bufr, const char *filename) {
 	 * one more (empty) row.  Appended unconditionally: emil's buffers
 	 * end in a newline (see mutate.c), so a file that arrives without
 	 * one gains it here rather than at save time.  The invariant then
-	 * holds from load onwards and save has no policy to apply.
-	 *
-	 * appendRowRaw deliberately does not dirty the buffer, so this
-	 * costs nothing: an untouched file is still clean, still prompts
-	 * nothing on quit, and is not rewritten unless the user edits it.
+	 * holds from load onwards.
 	 *
 	 * An empty file is the single empty row, which serialises back to
-	 * zero bytes -- it has no lines, so it has nothing to terminate. */
+	 * zero bytes. */
 	appendRowRaw(bufr, (const uint8_t *)"", 0);
 
 	/* Get the display length of the longest column */
@@ -719,20 +599,15 @@ static int editorOpenBody(struct buffer *bufr, const char *filename) {
 		return -1;
 	}
 
-	/* The load used appendRowRaw which deliberately does not dirty
-	 * the buffer or invalidate per-row; invalidate the screen cache
-	 * once here now that all rows are in place.  The buffer is
-	 * already clean (newBuffer initialized it that way, and the
-	 * load did not touch dirty state), so no markBufferClean is
-	 * needed. */
+	/* The load used appendRowRaw which  does not dirty the buffer
+	 *  or invalidate per-row; invalidate the screen cache once here
+	 *  now that all rows are in place. */
 
 	if (access(iopath, W_OK) != 0) {
 		bufr->read_only = 1;
 	}
 
-	/* Record mtime for external-modification detection.  The lock is
-	 * not taken here: it is held only while the buffer is dirty, so
-	 * acquisition is deferred to markBufferDirty(). */
+	/* Record mtime for external-modification detection.*/
 	{
 		struct stat st;
 		if (stat(iopath, &st) == 0) {
@@ -802,10 +677,6 @@ static int editorOpenBody(struct buffer *bufr, const char *filename) {
 void revert(void) {
 	struct buffer *buf = E.buf;
 
-	/* A buffer that isn't visiting a file has nothing to revert to.
-	 * editorOpen's first act is collapseHome(filename), which reads
-	 * path[0] unconditionally, so passing NULL here crashed --
-	 * reachable simply by starting emil with no arguments. */
 	if (buf->filename == NULL) {
 		setStatusMessage("Buffer is not visiting a file");
 		return;
@@ -853,8 +724,7 @@ void revert(void) {
 	new->cx = buf->cx;
 	new->cy = buf->cy;
 	/* The cursor is carried over from the old buffer, so it may sit
-	 * past the end of a file that shrank on disk.  Live guard, not a
-	 * virtual-EOF leftover. */
+	 * past the end of a file that shrank on disk. */
 	if (new->cy >= new->numrows) {
 		new->cy = new->numrows - 1;
 		new->cx = 0;
@@ -866,7 +736,7 @@ void revert(void) {
 
 /*** Backup and Write Strategy (Vim backupcopy=yes style) ***/
 
-static int create_backup_exclusive(const char *name) {
+static int createBackupExclusive(const char *name) {
 	int fd;
 	do {
 		fd = open(name, O_WRONLY | O_CREAT | O_EXCL, 0600);
@@ -904,7 +774,7 @@ static int backup_create(const char *path, char *backup, size_t backup_size) {
 	backup[len] = '~';
 	backup[len + 1] = '\0';
 
-	fd = create_backup_exclusive(backup);
+	fd = createBackupExclusive(backup);
 	if (fd != -1)
 		return fd;
 
@@ -928,7 +798,7 @@ static int backup_create(const char *path, char *backup, size_t backup_size) {
 	for (int c = 'z'; c >= 'a'; c--) {
 		backup[char_start] = (char)c;
 
-		fd = create_backup_exclusive(backup);
+		fd = createBackupExclusive(backup);
 		if (fd != -1)
 			return fd;
 
@@ -943,7 +813,7 @@ static int backup_create(const char *path, char *backup, size_t backup_size) {
 /*
  * Write all bytes to fd, retrying on EINTR and handling short writes.
  */
-static int write_all(int fd, const char *buf, size_t len) {
+static int writeToFile(int fd, const char *buf, size_t len) {
 	size_t total = 0;
 
 	while (total < len) {
@@ -969,7 +839,7 @@ static int write_all(int fd, const char *buf, size_t len) {
 /*
  * Copy all bytes from from_fd to to_fd.
  */
-static int copy_fd(int from_fd, int to_fd) {
+static int copyFd(int from_fd, int to_fd) {
 	char buf[8192];
 
 	while (1) {
@@ -1011,8 +881,8 @@ static int copy_fd(int from_fd, int to_fd) {
  *
  * On failure, remove the partial backup and return -1.
  */
-static int make_verified_backup(const char *path, char *backup_path,
-				size_t backup_path_size) {
+static int makeVerifiedBackup(const char *path, char *backup_path,
+			      size_t backup_path_size) {
 	int bfd;
 	int fd;
 	int saved_errno;
@@ -1030,7 +900,7 @@ static int make_verified_backup(const char *path, char *backup_path,
 		return -1;
 	}
 
-	if (copy_fd(fd, bfd) == -1) {
+	if (copyFd(fd, bfd) == -1) {
 		saved_errno = errno;
 		close(fd);
 		close(bfd);
@@ -1075,8 +945,8 @@ static int make_verified_backup(const char *path, char *backup_path,
  *
  * On failure, set *damaged if the target file may now be damaged.
  */
-static int write_in_place(const char *path, const char *buf, size_t len,
-			  int require_regular, int *damaged) {
+static int writeInPlace(const char *path, const char *buf, size_t len,
+			int require_regular, int *damaged) {
 	int fd;
 	struct stat st;
 	int saved_errno;
@@ -1088,16 +958,13 @@ static int write_in_place(const char *path, const char *buf, size_t len,
 	if (fd == -1)
 		return -1;
 
-	if (write_all(fd, buf, len) == -1)
+	if (writeToFile(fd, buf, len) == -1)
 		goto fail;
 
 	if (fstat(fd, &st) == -1)
 		goto fail;
 
 	if (S_ISREG(st.st_mode)) {
-		if (ftruncate(fd, (off_t)len) == -1)
-			goto fail;
-
 		if (fsync(fd) == -1)
 			goto fail;
 	} else if (require_regular) {
@@ -1229,8 +1096,8 @@ static void saveBuffer(int skip_backup) {
 		struct stat st;
 
 		if (stat(iopath, &st) == 0 && S_ISREG(st.st_mode)) {
-			int backup_rc = make_verified_backup(
-				iopath, backup_path, sizeof(backup_path));
+			int backup_rc = makeVerifiedBackup(iopath, backup_path,
+							   sizeof(backup_path));
 			relockAll();
 
 			if (backup_rc == 0) {
@@ -1267,8 +1134,7 @@ static void saveBuffer(int skip_backup) {
 	 * the damaged file.
 	 */
 	while (1) {
-		int rc =
-			write_in_place(iopath, buf, len, have_backup, &damaged);
+		int rc = writeInPlace(iopath, buf, len, have_backup, &damaged);
 		relockAll();
 
 		if (rc == 0) {
@@ -1290,7 +1156,8 @@ static void saveBuffer(int skip_backup) {
 		emil_strlcat(msg, strerror(errno), sizeof(msg));
 
 		if (damaged)
-			emil_strlcat(msg, ". File contents incomplete or corrupt",
+			emil_strlcat(msg,
+				     ". File contents incomplete or corrupt",
 				     sizeof(msg));
 
 		if (have_backup) {
@@ -1377,13 +1244,6 @@ void save(int uarg) {
 	saveBuffer(skip_backup);
 }
 
-/*
- * Save As.
- *
- * This version does not take a universal argument.  If you want Save As to
- * honor the universal argument too, change this to saveAs(int uarg) and call
- * saveBuffer(uarg != 0).
- */
 void saveAs(void) {
 	if (E.recording || E.playback) {
 		setStatusMessage("Not available during macro");
@@ -1554,10 +1414,7 @@ void findFile(int read_only) {
 static int insertFileAtPathBody(struct buffer *buf, const char *path,
 				const char *display_name);
 
-/* Wrapped for the same reason as editorOpen, and this is the path §F2
- * was reported against: `C-x i` on the file the buffer is already
- * visiting fopen()s and fclose()s it, which released the lock
- * markBufferDirty() had taken on the very buffer doing the inserting. */
+/* Wrapped so that relockAll cannot be bypassed */
 int insertFileAtPath(struct buffer *buf, const char *path,
 		     const char *display_name) {
 	int rc = insertFileAtPathBody(buf, path, display_name);
@@ -1689,8 +1546,7 @@ static int insertFileAtPathBody(struct buffer *buf, const char *path,
 void insertFile(void) {
 	struct buffer *buf = E.buf;
 
-	/* Refuse before prompting for a filename.  insertFileAtPath
-	 * remains the load-bearing check; this one only spares the
+	/* Refuse before prompting for a filename.  Spares the
 	 * user typing a path for an insertion that will be refused. */
 	if (rejectIfReadOnly(buf))
 		return;

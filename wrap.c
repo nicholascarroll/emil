@@ -10,9 +10,7 @@
 #endif
 
 /* The whole-row walk, factored out so the cache-miss path and the
- * debug check below cannot drift apart.  A check computing the value
- * a second way would eventually disagree for its own reasons and be
- * disbelieved. */
+ * debug check below cannot drift apart. */
 static int walkLineWidth(erow *row) {
 	int screen_x = 0;
 	for (int i = 0; i < row->size;) {
@@ -25,19 +23,7 @@ static int walkLineWidth(erow *row) {
 /* Total display width of a row, cached in row->cached_width.
  *
  * EMIL_DEBUG_ROW_CACHE recomputes on every cache hit and aborts on a
- * mismatch.  §4.10 obliges every mutation site to set cached_width to
- * -1 by hand and there is no mechanical check (Appendix C.2), so the
- * remaining readers want a net.  drawRows() is no longer one of them:
- * §C2 pads from the column the renderer stopped at.  What is left
- * reaches here through charsToDisplayColumn(row, cx) with the cursor
- * at end of line, where char_pos >= row->size makes the whole row the
- * answer.
- *
- * Not gated on NDEBUG, which the Makefile never defines, so it would
- * be on in the build users get.  The check IS the walk the cache
- * exists to avoid, and on a multi-megabyte line it costs more than the
- * walk it guards.  The sanitize target defines the macro instead,
- * which is what the pre-merge run uses. */
+ * mismatch.*/
 int calculateLineWidth(erow *row) {
 	if (row->cached_width >= 0) {
 #ifdef EMIL_DEBUG_ROW_CACHE
@@ -59,17 +45,13 @@ int calculateLineWidth(erow *row) {
 
 /* Display column of a byte offset within a row.
  *
- * char_pos >= row->size means "the whole row", which is exactly what
+ * char_pos >= row->size means "the whole row", which is  what
  * calculateLineWidth() computes and caches.  The comparison must be
  * >=, not >: a > here sends a cursor at end of line down the
- * O(row->size) walk while the cached answer sits unused.  Since §C2
- * the frame computes this column once and passes it to the status bar
+ * O(row->size) walk while the cached answer sits unused.  The
+ * frame computes this column once and passes it to the status bar
  * and the cursor placement, so the cache serves repeat frames on an
- * unedited row rather than repeat callers within one frame.
- *
- * The walk delegates to nextScreenX() rather than repeating its width
- * rules.  An earlier copy here drifted from it and was the reason two
- * paths could disagree about a tab or a wide character. */
+ * unedited row rather than repeat callers within one frame.*/
 int charsToDisplayColumn(erow *row, int char_pos) {
 	if (!row || char_pos < 0)
 		return 0;

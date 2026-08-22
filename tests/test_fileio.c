@@ -291,7 +291,7 @@ void test_save_valid_utf8_succeeds(void) {
 	buf->filename = xstrdup(tmpname);
 	buf->dirty = 1;
 
-	save();
+	save(0);
 
 	TEST_ASSERT_NOT_NULL(strstr(E.statusmsg, "Wrote"));
 	TEST_ASSERT_EQUAL_INT(0, buf->dirty);
@@ -321,7 +321,7 @@ void test_save_invalid_utf8_refused(void) {
 	/* Corrupt the row in place: 0xC2 with no continuation byte */
 	buf->row[0].chars[1] = 0xC2;
 
-	save();
+	save(0);
 
 	/* Refused with an error... */
 	TEST_ASSERT_NOT_NULL(strstr(E.statusmsg, "Save failed"));

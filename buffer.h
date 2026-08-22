@@ -83,14 +83,7 @@ void clampPositions(struct buffer *buf);
  * exists for exactly that and its callers must restore the invariant
  * before returning. */
 
-/* ---- G0 offset shims (design §11 step 2) ----
- *
- * G0 replaces the (cx, cy) coordinate pair with a single byte offset
- * into a flat buffer.  These three functions define that offset space
- * against the current row array, so that callers can be converted to
- * offsets one at a time while the row array is still the storage.
- *
- * The offset space is exactly the byte string rowsToString() produces:
+/* The offset space is exactly the byte string rowsToString() produces:
  *
  *     row[0] "\n" row[1] "\n" ... "\n" row[N-1]
  *
@@ -98,11 +91,6 @@ void clampPositions(struct buffer *buf);
  * offset of row j is sum(row[i].size + 1) for i < j.  Offsets run over
  * [0, bufTextLen()] inclusive: the end offset names the position after
  * the last byte, which is where the cursor sits at end of buffer.
- *
- * These are O(numrows) by construction and are scaffolding, not a
- * destination: under the flat buffer the offset IS the storage address
- * and both conversions disappear.  Do not call them from a per-frame
- * path.
  *
  * bufOffset() and bufPos() are exact inverses for every in-bounds
  * (cx, cy); tests/test_offset.c and the fuzzer assert the round trip. */

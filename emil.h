@@ -62,29 +62,15 @@ enum promptType {
 /* Type policy:
  * Positions (cx, cy, markx, marky): int, signed for sentinels
  * Sizes (erow.size, abuf.len): int, NOT bounded by anything at runtime
- * Accumulations to malloc: size_t (e.g. rowsToString totlen)
- *
- * This used to say erow.size and abuf.len were bounded by
- * EMIL_MAX_FILE_SIZE.  They are not.  The load path bounds a *file* to
- * that size at admission (§3.21.1); nothing re-imposes it once editing
- * starts, and a buffer can grow without limit from there.  So any code
- * growing one of these values owns its own overflow guard -- see
- * dbuf_ensure(), undoEnsureData(), rowEnsureCap().  The claim was true
- * under the older EMIL_BYTES_BUDGET and was left behind when that
- * went.  */
+ * Accumulations to malloc: size_t (e.g. rowsToString totlen) */
 
 typedef struct erow {
 	int size;
 	int charcap; /* bytes allocated (>= size + 1) */
 	uint8_t *chars;
 	int cached_width; /* display width in columns, or -1 if stale.
-			   * INVARIANT (§4.10): any code that modifies
-			   * row text must set this to -1.  It is now
-			   * the only derived field on a row: the wrap
-			   * count that sat beside it went with the
-			   * screen-line cache (#108), and the width
-			   * does not depend on the terminal's, so a
-			   * resize does not stale it. */
+			   * INVARIANT: any code that modifies
+			   * row text must set this to -1. */
 } erow;
 
 struct undo {
@@ -253,17 +239,7 @@ struct history {
 };
 
 struct config {
-	/* Active kill entry.
-	 *
-	 * Deliberately shared between the minibuffer and ordinary
-	 * buffers, as in Emacs: a kill made while typing at a prompt
-	 * lands in the same ring the file yanks from, which is what
-	 * makes C-w at a prompt then C-y in the buffer work.  The kill
-	 * ring, kill_ring_pos and the history rings below are therefore
-	 * NOT saved and restored across a nested prompt -- unlike
-	 * edbuf and prompt_type, which are per-prompt state.  A nested
-	 * prompt moving the outer buffer's yank position is the
-	 * intended behaviour, not a nesting bug. */
+	/* Active kill entry.*/
 	struct text kill;
 	int screenrows;
 	int screencols;
@@ -296,14 +272,7 @@ struct config {
 	 * after a C-/ that leaves more to redo, a following C-_ or
 	 * C-/ continues redoing rather than undoing (keymap.c's redo
 	 * chain).  Every other key clears it, so it never outlives
-	 * the keystroke after the one that set it.
-	 *
-	 * emil-findings.md §F6 lists this as vestigial.  It is not:
-	 * keymap.c:1170 reads it, and without that read C-_ after a
-	 * redo would reach dispatchMisc's plain doUndo() and undo the
-	 * redo just applied -- so C-_ and C-/ would oscillate over one
-	 * change instead of walking back up the redo stack.  Read from
-	 * the dispatch path, not exercised against a running editor. */
+	 * the keystroke after the one that set it.*/
 	int micro;
 	struct command *cmd;
 	int cmd_count;

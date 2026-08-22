@@ -158,9 +158,7 @@ void popMark(void) {
 		/* Backstop: adjustAllPoints() keeps ring entries live
 		 * across mutations, but an entry can also predate a
 		 * buffer reload, so snap what we restore rather than
-		 * trusting it.  Bounds first -- a byte offset must be
-		 * inside the row before it can be tested for being
-		 * mid-character. */
+		 * trusting it.*/
 		if (buf->marky >= buf->numrows)
 			buf->marky = buf->numrows - 1;
 		if (buf->marky < buf->numrows) {
@@ -202,8 +200,7 @@ void markBuffer(void) {
 
 /* Validity of a specific buffer's mark.  Callers that render or edit a
  * buffer other than the focused one must use this form: the no-arg
- * wrapper below consults the global E.buf, which is only the right
- * question when the buffer in hand IS E.buf. */
+ * wrapper below consults the global E.buf.*/
 int markInvalidBuf(const struct buffer *buf) {
 	return (buf->markx < 0 || buf->marky < 0 ||
 		buf->marky >= buf->numrows ||
@@ -389,8 +386,7 @@ static int yank_style_reverse = 0;
 
 /* Insert the current kill at point.  Forward style leaves point after
  * the inserted text; reverse style leaves point before it and sets
- * the mark after it.  Does not touch E.kill_ring_pos — that is the
- * caller's bookkeeping. */
+ * the mark after it.*/
 static void yankInsert(int reverse) {
 	if (E.kill.is_rectangle) {
 		/* Rectangles have their own geometry-driven point
@@ -418,8 +414,7 @@ static void yankInsert(int reverse) {
 }
 
 void yank(int uarg) {
-	/* M-- C-y is undefined by design: the reverse modifier belongs
-	 * to M-y, transpose, and the case commands. */
+	/* M-- C-y is an anti-feature.*/
 	if (uarg == UARG_REVERSE)
 		return;
 
@@ -443,8 +438,7 @@ void yank(int uarg) {
 }
 
 void yankPop(int uarg) {
-	/* C-u M-y is undefined by design: a repeat count has no meaning
-	 * for cycling, and numeric ring selection does not exist. */
+	/* C-u M-y (numeric ring selection) is an anti-feature.*/
 	if (uarg > 0)
 		return;
 
@@ -883,12 +877,6 @@ void stringRectangleWithText(uint8_t *string) {
 		 * stay whole outside the replacement. */
 		int s = rectSnapFwd(row, topx);
 		int e = rectSnapBack(row, botx);
-		/* A rectangle whose columns both fall inside one
-		 * multi-byte character snaps to an inverted pair: the
-		 * left edge forward past the character, the right edge
-		 * back before it.  That is a zero-width intersection
-		 * with this row, so say so here rather than leaving
-		 * each consumer to derive it from its own clamp. */
 		if (e < s)
 			e = s;
 
@@ -941,12 +929,6 @@ static uint8_t *extractRectColumns(struct buffer *buf, int topx, int topy,
 		 * always fits in the rw-byte cell, space-padded. */
 		int s = rectSnapFwd(row, topx);
 		int e = rectSnapBack(row, botx);
-		/* A rectangle whose columns both fall inside one
-		 * multi-byte character snaps to an inverted pair: the
-		 * left edge forward past the character, the right edge
-		 * back before it.  That is a zero-width intersection
-		 * with this row, so say so here rather than leaving
-		 * each consumer to derive it from its own clamp. */
 		if (e < s)
 			e = s;
 		if (s >= row->size || e <= s)

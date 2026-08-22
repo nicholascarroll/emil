@@ -183,10 +183,6 @@ void forwardWordEnd(int *dx, int *dy) {
 		}
 		cx = 0;
 	}
-	/* Only whitespace/boundary characters between point and end of
-	 * buffer.  Land at end of buffer (like Emacs M-f), not at
-	 * (0, starting row): cx was reset to 0 at each line end, so the
-	 * old "*dx = cx" moved the cursor BACKWARD to column 0. */
 	*dy = E.buf->numrows - 1; /* numrows >= 1 (#105) */
 	*dx = E.buf->row[*dy].size;
 }

@@ -47,7 +47,7 @@ void insertChar(struct buffer *bufr, int c, int count) {
  * and leave point after the insertion.
  *
  * A single repetition may join the run at the head of the undo list —
- * that is what makes typing a word one undo step.  An explicit prefix
+ * that's what makes typing a word one undo step.  An explicit prefix
  * argument is one command, so it produces one record however many
  * copies it asks for, rather than a run the cap would then chop up. */
 static void insertRepeat(struct buffer *buf, const uint8_t *text, int len,
@@ -154,10 +154,6 @@ void unindent(int rept) {
 	/* Calculate size of unindent */
 	/* NB: trunc is bounded by the NUL terminator at chars[size],
 	 * which always mismatches '\t'. */
-	/* UARG_COUNT maps a missing prefix argument (0) to 1, as every
-	 * other command in this file does.  Looping on the raw argument
-	 * meant a plain Shift-Tab -- CMD_UNINDENT passes E.uarg, which is
-	 * 0 with no prefix -- asked for zero levels and did nothing. */
 	int times = UARG_COUNT(rept);
 	int trunc = 0;
 	for (int i = 0; i < times; i++) {
@@ -577,10 +573,6 @@ void killLineBackwards(void) {
 
 void quit(void) {
 	if (E.playback) {
-		/* The unsaved-changes confirmation below reads a key;
-		 * during playback that read comes from the macro key
-		 * stream (now bounds-checked to return -1), so the
-		 * prompt could never be answered: block instead. */
 		setStatusMessage("Not available during macro");
 		return;
 	}
@@ -859,13 +851,7 @@ void zapToChar(void) {
 	}
 
 	/* The target is compared byte-for-byte against buffer content, so
-	 * it has to be a single ASCII byte.  readKey() also returns key
-	 * tokens >= 1000 for navigation and Meta keys, and truncating one
-	 * to uint8_t lands in the UTF-8 lead-byte range -- KEY_ARROW_LEFT
-	 * (1000) becomes 0xE8 -- so the search would cut a character in
-	 * half and leave the buffer holding invalid UTF-8.  A multi-byte
-	 * target could not work here in any case: those bytes arrive in
-	 * E.unicode, not in c.  This also catches readKey()'s -1. */
+	 * it has to be a single ASCII byte.*/
 	if (c != '\t' && (c < ' ' || c > '~')) {
 		setStatusMessage("Zap to char: not a character");
 		return;

@@ -74,10 +74,8 @@ void markBufferClean(struct buffer *buf) {
 void rowEnsureCap(erow *row, int needed) {
 	if (needed <= row->charcap)
 		return;
-	/* `charcap * 2` was unchecked.  Latent: a row is bounded by
-	 * EMIL_MAX_FILE_SIZE (1 GiB) at load, but nothing re-imposes
-	 * that during editing, so the doubling is the caller's problem
-	 * and the caller does not know it has one.  Cap the doubling
+	/* A row is bounded by EMIL_MAX_FILE_SIZE (1 GiB) at load, but 
+	 * nothing re-imposes that during editing, so cap the doubling
 	 * instead of overflowing into a negative capacity, which would
 	 * make the `new_cap < needed` line below silently allocate too
 	 * little. */
@@ -94,11 +92,8 @@ void rowEnsureCap(erow *row, int needed) {
 static void bufEnsureRowCap(struct buffer *bufr) {
 	if (bufr->numrows < bufr->rowcap)
 		return;
-	/* Same unchecked doubling as rowEnsureCap had.  The row count
-	 * is bounded at INT_MAX / 2 by the load path (§2.4.1), so the
-	 * cap below is reached before the multiplication can overflow;
-	 * it is here so the bound is stated in the code that depends on
-	 * it rather than only in a document. */
+	/* The row count is bounded at INT_MAX / 2 by the load path, so the
+	 * cap below is reached before the multiplication can overflow.*/
 	int new_cap = !bufr->rowcap		 ? 16 :
 		      bufr->rowcap > INT_MAX / 2 ? INT_MAX :
 						   bufr->rowcap * 2;
@@ -203,10 +198,6 @@ struct buffer *newBuffer(void) {
 	ret->match_len = 0;
 	ret->dirty = 0;
 	ret->special_buffer = 0;
-	/* An empty buffer has nothing to undo.  Before #104 this held a
-	 * pre-allocated empty record that the first edit appended to;
-	 * the mutation layer now builds every record, so the list
-	 * simply starts empty. */
 	ret->undo = NULL;
 	ret->redo = NULL;
 	ret->completionState.last_completed_text = NULL;
@@ -229,11 +220,7 @@ struct buffer *newBuffer(void) {
 	ret->lock_blocked_pid = 0;
 	ret->internal_mod = 0;
 
-	/* Establish numrows >= 1.  The empty buffer is the one-row
-	 * buffer whose single row is empty, which serialises to the
-	 * empty byte string -- see rowsToString.  appendRowRaw is used
-	 * rather than insertRow because the new buffer must start
-	 * clean. */
+	/* Establish numrows >= 1. */
 	appendRowRaw(ret, (const uint8_t *)"", 0);
 	return ret;
 }
@@ -250,9 +237,7 @@ void bufferResetRows(struct buffer *bufr) {
 	bufr->rowcap = 0;
 }
 
-/* Does the buffer hold no text at all?  The empty buffer is the one-row
- * buffer whose single row is empty (numrows == 0 is unreachable), so
- * every emptiness test goes through here. */
+/* The empty buffer is the one-row buffer whose single row is empty. */
 int bufferIsEmpty(struct buffer *bufr) {
 	return bufr->numrows == 1 && bufr->row[0].size == 0;
 }
@@ -264,8 +249,7 @@ int bufferIsEmpty(struct buffer *bufr) {
  *
  * For display only.  Line *numbering* does not go through here: point
  * may legitimately sit on the final empty row, so the cursor line
- * stays cy + 1 and can exceed this count by one.  That asymmetry is
- * deliberate and matches Emacs. */
+ * stays cy + 1 and can exceed this count by one.*/
 int bufferLineCount(struct buffer *bufr) {
 	if (bufr->numrows > 0 && bufr->row[bufr->numrows - 1].size == 0)
 		return bufr->numrows - 1;
@@ -577,13 +561,13 @@ void killBuffer(void) {
 			if (scratch != NULL) {
 				E.windows[i]->buf = scratch;
 				E.headbuf = scratch;
-				E.buf = E.headbuf; // Ensure E.buf is updated
+				E.buf = E.headbuf;
 			} else if (bufr->next == NULL) {
 				E.windows[i]->buf = E.headbuf;
-				E.buf = E.headbuf; // Ensure E.buf is updated
+				E.buf = E.headbuf;
 			} else {
 				E.windows[i]->buf = bufr->next;
-				E.buf = bufr->next; // Ensure E.buf is updated
+				E.buf = bufr->next;
 			}
 		}
 	}
@@ -849,9 +833,7 @@ void clampPositions(struct buffer *buf) {
 		clampToBuffer(buf, &buf->markx, &buf->marky);
 }
 
-/* ---- G0 offset shims (design §11 step 2) ----
- *
- * See the contract in buffer.h.  These define the flat offset space
+/* See the contract in buffer.h.  These define the flat offset space
  * against the row array so callers can migrate to offsets before the
  * storage changes. */
 

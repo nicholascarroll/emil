@@ -262,16 +262,7 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 		setStatusMessage("Read %d bytes", d.len);
 	}
 
-	/* Reject output containing NUL bytes.  Both consumers
-		 * measure it with strlen -- pipeCmd building the *Shell
-		 * Output* buffer, and transformRange REPLACING the user's
-		 * region with it -- so a NUL would silently truncate, in
-		 * the worst case swapping the selected text for a prefix
-		 * of the real output.  Every other ingestion path refuses
-		 * NUL-bearing content; this is the last remaining door.
-		 * d.len is the true byte count and is discarded by
-		 * dbuf_detach below, which is why the check belongs here
-		 * and not in the strlen-based callers. */
+	/* Reject output containing NUL bytes.*/
 	if (d.len > 0 && memchr(d.buf, '\0', (size_t)d.len) != NULL) {
 		setStatusMessage("Shell output contains null bytes");
 		subprocess_destroy(&subprocess);
@@ -441,9 +432,6 @@ void diffBufferWithFile(void) {
 		return;
 	}
 
-	/* A clean buffer matches its file unless another process
-	 * rewrote it underneath (#112) -- the case where a diff is
-	 * most wanted, and where the old message was false. */
 	if (!bufr->dirty && !bufr->external_mod) {
 		setStatusMessage("Buffer matches file");
 		return;
@@ -490,7 +478,7 @@ void diffBufferWithFile(void) {
 	close(fd);
 	free(bufstr);
 
-	/* Run diff directly, no shell — avoids filename quoting issues */
+	/* Run diff directly, no shell. Avoids filename quoting issues.*/
 	char *iopath = expandTilde(bufr->filename);
 	const char *command_line[5] = { "diff", "-u", iopath, tmpname, NULL };
 	struct subprocess_s subprocess;

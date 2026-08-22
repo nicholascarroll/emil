@@ -407,9 +407,9 @@ void test_checkFileModified_does_not_reacquire_if_file_changed(void) {
 
 /* ---- save / revert clearing external_mod ---- */
 
-/* save() clears external_mod after writing.  We can't easily call
- * save() in the test harness (it needs terminal I/O for prompts),
- * so we simulate the flag-clearing sequence that save() performs
+/* save(0) clears external_mod after writing.  We can't easily call
+ * save(0) in the test harness (it needs terminal I/O for prompts),
+ * so we simulate the flag-clearing sequence that save(0) performs
  * after a successful write:
  *   markBufferClean → stat → open_mtime update → external_mod = 0
  * The point of this test is that the latch is cleared by the save
@@ -638,7 +638,7 @@ void test_presave_prompt_refused_leaves_file(void) {
 	int keys[] = { 'n' };
 	scriptKeys(keys, 1);
 	muteStdout();
-	save();
+	save(0);
 	unmuteStdout();
 	clearKeys();
 
@@ -673,7 +673,7 @@ void test_presave_prompt_accepted_writes(void) {
 	int keys[] = { 'y' };
 	scriptKeys(keys, 1);
 	muteStdout();
-	save();
+	save(0);
 	unmuteStdout();
 	clearKeys();
 
@@ -696,7 +696,7 @@ void test_presave_no_prompt_when_unchanged(void) {
 
 	clearKeys();
 	muteStdout();
-	save();
+	save(0);
 	unmuteStdout();
 
 	TEST_ASSERT_FALSE(b->dirty);
