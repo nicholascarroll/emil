@@ -89,6 +89,9 @@ Quit the editor.
 Open a file and load it into a buffer.
 .It Cm C-x C-s
 Save the current buffer to its associated file.
+With
+.Cm C-u ,
+saves without creating an ephemeral backup file, and is therefore unsafe.
 .It Cm C-x C-w
 Save the current buffer under a new filename (Save As).
 .It Cm C-x C-q
@@ -464,9 +467,8 @@ When saving,
 .Nm
 writes the complete buffer to the associated file.
 A buffer with no unsaved changes is not rewritten. 
-The write is not atomic, and an interrupted write leaves the file partly updated.
 Symbolic links are followed and the file they name is written.
-No automatic backup or "auto-save" files are generated.
+The write is not atomic, and an interrupted write leaves the file partly updated. After a failed save, a backup file of the pre-saved file state is left in the same directory, suffixed "~".  
 .Ss Advisory Locking
 While having unsaved edits to a file,
 .Nm

@@ -52,9 +52,6 @@ void markBufferDirty(struct buffer *buf) {
 	if (lockFile(buf, iopath) == 0) {
 		/* Lock acquired: clear any prior "blocked by PID" state. */
 		buf->lock_blocked_pid = 0;
-	} else if (buf->lock_blocked_pid != 0) {
-		setStatusMessage("Warning: file locked by PID %d",
-				 buf->lock_blocked_pid);
 	}
 	free(iopath);
 }

@@ -336,8 +336,6 @@ void relockAll(void) {
 				b->lock_blocked_pid = -1;
 			close(b->lock_fd);
 			b->lock_fd = -1;
-			setStatusMessage("Warning: file locked by PID %d",
-					 b->lock_blocked_pid);
 		} else {
 			/* ENOLCK and friends: there is no holder to wait
 			 * for.  Same conclusion lockFile() draws with
@@ -423,8 +421,6 @@ void checkFileModified(void) {
 		if (rc == 0 && (st.st_mtime != E.buf->open_mtime ||
 				st.st_size != E.buf->open_size)) {
 			E.buf->external_mod = 1;
-			setStatusMessage("Warning: %s modified on disk",
-					 E.buf->filename);
 		}
 		free(iopath);
 	}
@@ -1077,7 +1073,7 @@ static int make_verified_backup(const char *path, char *backup_path,
  * regular file.  This is used when a backup exists, because deleting a
  * backup after writing to a non-regular file would be unsafe.
  *
- * On failure, set *damaged if the target file may now be invalid.
+ * On failure, set *damaged if the target file may now be damaged.
  */
 static int write_in_place(const char *path, const char *buf, size_t len,
 			  int require_regular, int *damaged) {
@@ -1233,8 +1229,11 @@ static void saveBuffer(int skip_backup) {
 		struct stat st;
 
 		if (stat(iopath, &st) == 0 && S_ISREG(st.st_mode)) {
-			if (make_verified_backup(iopath, backup_path,
-						 sizeof(backup_path)) == 0) {
+			int backup_rc = make_verified_backup(
+				iopath, backup_path, sizeof(backup_path));
+			relockAll();
+
+			if (backup_rc == 0) {
 				have_backup = 1;
 			} else {
 				char msg[PATH_MAX + 256];
@@ -1268,12 +1267,15 @@ static void saveBuffer(int skip_backup) {
 	 * the damaged file.
 	 */
 	while (1) {
-		if (write_in_place(iopath, buf, len, have_backup, &damaged) ==
-		    0) {
+		int rc =
+			write_in_place(iopath, buf, len, have_backup, &damaged);
+		relockAll();
+
+		if (rc == 0) {
 			/*
-			 * Success.  Delete only a backup that this save
-			 * created.
+			 * Success.  Delete only a backup that this save created.
 			 */
+
 			if (have_backup)
 				unlink(backup_path);
 			break;
@@ -1288,7 +1290,7 @@ static void saveBuffer(int skip_backup) {
 		emil_strlcat(msg, strerror(errno), sizeof(msg));
 
 		if (damaged)
-			emil_strlcat(msg, ". File data is now invalid",
+			emil_strlcat(msg, ". File contents incomplete or corrupt",
 				     sizeof(msg));
 
 		if (have_backup) {
@@ -1301,7 +1303,7 @@ static void saveBuffer(int skip_backup) {
 		if (!confirmYN(msg)) {
 			if (damaged && have_backup) {
 				setStatusMessage(
-					"Save aborted. File may be damaged; backup is in %s",
+					"Save aborted. File contents may be incomplete or corrupt; backup is in %s",
 					backup_path);
 			} else if (damaged) {
 				setStatusMessage(
@@ -1318,7 +1320,6 @@ static void saveBuffer(int skip_backup) {
 		}
 	}
 
-	relockAll();
 	markBufferClean(E.buf);
 
 	for (int i = 0; i < E.buf->numrows; i++) {
