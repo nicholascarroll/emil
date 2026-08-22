@@ -782,7 +782,9 @@ static int backup_create(const char *path, char *backup, size_t backup_size) {
 		return -1;
 
 	char_start = len;
-	while (char_start > 0 && utf8_isCont((uint8_t)path[char_start - 1]))
+	if (char_start > 0)
+		char_start--;
+	while (char_start > 0 && utf8_isCont((uint8_t)path[char_start]))
 		char_start--;
 
 	new_len = char_start + 1;
