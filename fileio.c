@@ -1841,10 +1841,10 @@ char *readAllFromFd(int fd, size_t *out_len) {
 }
 
 /*
- * Load piped stdin data into a new editor buffer.  The data is split
+ * load piped stdin data into a new editor buffer.  The data is split
  * on newline boundaries and inserted row by row, matching the same
  * approach used by editorOpen().  The buffer is named "*stdin*" and
- * marked read-only.
+ * marked as a special buffer.
  *
  * Returns the new buffer, or NULL if the data contains null bytes
  * or is not valid UTF-8.  editorOpen() enforces the same invariant
@@ -1893,11 +1893,7 @@ struct buffer *loadStdinBuffer(const char *data, size_t len) {
 		destroyBuffer(buf);
 		return NULL;
 	}
-
-	/* Stdin content is read-only: the *stdin* pseudo-file has no
-	 * disk backing to save to. 
-	 */
-	buf->read_only = 1;
+	buf->special_buffer = 1;
 	buf->word_wrap = 1;
 	return buf;
 }

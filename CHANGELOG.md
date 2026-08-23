@@ -1,82 +1,25 @@
 ## [Unreleased]
+- Piped stdin is now a writeable special buffer. 
 - Fixed a window's top line going blank after an edit deleted the row
-  it was scrolled into. `adjustAllPoints` moved `rowoff` to the
-  deletion's first row but carried `skip_sublines` across unchanged, so
-  it could name a sub-line the surviving row does not have; `drawRows`
-  then skipped past the row's last sub-line and emitted nothing.
-  `scroll()` repaired this for the focused window, so it showed only in
-  a window that was not focused. Introduced with the `rowoff`
-  adjustment itself.
-- Fixed the same blank top line arising without a deletion: a top row
-  that shrank, or a terminal that widened, could leave a stored
-  `skip_sublines` past the row's last sub-line. `topSet()` deliberately
-  does not clamp on write (that would be a whole-row walk per write),
-  so `drawRows` now clamps on the read and draws the row's last
-  sub-line. Pre-existing.
+  it was scrolled into.
+- Fixed the same blank top line arising without a deletion.
 - Fixed the terminal-ownership pty scenarios silently skipping instead
-  of failing when the editor genuinely fails to enter raw mode. The
-  probe for "can this platform report the slave's termios through the
-  master" asked whether ECHO was off while the editor ran -- which is
-  also the defect the scenarios exist to catch, so a real failure was
-  indistinguishable from an unobservant platform, and the probe won.
-  It now opens its own pty pair and checks that a flag set on the slave
-  is reflected through the master in both directions, with no editor
-  involved. Confirmed by mutation: with ECHO and ISIG left on, three
-  scenarios previously skipped on Linux and now fail.
-- Corrected the WASIX skip rationale, which reasoned about `wasi-libc`
-  while the target builds against `wasix-libc`. Only the `warnings`
-  skip is a platform gap (no `F_GETLK`/`F_SETLK`); `subprocess` and
-  `shell` are skipped because this target chooses `-DEMIL_DISABLE_SHELL`,
-  and `writeall` fails to link for threading-model reasons rather than
-  for the absence of `fork` or of signals, both of which WASIX has.
-  No behaviour change; the same four suites are skipped. README
-  updated to match.
-- Corrected two comments that overstated the viewport rewrite.
-  Viewport questions are bounded by the window height in screen lines,
-  not in bytes: `screenWalkStart()` costs the bytes before its
-  sub-line, and `linesBack()` costs a whole row to learn its last
-  sub-line index. A frame is independent of `numrows`, which is what
-  #111 achieved, but still scales with the cursor's depth inside a
-  single long wrapped row. Measured on one 4 MB row: 0.06 ms at the
-  start, 167 ms at 3.2 MB in. Page-down on the same row improved from
-  1024 ms to 201 ms, and page-up on short rows regressed from 0.036 ms
-  to 0.072 ms, which the original notes recorded as a wash.
-- Fixed the hard-link tests failing on Haiku, where `link()` is not
-  available. They asserted that the call succeeds, which is a claim about
-  the filesystem rather than about emil -- and a filesystem without hard
-  links cannot have the bug they guard. They now skip.
-- Fixed the terminal-ownership pty scenarios failing on MSYS2. They
-  assumed the raised `SIGTSTP` is always discarded, which POSIX requires
-  only for an orphaned process group: Linux and illumos discard it,
-  Cygwin stops the process anyway. A stopped editor is supposed to have
-  handed the terminal back, so the assertion had it exactly backwards.
-  The scenarios now distinguish stopped from running, and where the stop
-  takes effect they send `SIGCONT` and assert the editor reclaims the
-  terminal -- the same repair, reached the ordinary way.
-- Tests can now skip themselves. `TEST_SKIP` reports a platform that
-  cannot host a test rather than passing silently, and both the unit
-  suites and the pty scenarios count and print their skips, so coverage
-  cannot quietly shrink where nobody is looking.
-- Fixed the terminal-ownership pty scenarios failing on illumos. They
-  asserted that `tcgetattr()` on the pty master reports the slave's
-  termios, which is a Linux/BSD convenience: an illumos pty is a STREAMS
-  device whose master has no terminal semantics of its own, so the call
-  fails and the suite reported "editor did not start in raw mode" against
-  an editor that had. The scenarios now skip where the state cannot be
-  observed, and the Ctrl-C-after-suspend check -- which needs no termios
-  visibility and passed on OpenIndiana throughout -- now covers all three
-  suspend paths, so those platforms keep real coverage.
+  of failing when the editor fails to enter raw mode. 
+- Save now works like Vim's backupcopy=yes: inode is preserved. File is
+  directly written with an ephemeral backup sidecar file suffixed '~'.
 - Saving now direct-writes hard-linked files.
 - Saving no longer replaces a FIFO, socket or device node.
 - A file whose directory is not writable can now be saved.
-- #107 Removed the direct-overwrite prompt on ENOSPC.
 - Higlighting of matches in `query-replace` #106.
 - On file save, a confirmation prompt if file on disk is newer
 - Fixed the editor being left with the terminal in cooked mode after
   `C-z`, `C-x z` or `C-x C-z` when the raised `SIGTSTP` is discarded.
 - Fixed a heap-buffer-overflow in `clampCursorToViewport`.
-- `fuzz_undo` now runs a set of seeds rather than the pinned seed 1.
-- The shared test harness now gives its window a realistic height.
+- Viewport arithmetic now just-in-time relative to the window. Drops
+  the absolute screen-line coordinate (#111) and the buffer-level 
+  screen-line cache behind it (#108); fixes C-l in word wrap mode.
+- Fixed #112
+- Added WASIX target. 
 
 ## [0.9.3]
 - query-replace better error handling

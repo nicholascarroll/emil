@@ -91,7 +91,7 @@ Open a file and load it into a buffer.
 Save the current buffer to its associated file.
 With
 .Cm C-u ,
-saves without creating an ephemeral backup file, and is therefore unsafe.
+saves without creating an ephemeral backup file (risks data loss).
 .It Cm C-x C-w
 Save the current buffer under a new filename (Save As).
 .It Cm C-x C-q
@@ -465,10 +465,11 @@ Validation at file load and inserting text in the buffer disallow  null bytes (0
 .Ss File Persistence
 When saving,
 .Nm
-writes the complete buffer to the associated file.
-A buffer with no unsaved changes is not rewritten. 
-Symbolic links are followed and the file they name is written.
-The write is not atomic, and an interrupted write leaves the file partly updated. After a failed save, a backup file of the pre-saved file state is left in the same directory, suffixed "~".  
+writes the complete buffer to the associated file. Symbolic links are followed.  The inode is preserved; hard links are preserved. Before writing, 
+.Nm
+copies the file to an ephemeral backup (suffixed "~") in the same directory.  The file is then truncated to zero bytes before being written. The write is not atomic; a failed write leaves the file incomplete and 
+.Nm
+prompts the user with the error message and the backup filename.
 .Ss Advisory Locking
 While having unsaved edits to a file,
 .Nm
