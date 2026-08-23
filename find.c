@@ -60,6 +60,7 @@ static int regexCacheEnsure(const uint8_t *pattern) {
 				regfree(&re_cache);
 			free(re_cache_pat);
 		}
+		re_cache_pat = xstrdup((const char *)pattern);
 		re_cache_ok = (regcomp(&re_cache, (const char *)pattern,
 				       REG_EXTENDED | REG_NEWLINE) == 0);
 	}
