@@ -49,6 +49,36 @@ uint32_t utf8Decode(const uint8_t *str, int idx) {
 	return ret;
 }
 
+/* Encode a Unicode codepoint into UTF-8 bytes at out[].
+ * Returns the number of bytes written, or 0 if the codepoint
+ * is invalid (e.g., exceeds U+10FFFF or is a surrogate).
+ */
+int utf8Encode(uint32_t cp, uint8_t *out) {
+	if (cp < 0x80) {
+		out[0] = cp;
+		return 1;
+	} else if (cp < 0x800) {
+		out[0] = 0xC0 | (cp >> 6);
+		out[1] = 0x80 | (cp & 0x3F);
+		return 2;
+	} else if (cp < 0x10000) {
+		/* UTF-16 surrogates are invalid Unicode */
+		if (cp >= 0xD800 && cp <= 0xDFFF)
+			return 0;
+		out[0] = 0xE0 | (cp >> 12);
+		out[1] = 0x80 | ((cp >> 6) & 0x3F);
+		out[2] = 0x80 | (cp & 0x3F);
+		return 3;
+	} else if (cp < 0x110000) {
+		out[0] = 0xF0 | (cp >> 18);
+		out[1] = 0x80 | ((cp >> 12) & 0x3F);
+		out[2] = 0x80 | ((cp >> 6) & 0x3F);
+		out[3] = 0x80 | (cp & 0x3F);
+		return 4;
+	}
+	return 0;
+}
+
 int stringWidth(const uint8_t *str) {
 	int idx = 0;
 	int width = 0;

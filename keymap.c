@@ -56,6 +56,7 @@ static int uargScale(int uarg) {
 void setupCommands(void) {
 	static struct command commands[] = {
 		{ "capitalize-region", capitalizeRegion },
+		{ "insert-char", insertCharHex },
 		{ "insert-file", insertFile },
 		{ "cd", changeDirectory },
 		{ "diff-buffer-with-file", diffBufferWithFile },
@@ -294,6 +295,8 @@ int resolveBinding(int key) {
 			return CMD_DESTROY_OTHER_WINDOWS;
 		case '2':
 			return CMD_CREATE_WINDOW;
+		case '8':
+			return CMD_INSERT_CHAR_HEX;
 		case 'k':
 			return CMD_KILL_BUFFER;
 		case '(':
@@ -759,6 +762,9 @@ static int dispatchEdit(int c, int uarg) {
 		return 1;
 	case CMD_ZAP_TO_CHAR:
 		zapToChar();
+		return 1;
+	case CMD_INSERT_CHAR_HEX:
+		insertCharHex();
 		return 1;
 	case CMD_KILL_SEXP:
 		killSexp(uarg);

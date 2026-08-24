@@ -239,6 +239,8 @@ With
 downcase the word before the cursor without moving.
 .It Cm DEL
 Delete character under cursor.
+.It Cm C-x 8
+Insert a character by entering the hex of the Unicode codepoint (insert-char).
 .It Cm M-/
 Open a palette of emojis and other useful Unicode symbol characters in a popup buffer.
 Navigate to the desired character and press
@@ -414,6 +416,8 @@ The following commands are available via
 .Bl -tag -width Ds
 .It Cm capitalize-region
 Capitalize each word in the region.
+.It Cm insert-char
+Insert a character by entering the hex of the Unicode codepoint.
 .It Cm insert-file
 Insert contents of another file at cursor.
 .It Cm cd

@@ -1,4 +1,5 @@
 ## [Unreleased]
+- Added `M-x insert-char` to insert a character by Unicode codepoint hex
 - Improved `C-x =`: now shows Unicode codepoint
 - Piped stdin is now a writeable special buffer. 
 - Fixed a window's top line going blank after an edit deleted the row

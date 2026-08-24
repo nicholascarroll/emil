@@ -18,6 +18,8 @@ int utf8_isCont(uint8_t ch);
 
 uint32_t utf8Decode(const uint8_t *str, int idx);
 
+int utf8Encode(uint32_t cp, uint8_t *out);
+
 /* Codepoint classifiers */
 int isCJKChar(uint32_t cp);
 int isLineStartForbidden(uint32_t cp);

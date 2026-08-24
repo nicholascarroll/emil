@@ -882,3 +882,50 @@ void zapToChar(void) {
 
 	setStatusMessage("'%c' not found", c);
 }
+
+#include "prompt.h"
+#include "unicode.h"
+#include "util.h"   // For setStatusMessage
+#include <stdlib.h> // For strtoul, free
+
+/* Insert Unicode codepoint hex */
+void insertCharHex(void) {
+	/* Open the minibuffer prompt for input */
+	uint8_t *buf = editorPrompt(E.buf, "Enter Unicode codepoint (hex): U+",
+				    PROMPT_PLAIN, NULL);
+
+	/* User pressed Ctrl-G to cancel */
+	if (buf == NULL)
+		return;
+
+	/* User pressed Enter without typing anything */
+	if (buf[0] == '\0') {
+		free(buf);
+		return;
+	}
+
+	/* Parse the hex string (e.g., "1F600" or "03B1") */
+	uint32_t cp = strtoul((char *)buf, NULL, 16);
+	free(buf); // Free the minibuffer result immediately
+
+	if (cp == 0) {
+		setStatusMessage("Invalid hex code");
+		return;
+	}
+
+	/* Encode to UTF-8 */
+	uint8_t utf8[5] = {
+		0
+	}; // FIXED: uint8_t instead of char to satisfy utf8Encode
+	int len = utf8Encode(cp, utf8);
+
+	if (len == 0) {
+		setStatusMessage("Invalid codepoint");
+		return;
+	}
+
+	memcpy(E.unicode, utf8, len);
+	E.nunicode = len;
+
+	insertUnicode(1);
+}

@@ -49,6 +49,8 @@ void transposeSentences(int uarg);
 
 void zapToChar(void);
 
+void insertCharHex(void);
+
 void quit(void);
 
 #endif
