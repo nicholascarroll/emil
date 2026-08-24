@@ -1,4 +1,5 @@
 ## [Unreleased]
+- Improved `C-x =`: now shows Unicode codepoint
 - Piped stdin is now a writeable special buffer. 
 - Fixed a window's top line going blank after an edit deleted the row
   it was scrolled into.
@@ -9,6 +10,7 @@
   directly written with an ephemeral backup sidecar file suffixed '~'.
 - Saving now direct-writes hard-linked files.
 - Saving no longer replaces a FIFO, socket or device node.
+- Fsync directory after backup created #122.
 - A file whose directory is not writable can now be saved.
 - Higlighting of matches in `query-replace` #106.
 - On file save, a confirmation prompt if file on disk is newer

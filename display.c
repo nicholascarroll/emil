@@ -1418,40 +1418,143 @@ void resizeScreen(void) {
 	refreshScreen();
 }
 
-void whatCursor(void) {
-	int rx = 0;
-	int line_len = 0;
-	if (E.buf->cy < E.buf->numrows) {
-		erow *row = &E.buf->row[E.buf->cy];
-		line_len = row->size;
-		rx = charsToDisplayColumn(row, E.buf->cx);
+/* Return the Unicode name for non-printing characters.
+ * Returns NULL if the character is printable. */
+static const char *unicodeCharName(uint32_t cp) {
+	/* C0 control characters */
+	if (cp == 0x00)
+		return "NULL";
+	if (cp == 0x09)
+		return "CHARACTER TABULATION";
+	if (cp == 0x0D)
+		return "CARRIAGE RETURN";
+	if (cp == 0x7F)
+		return "DELETE";
+	if (cp < 0x20) {
+		static char ctrl_name[16];
+		snprintf(ctrl_name, sizeof(ctrl_name), "CONTROL-%04X", cp);
+		return ctrl_name;
 	}
 
-	/* Get character at cursor */
-	/* TODO Unicode codepoint uint32_t cp = utf8Decode(row->chars, E.buf->cx); */
-	char ch[8] = "EOL";
-	if (E.buf->cy < E.buf->numrows &&
-	    E.buf->cx < E.buf->row[E.buf->cy].size) {
-		uint8_t c = E.buf->row[E.buf->cy].chars[E.buf->cx];
-		if (c < 32) {
-			snprintf(ch, sizeof(ch), "^%c", c + 64);
-		} else if (c == 127) {
-			snprintf(ch, sizeof(ch), "^?");
-		} else if (c < 128) {
-			snprintf(ch, sizeof(ch), "%c", c);
-		} else {
-			snprintf(ch, sizeof(ch), "\\x%02X", c);
-		}
+	/* Unicode space characters */
+	if (cp == 0x0020)
+		return "SPACE";
+	if (cp == 0x00A0)
+		return "NO-BREAK SPACE";
+	if (cp == 0x1680)
+		return "OGHAM SPACE MARK";
+	if (cp == 0x2000)
+		return "EN QUAD";
+	if (cp == 0x2001)
+		return "EM QUAD";
+	if (cp == 0x2002)
+		return "EN SPACE";
+	if (cp == 0x2003)
+		return "EM SPACE";
+	if (cp == 0x2004)
+		return "THREE-PER-EM SPACE";
+	if (cp == 0x2005)
+		return "FOUR-PER-EM SPACE";
+	if (cp == 0x2006)
+		return "SIX-PER-EM SPACE";
+	if (cp == 0x2007)
+		return "FIGURE SPACE";
+	if (cp == 0x2008)
+		return "PUNCTUATION SPACE";
+	if (cp == 0x2009)
+		return "THIN SPACE";
+	if (cp == 0x200A)
+		return "HAIR SPACE";
+	if (cp == 0x202F)
+		return "NARROW NO-BREAK SPACE";
+	if (cp == 0x205F)
+		return "MEDIUM MATHEMATICAL SPACE";
+	if (cp == 0x3000)
+		return "IDEOGRAPHIC SPACE";
+
+	/* Zero-width characters */
+	if (cp == 0x200B)
+		return "ZERO WIDTH SPACE";
+	if (cp == 0x200C)
+		return "ZERO WIDTH NON-JOINER";
+	if (cp == 0x200D)
+		return "ZERO WIDTH JOINER";
+	if (cp == 0xFEFF)
+		return "ZERO WIDTH NO-BREAK SPACE";
+
+	return NULL;
+}
+
+/* Handy information about the character under the cursor.*/
+void describeChar(void) {
+	char debug_info[256];
+
+	if (E.buf->cy >= E.buf->numrows) {
+		setStatusMessage("%s", "No line at cursor.");
+		return;
 	}
 
-	/* The focused window, not window 0: with a split, C-x = reported a
-	 * screen row computed from an unrelated window's scroll offset. */
-	struct window *win = E.windows[windowFocusedIdx()];
-	int screen_y = E.buf->cy - win->rowoff + 1;
-	setStatusMessage(
-		"Line,col (buffer:%d,%d screen:%d,%d) Char='%s' LineLen=%d Window=%dx%d",
-		E.buf->cy + 1, E.buf->cx, screen_y, rx, ch, line_len,
-		E.screencols, E.screenrows);
+	erow *row = &E.buf->row[E.buf->cy];
+	int cx = E.buf->cx;
+
+	/* Calculate absolute byte offset from the start of the file/buffer */
+	long abs_offset = cx;
+	for (int i = 0; i < E.buf->cy; i++) {
+		abs_offset += E.buf->row[i].size;
+		abs_offset +=
+			1; /* +1 for the implicit \n stripped from memory */
+	}
+
+	if (cx >= row->size) {
+		snprintf(debug_info, sizeof(debug_info),
+			 "Character: LINE FEED | Line Byte Offset: %d | "
+			 "Absolute Byte Offset: %ld",
+			 cx, abs_offset);
+		setStatusMessage("%s", debug_info);
+		return;
+	}
+
+	uint8_t lead = row->chars[cx];
+	int byte_len = utf8_nBytes(lead);
+	if (byte_len < 1)
+		byte_len = 1;
+	if (cx + byte_len > row->size)
+		byte_len = row->size - cx;
+
+	uint32_t cp = utf8Decode(row->chars, cx);
+	int sw = charInStringWidth(row->chars, cx);
+
+	/* Build raw hex bytes string */
+	char raw[32];
+	int pos = 0;
+	for (int i = 0; i < byte_len && pos + 5 < (int)sizeof(raw); i++) {
+		pos += snprintf(raw + pos, sizeof(raw) - pos, "0x%02X ",
+				row->chars[cx + i]);
+	}
+	if (pos > 0)
+		raw[pos - 1] = '\0';
+
+	/* Get Unicode name for non-printing characters */
+	const char *name = unicodeCharName(cp);
+
+	if (name) {
+		snprintf(debug_info, sizeof(debug_info),
+			 "Character: %s | Unicode Codepoint: U+%04X | "
+			 "Display Width: %d | Line Byte Offset: %d | "
+			 "Absolute Byte Offset: %ld |  Hex Bytes: %s",
+			 name, cp, sw, cx, abs_offset, raw);
+	} else {
+		/* Printable character: show the glyph */
+		char glyph[8] = { 0 };
+		memcpy(glyph, &row->chars[cx], byte_len);
+
+		snprintf(
+			debug_info, sizeof(debug_info),
+			"Character: %s | Unicode Codepoint: U+%04X | Display Width: %d | Line Byte Offset: %d | Absolute Byte Offset: %ld | Raw Hex Bytes: %s",
+			glyph, cp, sw, cx, abs_offset, raw);
+	}
+
+	setStatusMessage("%s", debug_info);
 }
 
 /* Put the cursor's screen line in the middle of the window by walking

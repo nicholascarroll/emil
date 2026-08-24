@@ -26,6 +26,7 @@
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
+#include <libgen.h>
 
 /* Access global editor state */
 
@@ -878,6 +879,82 @@ static int copyFd(int from_fd, int to_fd) {
 }
 
 /*
+ * Attempt to fsync the parent directory of the given filepath.
+ * This ensures that the directory entry for a newly created file
+ * is persisted to disk on filesystems that require it.
+ *
+ * Returns 0 on success or if the operation is unsupported/harmless.
+ * Returns -1 on genuine I/O or storage failure.
+ */
+static int syncParentDirectory(const char *filepath) {
+	if (!filepath)
+		return 0; /* Invalid file path was passed in 🙈. Don't blame the filesystem.*/
+
+	char *path_copy = xstrdup(filepath);
+	if (!path_copy)
+		return -1;
+
+	char *dir_path = dirname(path_copy);
+	int dir_fd = open(dir_path, O_RDONLY
+#ifdef O_DIRECTORY
+					    | O_DIRECTORY
+#endif
+	);
+	free(path_copy);
+
+	if (dir_fd < 0) {
+		/*
+		 * Cannot open directory (e.g. EACCES on a write-only
+		 * drop-box directory). Treat as unsupported/fallback
+		 * and proceed without directory sync.
+		 */
+		return 0;
+	}
+
+	int sync_result;
+	do {
+		sync_result = fsync(dir_fd);
+	} while (sync_result == -1 &&
+		 errno == EINTR); /* Retry if interrupted by signal */
+
+	int saved_errno = errno;
+	close(dir_fd);
+
+	if (sync_result == 0)
+		return 0;
+
+	/*
+	 * fsync failed. Differentiate between unsupported operations
+	 * and genuine storage/hardware failures.
+	 */
+	switch (saved_errno) {
+	case EINVAL:
+		//	case EOPNOTSUPP: // compiler treats as duplicate of ENOTSUP
+	case ENOTSUP:
+	case EROFS:
+	case ENOSYS:
+	case EBADF:
+	case EISDIR:
+		/*
+		 * The OS or filesystem does not require or support
+		 * directory syncing. Silently ignore and proceed.
+		 */
+		return 0;
+
+	case EIO:
+	case ENOSPC:
+	case EDQUOT:
+	default:
+		/*
+		 * Genuine storage failure. The directory metadata may
+		 * not have reached the disk.
+		 */
+		errno = saved_errno;
+		return -1;
+	}
+}
+
+/*
  * Create a backup of path using backup_create(), then verify that the
  * backup was fully written, fsynced, and closed.
  *
@@ -934,6 +1011,17 @@ static int makeVerifiedBackup(const char *path, char *backup_path,
 		return -1;
 	}
 
+	/*
+	 * Best-effort directory sync to persist the backup's directory
+	 * entry on filesystems that require it.
+	 */
+	if (syncParentDirectory(backup_path) == -1) {
+		saved_errno = errno;
+		unlink(backup_path);
+		errno = saved_errno;
+		return -1;
+	}
+
 	return 0;
 }
 
@@ -942,13 +1030,14 @@ static int makeVerifiedBackup(const char *path, char *backup_path,
  * and close it.
  *
  * If require_regular is true, fail if the target descriptor is not a
- * regular file.  This is used when a backup exists, because deleting a
- * backup after writing to a non-regular file would be unsafe.
+ * regular file.  
  *
  * On failure, set *damaged if the target file may now be damaged.
+ * It's almost certainly only incomplete, but only almost, so we'll
+ * call it "damaged". 
  */
 static int writeInPlace(const char *path, const char *buf, size_t len,
-			int require_regular, int *damaged) {
+			int require_regular, int skip_fsync, int *damaged) {
 	int fd;
 	struct stat st;
 	int saved_errno;
@@ -960,18 +1049,23 @@ static int writeInPlace(const char *path, const char *buf, size_t len,
 	if (fd == -1)
 		return -1;
 
-	if (writeToFile(fd, buf, len) == -1)
-		goto fail;
-
 	if (fstat(fd, &st) == -1)
 		goto fail;
 
-	if (S_ISREG(st.st_mode)) {
-		if (fsync(fd) == -1)
-			goto fail;
-	} else if (require_regular) {
+	int is_reg = S_ISREG(st.st_mode);
+	/* If the file is not regular the truncate was a no-op,
+	 * so no worries there.*/
+	if (!is_reg && require_regular) {
 		errno = EIO;
 		goto fail;
+	}
+
+	if (writeToFile(fd, buf, len) == -1)
+		goto fail;
+
+	if (is_reg && !skip_fsync) {
+		if (fsync(fd) == -1)
+			goto fail;
 	}
 
 	if (close(fd) == -1) {
@@ -1132,11 +1226,16 @@ static void saveBuffer(int skip_backup) {
 	 * Write loop.
 	 *
 	 * Backup creation is intentionally not repeated here.  If the first
-	 * write damages the file, retrying must not create a new backup of
-	 * the damaged file.
+	 * write damages the file, retrying write must not copy the damaged
+	 * file to the good backup .
+	 * 
+	 * If we have_backup then we ask writeInPlace to enforce require_regular
+	 * 
+	 * If user chose skip_backup, don't bother to fsync.
 	 */
 	while (1) {
-		int rc = writeInPlace(iopath, buf, len, have_backup, &damaged);
+		int rc = writeInPlace(iopath, buf, len, have_backup,
+				      skip_backup, &damaged);
 		relockAll();
 
 		if (rc == 0) {
@@ -1172,7 +1271,7 @@ static void saveBuffer(int skip_backup) {
 		if (!confirmYN(msg)) {
 			if (damaged && have_backup) {
 				setStatusMessage(
-					"Save aborted. File contents may be incomplete or corrupt; backup is in %s",
+					"Save aborted. File contents may damaged; backup is in %s",
 					backup_path);
 			} else if (damaged) {
 				setStatusMessage(

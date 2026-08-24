@@ -1100,7 +1100,7 @@ static int dispatchMisc(int c, int uarg) {
 		toggleVisualLineMode();
 		return 1;
 	case CMD_WHAT_CURSOR:
-		whatCursor();
+		describeChar();
 		return 1;
 	case CMD_EXEC_CMD: {
 		if (E.recording || E.playback) {

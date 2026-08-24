@@ -109,38 +109,6 @@ void test_b6_unfocused_selection_drawn_when_focused_has_no_mark(void) {
 	cleanupTestEditor();
 }
 
-/* B10 — whatCursor reads window 0
- *
- * `int screen_y = E.buf->cy - E.windows[0]->rowoff + 1;` — hardcoded
- * to the first window, so C-x = reports the wrong screen row whenever
- * focus is anywhere else. */
-
-void test_b10_whatcursor_uses_focused_window_rowoff(void) {
-	initTestEditor();
-
-	E.windows = realloc(E.windows, 2 * sizeof(struct window *));
-	E.windows[1] = calloc(1, sizeof(struct window));
-	E.nwindows = 2;
-	E.windows[0]->focused = 0;
-	E.windows[0]->rowoff = 0;
-	E.windows[1]->focused = 1;
-	E.windows[1]->rowoff = 10;
-
-	const char *lines[20];
-	for (int i = 0; i < 20; i++)
-		lines[i] = "some line of text";
-	struct buffer *buf = make_test_buffer_lines(lines, 20);
-	E.windows[1]->buf = buf;
-	buf->cy = 12;
-	buf->cx = 0;
-
-	whatCursor();
-
-	/* Focused window starts at row 10, so cy 12 is screen row 3. */
-	TEST_ASSERT_NOT_NULL(strstr(E.statusmsg, "screen:3,"));
-
-	cleanupTestEditor();
-}
 
 /* Scrolling used to carry the cursor's byte offset onto a different row
  * and clamp it only against that row's byte length, so scrolling from a
@@ -602,7 +570,6 @@ int main(void) {
 	TEST_BEGIN();
 
 	RUN_TEST(test_b6_unfocused_selection_drawn_when_focused_has_no_mark);
-	RUN_TEST(test_b10_whatcursor_uses_focused_window_rowoff);
 	RUN_TEST(test_scroll_leaves_cursor_on_char_boundary);
 	RUN_TEST(test_scroll_up_with_stale_rowoff_stays_in_bounds);
 	RUN_TEST(test_scroll_down_with_stale_rowoff_stays_in_bounds);

@@ -159,7 +159,9 @@ Centre the screen on the cursor's current line.
 .It Cm M-g
 Go to specific line number.
 .It Cm C-x =
-Show cursor position (line, column, byte offset).
+Displays useful information about the character under the cursor:
+character (the visual glyph, or for nonprinting characters, the Unicode description);
+Unicode codepoint in hexadecimal; display width; byte offset from the start of the line; absolute byte offset (from the start of the buffer); raw hexadecimal bytes.
 .El
 .Ss Editing
 .Bl -tag -width Ds

@@ -34,7 +34,7 @@ void recenter(struct window *win);
 void toggleVisualLineMode(void);
 void editorVersion(void);
 void help(void);
-void whatCursor(void);
+void describeChar(void);
 
 /* Status message display */
 void setStatusMessage(const char *fmt, ...)
