@@ -25,6 +25,7 @@ void drawStatusBar(struct window *win, struct abuf *ab, int line,
 void drawMinibuffer(struct abuf *ab);
 int scroll(void);
 void scrollViewport(struct window *win, struct buffer *buf, int n);
+void scrollToShowCursor(struct window *win, struct buffer *buf);
 void clampCursorToViewport(struct window *win, struct buffer *buf);
 void screenCursorPos(struct window *win, int cursor_col, int *scx_out,
 		     int *scy_out);

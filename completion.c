@@ -525,5 +525,18 @@ void cycleCompletion(struct buffer *minibuf, int direction) {
 	struct buffer *b = findBufferByName("*Completions*");
 	if (b) {
 		b->cy = cs->selected + 2;
+
+		/* Focus never moves to the popup's window during a
+		 * prompt (showPopupBuffer() keeps it on the window the
+		 * user was editing before the prompt opened), so
+		 * scroll() -- which only acts on the focused window --
+		 * never notices that b->cy just walked off the visible
+		 * range. Without this, the highlighted row keeps
+		 * advancing past the window edge while the viewport
+		 * sits still. Page up/down already need the same
+		 * "find the popup's window" step; see prompt.c. */
+		int win_idx = findBufferWindow(b);
+		if (win_idx >= 0)
+			scrollToShowCursor(E.windows[win_idx], b);
 	}
 }

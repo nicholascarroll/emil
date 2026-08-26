@@ -702,6 +702,55 @@ int scroll(void) {
 	return cursor_col;
 }
 
+/* Move `win`'s viewport so that `buf->cy` is visible, exactly as the
+ * vertical half of scroll() does for the focused window. Unlike
+ * scroll(), this does not require `win` to be the focused window --
+ * it exists for windows that are never focused, such as the
+ * completions popup, whose selection cursor (buf->cy) moves in
+ * response to M-p/M-n while focus stays on the prompt's minibuffer.
+ * scroll() runs for the focused window only (see adjust.c's note on
+ * the same gap for a different cause), so nothing else keeps such a
+ * window's viewport following its own cursor.
+ *
+ * Horizontal scrolling (coloff) and cx clamping are deliberately not
+ * handled here: they are concerns of the window actually being typed
+ * into, not of a passive popup. */
+void scrollToShowCursor(struct window *win, struct buffer *buf) {
+	if (buf->cy < 0)
+		buf->cy = 0;
+	if (buf->cy > buf->numrows - 1)
+		buf->cy = buf->numrows - 1;
+
+	if (buf->word_wrap) {
+		int cursor_col =
+			charsToDisplayColumn(&buf->row[buf->cy], buf->cx);
+		int cursor_sub_line, sub_col;
+		cursorSubline(buf, cursor_col, &cursor_sub_line, &sub_col);
+
+		struct viewportTop top = topRead(win, buf);
+		int above =
+			buf->cy < top.row ||
+			(buf->cy == top.row && cursor_sub_line < top.subline);
+
+		if (above) {
+			topSet(win, buf, buf->cy, cursor_sub_line);
+		} else if (linesFromTop(win, buf, buf->cy, cursor_sub_line,
+					win->height - 1) < 0) {
+			int row, subline;
+			linesBack(buf, buf->cy, cursor_sub_line,
+				  win->height - 1, &row, &subline);
+			topSet(win, buf, row, subline);
+		}
+	} else {
+		if (buf->cy < win->rowoff)
+			topSet(win, buf, buf->cy, 0);
+		else if (buf->cy >= win->rowoff + win->height)
+			topSet(win, buf, buf->cy - win->height + 1, 0);
+		else
+			topSet(win, buf, win->rowoff, 0);
+	}
+}
+
 void drawRows(struct window *win, struct abuf *ab, int screenrows,
 	      int screencols) {
 	struct buffer *buf = win->buf;

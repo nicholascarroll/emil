@@ -215,6 +215,66 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 
 		int callback_key = c;
 
+		/* PageUp/PageDown/C-v/M-v, if a completions popup is
+		 * visible, scroll *it* rather than falling through to
+		 * the default: dispatch below.  During a prompt, focus
+		 * never moves to the popup's window (showPopupBuffer()
+		 * keeps focus on the window the user was editing before
+		 * the prompt opened), so processKeypress() would
+		 * otherwise scroll that unrelated window while the
+		 * popup itself sits static -- the long-standing "no
+		 * scroll" gap when a match list overflows the popup
+		 * (Find File with many matches is the usual case).
+		 *
+		 * The popup's existence is the only test: this applies
+		 * to every prompt type that can show one (File, Dir,
+		 * Command, Buffer, Unicode alike), not just the one
+		 * that motivated it.
+		 *
+		 * Deliberately NOT CMD_SCROLL_UP/CMD_SCROLL_DOWN: those
+		 * are M-p/M-n, which the switch below already claims
+		 * for a higher-priority, prompt-local purpose (cycle
+		 * the completion selection, or else browse history) --
+		 * see the KEY_ARROW_UP/KEY_META('p')/... case.  Catching
+		 * them here first would silently take that away. */
+		{
+			int cmd_peek = resolveBinding(c);
+			if (cmd_peek == CMD_PAGE_UP ||
+			    cmd_peek == CMD_PAGE_DOWN) {
+				struct buffer *comp_buf =
+					findBufferByName("*Completions*");
+				int win_idx =
+					comp_buf ? findBufferWindow(comp_buf) :
+						   -1;
+				if (win_idx >= 0) {
+					struct window *popup =
+						E.windows[win_idx];
+
+					/* Same rule as pageUp()/pageDown()
+					 * (motion.c), targeted at the
+					 * popup instead of the focused
+					 * window. */
+					int scroll_lines =
+						popup->height - page_overlap;
+					if (scroll_lines < 1)
+						scroll_lines = 1;
+					if (cmd_peek == CMD_PAGE_UP)
+						scroll_lines = -scroll_lines;
+
+					scrollViewport(popup, comp_buf,
+						       scroll_lines);
+					/* comp_buf isn't the minibuffer;
+					 * nothing here changed the typed
+					 * text, so there's nothing for
+					 * the callback (always NULL
+					 * whenever a popup exists -- see
+					 * editorPrompt callers) to react
+					 * to. */
+					continue;
+				}
+			}
+		}
+
 		/* Handle special minibuffer keys */
 		switch (c) {
 		case '\r':

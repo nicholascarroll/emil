@@ -40,6 +40,7 @@ const PaletteEntry palette[] = {
 	{ 0x00B6, "PILCROW SIGN" },    // ¶
 	{ 0x2020, "DAGGER" },	       // †
 	{ 0x2021, "DOUBLE DAGGER" },   // ‡
+	{0x00B0,  " DEGREE SIGN"  },   // °
 	/* Currency */
 	{ 0x00A2, "CENT SIGN" },		 // ¢
 	{ 0x00A3, "POUND SIGN" },		 // £
@@ -56,6 +57,7 @@ const PaletteEntry palette[] = {
 	{ 0x20AE, "TUGRIK SIGN" },		 // ₮
 	{ 0x20B4, "HRYVNIA SIGN" },		 // ₴
 	{ 0x20BF, "BITCOIN SIGN" },		 // ₿
+
 	/* Emoji */
 	{ PALETTE_BREAK, NULL },
 	{ 0x1F44D, "THUMBS UP SIGN" },					// 👍
@@ -119,6 +121,7 @@ const PaletteEntry palette[] = {
 	{ 0x1F914, "THINKING FACE" },					// 🤔
 	{ 0x1F925, "LYING FACE" },					// 🤥
 	{ 0x1F928, "FACE WITH ONE EYEBROW RAISED" },			// 🤨
+
 	/* Greek Letters */
 	{ PALETTE_BREAK, NULL },
 	{ 0x03B1, "GREEK SMALL LETTER ALPHA" },	  // α
