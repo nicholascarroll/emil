@@ -1483,8 +1483,7 @@ void describeChar(void) {
 	long abs_offset = cx;
 	for (int i = 0; i < E.buf->cy; i++) {
 		abs_offset += E.buf->row[i].size;
-		abs_offset +=
-			1; /* +1 for the implicit \n stripped from memory */
+		abs_offset += 1; /* +1 for the implicit \n stripped from memory */
 	}
 
 	if (cx >= row->size) {
@@ -1507,7 +1506,7 @@ void describeChar(void) {
 	int sw = charInStringWidth(row->chars, cx);
 
 	/* Build raw hex bytes string */
-	char raw[32];
+	char raw[32] = "";
 	int pos = 0;
 	for (int i = 0; i < byte_len && pos + 5 < (int)sizeof(raw); i++) {
 		pos += snprintf(raw + pos, sizeof(raw) - pos, "0x%02X ",
@@ -1518,27 +1517,36 @@ void describeChar(void) {
 
 	/* Get Unicode name for non-printing characters */
 	const char *name = unicodeCharName(cp);
-	const char *script = unicodeScriptName(cp);
 
 	if (name) {
 		snprintf(info, sizeof(info),
-			 "Character: %s | Unicode Codepoint: U+%04X | "
+			 "Character: %s | Unicode Codepoint: U+%04lX | "
 			 "Display Width: %d | Line Byte Offset: %d | "
-			 "Absolute Byte Offset: %ld |  Hex Bytes: %s",
-			 name, cp, sw, cx, abs_offset, raw);
+			 "Absolute Byte Offset: %ld | Hex Bytes: %s",
+			 name, (unsigned long)cp, sw, cx, abs_offset, raw);
 	} else {
 		/* Printable character: show the glyph */
 		char glyph[8] = { 0 };
+		char scriptpart[64] = "";
+		const char *script = unicodeScriptName(cp);
+
+		if (script != NULL && script[0] != '\0')
+			snprintf(scriptpart, sizeof(scriptpart), " (%s)", script);
+
+		if (byte_len > (int)sizeof(glyph) - 1)
+			byte_len = sizeof(glyph) - 1;
+
 		memcpy(glyph, &row->chars[cx], byte_len);
 
 		snprintf(
 			info, sizeof(info),
-			"Character: %s (%s) | Unicode Codepoint: U+%04X | Display Width: %d | Line Byte Offset: %d | Absolute Byte Offset: %ld | Raw Hex Bytes: %s",
-			glyph, script, cp, sw, cx, abs_offset, raw);
+			"Character: %s%s | Unicode Codepoint: U+%04lX | Display Width: %d | Line Byte Offset: %d | Absolute Byte Offset: %ld | Raw Hex Bytes: %s",
+			glyph, scriptpart, (unsigned long)cp, sw, cx, abs_offset, raw);
 	}
 
 	setStatusMessage("%s", info);
 }
+
 
 /* Put the cursor's screen line in the middle of the window by walking
  * back half a window of screen lines from it.*/
