@@ -2,6 +2,9 @@
  * SPDX-License-Identifier: MIT */
 #include <stdint.h>
 
+const char *unicodeScriptName(uint32_t cp);
+const char *unicodeCharName(uint32_t cp);
+
 int stringWidth(const uint8_t *str);
 
 int charInStringWidth(const uint8_t *str, int idx);

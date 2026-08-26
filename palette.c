@@ -444,5 +444,6 @@ void expandPalette(void) {
 
 		clampPositions(pbuf);
 		snapToSymbol(pbuf, snap_dir);
+		setStatusMessage("test");
 	}
 }

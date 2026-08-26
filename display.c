@@ -1418,76 +1418,9 @@ void resizeScreen(void) {
 	refreshScreen();
 }
 
-/* Return the Unicode name for non-printing characters.
- * Returns NULL if the character is printable. */
-static const char *unicodeCharName(uint32_t cp) {
-	/* C0 control characters */
-	if (cp == 0x00)
-		return "NULL";
-	if (cp == 0x09)
-		return "CHARACTER TABULATION";
-	if (cp == 0x0D)
-		return "CARRIAGE RETURN";
-	if (cp == 0x7F)
-		return "DELETE";
-	if (cp < 0x20) {
-		static char ctrl_name[16];
-		snprintf(ctrl_name, sizeof(ctrl_name), "CONTROL-%04X", cp);
-		return ctrl_name;
-	}
-
-	/* Unicode space characters */
-	if (cp == 0x0020)
-		return "SPACE";
-	if (cp == 0x00A0)
-		return "NO-BREAK SPACE";
-	if (cp == 0x1680)
-		return "OGHAM SPACE MARK";
-	if (cp == 0x2000)
-		return "EN QUAD";
-	if (cp == 0x2001)
-		return "EM QUAD";
-	if (cp == 0x2002)
-		return "EN SPACE";
-	if (cp == 0x2003)
-		return "EM SPACE";
-	if (cp == 0x2004)
-		return "THREE-PER-EM SPACE";
-	if (cp == 0x2005)
-		return "FOUR-PER-EM SPACE";
-	if (cp == 0x2006)
-		return "SIX-PER-EM SPACE";
-	if (cp == 0x2007)
-		return "FIGURE SPACE";
-	if (cp == 0x2008)
-		return "PUNCTUATION SPACE";
-	if (cp == 0x2009)
-		return "THIN SPACE";
-	if (cp == 0x200A)
-		return "HAIR SPACE";
-	if (cp == 0x202F)
-		return "NARROW NO-BREAK SPACE";
-	if (cp == 0x205F)
-		return "MEDIUM MATHEMATICAL SPACE";
-	if (cp == 0x3000)
-		return "IDEOGRAPHIC SPACE";
-
-	/* Zero-width characters */
-	if (cp == 0x200B)
-		return "ZERO WIDTH SPACE";
-	if (cp == 0x200C)
-		return "ZERO WIDTH NON-JOINER";
-	if (cp == 0x200D)
-		return "ZERO WIDTH JOINER";
-	if (cp == 0xFEFF)
-		return "ZERO WIDTH NO-BREAK SPACE";
-
-	return NULL;
-}
-
 /* Handy information about the character under the cursor.*/
 void describeChar(void) {
-	char debug_info[256];
+	char info[256];
 
 	if (E.buf->cy >= E.buf->numrows) {
 		setStatusMessage("%s", "No line at cursor.");
@@ -1506,11 +1439,11 @@ void describeChar(void) {
 	}
 
 	if (cx >= row->size) {
-		snprintf(debug_info, sizeof(debug_info),
+		snprintf(info, sizeof(info),
 			 "Character: LINE FEED | Line Byte Offset: %d | "
 			 "Absolute Byte Offset: %ld",
 			 cx, abs_offset);
-		setStatusMessage("%s", debug_info);
+		setStatusMessage("%s", info);
 		return;
 	}
 
@@ -1536,9 +1469,10 @@ void describeChar(void) {
 
 	/* Get Unicode name for non-printing characters */
 	const char *name = unicodeCharName(cp);
+	const char *script = unicodeScriptName(cp);
 
 	if (name) {
-		snprintf(debug_info, sizeof(debug_info),
+		snprintf(info, sizeof(info),
 			 "Character: %s | Unicode Codepoint: U+%04X | "
 			 "Display Width: %d | Line Byte Offset: %d | "
 			 "Absolute Byte Offset: %ld |  Hex Bytes: %s",
@@ -1549,12 +1483,12 @@ void describeChar(void) {
 		memcpy(glyph, &row->chars[cx], byte_len);
 
 		snprintf(
-			debug_info, sizeof(debug_info),
-			"Character: %s | Unicode Codepoint: U+%04X | Display Width: %d | Line Byte Offset: %d | Absolute Byte Offset: %ld | Raw Hex Bytes: %s",
-			glyph, cp, sw, cx, abs_offset, raw);
+			info, sizeof(info),
+			"Character: %s (%s) | Unicode Codepoint: U+%04X | Display Width: %d | Line Byte Offset: %d | Absolute Byte Offset: %ld | Raw Hex Bytes: %s",
+			glyph, script, cp, sw, cx, abs_offset, raw);
 	}
 
-	setStatusMessage("%s", debug_info);
+	setStatusMessage("%s", info);
 }
 
 /* Put the cursor's screen line in the middle of the window by walking

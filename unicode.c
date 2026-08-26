@@ -7,9 +7,203 @@
 #include <sys/types.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <stddef.h>
 #include <wchar.h>
 #include "unicode.h"
 #include "emil.h"
+
+struct known_script_range {
+	uint32_t start;
+	uint32_t end;
+	const char *name;
+};
+
+/* This does not pretend to be the full list of scripts in the Unicode specification.*/
+static const struct known_script_range known_scripts[] = {
+	/* European & Middle Eastern */
+	{ 0x0041, 0x005A, "Latin" }, /* A-Z */
+	{ 0x0061, 0x007A, "Latin" }, /* a-z */
+	{ 0x00C0, 0x024F, "Latin" }, /* Latin-1 Supplement, Extended-A/B */
+	{ 0x1E00, 0x1EFF, "Latin" }, /* Latin Extended Additional */
+	{ 0x2C60, 0x2C7F, "Latin" }, /* Latin Extended-C */
+	{ 0xA720, 0xA7FF, "Latin" }, /* Latin Extended-D */
+	{ 0xFB00, 0xFB06, "Latin" }, /* Latin ligatures */
+	{ 0xFF21, 0xFF3A, "Latin" }, /* Fullwidth A-Z */
+	{ 0xFF41, 0xFF5A, "Latin" }, /* Fullwidth a-z */
+
+	{ 0x0400, 0x04FF, "Cyrillic" },
+	{ 0x0500, 0x052F, "Cyrillic" }, /* Cyrillic Supplement */
+	{ 0x2DE0, 0x2DFF, "Cyrillic" }, /* Cyrillic Extended-A */
+	{ 0xA640, 0xA69F, "Cyrillic" }, /* Cyrillic Extended-B */
+
+	{ 0x0370, 0x03FF, "Greek" },
+	{ 0x1F00, 0x1FFF, "Greek" }, /* Greek Extended */
+
+	{ 0x0530, 0x058F, "Armenian" },
+	{ 0xFB13, 0xFB17, "Armenian" }, /* Armenian ligatures */
+
+	{ 0x10A0, 0x10FF, "Georgian" },
+	{ 0x2D00, 0x2D2F, "Georgian" }, /* Georgian Supplement */
+
+	{ 0x16A0, 0x16FF, "Runic" },
+	{ 0x1680, 0x169F, "Ogham" },
+
+	{ 0x0600, 0x06FF, "Arabic" },
+	{ 0x0750, 0x077F, "Arabic" }, /* Arabic Supplement */
+	{ 0x08A0, 0x08FF, "Arabic" }, /* Arabic Extended-A */
+	{ 0xFB50, 0xFDFF, "Arabic" }, /* Arabic Presentation Forms-A */
+	{ 0xFE70, 0xFEFF, "Arabic" }, /* Arabic Presentation Forms-B */
+
+	{ 0x0590, 0x05FF, "Hebrew" },
+	{ 0xFB1D, 0xFB4F, "Hebrew" }, /* Hebrew Presentation Forms */
+
+	/* Chinese & East Asian */
+	{ 0x2E80, 0x2EFF, "Han" },   /* CJK Radicals Supplement */
+	{ 0x2F00, 0x2FDF, "Han" },   /* Kangxi Radicals */
+	{ 0x3400, 0x4DBF, "Han" },   /* CJK Extension A */
+	{ 0x4E00, 0x9FFF, "Han" },   /* CJK Unified Ideographs */
+	{ 0xF900, 0xFAFF, "Han" },   /* CJK Compatibility Ideographs */
+	{ 0x20000, 0x2A6DF, "Han" }, /* CJK Extension B */
+	{ 0x2A700, 0x2B73F, "Han" }, /* CJK Extension C */
+	{ 0x2B740, 0x2B81F, "Han" }, /* CJK Extension D */
+	{ 0x2B820, 0x2CEAF, "Han" }, /* CJK Extension E */
+	{ 0x2CEB0, 0x2EBEF, "Han" }, /* CJK Extension F */
+	{ 0x2F800, 0x2FA1F, "Han" }, /* CJK Compatibility Supplement */
+	{ 0x30000, 0x3134F, "Han" }, /* CJK Extension G */
+
+	{ 0x02EA, 0x02EB, "Bopomofo" }, /* Bopomofo Extended */
+	{ 0x3100, 0x312F, "Bopomofo" },
+	{ 0x31A0, 0x31BF, "Bopomofo" }, /* Bopomofo Extended */
+
+	{ 0x1100, 0x11FF, "Hangul" }, /* Hangul Jamo */
+	{ 0x3130, 0x318F, "Hangul" }, /* Hangul Compatibility Jamo */
+	{ 0xA960, 0xA97F, "Hangul" }, /* Hangul Jamo Extended-A */
+	{ 0xAC00, 0xD7AF, "Hangul" }, /* Hangul Syllables */
+	{ 0xD7B0, 0xD7FF, "Hangul" }, /* Hangul Jamo Extended-B */
+
+	{ 0x3040, 0x309F, "Hiragana" },
+	{ 0x1B001, 0x1B11F, "Hiragana" }, /* Hiragana Extended-A */
+
+	{ 0x30A0, 0x30FF, "Katakana" },
+	{ 0x31F0, 0x31FF, "Katakana" },	  /* Katakana Phonetic Extensions */
+	{ 0xFF66, 0xFF9D, "Katakana" },	  /* Halfwidth Katakana */
+	{ 0x1B120, 0x1B122, "Katakana" }, /* Katakana Extended-A */
+
+	/* South Asian / Indic */
+	{ 0x0900, 0x097F, "Devanagari" },
+	{ 0xA8E0, 0xA8FF, "Devanagari" }, /* Devanagari Extended */
+
+	{ 0x0980, 0x09FF, "Bengali" },
+	{ 0x0A00, 0x0A7F, "Gurmukhi" },
+	{ 0x0A80, 0x0AFF, "Gujarati" },
+	{ 0x0B00, 0x0B7F, "Oriya" },
+	{ 0x0B80, 0x0BFF, "Tamil" },
+	{ 0x0C00, 0x0C7F, "Telugu" },
+	{ 0x0C80, 0x0CFF, "Kannada" },
+	{ 0x0D00, 0x0D7F, "Malayalam" },
+	{ 0x0D80, 0x0DFF, "Sinhala" },
+
+	/* Southeast Asian */
+	{ 0x0E00, 0x0E7F, "Thai" },
+	{ 0x0E80, 0x0EFF, "Lao" },
+	{ 0x1780, 0x17FF, "Khmer" },
+	{ 0x19E0, 0x19FF, "Khmer" }, /* Khmer Symbols */
+	{ 0x1000, 0x109F, "Myanmar" },
+	{ 0xA9E0, 0xA9FE, "Myanmar" }, /* Myanmar Extended-B */
+	{ 0xAA60, 0xAA7F, "Myanmar" }, /* Myanmar Extended-A */
+
+	/* Other Major Regional */
+	{ 0xA000, 0xA4CF, "Yi" },
+	{ 0x1800, 0x18AF, "Mongolian" },
+	{ 0x11660, 0x1167F, "Mongolian" }, /* Mongolian Supplement */
+	{ 0x0F00, 0x0FFF, "Tibetan" },
+	{ 0x1700, 0x171F, "Tagalog" },
+	{ 0x1200, 0x137F, "Ethiopic" },
+	{ 0x1380, 0x139F, "Ethiopic" },	  /* Ethiopic Supplement */
+	{ 0x2D80, 0x2DDF, "Ethiopic" },	  /* Ethiopic Extended */
+	{ 0xAB01, 0xAB2F, "Ethiopic" },	  /* Ethiopic Extended-A */
+	{ 0x1E7E0, 0x1E7FF, "Ethiopic" }, /* Ethiopic Extended-B */
+	{ 0x2D30, 0x2D7F, "Tifinagh" },
+	{ 0x07C0, 0x07FF, "Nko" },
+};
+
+const char *unicodeScriptName(uint32_t cp) {
+	size_t count = sizeof(known_scripts) / sizeof(known_scripts[0]);
+	for (size_t i = 0; i < count; i++) {
+		if (cp >= known_scripts[i].start &&
+		    cp <= known_scripts[i].end) {
+			return known_scripts[i].name;
+		}
+	}
+	return NULL;
+}
+
+/* Return the Unicode name for non-printing characters.
+ * Returns NULL if the character is printable. */
+const char *unicodeCharName(uint32_t cp) {
+	/* C0 control characters */
+	if (cp == 0x00)
+		return "NULL";
+	if (cp == 0x09)
+		return "CHARACTER TABULATION";
+	if (cp == 0x0D)
+		return "CARRIAGE RETURN";
+	if (cp == 0x7F)
+		return "DELETE";
+	if (cp < 0x20) {
+		static char ctrl_name[16];
+		snprintf(ctrl_name, sizeof(ctrl_name), "CONTROL-%04X", cp);
+		return ctrl_name;
+	}
+
+	/* Unicode space characters */
+	if (cp == 0x0020)
+		return "SPACE";
+	if (cp == 0x00A0)
+		return "NO-BREAK SPACE";
+	if (cp == 0x1680)
+		return "OGHAM SPACE MARK";
+	if (cp == 0x2000)
+		return "EN QUAD";
+	if (cp == 0x2001)
+		return "EM QUAD";
+	if (cp == 0x2002)
+		return "EN SPACE";
+	if (cp == 0x2003)
+		return "EM SPACE";
+	if (cp == 0x2004)
+		return "THREE-PER-EM SPACE";
+	if (cp == 0x2005)
+		return "FOUR-PER-EM SPACE";
+	if (cp == 0x2006)
+		return "SIX-PER-EM SPACE";
+	if (cp == 0x2007)
+		return "FIGURE SPACE";
+	if (cp == 0x2008)
+		return "PUNCTUATION SPACE";
+	if (cp == 0x2009)
+		return "THIN SPACE";
+	if (cp == 0x200A)
+		return "HAIR SPACE";
+	if (cp == 0x202F)
+		return "NARROW NO-BREAK SPACE";
+	if (cp == 0x205F)
+		return "MEDIUM MATHEMATICAL SPACE";
+	if (cp == 0x3000)
+		return "IDEOGRAPHIC SPACE";
+
+	/* Zero-width characters */
+	if (cp == 0x200B)
+		return "ZERO WIDTH SPACE";
+	if (cp == 0x200C)
+		return "ZERO WIDTH NON-JOINER";
+	if (cp == 0x200D)
+		return "ZERO WIDTH JOINER";
+	if (cp == 0xFEFF)
+		return "ZERO WIDTH NO-BREAK SPACE";
+
+	return NULL;
+}
 
 /* Decode the UTF-8 character at str[idx] and return its Unicode codepoint. */
 uint32_t utf8Decode(const uint8_t *str, int idx) {
