@@ -5,7 +5,6 @@
 #include "edit.h"
 #include "emil.h"
 #include "keymap.h"
-
 #include "motion.h"
 #include "terminal.h"
 #include "unicode.h"
@@ -14,198 +13,228 @@
 #include <string.h>
 
 const PaletteEntry palette[] = {
-	/* Punctuation and Misc*/
-	{ 0x2014, { 0xE2, 0x80, 0x94, 0x00 }, 3, true },  // —
-	{ 0x2713, { 0xE2, 0x9C, 0x93, 0x00 }, 3, false }, // ✓
-	{ 0x2717, { 0xE2, 0x9C, 0x97, 0x00 }, 3, false }, // ✗
-	{ 0x2013, { 0xE2, 0x80, 0x93, 0x00 }, 3, false }, // –
-	{ 0x2026, { 0xE2, 0x80, 0xA6, 0x00 }, 3, false }, // …
-	{ 0x201C, { 0xE2, 0x80, 0x9C, 0x00 }, 3, false }, // “
-	{ 0x201D, { 0xE2, 0x80, 0x9D, 0x00 }, 3, false }, // ”
-	{ 0x2018, { 0xE2, 0x80, 0x98, 0x00 }, 3, false }, // ‘
-	{ 0x2019, { 0xE2, 0x80, 0x99, 0x00 }, 3, false }, // ’
-	{ 0x00AB, { 0xC2, 0xAB, 0x00 }, 2, false },	  // «
-	{ 0x00BB, { 0xC2, 0xBB, 0x00 }, 2, false },	  // »
-	{ 0x2039, { 0xE2, 0x80, 0xB9, 0x00 }, 3, false }, // ‹
-	{ 0x203A, { 0xE2, 0x80, 0xBA, 0x00 }, 3, false }, // ›
-	{ 0x2010, { 0xE2, 0x80, 0x90, 0x00 }, 3, false }, // ‐
-	{ 0x00B7, { 0xC2, 0xB7, 0x00 }, 2, false },	  // ·
-
-	/* Emoji */
-	{ PALETTE_BREAK, { '\n', 0 }, 1, false },
-	{ 0x1F44D, { 0xF0, 0x9F, 0x91, 0x8D, 0x00 }, 4, true },	 // 👍
-	{ 0x1F44E, { 0xF0, 0x9F, 0x91, 0x8E, 0x00 }, 4, false }, // 👎
-	{ 0x1F440, { 0xF0, 0x9F, 0x91, 0x80, 0x00 }, 4, false }, // 👀
-	{ 0x1F44B, { 0xF0, 0x9F, 0x91, 0x8B, 0x00 }, 4, false }, // 👋
-	{ 0x1F44C, { 0xF0, 0x9F, 0x91, 0x8C, 0x00 }, 4, false }, // 👌
-	{ 0x1F601, { 0xF0, 0x9F, 0x98, 0x81, 0x00 }, 4, false }, // 😁
-	{ 0x1F600, { 0xF0, 0x9F, 0x98, 0x80, 0x00 }, 4, false }, // 😀
-	{ 0x1F602, { 0xF0, 0x9F, 0x98, 0x82, 0x00 }, 4, false }, // 😂
-	{ 0x1F60A, { 0xF0, 0x9F, 0x98, 0x8A, 0x00 }, 4, false }, // 😊
-	{ 0x1F609, { 0xF0, 0x9F, 0x98, 0x89, 0x00 }, 4, false }, // 😉
-	{ 0x1F60D, { 0xF0, 0x9F, 0x98, 0x8D, 0x00 }, 4, false }, // 😍
-	{ 0x1F60E, { 0xF0, 0x9F, 0x98, 0x8E, 0x00 }, 4, false }, // 😎
-	{ 0x1F622, { 0xF0, 0x9F, 0x98, 0xA2, 0x00 }, 4, false }, // 😢
-	{ 0x1F62D, { 0xF0, 0x9F, 0x98, 0xAD, 0x00 }, 4, false }, // 😭
-	{ 0x1F630, { 0xF0, 0x9F, 0x98, 0xB0, 0x00 }, 4, false }, // 😰
-	{ 0x1F633, { 0xF0, 0x9F, 0x98, 0xB3, 0x00 }, 4, false }, // 😳
-	{ 0x1F923, { 0xF0, 0x9F, 0xA4, 0xA3, 0x00 }, 4, false }, // 🤣
-	{ 0x1F973, { 0xF0, 0x9F, 0xA5, 0xB3, 0x00 }, 4, false }, // 🥳
-	{ 0x1F977, { 0xF0, 0x9F, 0xA5, 0xB7, 0x00 }, 4, false }, // 🥷
-	{ 0x1F97A, { 0xF0, 0x9F, 0xA5, 0xBA, 0x00 }, 4, false }, // 🥺
-	{ 0x1F382, { 0xF0, 0x9F, 0x8E, 0x82, 0x00 }, 4, false }, // 🎂
-	{ 0x1F389, { 0xF0, 0x9F, 0x8E, 0x89, 0x00 }, 4, false }, // 🎉
-	{ 0x1F4A1, { 0xF0, 0x9F, 0x92, 0xA1, 0x00 }, 4, false }, // 💡
-	{ 0x1F525, { 0xF0, 0x9F, 0x94, 0xA5, 0x00 }, 4, false }, // 🔥
-	{ 0x1F680, { 0xF0, 0x9F, 0x9A, 0x80, 0x00 }, 4, false }, // 🚀
-	{ 0x1F517, { 0xF0, 0x9F, 0x94, 0x97, 0x00 }, 4, false }, // 🔗
-	{ 0x1F48B, { 0xF0, 0x9F, 0x92, 0x8B, 0x00 }, 4, false }, // 💋
-	{ 0x1F495, { 0xF0, 0x9F, 0x92, 0x95, 0x00 }, 4, false }, // 💕
-	{ 0x1F496, { 0xF0, 0x9F, 0x92, 0x96, 0x00 }, 4, false }, // 💖
-	{ 0x1F970, { 0xF0, 0x9F, 0xA5, 0xB0, 0x00 }, 4, false }, // 🥰
-	{ 0x1F498, { 0xF0, 0x9F, 0x92, 0x98, 0x00 }, 4, false }, // 💘
-	{ 0x1F494, { 0xF0, 0x9F, 0x92, 0x94, 0x00 }, 4, false }, // 💔
-	{ 0x1F337, { 0xF0, 0x9F, 0x8C, 0xB7, 0x00 }, 4, false }, // 🌷
-	{ 0x1F339, { 0xF0, 0x9F, 0x8C, 0xB9, 0x00 }, 4, false }, // 🌹
-	{ 0x1F33B, { 0xF0, 0x9F, 0x8C, 0xBB, 0x00 }, 4, false }, // 🌻
-	{ 0x1F33C, { 0xF0, 0x9F, 0x8C, 0xBC, 0x00 }, 4, false }, // 🌼
-	{ 0x1F408, { 0xF0, 0x9F, 0x90, 0x88, 0x00 }, 4, false }, // 🐈
-	{ 0x1F415, { 0xF0, 0x9F, 0x90, 0x95, 0x00 }, 4, false }, // 🐕
-	{ 0x2705, { 0xE2, 0x9C, 0x85, 0x00 }, 3, false },	 // ✅
-	{ 0x274C, { 0xE2, 0x9D, 0x8C, 0x00 }, 3, false },	 // ❌
-	{ 0x2728, { 0xE2, 0x9C, 0xA8, 0x00 }, 3, false },	 // ✨
-	{ 0x26A1, { 0xE2, 0x9A, 0xA1, 0x00 }, 3, false },	 // ⚡
-	{ 0x2B50, { 0xE2, 0xAD, 0x90, 0x00 }, 3, false },	 // ⭐
-	{ 0x270B, { 0xE2, 0x9C, 0x8B, 0x00 }, 3, false },	 // ✋
-	{ 0x1FAE1, { 0xF0, 0x9F, 0xAB, 0xA1, 0x00 }, 4, false }, // 🫡
-	{ 0x1F60F, { 0xF0, 0x9F, 0x98, 0x8F, 0x00 }, 4, false }, // 😏
-	{ 0x1F610, { 0xF0, 0x9F, 0x98, 0x90, 0x00 }, 4, false }, // 😐
-	{ 0x1F612, { 0xF0, 0x9F, 0x98, 0x92, 0x00 }, 4, false }, // 😒
-	{ 0x1F618, { 0xF0, 0x9F, 0x98, 0x98, 0x00 }, 4, false }, // 😘
-	{ 0x1F61C, { 0xF0, 0x9F, 0x98, 0x9C, 0x00 }, 4, false }, // 😜
-	{ 0x1F92A, { 0xF0, 0x9F, 0xA4, 0xAA, 0x00 }, 4, false }, // 🤪
-	{ 0x1F61F, { 0xF0, 0x9F, 0x98, 0x9F, 0x00 }, 4, false }, // 😟
-	{ 0x1F620, { 0xF0, 0x9F, 0x98, 0xA0, 0x00 }, 4, false }, // 😠
-	{ 0x1F621, { 0xF0, 0x9F, 0x98, 0xA1, 0x00 }, 4, false }, // 😡
-	{ 0x1F62C, { 0xF0, 0x9F, 0x98, 0xAC, 0x00 }, 4, false }, // 😬
-	{ 0x1F625, { 0xF0, 0x9F, 0x98, 0xA5, 0x00 }, 4, false }, // 😥
-	{ 0x1F641, { 0xF0, 0x9F, 0x99, 0x81, 0x00 }, 4, false }, // 🙁
-	{ 0x1F642, { 0xF0, 0x9F, 0x99, 0x82, 0x00 }, 4, false }, // 🙂
-	{ 0x1F914, { 0xF0, 0x9F, 0xA4, 0x94, 0x00 }, 4, false }, // 🤔
-	{ 0x1F925, { 0xF0, 0x9F, 0xA4, 0xA5, 0x00 }, 4, false }, // 🤥
-	{ 0x1F928, { 0xF0, 0x9F, 0xA4, 0xA8, 0x00 }, 4, false }, // 🤨
-
+	/* Punctuation and Misc */
+	{ 0x2014, "EM DASH" },					  // —
+	{ 0x2713, "CHECK MARK" },				  // ✓
+	{ 0x2717, "BALLOT X" },					  // ✗
+	{ 0x2013, "EN DASH" },					  // –
+	{ 0x2026, "HORIZONTAL ELLIPSIS" },			  // …
+	{ 0x201C, "LEFT DOUBLE QUOTATION MARK" },		  // “
+	{ 0x201D, "RIGHT DOUBLE QUOTATION MARK" },		  // ”
+	{ 0x2018, "LEFT SINGLE QUOTATION MARK" },		  // ‘
+	{ 0x2019, "RIGHT SINGLE QUOTATION MARK" },		  // ’
+	{ 0x00AB, "LEFT-POINTING DOUBLE ANGLE QUOTATION MARK" },  // «
+	{ 0x00BB, "RIGHT-POINTING DOUBLE ANGLE QUOTATION MARK" }, // »
+	{ 0x2039, "SINGLE LEFT-POINTING ANGLE QUOTATION MARK" },  // ‹
+	{ 0x203A, "SINGLE RIGHT-POINTING ANGLE QUOTATION MARK" }, // ›
+	{ 0x2010, "HYPHEN" },					  // ‐
+	{ 0x00B7, "MIDDLE DOT" },				  // ·
 	/* Publishing */
-	{ PALETTE_BREAK, { '\n', 0 }, 1, false },
-	{ 0x00A7, { 0xC2, 0xA7, 0x00 }, 2, true },	  // §
-	{ 0x2032, { 0xE2, 0x80, 0xB2, 0x00 }, 3, false }, // ′
-	{ 0x2033, { 0xE2, 0x80, 0xB3, 0x00 }, 3, false }, // ″
-
+	{ 0x00A7, "SECTION SIGN" }, // §
+	{ 0x2032, "PRIME" },	    // ′
+	{ 0x2033, "DOUBLE PRIME" }, // ″
 	/* Legal */
-	//	{ PALETTE_BREAK, { '\n', 0 }, 1, false },
-	{ 0x00A9, { 0xC2, 0xA9, 0x00 }, 2, true },	  // ©
-	{ 0x00AE, { 0xC2, 0xAE, 0x00 }, 2, false },	  // ®
-	{ 0x2122, { 0xE2, 0x84, 0xA2, 0x00 }, 3, false }, // ™
-	{ 0x00B6, { 0xC2, 0xB6, 0x00 }, 2, false },	  // ¶
-	{ 0x2020, { 0xE2, 0x80, 0xA0, 0x00 }, 3, false }, // †
-	{ 0x2021, { 0xE2, 0x80, 0xA1, 0x00 }, 3, false }, // ‡
-
+	{ 0x00A9, "COPYRIGHT SIGN" },  // ©
+	{ 0x00AE, "REGISTERED SIGN" }, // ®
+	{ 0x2122, "TRADE MARK SIGN" }, // ™
+	{ 0x00B6, "PILCROW SIGN" },    // ¶
+	{ 0x2020, "DAGGER" },	       // †
+	{ 0x2021, "DOUBLE DAGGER" },   // ‡
 	/* Currency */
-	//	{ PALETTE_BREAK, { '\n', 0 }, 1, false },
-	{ 0x20AC, { 0xE2, 0x82, 0xAC, 0x00 }, 3, true },  // €
-	{ 0x00A3, { 0xC2, 0xA3, 0x00 }, 2, false },	  // £
-	{ 0x00A5, { 0xC2, 0xA5, 0x00 }, 2, false },	  // ¥
-	{ 0x20B9, { 0xE2, 0x82, 0xB9, 0x00 }, 3, false }, // ₹
-	{ 0x20BF, { 0xE2, 0x82, 0xBF, 0x00 }, 3, false }, // ₿
-	{ 0x00A2, { 0xC2, 0xA2, 0x00 }, 2, false },	  // ¢
-	{ 0x20A9, { 0xE2, 0x82, 0xA9, 0x00 }, 3, false }, // ₩
-
-	/* Maths */
-	{ PALETTE_BREAK, { '\n', 0 }, 1, false },
-	{ 0x00B1, { 0xC2, 0xB1, 0x00 }, 2, true },	  // ±
-	{ 0x00D7, { 0xC3, 0x97, 0x00 }, 2, false },	  // ×
-	{ 0x00F7, { 0xC3, 0xB7, 0x00 }, 2, false },	  // ÷
-	{ 0x2212, { 0xE2, 0x88, 0x92, 0x00 }, 3, false }, // −
-	{ 0x2260, { 0xE2, 0x89, 0xA0, 0x00 }, 3, false }, // ≠
-	{ 0x2248, { 0xE2, 0x89, 0x88, 0x00 }, 3, false }, // ≈
-	{ 0x2245, { 0xE2, 0x89, 0x85, 0x00 }, 3, false }, // ≅
-	{ 0x2264, { 0xE2, 0x89, 0xA4, 0x00 }, 3, false }, // ≤
-	{ 0x2265, { 0xE2, 0x89, 0xA5, 0x00 }, 3, false }, // ≥
-	{ 0x221D, { 0xE2, 0x88, 0x9D, 0x00 }, 3, false }, // ∝
-	{ 0x221E, { 0xE2, 0x88, 0x9E, 0x00 }, 3, false }, // ∞
-	{ 0x221A, { 0xE2, 0x88, 0x9A, 0x00 }, 3, false }, // √
-	{ 0x2202, { 0xE2, 0x88, 0x82, 0x00 }, 3, false }, // ∂
-	{ 0x2207, { 0xE2, 0x88, 0x87, 0x00 }, 3, false }, // ∇
-	{ 0x2211, { 0xE2, 0x88, 0x91, 0x00 }, 3, false }, // ∑
-	{ 0x220F, { 0xE2, 0x88, 0x8F, 0x00 }, 3, false }, // ∏
-	{ 0x222B, { 0xE2, 0x88, 0xAB, 0x00 }, 3, false }, // ∫
-	{ 0x03C0, { 0xCF, 0x80, 0x00 }, 2, false },	  // π
-	{ 0x03BB, { 0xCE, 0xBB, 0x00 }, 2, false },	  // λ
-	{ 0x03BC, { 0xCE, 0xBC, 0x00 }, 2, false },	  // μ
-	{ 0x03A3, { 0xCE, 0xA3, 0x00 }, 2, false },	  // Σ
-	{ 0x03B1, { 0xCE, 0xB1, 0x00 }, 2, false },	  // α
-	{ 0x03B2, { 0xCE, 0xB2, 0x00 }, 2, false },	  // β
-	{ 0x00B0, { 0xC2, 0xB0, 0x00 }, 2, false },	  // °
-	{ 0x2205, { 0xE2, 0x88, 0x85, 0x00 }, 3, false }, // ∅
-	{ 0x2208, { 0xE2, 0x88, 0x88, 0x00 }, 3, false }, // ∈
-	{ 0x2209, { 0xE2, 0x88, 0x89, 0x00 }, 3, false }, // ∉
-	{ 0x2282, { 0xE2, 0x8A, 0x82, 0x00 }, 3, false }, // ⊂
-	{ 0x2283, { 0xE2, 0x8A, 0x83, 0x00 }, 3, false }, // ⊃
-	{ 0x2286, { 0xE2, 0x8A, 0x86, 0x00 }, 3, false }, // ⊆
-	{ 0x2287, { 0xE2, 0x8A, 0x87, 0x00 }, 3, false }, // ⊇
-
-	/* Programming / Logic */
-	{ PALETTE_BREAK, { '\n', 0 }, 1, false },
-	{ 0x2192, { 0xE2, 0x86, 0x92, 0x00 }, 3, true },  // →
-	{ 0x2190, { 0xE2, 0x86, 0x90, 0x00 }, 3, false }, // ←
-	{ 0x2194, { 0xE2, 0x86, 0x94, 0x00 }, 3, false }, // ↔
-	{ 0x21D2, { 0xE2, 0x87, 0x92, 0x00 }, 3, false }, // ⇒
-	{ 0x21D0, { 0xE2, 0x87, 0x90, 0x00 }, 3, false }, // ⇐
-	{ 0x21D4, { 0xE2, 0x87, 0x94, 0x00 }, 3, false }, // ⇔
-	{ 0x2200, { 0xE2, 0x88, 0x80, 0x00 }, 3, false }, // ∀
-	{ 0x2203, { 0xE2, 0x88, 0x83, 0x00 }, 3, false }, // ∃
-	{ 0x00AC, { 0xC2, 0xAC, 0x00 }, 2, false },	  // ¬
-	{ 0x2227, { 0xE2, 0x88, 0xA7, 0x00 }, 3, false }, // ∧
-	{ 0x2228, { 0xE2, 0x88, 0xA8, 0x00 }, 3, false }, // ∨
-	{ 0x2261, { 0xE2, 0x89, 0xA1, 0x00 }, 3, false }, // ≡
-	{ 0x2218, { 0xE2, 0x88, 0x98, 0x00 }, 3, false }, // ∘
-	{ 0x22A5, { 0xE2, 0x8A, 0xA5, 0x00 }, 3, false }, // ⊥
-
-	/* Misc */
-	//	{ PALETTE_BREAK, { '\n', 0 }, 1, false },
-	{ 0x2022, { 0xE2, 0x80, 0xA2, 0x00 }, 3, true },  // •
-	{ 0x25E6, { 0xE2, 0x97, 0xA6, 0x00 }, 3, false }, // ◦
-	{ 0x00BD, { 0xC2, 0xBD, 0x00 }, 2, false },	  // ½
-	{ 0x00BC, { 0xC2, 0xBC, 0x00 }, 2, false },	  // ¼
-	{ 0x00BE, { 0xC2, 0xBE, 0x00 }, 2, false },	  // ¾
-	{ 0x00B2, { 0xC2, 0xB2, 0x00 }, 2, false },	  // ²
-	{ 0x00B3, { 0xC2, 0xB3, 0x00 }, 2, false },	  // ³
+	{ 0x00A2, "CENT SIGN" },		 // ¢
+	{ 0x00A3, "POUND SIGN" },		 // £
+	{ 0x00A5, "YEN SIGN" },			 // ¥
+	{ 0x20AC, "EURO SIGN" },		 // €
+	{ 0x20A9, "WON SIGN" },			 // ₩
+	{ 0x20B9, "INDIAN RUPEE SIGN" },	 // ₹
+	{ 0x20BD, "RUBLE SIGN" },		 // ₽
+	{ 0x0E3F, "THAI CURRENCY SYMBOL BAHT" }, // ฿
+	{ 0x20BA, "TURKISH LIRA SIGN" },	 // ₺
+	{ 0x20B1, "PESO SIGN" },		 // ₱
+	{ 0x20AA, "NEW SHEQEL SIGN" },		 // ₪
+	{ 0x20AB, "DONG SIGN" },		 // ₫
+	{ 0x20AE, "TUGRIK SIGN" },		 // ₮
+	{ 0x20B4, "HRYVNIA SIGN" },		 // ₴
+	{ 0x20BF, "BITCOIN SIGN" },		 // ₿
+	/* Emoji */
+	{ PALETTE_BREAK, NULL },
+	{ 0x1F44D, "THUMBS UP SIGN" },					// 👍
+	{ 0x1F44E, "THUMBS DOWN SIGN" },				// 👎
+	{ 0x1F440, "EYES" },						// 👀
+	{ 0x1F44B, "WAVING HAND SIGN" },				// 👋
+	{ 0x1F44C, "OK HAND SIGN" },					// 👌
+	{ 0x1F601, "GRINNING FACE WITH SMILING EYES" },			// 😁
+	{ 0x1F600, "GRINNING FACE" },					// 😀
+	{ 0x1F602, "FACE WITH TEARS OF JOY" },				// 😂
+	{ 0x1F60A, "SMILING FACE WITH SMILING EYES" },			// 😊
+	{ 0x1F609, "WINKING FACE" },					// 😉
+	{ 0x1F60D, "SMILING FACE WITH HEART-SHAPED EYES" },		// 😍
+	{ 0x1F60E, "SMILING FACE WITH SUNGLASSES" },			// 😎
+	{ 0x1F622, "CRYING FACE" },					// 😢
+	{ 0x1F62D, "LOUDLY CRYING FACE" },				// 😭
+	{ 0x1F630, "FACE WITH OPEN MOUTH AND COLD SWEAT" },		// 😰
+	{ 0x1F633, "FLUSHED FACE" },					// 😳
+	{ 0x1F923, "ROLLING ON THE FLOOR LAUGHING" },			// 🤣
+	{ 0x1F973, "FACE WITH PARTY HORN AND PARTY HAT" },		// 🥳
+	{ 0x1F977, "NINJA" },						// 🥷
+	{ 0x1F97A, "FACE WITH PLEADING EYES" },				// 🥺
+	{ 0x1F382, "SHORTCAKE" },					// 🎂
+	{ 0x1F389, "PARTY POPPER" },					// 🎉
+	{ 0x1F4A1, "ELECTRIC LIGHT BULB" },				// 💡
+	{ 0x1F525, "FIRE" },						// 🔥
+	{ 0x1F680, "ROCKET" },						// 🚀
+	{ 0x1F517, "LINK SYMBOL" },					// 🔗
+	{ 0x1F48B, "KISS MARK" },					// 💋
+	{ 0x1F495, "TWO HEARTS" },					// 💕
+	{ 0x1F496, "SPARKLING HEART" },					// 💖
+	{ 0x1F970, "SMILING FACE WITH SMILING EYES AND THREE HEARTS" }, // 🥰
+	{ 0x1F498, "HEART WITH ARROW" },				// 💘
+	{ 0x1F494, "BROKEN HEART" },					// 💔
+	{ 0x1F337, "TULIP" },						// 🌷
+	{ 0x1F339, "ROSE" },						// 🌹
+	{ 0x1F33B, "SUNFLOWER" },					// 🌻
+	{ 0x1F33C, "BLOSSOM" },						// 🌼
+	{ 0x1F408, "CAT" },						// 🐈
+	{ 0x1F415, "DOG" },						// 🐕
+	{ 0x2705, "WHITE HEAVY CHECK MARK" },				// ✅
+	{ 0x274C, "CROSS MARK" },					// ❌
+	{ 0x2728, "SPARKLES" },						// ✨
+	{ 0x26A1, "HIGH VOLTAGE SIGN" },				// ⚡
+	{ 0x2B50, "WHITE MEDIUM STAR" },				// ⭐
+	{ 0x270B, "RAISED HAND" },					// ✋
+	{ 0x1FAE1, "SALUTING FACE" },					// 🫡
+	{ 0x1F60F, "SMIRKING FACE" },					// 😏
+	{ 0x1F610, "NEUTRAL FACE" },					// 😐
+	{ 0x1F612, "UNAMUSED FACE" },					// 😒
+	{ 0x1F618, "FACE THROWING A KISS" },				// 😘
+	{ 0x1F61C, "WINKING FACE WITH STUCK-OUT TONGUE" },		// 😜
+	{ 0x1F92A, "GRINNING FACE WITH ONE LARGE AND ONE SMALL EYE" },	// 🤪
+	{ 0x1F61F, "WORRIED FACE" },					// 😟
+	{ 0x1F620, "ANGRY FACE" },					// 😠
+	{ 0x1F621, "POUTING FACE" },					// 😡
+	{ 0x1F62C, "GRIMACING FACE" },					// 😬
+	{ 0x1F625, "DISAPPOINTED BUT RELIEVED FACE" },			// 😥
+	{ 0x1F641, "SLIGHTLY FROWNING FACE" },				// 🙁
+	{ 0x1F642, "SLIGHTLY SMILING FACE" },				// 🙂
+	{ 0x1F914, "THINKING FACE" },					// 🤔
+	{ 0x1F925, "LYING FACE" },					// 🤥
+	{ 0x1F928, "FACE WITH ONE EYEBROW RAISED" },			// 🤨
+	/* Greek Letters */
+	{ PALETTE_BREAK, NULL },
+	{ 0x03B1, "GREEK SMALL LETTER ALPHA" },	  // α
+	{ 0x03B2, "GREEK SMALL LETTER BETA" },	  // β
+	{ 0x03B3, "GREEK SMALL LETTER GAMMA" },	  // γ
+	{ 0x03B4, "GREEK SMALL LETTER DELTA" },	  // δ
+	{ 0x03B5, "GREEK SMALL LETTER EPSILON" }, // ε
+	{ 0x03B6, "GREEK SMALL LETTER ZETA" },	  // ζ
+	{ 0x03B7, "GREEK SMALL LETTER ETA" },	  // η
+	{ 0x03B8, "GREEK SMALL LETTER THETA" },	  // θ
+	{ 0x03B9, "GREEK SMALL LETTER IOTA" },	  // ι
+	{ 0x03BA, "GREEK SMALL LETTER KAPPA" },	  // κ
+	{ 0x03BB, "GREEK SMALL LETTER LAMDA" },	  // λ
+	{ 0x03BC, "GREEK SMALL LETTER MU" },	  // μ
+	{ 0x03BD, "GREEK SMALL LETTER NU" },	  // ν
+	{ 0x03BE, "GREEK SMALL LETTER XI" },	  // ξ
+	{ 0x03BF, "GREEK SMALL LETTER OMICRON" }, // ο
+	{ 0x03C0, "GREEK SMALL LETTER PI" },	  // π
+	{ 0x03C1, "GREEK SMALL LETTER RHO" },	  // ρ
+	{ 0x03C3, "GREEK SMALL LETTER SIGMA" },	  // σ
+	{ 0x03C4, "GREEK SMALL LETTER TAU" },	  // τ
+	{ 0x03C5, "GREEK SMALL LETTER UPSILON" }, // υ
+	{ 0x03C6, "GREEK SMALL LETTER PHI" },	  // φ
+	{ 0x03C7, "GREEK SMALL LETTER CHI" },	  // χ
+	{ 0x03C8, "GREEK SMALL LETTER PSI" },	  // ψ
+	{ 0x03C9, "GREEK SMALL LETTER OMEGA" },	  // ω
+	{ 0x0393, "GREEK CAPITAL LETTER GAMMA" }, // Γ
+	{ 0x0394, "GREEK CAPITAL LETTER DELTA" }, // Δ
+	{ 0x0398, "GREEK CAPITAL LETTER THETA" }, // Θ
+	{ 0x039B, "GREEK CAPITAL LETTER LAMDA" }, // Λ
+	{ 0x039E, "GREEK CAPITAL LETTER XI" },	  // Ξ
+	{ 0x03A0, "GREEK CAPITAL LETTER PI" },	  // Π
+	{ 0x03A3, "GREEK CAPITAL LETTER SIGMA" }, // Σ
+	{ 0x03A6, "GREEK CAPITAL LETTER PHI" },	  // Φ
+	{ 0x03A8, "GREEK CAPITAL LETTER PSI" },	  // Ψ
+	{ 0x03A9, "GREEK CAPITAL LETTER OMEGA" }, // Ω
+	/* Box Drawing - Light & Heavy */
+	{ PALETTE_BREAK, NULL },
+	{ 0x2500, "BOX DRAWINGS LIGHT HORIZONTAL" },		  // ─
+	{ 0x2502, "BOX DRAWINGS LIGHT VERTICAL" },		  // │
+	{ 0x250C, "BOX DRAWINGS LIGHT DOWN AND RIGHT" },	  // ┌
+	{ 0x2510, "BOX DRAWINGS LIGHT DOWN AND LEFT" },		  // ┐
+	{ 0x2514, "BOX DRAWINGS LIGHT UP AND RIGHT" },		  // └
+	{ 0x2518, "BOX DRAWINGS LIGHT UP AND LEFT" },		  // ┘
+	{ 0x251C, "BOX DRAWINGS LIGHT VERTICAL AND RIGHT" },	  // ├
+	{ 0x2524, "BOX DRAWINGS LIGHT VERTICAL AND LEFT" },	  // ┤
+	{ 0x252C, "BOX DRAWINGS LIGHT DOWN AND HORIZONTAL" },	  // ┬
+	{ 0x2534, "BOX DRAWINGS LIGHT UP AND HORIZONTAL" },	  // ┴
+	{ 0x253C, "BOX DRAWINGS LIGHT VERTICAL AND HORIZONTAL" }, // ┼
+	{ 0x2501, "BOX DRAWINGS HEAVY HORIZONTAL" },		  // ━
+	{ 0x2503, "BOX DRAWINGS HEAVY VERTICAL" },		  // ┃
+	{ 0x250F, "BOX DRAWINGS HEAVY DOWN AND RIGHT" },	  // ┏
+	{ 0x251B, "BOX DRAWINGS HEAVY UP AND LEFT" },		  // ┛
+	/* Box Drawing - Double */
+	{ 0x2551, "BOX DRAWINGS DOUBLE VERTICAL" },		   // ║
+	{ 0x2550, "BOX DRAWINGS DOUBLE HORIZONTAL" },		   // ═
+	{ 0x2554, "BOX DRAWINGS DOUBLE DOWN AND RIGHT" },	   // ╔
+	{ 0x2557, "BOX DRAWINGS DOUBLE DOWN AND LEFT" },	   // ╗
+	{ 0x255A, "BOX DRAWINGS DOUBLE UP AND RIGHT" },		   // ╚
+	{ 0x255D, "BOX DRAWINGS DOUBLE UP AND LEFT" },		   // ╝
+	{ 0x2560, "BOX DRAWINGS DOUBLE VERTICAL AND RIGHT" },	   // ╠
+	{ 0x2563, "BOX DRAWINGS DOUBLE VERTICAL AND LEFT" },	   // ╣
+	{ 0x2566, "BOX DRAWINGS DOUBLE DOWN AND HORIZONTAL" },	   // ╦
+	{ 0x2569, "BOX DRAWINGS DOUBLE UP AND HORIZONTAL" },	   // ╩
+	{ 0x256C, "BOX DRAWINGS DOUBLE VERTICAL AND HORIZONTAL" }, // ╬
+	/* Terminal/CLI Blocks & Shading */
+	{ PALETTE_BREAK, NULL },
+	{ 0x2588, "FULL BLOCK" },		     // █
+	{ 0x2589, "LEFT SEVEN EIGHTHS BLOCK" },	     // ▉
+	{ 0x258A, "LEFT THREE QUARTERS BLOCK" },     // ▊
+	{ 0x258B, "LEFT FIVE EIGHTHS BLOCK" },	     // ▋
+	{ 0x258C, "LEFT HALF BLOCK" },		     // ▌
+	{ 0x258D, "LEFT THREE EIGHTHS BLOCK" },	     // ▍
+	{ 0x258E, "LEFT ONE QUARTER BLOCK" },	     // ▎
+	{ 0x258F, "LEFT ONE EIGHTH BLOCK" },	     // ▏
+	{ 0x2581, "LOWER ONE EIGHTH BLOCK" },	     // ▁
+	{ 0x2582, "LOWER ONE QUARTER BLOCK" },	     // ▂
+	{ 0x2583, "LOWER THREE EIGHTHS BLOCK" },     // ▃
+	{ 0x2584, "LOWER HALF BLOCK" },		     // ▄
+	{ 0x2585, "LOWER FIVE EIGHTHS BLOCK" },	     // ▅
+	{ 0x2586, "LOWER THREE QUARTERS BLOCK" },    // ▆
+	{ 0x2587, "LOWER SEVEN EIGHTHS BLOCK" },     // ▇
+	{ 0x2591, "LIGHT SHADE" },		     // ░
+	{ 0x2592, "MEDIUM SHADE" },		     // ▒
+	{ 0x2593, "DARK SHADE" },		     // ▓
+	{ 0x25B2, "BLACK UP-POINTING TRIANGLE" },    // ▲
+	{ 0x25BC, "BLACK DOWN-POINTING TRIANGLE" },  // ▼
+	{ 0x25B6, "BLACK RIGHT-POINTING TRIANGLE" }, // ▶
+	{ 0x25C0, "BLACK LEFT-POINTING TRIANGLE" },  // ◀
 };
-
 const int palette_size = sizeof(palette) / sizeof(palette[0]);
 
 /* ------------------------------------------------------------------ */
 /* Palette popup                                                       */
 /* ------------------------------------------------------------------ */
-
-#define PALETTE_BUF_NAME "*Palette*"
+#define PALETTE_BUF_NAME "Palette"
 
 /* Populate the palette buffer.  Mirrors the dump_palette utility:
- * concatenate every entry's utf8[] with a trailing space.  The
- * PALETTE_BREAK entries contain '\n', producing line breaks. */
+concatenate every entry's utf8[] with a trailing space.  The
+PALETTE_BREAK entries contain '\n', producing line breaks. */
 static void populatePaletteBuffer(struct buffer *buf) {
 	bufferResetRows(buf);
 	buf->read_only = 0;
-
 	uint8_t flat[4096];
 	int len = 0;
 	for (int i = 0; i < palette_size; i++) {
-		memcpy(&flat[len], palette[i].utf8, palette[i].utf8_len);
-		len += palette[i].utf8_len;
-		if (palette[i].codepoint != PALETTE_BREAK)
+		if (palette[i].codepoint == PALETTE_BREAK) {
+			flat[len++] = '\n';
+		} else {
+			uint8_t utf8[5];
+			int nbytes = utf8Encode(palette[i].codepoint, utf8);
+			memcpy(&flat[len], utf8, nbytes);
+			len += nbytes;
 			flat[len++] = ' ';
+		}
 	}
-
 	/* Load into buffer rows (split on '\n'). */
 	int start = 0;
 	for (int i = 0; i < len; i++) {
@@ -216,12 +245,11 @@ static void populatePaletteBuffer(struct buffer *buf) {
 	}
 	if (start < len)
 		appendRowRaw(buf, &flat[start], len - start);
-
 	buf->read_only = 1;
 }
 
 /* Return the byte offset in `row` of the first non-space character
- * at or after byte position `from`.  Returns row->size if none. */
+at or after byte position `from`.  Returns row->size if none. */
 static int skipSpacesForward(erow *row, int from) {
 	while (from < row->size && row->chars[from] == ' ')
 		from++;
@@ -229,8 +257,8 @@ static int skipSpacesForward(erow *row, int from) {
 }
 
 /* Return the byte offset of the first non-space character at or
- * before `from`, walking backwards.  Returns 0 if the row begins
- * with a non-space, or the earliest non-space position found. */
+before `from`, walking backwards.  Returns 0 if the row begins
+with a non-space, or the earliest non-space position found. */
 static int skipSpacesBackward(erow *row, int from) {
 	while (from > 0 && row->chars[from] == ' ')
 		from--;
@@ -241,9 +269,9 @@ static int skipSpacesBackward(erow *row, int from) {
 }
 
 /* After a cursor movement, snap cx to a non-space character so the
- * cursor always rests on an actual symbol.  `direction` should be
- * -1 after a backward movement, +1 after a forward movement, and
- * 0 for neutral (initial placement, vertical moves). */
+cursor always rests on an actual symbol.  `direction` should be
+-1 after a backward movement, +1 after a forward movement, and
+0 for neutral (initial placement, vertical moves). */
 static void snapToSymbol(struct buffer *buf, int direction) {
 	erow *row = &buf->row[buf->cy];
 	if (row->size == 0)
@@ -277,18 +305,15 @@ static void snapToSymbol(struct buffer *buf, int direction) {
 }
 
 /* Close the palette popup and restore window focus to the buffer that
- * was active when the palette was opened.
- *
- * If `origin` still inhabits a visible window, focus that window.
- * Otherwise (typically when the palette was invoked from the
- * minibuffer, which is not in any window) fall back to whichever
- * window held focus before the palette opened: clamped to the
- * current window count, since windows may have been closed.
- *
- * Updates E.windows[*]->focused and E.buf. */
+was active when the palette was opened.
+If `origin` still inhabits a visible window, focus that window.
+Otherwise (typically when the palette was invoked from the
+minibuffer, which is not in any window) fall back to whichever
+window held focus before the palette opened: clamped to the
+current window count, since windows may have been closed.
+Updates E.windows[*]->focused and E.buf. */
 static void restoreFocusTo(struct buffer *origin, int origin_win) {
 	closeSpecialBuffer(PALETTE_BUF_NAME);
-
 	int ow = findBufferWindow(origin);
 	int target = (ow >= 0) ? ow :
 				 (origin_win < E.nwindows ? origin_win : 0);
@@ -306,18 +331,15 @@ void expandPalette(void) {
 	struct buffer *pbuf = findOrCreateSpecialBuffer(PALETTE_BUF_NAME);
 	populatePaletteBuffer(pbuf);
 	pbuf->word_wrap = 1;
-
 	/* Place cursor on the first symbol (first entry with default_sel) */
 	pbuf->cx = 0;
 	pbuf->cy = 0;
 	pbuf->markx = -1;
 	pbuf->marky = -1;
 	pbuf->mark_active = 0;
-
 	bufferEnsureRow(pbuf);
 	updateBuffer(pbuf);
 	showPopupBuffer(pbuf);
-
 	/* Transfer focus to the palette window */
 	int palette_win = findBufferWindow(pbuf);
 	int from_minibuf = (origin == E.minibuf);
@@ -332,14 +354,12 @@ void expandPalette(void) {
 		E.windows[palette_win]->cy = pbuf->cy;
 		E.buf = pbuf;
 	}
-
 	/* Snap to the first symbol */
 	snapToSymbol(pbuf, 0);
 
 	/* ---- Modal key loop ---- */
 	for (;;) {
 		refreshScreen();
-
 		int key = readKey();
 		if (key == -1)
 			continue;
@@ -358,13 +378,10 @@ void expandPalette(void) {
 						memcpy(E.unicode,
 						       &row->chars[cx], nbytes);
 						E.nunicode = nbytes;
-
 						restoreFocusTo(origin,
 							       origin_win);
-
 						if (rejectIfReadOnly(E.buf))
 							return;
-
 						/* Insert the symbol */
 						insertUnicode(1);
 						return;
@@ -374,14 +391,12 @@ void expandPalette(void) {
 			/* Nothing valid under cursor: just beep / ignore */
 			continue;
 		}
-
 		/* Cancel */
 		if (key == CTRL('g')) {
 			restoreFocusTo(origin, origin_win);
 			setStatusMessage("Canceled.");
 			return;
 		}
-
 		/* Navigation keys: dispatch normally then snap to symbol */
 		int cmd = resolveBinding(key);
 		int snap_dir = 0;
@@ -441,9 +456,19 @@ void expandPalette(void) {
 				break;
 			}
 		}
-
 		clampPositions(pbuf);
 		snapToSymbol(pbuf, snap_dir);
-		setStatusMessage("test");
+
+		erow *row = &pbuf->row[pbuf->cy];
+		if (pbuf->cx < row->size && row->chars[pbuf->cx] != ' ') {
+			uint32_t cp = utf8Decode(row->chars, pbuf->cx);
+			for (int i = 0; i < palette_size; i++) {
+				if (palette[i].codepoint == cp &&
+				    palette[i].name) {
+					setStatusMessage("%s", palette[i].name);
+					break;
+				}
+			}
+		}
 	}
 }

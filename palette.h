@@ -10,10 +10,8 @@
 #define PALETTE_BREAK 0x00
 
 typedef struct {
-	uint32_t codepoint; /* PALETTE_BREAK for category separators */
-	unsigned char utf8[5];
-	int utf8_len;
-	bool default_sel;
+	uint32_t codepoint;
+	const char *name;
 } PaletteEntry;
 
 extern const PaletteEntry palette[];
