@@ -29,6 +29,11 @@ const PaletteEntry palette[] = {
 	{ 0x203A, "SINGLE RIGHT-POINTING ANGLE QUOTATION MARK" }, // ›
 	{ 0x2010, "HYPHEN" },					  // ‐
 	{ 0x00B7, "MIDDLE DOT" },				  // ·
+	/* Spanish Special Characters */
+	{ 0x00A1, "INVERTED EXCLAMATION MARK" },   // ¡
+	{ 0x00BF, "INVERTED QUESTION MARK" },	   // ¿
+	{ 0x00AA, "FEMININE ORDINAL INDICATOR" },  // ª
+	{ 0x00BA, "MASCULINE ORDINAL INDICATOR" }, // º
 	/* Publishing */
 	{ 0x00A7, "SECTION SIGN" }, // §
 	{ 0x2032, "PRIME" },	    // ′
@@ -40,7 +45,7 @@ const PaletteEntry palette[] = {
 	{ 0x00B6, "PILCROW SIGN" },    // ¶
 	{ 0x2020, "DAGGER" },	       // †
 	{ 0x2021, "DOUBLE DAGGER" },   // ‡
-	{0x00B0,  " DEGREE SIGN"  },   // °
+	{ 0x00B0, " DEGREE SIGN" },    // °
 	/* Currency */
 	{ 0x00A2, "CENT SIGN" },		 // ¢
 	{ 0x00A3, "POUND SIGN" },		 // £
@@ -121,6 +126,19 @@ const PaletteEntry palette[] = {
 	{ 0x1F914, "THINKING FACE" },					// 🤔
 	{ 0x1F925, "LYING FACE" },					// 🤥
 	{ 0x1F928, "FACE WITH ONE EYEBROW RAISED" },			// 🤨
+	{ 0x1F634, "SLEEPING FACE" },					// 😴
+	{ 0x1F60B, "FACE SAVOURING DELICIOUS FOOD" },			// 😋
+	{ 0x1F480, "SKULL" },						// 💀
+	{ 0x1F64F, "PERSON WITH FOLDED HANDS" },			// 🙏
+	{ 0x1F91D, "HANDSHAKE" },					// 🤝
+	{ 0x2795, "HEAVY PLUS SIGN" },	  // ➕
+	{ 0x2796, "HEAVY MINUS SIGN" },	  // ➖
+	{ 0x1F4DD, "MEMO" },		  // 📝
+	{ 0x1F527, "WRENCH" },		  // 🔧
+	{ 0x1F528, "HAMMER" },		  // 🔨
+	{ 0x1F6A7, "CONSTRUCTION SIGN" }, // 🚧
+	{ 0x1F512, "LOCK" },		  // 🔒
+	{ 0x1F3AF, "DIRECT HIT" },	  // 🎯
 
 	/* Greek Letters */
 	{ PALETTE_BREAK, NULL },
@@ -211,6 +229,17 @@ const PaletteEntry palette[] = {
 	{ 0x25BC, "BLACK DOWN-POINTING TRIANGLE" },  // ▼
 	{ 0x25B6, "BLACK RIGHT-POINTING TRIANGLE" }, // ▶
 	{ 0x25C0, "BLACK LEFT-POINTING TRIANGLE" },  // ◀
+	/* Terminal/CLI Indicators */
+	{ 0x25D0, "CIRCLE WITH LEFT HALF BLACK" },	   // ◐
+	{ 0x25D1, "CIRCLE WITH RIGHT HALF BLACK" },	   // ◑
+	{ 0x25D2, "CIRCLE WITH LOWER HALF BLACK" },	   // ◒
+	{ 0x25D3, "CIRCLE WITH UPPER HALF BLACK" },	   // ◓
+	{ 0x25B8, "BLACK RIGHT-POINTING SMALL TRIANGLE" }, // ▸
+	{ 0x25B9, "WHITE RIGHT-POINTING SMALL TRIANGLE" }, // ▹
+	{ 0x25BE, "BLACK DOWN-POINTING SMALL TRIANGLE" },  // ▾
+	{ 0x25BF, "WHITE DOWN-POINTING SMALL TRIANGLE" },  // ▿
+	{ 0x25AA, "BLACK SMALL SQUARE" },		   // ▪
+	{ 0x25AB, "WHITE SMALL SQUARE" },		   // ▫
 };
 const int palette_size = sizeof(palette) / sizeof(palette[0]);
 

@@ -1483,7 +1483,8 @@ void describeChar(void) {
 	long abs_offset = cx;
 	for (int i = 0; i < E.buf->cy; i++) {
 		abs_offset += E.buf->row[i].size;
-		abs_offset += 1; /* +1 for the implicit \n stripped from memory */
+		abs_offset +=
+			1; /* +1 for the implicit \n stripped from memory */
 	}
 
 	if (cx >= row->size) {
@@ -1531,7 +1532,8 @@ void describeChar(void) {
 		const char *script = unicodeScriptName(cp);
 
 		if (script != NULL && script[0] != '\0')
-			snprintf(scriptpart, sizeof(scriptpart), " (%s)", script);
+			snprintf(scriptpart, sizeof(scriptpart), " (%s)",
+				 script);
 
 		if (byte_len > (int)sizeof(glyph) - 1)
 			byte_len = sizeof(glyph) - 1;
@@ -1541,12 +1543,12 @@ void describeChar(void) {
 		snprintf(
 			info, sizeof(info),
 			"Character: %s%s | Unicode Codepoint: U+%04lX | Display Width: %d | Line Byte Offset: %d | Absolute Byte Offset: %ld | Raw Hex Bytes: %s",
-			glyph, scriptpart, (unsigned long)cp, sw, cx, abs_offset, raw);
+			glyph, scriptpart, (unsigned long)cp, sw, cx,
+			abs_offset, raw);
 	}
 
 	setStatusMessage("%s", info);
 }
-
 
 /* Put the cursor's screen line in the middle of the window by walking
  * back half a window of screen lines from it.*/
