@@ -1,4 +1,4 @@
-## [Unreleased]
+## [0.9.9]
 - Added page up/down to prompt completion windows
 - Palette no shows the Unicode name for the selected symbol
 - Added `M-x insert-char` to insert a character by Unicode codepoint hex

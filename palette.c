@@ -131,14 +131,14 @@ const PaletteEntry palette[] = {
 	{ 0x1F480, "SKULL" },						// 💀
 	{ 0x1F64F, "PERSON WITH FOLDED HANDS" },			// 🙏
 	{ 0x1F91D, "HANDSHAKE" },					// 🤝
-	{ 0x2795, "HEAVY PLUS SIGN" },	  // ➕
-	{ 0x2796, "HEAVY MINUS SIGN" },	  // ➖
-	{ 0x1F4DD, "MEMO" },		  // 📝
-	{ 0x1F527, "WRENCH" },		  // 🔧
-	{ 0x1F528, "HAMMER" },		  // 🔨
-	{ 0x1F6A7, "CONSTRUCTION SIGN" }, // 🚧
-	{ 0x1F512, "LOCK" },		  // 🔒
-	{ 0x1F3AF, "DIRECT HIT" },	  // 🎯
+	{ 0x2795, "HEAVY PLUS SIGN" },					// ➕
+	{ 0x2796, "HEAVY MINUS SIGN" },					// ➖
+	{ 0x1F4DD, "MEMO" },						// 📝
+	{ 0x1F527, "WRENCH" },						// 🔧
+	{ 0x1F528, "HAMMER" },						// 🔨
+	{ 0x1F6A7, "CONSTRUCTION SIGN" },				// 🚧
+	{ 0x1F512, "LOCK" },						// 🔒
+	{ 0x1F3AF, "DIRECT HIT" },					// 🎯
 
 	/* Greek Letters */
 	{ PALETTE_BREAK, NULL },
