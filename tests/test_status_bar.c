@@ -425,6 +425,67 @@ void test_b13_statusleft_does_not_overrun_its_buffer(void) {
 	free(raw);
 }
 
+/* DEF-1 (#117) — leftTruncate split multi-byte characters
+ *
+ * The B12 defect's twin.  The 0.9.3 CHANGELOG fix repaired statusLeft;
+ * this copy of the loop — the one that produces display_name itself,
+ * plus completion lists and save/open/kill messages — kept measuring
+ * a column budget in bytes, so `s + (len - tail)` landed mid-sequence
+ * at two CJK widths in three. */
+
+void test_left_truncate_valid_utf8_at_every_width(void) {
+	/* The report's reproduction: "/home/u/" + 9 CJK + ".txt".
+	 * 39 bytes, 30 columns; byte arithmetic against a column
+	 * budget forced invalid output at widths 12, 14, 15, 17, 18,
+	 * 20, 21 and split characters silently elsewhere. */
+	const char *name = "/home/u/"
+			   "\xE8\xAF\xAD\xE8\xAF\xAD\xE8\xAF\xAD"
+			   "\xE8\xAF\xAD\xE8\xAF\xAD\xE8\xAF\xAD"
+			   "\xE8\xAF\xAD\xE8\xAF\xAD\xE8\xAF\xAD"
+			   ".txt";
+
+	for (int w = 1; w <= 32; w++) {
+		char *r = leftTruncate(name, w);
+		TEST_ASSERT_EQUAL_INT(1, utf8_validate((const uint8_t *)r,
+						       (int)strlen(r)));
+		TEST_ASSERT_TRUE(stringWidth((const uint8_t *)r) <= w);
+		free(r);
+	}
+
+	/* One exact expectation, at a width the old code corrupted:
+	 * budget 12 leaves 9 columns after "...", which holds the
+	 * rightmost 2 CJK (4 cols) + ".txt" (4 cols). */
+	char *r = leftTruncate(name, 12);
+	TEST_ASSERT_EQUAL_STRING("...\xE8\xAF\xAD\xE8\xAF\xAD.txt", r);
+	free(r);
+}
+
+void test_left_truncate_ascii_unchanged(void) {
+	/* Bytes == columns for ASCII, so the column rewrite must
+	 * reproduce the historical results exactly. */
+	char *r = leftTruncate("short", 10);
+	TEST_ASSERT_EQUAL_STRING("short", r);
+	free(r);
+
+	r = leftTruncate("abcdefghij", 8);
+	TEST_ASSERT_EQUAL_STRING("...fghij", r);
+	free(r);
+}
+
+void test_left_truncate_tiny_budget_keeps_whole_chars(void) {
+	/* max_width <= 3 has no room for "..." and used to return a
+	 * raw byte tail — also mid-character for CJK.  Now: the bare
+	 * rightmost whole characters that fit. */
+	const char *cjk = "\xE8\xAF\xAD\xE8\xAF\xAD\xE8\xAF\xAD"; /* 6 cols */
+	char *r = leftTruncate(cjk, 2);
+	TEST_ASSERT_EQUAL_STRING("\xE8\xAF\xAD", r);
+	free(r);
+
+	r = leftTruncate(cjk, 3); /* two chars = 4 cols > 3: still one */
+	TEST_ASSERT_EQUAL_STRING("\xE8\xAF\xAD", r);
+	free(r);
+}
+
 int main(void) {
 	/* wcwidth() only reports 2 for a CJK character under a UTF-8
 	 * LC_CTYPE; without this the display-column test below would
@@ -450,5 +511,9 @@ int main(void) {
 
 	RUN_TEST(test_b12_statusleft_truncation_stays_valid_utf8);
 	RUN_TEST(test_b13_statusleft_does_not_overrun_its_buffer);
+
+	RUN_TEST(test_left_truncate_valid_utf8_at_every_width);
+	RUN_TEST(test_left_truncate_ascii_unchanged);
+	RUN_TEST(test_left_truncate_tiny_budget_keeps_whole_chars);
 	return TEST_END();
 }

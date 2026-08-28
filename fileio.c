@@ -1960,31 +1960,13 @@ struct buffer *loadStdinBuffer(const char *data, size_t len) {
 	buf->filename = xstrdup("*stdin*");
 	bufferResetRows(buf); /* rebuilt from scratch below */
 
-	size_t start = 0;
-	for (size_t i = 0; i < len; i++) {
-		if (data[i] == '\n') {
-			/* Strip trailing \r for DOS line endings */
-			size_t end = i;
-			if (end > start && data[end - 1] == '\r')
-				end--;
-			appendRowRaw(buf, (const uint8_t *)&data[start],
-				     (int)(end - start));
-			start = i + 1;
-		}
-	}
-	/* Handle a final line with no trailing newline. */
-	if (start < len) {
-		size_t end = len;
-		if (end > start && data[end - 1] == '\r')
-			end--;
-		appendRowRaw(buf, (const uint8_t *)&data[start],
-			     (int)(end - start));
-	}
-
-	/* Terminate unconditionally, as editorOpen does: piped input
-	 * without a final newline would otherwise leave the last row
-	 * non-empty, breaking the invariant in buffer.h. */
-	appendRowRaw(buf, (const uint8_t *)"", 0);
+	/* BLOB_CRLF: DOS line endings are converted on ingestion,
+	 * consistent with §3.21.1.  BLOB_FINAL_NL terminates
+	 * unconditionally, as editorOpen does: piped input without a
+	 * final newline would otherwise leave the last row non-empty,
+	 * breaking the invariant in buffer.h. */
+	bufferLoadBlob(buf, (const uint8_t *)data, len,
+		       BLOB_CRLF | BLOB_FINAL_NL);
 
 	/* Validate UTF-8 encoding, mirroring editorOpen: the null-byte
 	 * check above only catches a subset of binary input. */

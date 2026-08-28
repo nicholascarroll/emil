@@ -273,6 +273,131 @@ void test_minibuf_trailing_newline(void) {
 	destroyBuffer(mb);
 }
 
+/* ================================================================
+ * bufferLoadBlob (#117 R2)
+ *
+ * Five places split a blob into rows and disagreed about the two edge
+ * cases that matter: what happens to a trailing segment with no
+ * newline after it, and whether CR is stripped.  These pin the single
+ * answer.
+ * ================================================================ */
+
+static struct buffer *blobBuf(void) {
+	struct buffer *b = newBuffer();
+	bufferResetRows(b);
+	return b;
+}
+
+static void assertRow(struct buffer *b, int i, const char *want) {
+	TEST_ASSERT_TRUE(i < b->numrows);
+	TEST_ASSERT_EQUAL_INT((int)strlen(want), b->row[i].size);
+	TEST_ASSERT_EQUAL_INT(0, memcmp(b->row[i].chars, want, strlen(want)));
+}
+
+void test_blob_trailing_newline(void) {
+	struct buffer *b = blobBuf();
+	bufferLoadBlob(b, (const uint8_t *)"alpha\nbravo\n", 12, 0);
+	TEST_ASSERT_EQUAL_INT(2, b->numrows);
+	assertRow(b, 0, "alpha");
+	assertRow(b, 1, "bravo");
+	destroyBuffer(b);
+}
+
+/* DEF-4: the *Diff* copy emitted the last row before counting its
+ * final byte, so "alpha\nbravo" captured as "alpha" / "brav". */
+void test_blob_no_trailing_newline_keeps_last_byte(void) {
+	struct buffer *b = blobBuf();
+	bufferLoadBlob(b, (const uint8_t *)"alpha\nbravo", 11, 0);
+	TEST_ASSERT_EQUAL_INT(2, b->numrows);
+	assertRow(b, 0, "alpha");
+	assertRow(b, 1, "bravo");
+	destroyBuffer(b);
+}
+
+void test_blob_empty(void) {
+	struct buffer *b = blobBuf();
+	bufferLoadBlob(b, (const uint8_t *)"", 0, 0);
+	/* Never rowless (§4.9). */
+	TEST_ASSERT_EQUAL_INT(1, b->numrows);
+	assertRow(b, 0, "");
+	destroyBuffer(b);
+}
+
+void test_blob_crlf_flag(void) {
+	struct buffer *b = blobBuf();
+	bufferLoadBlob(b, (const uint8_t *)"alpha\r\nbravo\r\n", 14, BLOB_CRLF);
+	TEST_ASSERT_EQUAL_INT(2, b->numrows);
+	assertRow(b, 0, "alpha");
+	assertRow(b, 1, "bravo");
+	destroyBuffer(b);
+
+	/* Without the flag the CR is ordinary content, and stays. */
+	b = blobBuf();
+	bufferLoadBlob(b, (const uint8_t *)"alpha\r\n", 7, 0);
+	TEST_ASSERT_EQUAL_INT(1, b->numrows);
+	assertRow(b, 0, "alpha\r");
+	destroyBuffer(b);
+
+	/* A lone CR mid-line is never touched (§3.21.1). */
+	b = blobBuf();
+	bufferLoadBlob(b, (const uint8_t *)"a\rb\n", 4, BLOB_CRLF);
+	TEST_ASSERT_EQUAL_INT(1, b->numrows);
+	assertRow(b, 0, "a\rb");
+	destroyBuffer(b);
+}
+
+void test_blob_final_nl_flag(void) {
+	/* BLOB_FINAL_NL terminates unconditionally: the trailing empty
+	 * row is how a final newline is represented (§4.1). */
+	struct buffer *b = blobBuf();
+	bufferLoadBlob(b, (const uint8_t *)"alpha\n", 6, BLOB_FINAL_NL);
+	TEST_ASSERT_EQUAL_INT(2, b->numrows);
+	assertRow(b, 0, "alpha");
+	assertRow(b, 1, "");
+	destroyBuffer(b);
+
+	/* Input lacking the newline gains one. */
+	b = blobBuf();
+	bufferLoadBlob(b, (const uint8_t *)"alpha", 5, BLOB_FINAL_NL);
+	TEST_ASSERT_EQUAL_INT(2, b->numrows);
+	assertRow(b, 0, "alpha");
+	assertRow(b, 1, "");
+	destroyBuffer(b);
+}
+
+void test_blob_blank_lines_preserved(void) {
+	struct buffer *b = blobBuf();
+	bufferLoadBlob(b, (const uint8_t *)"a\n\nb\n", 5, 0);
+	TEST_ASSERT_EQUAL_INT(3, b->numrows);
+	assertRow(b, 0, "a");
+	assertRow(b, 1, "");
+	assertRow(b, 2, "b");
+	destroyBuffer(b);
+}
+
+/* Appends rather than resets: register.c writes a header first. */
+void test_blob_appends_beneath_existing_rows(void) {
+	struct buffer *b = blobBuf();
+	insertRow(b, 0, (const uint8_t *)"header", 6);
+	bufferLoadBlob(b, (const uint8_t *)"one\ntwo\n", 8, 0);
+	TEST_ASSERT_EQUAL_INT(3, b->numrows);
+	assertRow(b, 0, "header");
+	assertRow(b, 1, "one");
+	assertRow(b, 2, "two");
+	destroyBuffer(b);
+}
+
+/* Bulk population must not mark the buffer dirty: §3.21.1 relies on
+ * that so an unedited file is never rewritten merely for being
+ * opened. */
+void test_blob_does_not_mark_dirty(void) {
+	struct buffer *b = blobBuf();
+	b->dirty = 0;
+	bufferLoadBlob(b, (const uint8_t *)"alpha\n", 6, 0);
+	TEST_ASSERT_EQUAL_INT(0, b->dirty);
+	destroyBuffer(b);
+}
+
 int main(void) {
 	TEST_BEGIN();
 
@@ -300,6 +425,16 @@ int main(void) {
 	RUN_TEST(test_minibuf_trailing_newline);
 	RUN_TEST(test_minibuf_bare_newline_is_not_empty);
 	RUN_TEST(test_caret_escape_newlines);
+
+	/* bufferLoadBlob (#117 R2) */
+	RUN_TEST(test_blob_trailing_newline);
+	RUN_TEST(test_blob_no_trailing_newline_keeps_last_byte);
+	RUN_TEST(test_blob_empty);
+	RUN_TEST(test_blob_crlf_flag);
+	RUN_TEST(test_blob_final_nl_flag);
+	RUN_TEST(test_blob_blank_lines_preserved);
+	RUN_TEST(test_blob_appends_beneath_existing_rows);
+	RUN_TEST(test_blob_does_not_mark_dirty);
 
 	/* Boundary tests */
 	RUN_TEST(test_del_row_only_row);

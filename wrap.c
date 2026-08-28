@@ -171,15 +171,14 @@ int wordWrapBreak(erow *row, int screencols, int line_start_col,
 			hard_byte = bidx;
 		}
 		uint8_t c = row->chars[bidx];
-		int cwidth;
-
-		if (c == '\t') {
-			cwidth = EMIL_TAB_STOP - (col % EMIL_TAB_STOP);
-		} else if (ISCTRL(c)) {
-			cwidth = 2;
-		} else {
-			cwidth = charInStringWidth(row->chars, bidx);
-		}
+		/* Width from THE rule (charAdvance, #117 R1).  The
+		 * render loop draws each sub-line with the same rule;
+		 * a one-column disagreement between the two shifts
+		 * text and moves the cursor off its character, so
+		 * they must share the computation, not agree by
+		 * inspection. */
+		int nb;
+		int cwidth = charAdvance(row->chars, bidx, col, &nb);
 
 		/* Wide char won't fit: leave a 1-col gap and break. */
 		if (cwidth > 1 && col + cwidth - line_start_col > screencols)
@@ -190,24 +189,24 @@ int wordWrapBreak(erow *row, int screencols, int line_start_col,
 		int this_preposed = 0;
 		if (isWordBoundary(c)) {
 			if (!breakForbiddenAfter(row, bidx) &&
-			    !breakForbiddenBefore(row, bidx + utf8_nBytes(c))) {
+			    !breakForbiddenBefore(row, bidx + nb)) {
 				wb_col = col + cwidth;
-				wb_byte = bidx + utf8_nBytes(c);
+				wb_byte = bidx + nb;
 			}
 		} else if (c >= 0x80) {
 			uint32_t cp = utf8Decode(row->chars, bidx);
 			if ((isCJKChar(cp) || isLineStartForbidden(cp) ||
 			     isWordSeparatorCP(cp)) &&
-			    !breakForbiddenBefore(row, bidx + utf8_nBytes(c))) {
+			    !breakForbiddenBefore(row, bidx + nb)) {
 				wb_col = col + cwidth;
-				wb_byte = bidx + utf8_nBytes(c);
+				wb_byte = bidx + nb;
 			}
 			this_preposed = isPreposedVowel(cp);
 		}
 		prev_preposed = this_preposed;
 
 		col += cwidth;
-		bidx += utf8_nBytes(c);
+		bidx += nb;
 	}
 
 	if (bidx >= row->size) {
@@ -225,10 +224,17 @@ int wordWrapBreak(erow *row, int screencols, int line_start_col,
 	} else {
 		/* Nothing fit: the segment's first character is wider
 		 * than the window.  Emit it anyway.  Returning a break
-		 * at line_start_byte would make callers loop forever. */
+		 * at line_start_byte would make callers loop forever.
+		 * charAdvance, not charInStringWidth: the main loop
+		 * above priced this character with tab-stop context
+		 * when deciding it didn't fit, and the render loop
+		 * will expand a tab to its stop, so break_col must be
+		 * charged the same way (a leading tab on a sub-8-col
+		 * window was previously charged 2 here). */
 		if (bidx == line_start_byte && bidx < row->size) {
-			col += charInStringWidth(row->chars, bidx);
-			bidx += utf8_nBytes(row->chars[bidx]);
+			int nb;
+			col += charAdvance(row->chars, bidx, col, &nb);
+			bidx += nb;
 		}
 		*break_col = col;
 		*break_byte = bidx;
@@ -416,25 +422,23 @@ int displayColumnToByteOffset(erow *row, int screencols, int target_subline,
 	int bidx = ls_byte;
 
 	while (bidx < subline_end_byte) {
-		uint8_t c = row->chars[bidx];
-		int cwidth;
-
-		if (c == '\t') {
-			int abs_col = ls_col + col;
-			cwidth = EMIL_TAB_STOP - (abs_col % EMIL_TAB_STOP);
-		} else if (ISCTRL(c)) {
-			cwidth = 2;
-		} else if (c < 0x80) {
-			cwidth = 1;
-		} else {
-			cwidth = charInStringWidth(row->chars, bidx);
-		}
+		/* charAdvance, THE width rule (#117 R1, fixes DEF-5).
+		 * This walk navigates WITHIN a sub-line whose
+		 * boundaries wordWrapBreak defined, so the two must
+		 * price every byte identically.  The open-coded rule
+		 * here had an `else if (c < 0x80) cwidth = 1` that
+		 * caught NUL at 1 column while wordWrapBreak gave it
+		 * 2 — unreachable through a buffer (load rejects NUL,
+		 * §3.21.1) but exactly the divergence class the
+		 * shared rule exists to make impossible. */
+		int nb;
+		int cwidth = charAdvance(row->chars, bidx, ls_col + col, &nb);
 
 		if (col + cwidth > target_col)
 			break;
 
 		col += cwidth;
-		bidx += utf8_nBytes(c);
+		bidx += nb;
 	}
 
 	return bidx;

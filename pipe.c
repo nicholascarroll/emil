@@ -372,27 +372,18 @@ void pipeCmd(int useRegion) {
 		shellBuf->marky = -1;
 		shellBuf->mark_active = 0;
 
-		// Use a temporary buffer to build each row
-		size_t rowStart = 0;
-		size_t rowLen = 0;
+		bufferLoadBlob(shellBuf, pipeOutput, outputLen, 0);
 
-		for (size_t i = 0; i < outputLen; i++) {
-			if (pipeOutput[i] == '\n') {
-				insertRow(shellBuf, shellBuf->numrows,
-					  &pipeOutput[rowStart], rowLen);
-				rowStart = i + 1;
-				rowLen = 0;
-			} else {
-				rowLen++;
-				if (i == outputLen - 1) {
-					insertRow(shellBuf, shellBuf->numrows,
-						  &pipeOutput[rowStart],
-						  rowLen);
-				}
-			}
-		}
-
-		bufferEnsureRow(shellBuf);
+		/* Preserves prior behaviour: these rows used to be
+		 * added with insertRow, which marks the buffer dirty.
+		 * A regenerated read-only popup showing "modified" in
+		 * its mode line is questionable, but changing it is a
+		 * user-visible change and not part of #117 R2.
+		 * Guarded on non-empty output because insertRow was
+		 * never reached for an empty capture, and an
+		 * unconditional call would newly dirty the popup. */
+		if (outputLen > 0)
+			markBufferDirty(shellBuf);
 		updateBuffer(shellBuf);
 
 		/* Route the shell output to a window.  If a window is
@@ -538,21 +529,13 @@ void diffBufferWithFile(void) {
 	diffBuf->mark_active = 0;
 	diffBuf->read_only = 1;
 
-	size_t rowStart = 0;
-	size_t rowLen = 0;
-	size_t outLen = (size_t)output_len;
-	for (size_t j = 0; j < outLen; j++) {
-		if (output[j] == '\n' || j == outLen - 1) {
-			insertRow(diffBuf, diffBuf->numrows,
-				  (const uint8_t *)&output[rowStart], rowLen);
-			rowStart = j + 1;
-			rowLen = 0;
-		} else {
-			rowLen++;
-		}
-	}
-
-	bufferEnsureRow(diffBuf);
+	/* The two copies of this split now share one implementation,
+	 * which is what DEF-4 asked for: this one dropped the final
+	 * byte of output not ending in a newline while the
+	 * shell-output copy above did not. */
+	bufferLoadBlob(diffBuf, (const uint8_t *)output, (size_t)output_len, 0);
+	if (output_len > 0)
+		markBufferDirty(diffBuf); /* as above */
 	updateBuffer(diffBuf);
 
 	/* Route the diff output to a window.  If a window is already

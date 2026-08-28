@@ -15,6 +15,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <locale.h>
 
 /* Portable substring search over a byte range (the haystack contains
  * escape sequences, not a NUL-terminated string, and memmem is a GNU
@@ -563,10 +564,227 @@ void test_viewport_stable_across_an_edit_above_a_non_focused_window(void) {
 void setUp(void) {
 }
 
+/* ================================================================
+ * DEF-2 (#117) — minibuffer height under-counted with wide characters
+ *
+ * Three places modelled the minibuffer's geometry and two of them
+ * disagreed: refreshScreen sized it by dividing total columns by
+ * screencols, while drawMinibuffer filled it character by character
+ * and pushed a straddling wide character to the next line.  The
+ * division assumed every line is filled to exactly screencols; each
+ * short line cost one column, the error accumulated, and the tail of
+ * the message was silently dropped.
+ *
+ * The invariant these pin: the number of lines the layout reports IS
+ * the number drawMinibuffer needs, and no message byte is lost.
+ * ================================================================ */
+
+/* Repeat a CJK character (U+8A9E, 3 bytes / 2 columns) n times. */
+static char *cjkRepeat(int n) {
+	char *s = xmalloc(n * 3 + 1);
+	for (int i = 0; i < n; i++)
+		memcpy(s + i * 3, "\xE8\xAF\xAD", 3);
+	s[n * 3] = '\0';
+	return s;
+}
+
+/* The four cases the report measured, each an odd screencols where
+ * the old division came up a line short. */
+void test_minibuf_layout_sizes_wide_messages(void) {
+	struct minibufLine lines[MINIBUF_MAX_LINES];
+	struct {
+		int screencols;
+		int nchars;
+		int expected;
+	} cases[] = {
+		{ 9, 9, 3 },
+		{ 9, 13, 4 },
+		{ 11, 11, 3 },
+		{ 11, 16, 4 },
+	};
+
+	for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+		char *msg = cjkRepeat(cases[i].nchars);
+		int n = minibufLayout(msg, 0, cases[i].screencols, lines,
+				      MINIBUF_MAX_LINES);
+		TEST_ASSERT_EQUAL_INT(cases[i].expected, n);
+		free(msg);
+	}
+}
+
+/* No byte of the message may be dropped: the lines must tile it
+ * exactly, in order, with no gaps and no overlap. */
+void test_minibuf_layout_covers_every_byte(void) {
+	struct minibufLine lines[MINIBUF_MAX_LINES];
+
+	for (int cols = 3; cols <= 13; cols++) {
+		for (int nchars = 1; nchars <= 12; nchars++) {
+			char *msg = cjkRepeat(nchars);
+			int n = minibufLayout(msg, 0, cols, lines,
+					      MINIBUF_MAX_LINES);
+			TEST_ASSERT_TRUE(n >= 1);
+
+			int expect_start = 0;
+			for (int i = 0; i < n; i++) {
+				TEST_ASSERT_EQUAL_INT(expect_start,
+						      lines[i].start);
+				TEST_ASSERT_TRUE(lines[i].end >
+						 lines[i].start);
+				TEST_ASSERT_TRUE(lines[i].cols <= cols);
+				expect_start = lines[i].end;
+			}
+			/* Fully consumed unless the 5-line cap bit. */
+			if (n < MINIBUF_MAX_LINES)
+				TEST_ASSERT_EQUAL_INT((int)strlen(msg),
+						      expect_start);
+			free(msg);
+		}
+	}
+}
+
+/* Sizing and drawing must agree.  drawMinibuffer emits one "\r\n"
+ * between lines, so a height matching the layout produces exactly
+ * (n-1) of them and carries every message byte. */
+void test_minibuf_drawn_lines_match_the_sizing(void) {
+	struct minibufLine lines[MINIBUF_MAX_LINES];
+	E.screencols = 9;
+
+	char *msg = cjkRepeat(9); /* the first DEF-2 case */
+	snprintf(E.statusmsg, sizeof(E.statusmsg), "%s", msg);
+	E.statusmsg_show = 1;
+
+	int n = minibufLayout(E.statusmsg, 0, E.screencols, lines,
+			      MINIBUF_MAX_LINES);
+	minibuffer_height = n;
+
+	struct abuf ab = ABUF_INIT;
+	drawMinibuffer(&ab);
+
+	int newlines = 0;
+	for (int i = 0; i + 1 < ab.len; i++)
+		if (ab.b[i] == '\r' && ab.b[i + 1] == '\n')
+			newlines++;
+	TEST_ASSERT_EQUAL_INT(n - 1, newlines);
+
+	/* Every byte of the message reached the frame: the tail is
+	 * what the old sizing dropped. */
+	TEST_ASSERT_TRUE(containsBytes(ab.b, ab.len, msg + 6 * 3, 3 * 3));
+
+	abFree(&ab);
+	free(msg);
+	E.statusmsg[0] = '\0';
+	E.statusmsg_show = 0;
+	minibuffer_height = 1;
+}
+
+/* ASCII must be unchanged: bytes == columns, so the old division was
+ * already exact there and the rewrite must reproduce it. */
+void test_minibuf_layout_ascii_unchanged(void) {
+	struct minibufLine lines[MINIBUF_MAX_LINES];
+
+	char msg[41];
+	memset(msg, 'a', 40);
+	msg[40] = '\0';
+
+	/* 40 columns over a 10-column screen = 4 lines. */
+	TEST_ASSERT_EQUAL_INT(4, minibufLayout(msg, 0, 10, lines,
+					       MINIBUF_MAX_LINES));
+	/* With a 3-column prefix on line 0: 7 + 10 + 10 + 10 = 37,
+	 * so a fifth line is needed and the cap holds it at 5. */
+	TEST_ASSERT_EQUAL_INT(5, minibufLayout(msg, 3, 10, lines,
+					       MINIBUF_MAX_LINES));
+	TEST_ASSERT_EQUAL_INT(7, lines[0].cols);
+
+	/* A message that fits is one line. */
+	TEST_ASSERT_EQUAL_INT(1, minibufLayout("short", 0, 40, lines,
+					       MINIBUF_MAX_LINES));
+	TEST_ASSERT_EQUAL_INT(5, lines[0].cols);
+
+	/* An empty message still occupies one line. */
+	TEST_ASSERT_EQUAL_INT(1, minibufLayout("", 0, 40, lines,
+					       MINIBUF_MAX_LINES));
+	TEST_ASSERT_EQUAL_INT(0, lines[0].cols);
+}
+
+/* A wide character on a 1-column screen cannot fit, and must still
+ * advance: no stall, no infinite layout. */
+void test_minibuf_layout_forces_progress(void) {
+	struct minibufLine lines[MINIBUF_MAX_LINES];
+	char *msg = cjkRepeat(3);
+
+	int n = minibufLayout(msg, 0, 1, lines, MINIBUF_MAX_LINES);
+	TEST_ASSERT_EQUAL_INT(3, n);
+	for (int i = 0; i < n; i++)
+		TEST_ASSERT_EQUAL_INT(3, lines[i].end - lines[i].start);
+
+	free(msg);
+}
+
+/* Sizing and drawing must agree.  This runs the SIZING path
+ * (minibufHeightNeeded, which is what refreshScreen calls) against
+ * what drawMinibuffer emits — asserting the layout against itself
+ * would not have caught DEF-2, since the defect was one model
+ * disagreeing with another.
+ *
+ * Every one of the report's four cases is checked, because the
+ * under-count accumulates and a single case could pass by luck. */
+void test_minibuf_sizing_matches_what_is_drawn(void) {
+	struct {
+		int screencols;
+		int nchars;
+		int expected;
+	} cases[] = {
+		{ 9, 9, 3 },
+		{ 9, 13, 4 },
+		{ 11, 11, 3 },
+		{ 11, 16, 4 },
+	};
+
+	for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+		char *msg = cjkRepeat(cases[i].nchars);
+		E.screencols = cases[i].screencols;
+		snprintf(E.statusmsg, sizeof(E.statusmsg), "%s", msg);
+		E.statusmsg_show = 1;
+
+		/* The sizing path, as refreshScreen runs it. */
+		int sized = minibufHeightNeeded();
+		TEST_ASSERT_EQUAL_INT(cases[i].expected, sized);
+
+		minibuffer_height = sized;
+		struct abuf ab = ABUF_INIT;
+		drawMinibuffer(&ab);
+
+		/* drawMinibuffer emits one "\r\n" between lines. */
+		int newlines = 0;
+		for (int j = 0; j + 1 < ab.len; j++)
+			if (ab.b[j] == '\r' && ab.b[j + 1] == '\n')
+				newlines++;
+		TEST_ASSERT_EQUAL_INT(sized - 1, newlines);
+
+		/* The message's LAST character reached the frame.  This
+		 * is the byte the under-count dropped. */
+		TEST_ASSERT_TRUE(containsBytes(ab.b, ab.len,
+					       msg + (cases[i].nchars - 1) * 3,
+					       3));
+
+		abFree(&ab);
+		free(msg);
+	}
+
+	E.statusmsg[0] = '\0';
+	E.statusmsg_show = 0;
+	minibuffer_height = 1;
+}
+
 void tearDown(void) {
 }
 
 int main(void) {
+	/* charAdvance prices a CJK character at 2 columns only under a
+	 * UTF-8 LC_CTYPE (§1.3); the DEF-2 cases are all about wide
+	 * characters, so they need it. */
+	setlocale(LC_CTYPE, "C.UTF-8");
+
 	TEST_BEGIN();
 
 	RUN_TEST(test_b6_unfocused_selection_drawn_when_focused_has_no_mark);
@@ -592,6 +810,14 @@ int main(void) {
 	RUN_TEST(test_scroll_puts_a_cursor_above_the_window_on_its_first_line);
 	RUN_TEST(
 		test_viewport_stable_across_an_edit_above_a_non_focused_window);
+
+	/* DEF-2 — one minibuffer layout model */
+	RUN_TEST(test_minibuf_layout_sizes_wide_messages);
+	RUN_TEST(test_minibuf_layout_covers_every_byte);
+	RUN_TEST(test_minibuf_drawn_lines_match_the_sizing);
+	RUN_TEST(test_minibuf_sizing_matches_what_is_drawn);
+	RUN_TEST(test_minibuf_layout_ascii_unchanged);
+	RUN_TEST(test_minibuf_layout_forces_progress);
 
 	return TEST_END();
 }

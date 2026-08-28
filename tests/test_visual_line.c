@@ -74,6 +74,35 @@ void test_dcbo_with_tab(void) {
 	TEST_ASSERT_EQUAL_INT(1, b);
 }
 
+/* DEF-5 regression (#117): displayColumnToByteOffset navigates WITHIN
+ * a sub-line whose boundaries wordWrapBreak defined, so the two must
+ * price every byte identically.  The divergent byte was NUL: the
+ * open-coded rule here gave it 1 column while wordWrapBreak gave 2.
+ * Unreachable through a buffer (load rejects NUL bytes) but the rules
+ * are directly callable, and agreement is the invariant. */
+void test_dcbo_nul_width_agrees_with_wrap(void) {
+	uint8_t text[] = { '\0', 'a', 'b', 'c' };
+	erow row;
+	memset(&row, 0, sizeof(row));
+	row.chars = text;
+	row.size = 4;
+	row.cached_width = -1;
+
+	/* NUL displays as ^@ (2 cols), so column 2 is 'a' at byte 1.
+	 * Under the old rule NUL was 1 col and column 2 answered
+	 * byte 2. */
+	int b = displayColumnToByteOffset(&row, 80, 0, 2);
+	TEST_ASSERT_EQUAL_INT(1, b);
+
+	/* And the break wordWrapBreak computes prices it the same
+	 * way: 4 chars = 2+1+1+1 = 5 cols on a wide screen. */
+	int break_col, break_byte;
+	int more = wordWrapBreak(&row, 80, 0, 0, &break_col, &break_byte);
+	TEST_ASSERT_EQUAL_INT(0, more);
+	TEST_ASSERT_EQUAL_INT(5, break_col);
+	TEST_ASSERT_EQUAL_INT(4, break_byte);
+}
+
 /* ---- sublineBounds tests ---- */
 
 void test_subline_bounds_single_line(void) {
@@ -488,6 +517,7 @@ int main(void) {
 	RUN_TEST(test_dcbo_nonexistent_subline);
 	RUN_TEST(test_dcbo_empty_row);
 	RUN_TEST(test_dcbo_with_tab);
+	RUN_TEST(test_dcbo_nul_width_agrees_with_wrap);
 
 	/* sublineBounds */
 	RUN_TEST(test_subline_bounds_single_line);

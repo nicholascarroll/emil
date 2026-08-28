@@ -161,23 +161,11 @@ static struct buffer *output_to_buffer(const char *output) {
 	buf->filename = xstrdup("*Shell Output*");
 	buf->special_buffer = 1;
 	bufferResetRows(buf); /* rows built from scratch below */
-	size_t len = strlen(output);
-	size_t rowStart = 0;
-	size_t rowLen = 0;
-	for (size_t i = 0; i < len; i++) {
-		if (output[i] == '\n') {
-			insertRow(buf, buf->numrows,
-				  (const uint8_t *)&output[rowStart], rowLen);
-			rowStart = i + 1;
-			rowLen = 0;
-		} else {
-			rowLen++;
-			if (i == len - 1) {
-				insertRow(buf, buf->numrows,
-					  (const uint8_t *)&output[rowStart], rowLen);
-			}
-		}
-	}
+	/* The same loader the shell-output path uses.  This helper was
+	 * a sixth copy of the split (#117 S-3 counted five, all in
+	 * production); a test mirroring the code under test is one
+	 * edit away from mirroring it wrongly. */
+	bufferLoadBlob(buf, (const uint8_t *)output, strlen(output), 0);
 	return buf;
 }
 

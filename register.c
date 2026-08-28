@@ -196,24 +196,21 @@ static void showRegisterOutput(int reg) {
 		}
 		insertRow(out, 0, (const uint8_t *)header, (int)strlen(header));
 
-		/* Add the text content line by line */
+		/* Add the text content beneath the header.  The old
+		 * strchr walk here was a fifth copy of the blob split
+		 * (#117 S-3); bufferLoadBlob appends, which is why the
+		 * header row above survives. */
 		{
-			const char *s =
-				(const char *)E.registers[reg].data.text.str;
-			while (s && *s) {
-				const char *nl = strchr(s, '\n');
-				int len;
-				if (nl) {
-					len = (int)(nl - s);
-					insertRow(out, out->numrows,
-						  (const uint8_t *)s, len);
-					s = nl + 1;
-				} else {
-					len = (int)strlen(s);
-					insertRow(out, out->numrows,
-						  (const uint8_t *)s, len);
-					break;
-				}
+			const uint8_t *t = E.registers[reg].data.text.str;
+			size_t tlen = t ? strlen((const char *)t) : 0;
+			if (tlen > 0) {
+				bufferLoadBlob(out, t, tlen, 0);
+				/* Preserves prior behaviour: insertRow
+				 * marked this buffer dirty.  Guarded
+				 * on non-empty text because the old
+				 * walk added no rows for an empty
+				 * register.  See pipe.c. */
+				markBufferDirty(out);
 			}
 		}
 		break;

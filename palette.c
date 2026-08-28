@@ -267,16 +267,9 @@ static void populatePaletteBuffer(struct buffer *buf) {
 			flat[len++] = ' ';
 		}
 	}
-	/* Load into buffer rows (split on '\n'). */
-	int start = 0;
-	for (int i = 0; i < len; i++) {
-		if (flat[i] == '\n') {
-			appendRowRaw(buf, &flat[start], i - start);
-			start = i + 1;
-		}
-	}
-	if (start < len)
-		appendRowRaw(buf, &flat[start], len - start);
+	/* Load into buffer rows.  No BLOB_FINAL_NL: the palette's last
+	 * category is a row of glyphs, not a terminated line. */
+	bufferLoadBlob(buf, flat, (size_t)len, 0);
 	buf->read_only = 1;
 }
 

@@ -548,16 +548,27 @@ static int renderLineWithHighlighting(erow *row, struct abuf *ab, int start_col,
 		updateHighlight(ab, &pad_hl, 0);
 	}
 
-	/* Render visible portion */
+	/* Render visible portion.  What each byte class EMITS stays
+	 * per-branch (spaces for a tab, ^X for a control, raw bytes
+	 * otherwise), but how far it ADVANCES comes from charAdvance —
+	 * the same rule wordWrapBreak used when it decided where this
+	 * sub-line ends (#117 R1).  If the two priced a byte
+	 * differently, text would shift within the sub-line, the fill
+	 * loop would mis-pad, and the cursor would leave its
+	 * character; sharing the rule removes the possibility rather
+	 * than the instances. */
 	while (char_idx < row->size && render_x < end_col) {
 		uint8_t c = row->chars[char_idx];
 
 		updateHighlight(ab, &current_highlight,
 				isHighlighted(hl, render_x) ? 1 : 0);
 
+		int nb;
+		int width = charAdvance(row->chars, char_idx, render_x, &nb);
+
 		if (c == '\t') {
-			int next_tab_stop = (render_x + EMIL_TAB_STOP) /
-					    EMIL_TAB_STOP * EMIL_TAB_STOP;
+			/* width is the distance to the next tab stop. */
+			int next_tab_stop = render_x + width;
 			while (render_x < next_tab_stop && render_x < end_col) {
 				if (render_x >= start_col) {
 					abAppend(ab, " ", 1);
@@ -574,18 +585,15 @@ static int renderLineWithHighlighting(erow *row, struct abuf *ab, int start_col,
 					abAppend(ab, &sym, 1);
 				}
 			}
-			render_x += 2;
+			render_x += width; /* == 2 */
 		} else {
-			int width = charInStringWidth(row->chars, char_idx);
 			if (render_x >= start_col) {
-				int bytes = utf8_nBytes(c);
-				abAppend(ab, (char *)&row->chars[char_idx],
-					 bytes);
+				abAppend(ab, (char *)&row->chars[char_idx], nb);
 			}
 			render_x += width;
 		}
 
-		char_idx += utf8_nBytes(row->chars[char_idx]);
+		char_idx += nb;
 	}
 
 	updateHighlight(ab, &current_highlight, 0);
@@ -893,32 +901,34 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
 
 /* Truncate a UTF-8 string to fit within `max_cols` display columns,
  * writing the result into `out` (which must have room for the result
- * plus a NUL).  Handles multi-byte UTF-8 and wide (CJK, emoji)
- * characters via stringWidth's per-character width logic.
+ * plus a NUL).
  *
  * Returns the number of display columns written.  The output may be
  * shorter than max_cols if the next character would straddle the
- * boundary (e.g. a 2-column CJK glyph with only 1 column left). */
+ * boundary (e.g. a 2-column CJK glyph with only 1 column left).
+ *
+ * Column accounting is utf8ColsToBytes, THE shared walk (#117 R1);
+ * only the output-capacity clamp is local. */
 static int truncateToCols(char *out, size_t out_cap, const char *in,
 			  int max_cols) {
-	int cols = 0;
-	size_t oi = 0;
 	const uint8_t *p = (const uint8_t *)in;
-	while (*p && oi + 1 < out_cap) {
-		int w = charInStringWidth(p, 0);
-		if (cols + w > max_cols)
-			break;
-		int n = utf8_nBytes(*p);
-		if (n <= 0)
-			n = 1;
-		if (oi + (size_t)n + 1 > out_cap)
-			break;
-		memcpy(out + oi, p, n);
-		oi += n;
-		p += n;
-		cols += w;
+	int len = (int)strlen(in);
+
+	int cols = 0;
+	int nbytes = utf8ColsToBytes(p, 0, len, max_cols, &cols);
+
+	/* Clamp to the output buffer, dropping whole characters. */
+	while (nbytes > 0 && (size_t)nbytes + 1 > out_cap) {
+		int back = nbytes - 1;
+		while (back > 0 && utf8_isCont(p[back]))
+			back--;
+		int nb;
+		cols -= charAdvance(p, back, 0, &nb);
+		nbytes = back;
 	}
-	out[oi] = '\0';
+
+	memcpy(out, in, (size_t)nbytes);
+	out[nbytes] = '\0';
 	return cols;
 }
 
@@ -959,27 +969,22 @@ static int statusLeft(const struct buffer *bufr, char *out, int cap,
 	flags[2] = '\0';
 
 	/* Left-truncate name with "..." to fit name_width, which is a
-	 * budget in COLUMNS.  Walk forward over whole characters,
-	 * dropping leading ones until what remains fits the budget that
-	 * "..." leaves: indexing by bytes instead would land inside a
-	 * multi-byte sequence and emit invalid UTF-8. */
+	 * budget in COLUMNS.  Drop leading whole characters until what
+	 * remains fits the budget "..." leaves: indexing by bytes
+	 * instead would land inside a multi-byte sequence and emit
+	 * invalid UTF-8 (B12).  Widths come from charAdvance, the one
+	 * rule (#117 R1) — this walk and leftTruncate in buffer.c both
+	 * truncate display_name, so they must price it the same way. */
 	const char *show_name = dname;
 	char trunc[256];
-	if (stringWidth((const uint8_t *)dname) > name_width) {
+	const uint8_t *u = (const uint8_t *)dname;
+	int dlen = (int)strlen(dname);
+	if (utf8WidthN(u, dlen) > name_width) {
 		int tail_cols = name_width - 3;
 		if (tail_cols < 1)
 			tail_cols = 1;
-
-		const uint8_t *p = (const uint8_t *)dname;
-		int remaining = stringWidth(p);
-		while (*p && remaining > tail_cols) {
-			int n = utf8_nBytes(*p);
-			if (n <= 0)
-				n = 1;
-			remaining -= charInStringWidth(p, 0);
-			p += n;
-		}
-		snprintf(trunc, sizeof(trunc), "...%s", (const char *)p);
+		snprintf(trunc, sizeof(trunc), "...%s",
+			 dname + utf8DropToFit(u, dlen, tail_cols));
 		show_name = trunc;
 	}
 
@@ -1227,6 +1232,82 @@ void drawStatusBar(struct window *win, struct abuf *ab, int line,
 
 	abAppend(ab, "\x1b[m" CRLF, 5);
 }
+/* THE minibuffer layout model (#117 R3).
+ *
+ * The minibuffer is a wrapped text surface, and three places used to
+ * model its geometry independently: refreshScreen sized it by
+ * division, drawMinibuffer filled it character by character, and
+ * cursorBottomLine divided again while ignoring both the prefix and
+ * character width.  The division models under-counted by up to one
+ * column per line, accumulating, so any odd terminal width plus a
+ * message containing CJK or emoji silently lost its last line
+ * (DEF-2): a CJK filename in a save message, C-x = output, the
+ * palette's Unicode-name line.
+ *
+ * All three now run this.  It breaks msg into at most max_lines
+ * screen lines, splitting only at character boundaries, with a wide
+ * character that straddles the boundary pushed to the next line (that
+ * line comes up one column short — the behaviour drawMinibuffer
+ * always had and the sizing never knew about).  Line 0 shares its
+ * width with prefix_display.
+ *
+ * Widths come from charAdvance via utf8ColsToBytes (#117 R1).
+ *
+ * Deliberately NOT routed through wordWrapBreak: this wraps a C
+ * string, not an erow, and wants no word-boundary breaks. */
+int minibufLayout(const char *msg, int prefix_cols, int screencols,
+		  struct minibufLine *out, int max_lines) {
+	int msglen = msg ? (int)strlen(msg) : 0;
+	int offset = 0;
+	int n = 0;
+
+	do {
+		int avail = screencols - (n == 0 ? prefix_cols : 0);
+		if (avail < 1)
+			avail = 1;
+
+		int used = 0;
+		int next = utf8ColsToBytes((const uint8_t *)msg, offset,
+					   msglen - offset, avail, &used);
+
+		/* Guarantee progress: if not even one character fit
+		 * (a wide character on a 1-column remainder, or
+		 * degenerate widths), force one whole character
+		 * through so the message cannot stall across lines. */
+		if (next == offset && offset < msglen) {
+			int nb;
+			used = charAdvance((const uint8_t *)msg, offset, 0,
+					   &nb);
+			next = offset + nb;
+		}
+
+		out[n].start = offset;
+		out[n].end = next;
+		out[n].cols = used;
+		n++;
+		offset = next;
+	} while (offset < msglen && n < max_lines);
+
+	return n;
+}
+
+/* Screen lines the current status message needs, capped at
+ * MINIBUF_MAX_LINES (§5.5).
+ *
+ * A named function rather than inline arithmetic in refreshScreen so
+ * that a test can assert it against what drawMinibuffer actually
+ * emits — the two disagreeing is DEF-2, and inline code left the
+ * disagreement unobservable. */
+int minibufHeightNeeded(void) {
+	if (!(E.statusmsg_show && E.statusmsg[0] && E.screencols > 0))
+		return 1;
+
+	struct minibufLine lines[MINIBUF_MAX_LINES];
+	int prefix_cols = stringWidth((const uint8_t *)E.prefix_display);
+	return minibufLayout(E.statusmsg, prefix_cols, E.screencols, lines,
+			     MINIBUF_MAX_LINES);
+}
+
 void drawMinibuffer(struct abuf *ab) {
 	/* Determine the message to display */
 	const char *msg = E.statusmsg;
@@ -1238,9 +1319,11 @@ void drawMinibuffer(struct abuf *ab) {
 	int prefix_len = strlen(E.prefix_display);
 	int prefix_cols = stringWidth((const uint8_t *)E.prefix_display);
 
-	/* Byte offset into msg; advances line by line.  Lines are
-	 * filled by display columns, splitting only at character boundaries.*/
-	int offset = 0;
+	struct minibufLine lines[MINIBUF_MAX_LINES];
+	int nlines = 0;
+	if (valid)
+		nlines = minibufLayout(msg, prefix_cols, E.screencols, lines,
+				       MINIBUF_MAX_LINES);
 
 	/* Draw each minibuffer line */
 	for (int line = 0; line < minibuffer_height; line++) {
@@ -1252,55 +1335,14 @@ void drawMinibuffer(struct abuf *ab) {
 			continue;
 		}
 
-		int avail;
-		if (line == 0) {
-			/* First line: prefix + start of message */
-			if (prefix_len > 0)
-				abAppend(ab, E.prefix_display, prefix_len);
-			avail = E.screencols - prefix_cols;
-		} else {
-			/* Continuation lines: message continues */
-			avail = E.screencols;
-		}
-		if (avail < 0)
-			avail = 0;
+		if (line == 0 && prefix_len > 0)
+			abAppend(ab, E.prefix_display, prefix_len);
 
-		if (offset < msglen) {
-			/* Take whole characters while they fit in the
-			 * remaining columns.  A wide character that
-			 * straddles the boundary is pushed to the next
-			 * line (the line comes up one column short). */
-			int start = offset;
-			int cols = 0;
-			while (offset < msglen) {
-				uint8_t c = (uint8_t)msg[offset];
-				int nb = (c < 0x80) ? 1 : utf8_nBytes(c);
-				if (nb < 1)
-					nb = 1;
-				int cw = (c < 0x80) ?
-						 1 :
-						 charInStringWidth(
-							 (const uint8_t *)msg,
-							 offset);
-				if (cw < 0)
-					cw = 1;
-				if (cols + cw > avail)
-					break;
-				cols += cw;
-				offset += nb;
-			}
-			/* Guarantee progress: if not even one character
-			 * fit (degenerate widths), force one through so
-			 * the message cannot stall across lines. */
-			if (offset == start && offset < msglen) {
-				uint8_t c = (uint8_t)msg[offset];
-				int nb = (c < 0x80) ? 1 : utf8_nBytes(c);
-				if (nb < 1)
-					nb = 1;
-				offset += nb;
-			}
-			if (offset > start)
-				abAppend(ab, msg + start, offset - start);
+		if (line < nlines) {
+			int start = lines[line].start;
+			int len = lines[line].end - start;
+			if (len > 0)
+				abAppend(ab, msg + start, len);
 			abAppend(ab, "\x1b[0m", 4);
 		}
 
@@ -1329,26 +1371,15 @@ void refreshScreen(void) {
 
 	int focusedIdx = windowFocusedIdx();
 
-	/* Auto-size minibuffer to fit the current status message.
-	 * Layout matches drawMinibuffer(): the first line shares space
-	 * with prefix_display, continuation lines get full width.
-	 * Measured in display columns, not bytes: a CJK message is 3
-	 * bytes but 2 columns per character, so byte counts over-grow
-	 * the minibuffer. */
-	int needed_mb = 1;
-	if (E.statusmsg_show && E.statusmsg[0] && E.screencols > 0) {
-		int msg_cols = stringWidth((const uint8_t *)E.statusmsg);
-		int prefix_cols =
-			stringWidth((const uint8_t *)E.prefix_display);
-		int first_line = E.screencols - prefix_cols;
-		if (first_line < 1)
-			first_line = 1;
-		if (msg_cols > first_line)
-			needed_mb = 1 + (msg_cols - first_line + E.screencols -
-					 1) / E.screencols;
-		if (needed_mb > 5)
-			needed_mb = 5;
-	}
+	/* Auto-size the minibuffer to fit the current status message,
+	 * by running the same layout drawMinibuffer will (#117 R3).
+	 * The previous division — 1 + ceil((msg_cols - first_line) /
+	 * screencols) — assumed every line is filled to exactly
+	 * screencols columns, which is false whenever a wide character
+	 * straddles the boundary and is pushed to the next line.  The
+	 * error was up to one column per line and accumulated, so the
+	 * message's last line was silently dropped (DEF-2). */
+	int needed_mb = minibufHeightNeeded();
 	if (needed_mb != minibuffer_height) {
 		minibuffer_height = needed_mb;
 		for (int i = 0; i < E.nwindows; i++)
@@ -1439,17 +1470,50 @@ void cursorBottomLine(int curs) {
 	}
 	minibuf_row++; /* minibuffer starts after all windows/status bars */
 
-	/* For multi-line minibuffer, figure out which line and column
-	 * the cursor falls on.  The first line has (screencols - prompt_width)
-	 * available characters; continuation lines have screencols each. */
-	if (minibuffer_height > 1 && curs > E.screencols) {
-		/* curs is 1-based column position.  First line holds screencols
-		 * characters.  Each subsequent line holds screencols more. */
-		int extra_lines = (curs - 1) / E.screencols;
-		if (extra_lines >= minibuffer_height)
-			extra_lines = minibuffer_height - 1;
-		minibuf_row += extra_lines;
-		curs = curs - extra_lines * E.screencols;
+	/* Which screen line the cursor falls on, and where within it.
+	 *
+	 * `curs` is a 1-based display column into the message stream:
+	 * callers add the width of the prompt text (which lives inside
+	 * E.statusmsg) to the columns of input before point.  Walking
+	 * the same layout drawMinibuffer used is the only way to land
+	 * on the character the user is editing — the previous code
+	 * divided by screencols, ignoring both prefix_display and the
+	 * short-by-one lines a straddling wide character produces, so
+	 * the cursor drifted left of its character on a wrapped prompt
+	 * (#117 R3). */
+	if (minibuffer_height > 1 && E.screencols > 0) {
+		struct minibufLine lines[MINIBUF_MAX_LINES];
+		int prefix_cols =
+			stringWidth((const uint8_t *)E.prefix_display);
+		int n = minibufLayout(E.statusmsg, prefix_cols, E.screencols,
+				      lines, MINIBUF_MAX_LINES);
+
+		int target = curs - 1; /* columns into the message */
+		if (target < 0)
+			target = 0;
+
+		int acc = 0;
+		int li = 0;
+		while (li < n - 1 && target > acc + lines[li].cols) {
+			acc += lines[li].cols;
+			li++;
+		}
+		if (li >= minibuffer_height)
+			li = minibuffer_height - 1;
+
+		minibuf_row += li;
+		curs = (li == 0 ? prefix_cols : 0) + (target - acc) + 1;
+
+		/* Defensive: minibuffer_height and `n` both come from
+		 * this same capped layout, so the clamp above cannot
+		 * fire today and `acc` always matches `li`.  Should
+		 * they ever diverge, place the cursor somewhere on
+		 * the screen rather than emitting a CUP past its
+		 * right edge. */
+		if (curs < 1)
+			curs = 1;
+		if (curs > E.screencols)
+			curs = E.screencols;
 	}
 
 	snprintf(cbuf, sizeof(cbuf), CSI "%d;%dH", minibuf_row, curs);

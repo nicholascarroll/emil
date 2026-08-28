@@ -228,6 +228,64 @@ struct buffer *newBuffer(void) {
 /* Discard every row, leaving the buffer transiently rowless.  For the
  * loaders, which build a row array from scratch and restore the
  * invariant before returning; see the invariant note in buffer.h. */
+/* Split a text blob into buffer rows, appending them (#117 R2).
+ *
+ * The one answer to "how does a blob of bytes become rows".  Five
+ * places used to do this, and they disagreed in two ways the report
+ * catalogued: only the stdin path stripped CR, and the *Diff* copy
+ * dropped the final byte of output that did not end in a newline
+ * (DEF-4) while its sibling 165 lines away in the same file got it
+ * right.
+ *
+ * Appends rather than resets: register.c writes a header row first
+ * and then the register's text beneath it.  Callers wanting a fresh
+ * buffer call bufferResetRows() themselves, which is also where the
+ * cursor/mark reset belongs.
+ *
+ * Rows are appended with appendRowRaw, so this does not mark the
+ * buffer dirty or take a lock.  That is what a bulk population wants
+ * — §3.21.1 requires it of the load path, so that an unedited file
+ * is never rewritten merely because it was opened.
+ *
+ * BLOB_CRLF       strip one trailing '\r' from each line (DOS input).
+ * BLOB_FINAL_NL   terminate with an empty final row unconditionally,
+ *                 the representation of a trailing newline (§4.1).
+ *                 Without it a blob not ending in '\n' yields a final
+ *                 row holding those bytes, and one that does ends on
+ *                 the last complete line.
+ *
+ * Guarantees at least one row on return (§4.9), so a caller need not
+ * follow with bufferEnsureRow. */
+void bufferLoadBlob(struct buffer *buf, const uint8_t *data, size_t len,
+		    int flags) {
+	size_t start = 0;
+
+	for (size_t i = 0; i < len; i++) {
+		if (data[i] != '\n')
+			continue;
+		size_t end = i;
+		if ((flags & BLOB_CRLF) && end > start && data[end - 1] == '\r')
+			end--;
+		appendRowRaw(buf, data + start, end - start);
+		start = i + 1;
+	}
+
+	/* Trailing bytes with no newline after them are a row too.
+	 * Counting them here, rather than inside the loop on its last
+	 * iteration, is what the *Diff* copy got wrong. */
+	if (start < len) {
+		size_t end = len;
+		if ((flags & BLOB_CRLF) && end > start && data[end - 1] == '\r')
+			end--;
+		appendRowRaw(buf, data + start, end - start);
+	}
+
+	if (flags & BLOB_FINAL_NL)
+		appendRowRaw(buf, (const uint8_t *)"", 0);
+
+	bufferEnsureRow(buf);
+}
+
 void bufferResetRows(struct buffer *bufr) {
 	for (int i = 0; i < bufr->numrows; i++)
 		freeRow(&bufr->row[i]);
@@ -595,22 +653,45 @@ static const char *baseName(const char *path) {
 	return slash ? slash + 1 : path;
 }
 
-/* Left-truncate a string to fit in max_width, prepending "...".
- * Returns a newly allocated string. */
+/* Left-truncate a string to fit in max_width display COLUMNS,
+ * prepending "..." when there is room for it.  Returns a newly
+ * allocated string.
+ *
+ * DEF-1 (#117): every caller passes a column budget, but this
+ * function measured in bytes — `s + (len - tail)` indexed by byte
+ * count and landed inside multi-byte sequences, leaking invalid
+ * UTF-8 into display_name, the status bar, completion lists and
+ * save/open/kill messages (the 0.9.3 CHANGELOG fix for this repaired
+ * only the other copy of the loop, in statusLeft).  Per §5.1.1 the
+ * truncation walks forward over whole characters.
+ *
+ * Widths come from charAdvance, the single rule (#117 R1); the total
+ * and the drop-walk share one accumulation so the function agrees
+ * with itself.  A tab is priced by tab stop here where stringWidth's
+ * legacy vocabulary prices it 2; a name containing a tab may
+ * therefore be re-truncated by statusLeft's own budget check.  The
+ * output is whole characters either way. */
 char *leftTruncate(const char *s, int max_width) {
 	if (max_width < 1)
 		max_width = 1;
+	const uint8_t *u = (const uint8_t *)s;
 	int len = (int)strlen(s);
-	if (len <= max_width)
+
+	if (utf8WidthN(u, len) <= max_width)
 		return xstrdup(s);
-	if (max_width <= 3) {
-		/* No room for "..." prefix, just return the tail */
-		char *r = xstrdup(s + (len - max_width));
-		return r;
-	}
-	int tail = max_width - 3;
-	char *r = xmalloc(max_width + 1);
-	snprintf(r, max_width + 1, "...%s", s + (len - tail));
+
+	/* With no room for "...", keep the bare rightmost characters
+	 * that fit; otherwise the tail budget is what "..." leaves. */
+	const char *pre = (max_width > 3) ? "..." : "";
+	int budget = (max_width > 3) ? max_width - 3 : max_width;
+	int i = utf8DropToFit(u, len, budget);
+
+	size_t pre_len = strlen(pre);
+	size_t tail_len = (size_t)(len - i);
+	char *r = xmalloc(pre_len + tail_len + 1);
+	memcpy(r, pre, pre_len);
+	memcpy(r + pre_len, s + i, tail_len);
+	r[pre_len + tail_len] = '\0';
 	return r;
 }
 

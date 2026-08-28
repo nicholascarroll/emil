@@ -363,12 +363,34 @@ static void showCompletionsBuffer(char **matches, int n_matches,
 				if (idx >= n_matches)
 					break;
 
+				/* Pad by display COLUMNS, not bytes
+				 * (DEF-1/#117).  "%-*s" counts bytes, so
+				 * an 18-byte 6-column CJK name got no
+				 * padding at all from "%-8s" and occupied
+				 * 6 columns where the grid expected 8,
+				 * misaligning every column after the
+				 * first.  col_width came from stringWidth
+				 * a few lines up, so the padding must be
+				 * measured the same way. */
 				int written = snprintf(line + line_pos,
 						       sizeof(line) - line_pos,
-						       "%-*s", col_width,
-						       display[idx]);
-				if (written > 0)
-					line_pos += written;
+						       "%s", display[idx]);
+				if (written < 0)
+					break;
+				if (written >= (int)(sizeof(line) - line_pos)) {
+					/* Truncated: the row is full. */
+					line_pos = sizeof(line) - 1;
+					break;
+				}
+				line_pos += written;
+
+				int pad = col_width -
+					  stringWidth((uint8_t *)display[idx]);
+				while (pad > 0 &&
+				       line_pos < (int)sizeof(line) - 1) {
+					line[line_pos++] = ' ';
+					pad--;
+				}
 			}
 
 			while (line_pos > 0 && line[line_pos - 1] == ' ')

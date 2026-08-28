@@ -100,6 +100,11 @@ void bufPos(struct buffer *bufr, size_t off, int *cx, int *cy);
 
 struct buffer *findBufferByName(const char *name);
 struct buffer *findOrCreateSpecialBuffer(const char *name);
+/* Blob-to-rows loading (#117 R2); see the definition for semantics. */
+enum { BLOB_CRLF = 1, BLOB_FINAL_NL = 2 };
+void bufferLoadBlob(struct buffer *buf, const uint8_t *data, size_t len,
+		    int flags);
+
 void bufferResetRows(struct buffer *buf);
 void bufferEnsureRow(struct buffer *buf);
 int bufferLineCount(struct buffer *buf);
