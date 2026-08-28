@@ -80,11 +80,10 @@ struct undo {
 	int endx;
 	int endy;
 	int append;
-	int nmerges; /* operations folded into this record so far */
-	/* Set when the edit that produced this record arrived in an
-	 * input burst.  UNDO_MERGE_LIMIT does not apply to such a run:
-	 * the cap exists to keep typing recoverable in steps, and a
-	 * burst is not typing (§3.5). */
+	int nmerges; /* operations folded into this record so far 
+			 * Set when the edit that produced this record arrived 
+			 * in an input burst. UNDO_MERGE_LIMIT does not apply.
+			 */
 	int uncapped;
 	int datalen;
 	int datasize;
@@ -133,12 +132,7 @@ struct buffer {
 	int word_wrap;
 	int rectangle_mode;
 	int read_only;
-	/* 1 when read_only was imposed by us because another process
-	 * held an advisory lock at open time, and NOT by a failed
-	 * access(W_OK) or by the user's own C-x C-q.  Only a read-only
-	 * flagged this way may be lifted when the lock goes away; the
-	 * other two reasons are not ours to undo. */
-	int read_only_by_lock;
+	int read_only_by_lock;/* managed by the advisory lock */
 	int lock_fd; /* fd holding advisory lock, or -1 */
 	/* Only used for equality comparison with stat().st_mtime.
 	 * Safe across the 2038 boundary.  Do NOT do arithmetic on
@@ -254,7 +248,7 @@ struct config {
 	 * already buffered when the previous one was handled, i.e.
 	 * input arriving faster than a person types.  Read by the
 	 * mutation layer to mark records exempt from the undo
-	 * coalescing cap (§3.5). */
+	 * coalescing cap. */
 	int input_burst;
 	char statusmsg[1024];
 	char prefix_display[32]; /* Display prefix commands like C-u */

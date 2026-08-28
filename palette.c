@@ -15,9 +15,11 @@
 const PaletteEntry palette[] = {
 	/* Punctuation and Misc */
 	{ 0x2014, "EM DASH" },					  // —
+	{ 0x00A7, "SECTION SIGN" },				  // §
 	{ 0x2713, "CHECK MARK" },				  // ✓
 	{ 0x2717, "BALLOT X" },					  // ✗
 	{ 0x2013, "EN DASH" },					  // –
+	{ 0x2010, "HYPHEN" },					  // ‐
 	{ 0x2026, "HORIZONTAL ELLIPSIS" },			  // …
 	{ 0x201C, "LEFT DOUBLE QUOTATION MARK" },		  // “
 	{ 0x201D, "RIGHT DOUBLE QUOTATION MARK" },		  // ”
@@ -27,17 +29,16 @@ const PaletteEntry palette[] = {
 	{ 0x00BB, "RIGHT-POINTING DOUBLE ANGLE QUOTATION MARK" }, // »
 	{ 0x2039, "SINGLE LEFT-POINTING ANGLE QUOTATION MARK" },  // ‹
 	{ 0x203A, "SINGLE RIGHT-POINTING ANGLE QUOTATION MARK" }, // ›
-	{ 0x2010, "HYPHEN" },					  // ‐
-	{ 0x00B7, "MIDDLE DOT" },				  // ·
-	/* Spanish Special Characters */
+	/* Español */
 	{ 0x00A1, "INVERTED EXCLAMATION MARK" },   // ¡
 	{ 0x00BF, "INVERTED QUESTION MARK" },	   // ¿
 	{ 0x00AA, "FEMININE ORDINAL INDICATOR" },  // ª
 	{ 0x00BA, "MASCULINE ORDINAL INDICATOR" }, // º
-	/* Publishing */
-	{ 0x00A7, "SECTION SIGN" }, // §
+	/* Quantities */
+	{ 0x00B7, "MIDDLE DOT" },   // ·
 	{ 0x2032, "PRIME" },	    // ′
 	{ 0x2033, "DOUBLE PRIME" }, // ″
+	{ 0x00B0, " DEGREE SIGN" }, // °
 	/* Legal */
 	{ 0x00A9, "COPYRIGHT SIGN" },  // ©
 	{ 0x00AE, "REGISTERED SIGN" }, // ®
@@ -45,23 +46,6 @@ const PaletteEntry palette[] = {
 	{ 0x00B6, "PILCROW SIGN" },    // ¶
 	{ 0x2020, "DAGGER" },	       // †
 	{ 0x2021, "DOUBLE DAGGER" },   // ‡
-	{ 0x00B0, " DEGREE SIGN" },    // °
-	/* Currency */
-	{ 0x00A2, "CENT SIGN" },		 // ¢
-	{ 0x00A3, "POUND SIGN" },		 // £
-	{ 0x00A5, "YEN SIGN" },			 // ¥
-	{ 0x20AC, "EURO SIGN" },		 // €
-	{ 0x20A9, "WON SIGN" },			 // ₩
-	{ 0x20B9, "INDIAN RUPEE SIGN" },	 // ₹
-	{ 0x20BD, "RUBLE SIGN" },		 // ₽
-	{ 0x0E3F, "THAI CURRENCY SYMBOL BAHT" }, // ฿
-	{ 0x20BA, "TURKISH LIRA SIGN" },	 // ₺
-	{ 0x20B1, "PESO SIGN" },		 // ₱
-	{ 0x20AA, "NEW SHEQEL SIGN" },		 // ₪
-	{ 0x20AB, "DONG SIGN" },		 // ₫
-	{ 0x20AE, "TUGRIK SIGN" },		 // ₮
-	{ 0x20B4, "HRYVNIA SIGN" },		 // ₴
-	{ 0x20BF, "BITCOIN SIGN" },		 // ₿
 
 	/* Emoji */
 	{ PALETTE_BREAK, NULL },
@@ -103,8 +87,6 @@ const PaletteEntry palette[] = {
 	{ 0x1F33C, "BLOSSOM" },						// 🌼
 	{ 0x1F408, "CAT" },						// 🐈
 	{ 0x1F415, "DOG" },						// 🐕
-	{ 0x2705, "WHITE HEAVY CHECK MARK" },				// ✅
-	{ 0x274C, "CROSS MARK" },					// ❌
 	{ 0x2728, "SPARKLES" },						// ✨
 	{ 0x26A1, "HIGH VOLTAGE SIGN" },				// ⚡
 	{ 0x2B50, "WHITE MEDIUM STAR" },				// ⭐
@@ -131,14 +113,34 @@ const PaletteEntry palette[] = {
 	{ 0x1F480, "SKULL" },						// 💀
 	{ 0x1F64F, "PERSON WITH FOLDED HANDS" },			// 🙏
 	{ 0x1F91D, "HANDSHAKE" },					// 🤝
-	{ 0x2795, "HEAVY PLUS SIGN" },					// ➕
-	{ 0x2796, "HEAVY MINUS SIGN" },					// ➖
-	{ 0x1F4DD, "MEMO" },						// 📝
-	{ 0x1F527, "WRENCH" },						// 🔧
-	{ 0x1F528, "HAMMER" },						// 🔨
-	{ 0x1F6A7, "CONSTRUCTION SIGN" },				// 🚧
-	{ 0x1F512, "LOCK" },						// 🔒
-	{ 0x1F3AF, "DIRECT HIT" },					// 🎯
+	{ 0x2705, "WHITE HEAVY CHECK MARK" },				// ✅
+	{ 0x274C,
+	  "CROSS MARK" }, // ❌	{ 0x2795, "HEAVY PLUS SIGN" },					// ➕
+	{ 0x2796, "HEAVY MINUS SIGN" },	  // ➖
+	{ 0x1F4DD, "MEMO" },		  // 📝
+	{ 0x1F527, "WRENCH" },		  // 🔧
+	{ 0x1F528, "HAMMER" },		  // 🔨
+	{ 0x1F6A7, "CONSTRUCTION SIGN" }, // 🚧
+	{ 0x1F512, "LOCK" },		  // 🔒
+	{ 0x1F3AF, "DIRECT HIT" },	  // 🎯
+
+	/* Currency */
+	{ PALETTE_BREAK, NULL },
+	{ 0x00A2, "CENT SIGN" },		 // ¢
+	{ 0x00A3, "POUND SIGN" },		 // £
+	{ 0x00A5, "YEN SIGN" },			 // ¥
+	{ 0x20AC, "EURO SIGN" },		 // €
+	{ 0x20A9, "WON SIGN" },			 // ₩
+	{ 0x20B9, "INDIAN RUPEE SIGN" },	 // ₹
+	{ 0x20BD, "RUBLE SIGN" },		 // ₽
+	{ 0x0E3F, "THAI CURRENCY SYMBOL BAHT" }, // ฿
+	{ 0x20BA, "TURKISH LIRA SIGN" },	 // ₺
+	{ 0x20B1, "PESO SIGN" },		 // ₱
+	{ 0x20AA, "NEW SHEQEL SIGN" },		 // ₪
+	{ 0x20AB, "DONG SIGN" },		 // ₫
+	{ 0x20AE, "TUGRIK SIGN" },		 // ₮
+	{ 0x20B4, "HRYVNIA SIGN" },		 // ₴
+	{ 0x20BF, "BITCOIN SIGN" },		 // ₿
 
 	/* Greek Letters */
 	{ PALETTE_BREAK, NULL },
@@ -176,6 +178,7 @@ const PaletteEntry palette[] = {
 	{ 0x03A6, "GREEK CAPITAL LETTER PHI" },	  // Φ
 	{ 0x03A8, "GREEK CAPITAL LETTER PSI" },	  // Ψ
 	{ 0x03A9, "GREEK CAPITAL LETTER OMEGA" }, // Ω
+
 	/* Box Drawing - Light & Heavy */
 	{ PALETTE_BREAK, NULL },
 	{ 0x2500, "BOX DRAWINGS LIGHT HORIZONTAL" },		  // ─
@@ -205,6 +208,7 @@ const PaletteEntry palette[] = {
 	{ 0x2566, "BOX DRAWINGS DOUBLE DOWN AND HORIZONTAL" },	   // ╦
 	{ 0x2569, "BOX DRAWINGS DOUBLE UP AND HORIZONTAL" },	   // ╩
 	{ 0x256C, "BOX DRAWINGS DOUBLE VERTICAL AND HORIZONTAL" }, // ╬
+
 	/* Terminal/CLI Blocks & Shading */
 	{ PALETTE_BREAK, NULL },
 	{ 0x2588, "FULL BLOCK" },		     // █

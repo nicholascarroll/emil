@@ -10,8 +10,8 @@
 #include <string.h>
 #include <unistd.h>
 
-/*** Backup and Write Strategy (Vim backupcopy=yes style) ***/
-
+/* Backup for the file save operation (Vim backupcopy=yes style).
+ * This unit is free of editor state.*/
 static int createBackupExclusive(const char *name) {
 	int fd;
 	do {
@@ -129,8 +129,6 @@ static int copyFd(int from_fd, int to_fd) {
 
 /*
  * Attempt to fsync the parent directory of the given filepath.
- * This ensures that the directory entry for a newly created file
- * is persisted to disk on filesystems that require it.
  *
  * Returns 0 on success or if the operation is unsupported/harmless.
  * Returns -1 on genuine I/O or storage failure.
