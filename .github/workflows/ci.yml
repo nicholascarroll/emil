@@ -120,6 +120,41 @@ jobs:
         - name: Build on Haiku
           uses: vmactions/haiku-vm@v1
           with:
+            # Pinned to R1/beta5 (hrev57937, Sep 2024).  The action's
+            # default moved to r1beta6 (hrev59866, Aug 2026) when the
+            # floating v1 tag was rebuilt, and every decoder_pty
+            # scenario began failing on that image while all 35 unit
+            # suites kept passing.
+            #
+            # The editor is not implicated.  Driving `emil --version`
+            # -- which prints one line and exits before raw mode and
+            # before the event loop -- through the harness's pty
+            # produced zero bytes and a child that never exited, and
+            # markers written by the harness's own forked child never
+            # appeared either.  Nothing in the editor had run.
+            #
+            # The harness builds its pty by hand: posix_openpt,
+            # grantpt, unlockpt, fork, setsid, open the slave, dup2,
+            # exec.  On Haiku, whose fork() is emulated, a child that
+            # calls into libroot before exec can deadlock on locks
+            # inherited from the parent -- which matches exactly what
+            # was observed: a child that is alive, has written
+            # nothing, and never becomes the editor.  It also has
+            # precedent here: spawnEmilOpts already carries a STREAMS
+            # workaround for illumos, whose freshly opened pty slave
+            # has no terminal semantics until ptem and ldterm are
+            # pushed.
+            #
+            # This pin restores a known-good image; it does not fix
+            # the harness.  The real fix is to stop doing work
+            # between fork and exec -- posix_spawn with file actions,
+            # which is what the editor itself uses for subprocesses
+            # (design §3.17) and what the harness should have used.
+            # Left undone deliberately: replacing the spawn path of
+            # the one test that cannot run outside CI, without being
+            # able to run it on the platform that is broken, risks
+            # the targets that currently pass.
+            release: r1beta5
             prepare: pkgman install -y gcc make
             run: |
               make CC=gcc
