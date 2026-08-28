@@ -193,7 +193,52 @@ TEST_OBJECTS="decoder.o unicode.o buffer.o region.o undo.o transform.o \
     find.o pipe.o register.o fileio.o display.o  keymap.o \
     edit.o prompt.o util.o completion.o history.o base64.o abuf.o \
     window.o ctags.o adjust.o mutate.o wrap.o motion.o dbuf.o \
-    emil_subprocess.o palette.o tests/stubs.o"
+    emil_subprocess.o palette.o backup.o tests/stubs.o"
+
+# ===== Generated fixture: backup.c against fake syscalls (#125) =====
+#
+# backup.c carries no test hooks and no test-only macros; the editor
+# source is what ships.  Fault injection is done by copying it here and
+# rewriting its syscall names to the fk_* fakes that tests/test_backup.c
+# defines, so the suite drives the real control flow over a filesystem
+# that fails on demand.
+#
+# makeVerifiedBackup is renamed too.  test_backup.c #includes this copy
+# rather than linking it -- that is what makes the file-local helpers
+# reachable -- and the real backup.o is in TEST_OBJECTS, so without the
+# rename the two definitions would collide at link time.
+#
+# The substitution is deliberately blunt, so it is checked rather than
+# trusted: the expected number of call sites is asserted below, and a
+# drift in either direction fails the run instead of silently testing
+# the real filesystem.  BRE with an explicit leading-character class,
+# not \b, because \b is a GNU extension that BSD and Solaris sed lack.
+BACKUP_SYSCALLS="open close read write fsync unlink fcntl"
+BACKUP_EXPECTED_SITES=22
+
+sed_script=""
+for fn in $BACKUP_SYSCALLS; do
+    sed_script="$sed_script -e s/\\([^a-zA-Z0-9_]\\)$fn(/\\1fk_$fn(/g"
+done
+sed_script="$sed_script -e s/makeVerifiedBackup/fake_makeVerifiedBackup/g"
+
+# shellcheck disable=SC2086
+sed $sed_script backup.c > tests/backup_faked.c
+
+sites=$(grep -c 'fk_' tests/backup_faked.c)
+if [ "$sites" -ne "$BACKUP_EXPECTED_SITES" ]; then
+    echo "✗ backup.c syscall rewrite: expected $BACKUP_EXPECTED_SITES call"
+    echo "  sites, rewrote $sites.  backup.c changed shape -- update"
+    echo "  BACKUP_EXPECTED_SITES in tests/run_tests.sh after checking"
+    echo "  tests/test_backup.c still fakes every syscall it now uses."
+    exit 1
+fi
+if grep -q '[^a-zA-Z0-9_]makeVerifiedBackup(' tests/backup_faked.c; then
+    echo "✗ backup.c rewrite left an un-renamed makeVerifiedBackup"
+    exit 1
+fi
+echo "✓ backup.c rewritten against fake syscalls ($sites call sites)"
+echo ""
 
 echo "Unit tests:"
 
@@ -204,7 +249,7 @@ echo "Unit tests:"
 SUITES="decoder unicode wcwidth buffer undo coalesce edit fileio relpath offset
     visual_line utf8_validate rect replace transform subprocess shell adjust
     history abuf tilde keymap kill_ring insert_file status_bar cjk_indic
-    warnings ctags find display prompt regex_semantics writeall"
+    warnings ctags find display prompt regex_semantics writeall backup"
 
 listed=$(echo $SUITES | wc -w)
 present=$(ls tests/test_*.c 2>/dev/null | wc -l)
@@ -360,7 +405,7 @@ if [ "$FUZZ_SEQS" -gt 0 ]; then
     rm -f tests/fuzz_undo
 fi
 
-rm -f tests/stubs.o
+rm -f tests/stubs.o tests/backup_faked.c
 
 # Terminal-level integration: drive the built binary under a pty.
 # decoder_pty_test skips itself (exit 0) if no pty is available.
