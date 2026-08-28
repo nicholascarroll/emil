@@ -249,6 +249,21 @@ static void sendStr(struct child *c, const char *s, int settle_ms) {
 	sendBytes(c, s, strlen(s), settle_ms);
 }
 
+
+/* Send text the way a terminal delivers a paste: one write, so the
+ * bytes are already buffered when the drain loop looks, and CR as the
+ * line separator.
+ *
+ * CR is not a detail.  A terminal sends \r for a line break -- that is
+ * what the Enter key transmits in raw mode -- and keymap.c maps it to
+ * CMD_NEWLINE.  A harness that sends \n instead is testing input no
+ * terminal produces, and will pass while multi-line paste is visibly
+ * broken.  Every paste scenario below uses this helper for that
+ * reason. */
+static void sendPaste(struct child *c, const char *text, int settle_ms) {
+	sendBytes(c, text, strlen(text), settle_ms);
+}
+
 static int childAlive(struct child *c) {
 	return waitpid(c->pid, NULL, WNOHANG) == 0;
 }
@@ -845,6 +860,95 @@ static void scenarioTerminalRestoredAfterFatalSignal(const char *label,
  * length rather than using strstr. */
 /* ---- main ------------------------------------------------------ */
 
+
+/* ---- input bursts and undo granularity (#126) ------------------ */
+
+/* A multi-line paste undoes in one step, and its CRs become real
+ * newlines with no stray ^M.
+ *
+ * The CR half of this is the regression that matters: an earlier
+ * attempt at this feature inserted the payload as raw bytes, bypassing
+ * the dispatch layer that maps CR to CMD_NEWLINE, so every pasted line
+ * break arrived as a literal ^M.  Burst detection keeps every byte on
+ * the normal dispatch path, so the mapping still applies -- but only a
+ * test that sends CR can show that. */
+static void scenarioBurstPasteUndoesInOneStep(void) {
+	struct child c;
+	begin("burst: multi-line paste, one undo, no ^M");
+	if (spawnEmil(&c) == 0) {
+		sendStr(&c, "keep", 250);
+		/* 5 lines x 40 chars: far past UNDO_MERGE_LIMIT if this
+		 * were treated as typing. */
+		sendPaste(&c,
+			  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r"
+			  "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\r"
+			  "cccccccccccccccccccccccccccccccccccccccc\r"
+			  "dddddddddddddddddddddddddddddddddddddddd\r"
+			  "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+			  700);
+		expect(contains(stripped(), "aaaaaaaaaa"), "paste missing");
+		expect(contains(stripped(), "eeeeeeeeee"),
+		       "last pasted line missing");
+		expect(!contains(stripped(), "^M"),
+		       "CR inserted literally instead of becoming a newline");
+		capReset();
+		sendStr(&c, "\037", 600); /* C-_ : one undo */
+		expect(!contains(stripped(), "aaaaaaaaaa"),
+		       "one undo did not remove the whole paste");
+		expect(!contains(stripped(), "eeeeeeeeee"),
+		       "one undo left part of the paste behind");
+		expect(contains(stripped(), "keep"),
+		       "undo removed text typed before the paste");
+		reap(&c);
+	}
+	finish();
+}
+
+/* Typing is still chopped into recoverable steps.  The cap is lifted
+ * only for a burst; keys that arrive one at a time must keep the
+ * UNDO_MERGE_LIMIT behaviour, or the exemption has eaten the rule it
+ * was supposed to leave alone. */
+static void scenarioTypingStillCapped(void) {
+	struct child c;
+	begin("burst: typed keys still obey the merge cap");
+	if (spawnEmil(&c) == 0) {
+		/* 30 characters, each its own write with a settle gap:
+		 * the drain loop sees no buffered bytes, so no burst. */
+		for (int i = 0; i < 30; i++)
+			sendStr(&c, "x", 40);
+		expect(contains(stripped(), "xxxxxxxxxx"), "typing missing");
+		capReset();
+		sendStr(&c, "\037", 500); /* one undo */
+		/* The cap is 20, so 30 typed chars is more than one run:
+		 * one undo must leave some behind. */
+		expect(contains(stripped(), "x"),
+		       "one undo erased all typing: cap not applied");
+		reap(&c);
+	}
+	finish();
+}
+
+/* A burst closes its run, so text typed afterwards is a separate undo
+ * step rather than folding into the paste. */
+static void scenarioBurstClosesRun(void) {
+	struct child c;
+	begin("burst: run closes when the burst ends");
+	if (spawnEmil(&c) == 0) {
+		sendPaste(&c,
+			  "pasted_text_pasted_text_pasted_text_pasted",
+			  600);
+		sendStr(&c, "Z", 400); /* typed after the burst */
+		capReset();
+		sendStr(&c, "\037", 500); /* one undo */
+		expect(!contains(stripped(), "Z"),
+		       "undo did not remove the character typed after");
+		expect(contains(stripped(), "pasted_text"),
+		       "undo swallowed the paste as well as the typing");
+		reap(&c);
+	}
+	finish();
+}
+
 int main(int argc, char **argv) {
 	emil_path = (argc > 1) ? argv[1] : "./emil";
 	signal(SIGPIPE, SIG_IGN);
@@ -869,6 +973,9 @@ int main(int argc, char **argv) {
 	printf("decoder_pty_test: driving %s\n", emil_path);
 
 	scenarioLoneEscThenArrow();
+	scenarioBurstPasteUndoesInOneStep();
+	scenarioTypingStillCapped();
+	scenarioBurstClosesRun();
 	scenarioMetaPrefixHumanSpeed();
 	scenarioUnknownReported("unknown key reported: F5", "\033[15~",
 				"M-[ 1 5 ~");

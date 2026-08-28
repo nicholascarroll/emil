@@ -652,7 +652,7 @@ int regexSubstituteAll(const regex_t *re, const uint8_t *subject, int len,
 
 		if (!adjacent_empty) {
 			if (count == 0)
-				first = copied = so;
+				first = so;
 			else
 				dbuf_append(out, subject + copied, so - copied);
 

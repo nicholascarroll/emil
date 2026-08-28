@@ -81,6 +81,11 @@ struct undo {
 	int endy;
 	int append;
 	int nmerges; /* operations folded into this record so far */
+	/* Set when the edit that produced this record arrived in an
+	 * input burst.  UNDO_MERGE_LIMIT does not apply to such a run:
+	 * the cap exists to keep typing recoverable in steps, and a
+	 * burst is not typing (§3.5). */
+	int uncapped;
 	int datalen;
 	int datasize;
 	int delete;
@@ -245,6 +250,12 @@ struct config {
 	int screencols;
 	uint8_t unicode[4];
 	int nunicode;
+	/* Set while the drain loop is dispatching keys that were
+	 * already buffered when the previous one was handled, i.e.
+	 * input arriving faster than a person types.  Read by the
+	 * mutation layer to mark records exempt from the undo
+	 * coalescing cap (§3.5). */
+	int input_burst;
 	char statusmsg[1024];
 	char prefix_display[32]; /* Display prefix commands like C-u */
 

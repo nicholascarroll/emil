@@ -670,4 +670,11 @@ SpacesInSquareBrackets: false
 Standard: Cpp03
 TabWidth: 8
 UseTab: Always
+# Do not re-wrap the body of a macro definition.  clang-format 18
+# reflows ABUF_INIT / DBUF_INIT onto a continuation line while 17 and
+# earlier leave them alone, so 'make hal' (which runs 'make format'
+# first) dirtied the tree on any checkout built with a different
+# clang-format.  Requires clang-format >= 18; older versions ignore
+# the key.
+SkipMacroDefinitionBody: true
 ...

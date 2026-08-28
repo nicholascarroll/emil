@@ -786,10 +786,12 @@ static int writeInPlace(const char *path, const char *buf, size_t len,
 	if (fd == -1)
 		return -1;
 
+	int is_reg;
+
 	if (fstat(fd, &st) == -1)
 		goto fail;
 
-	int is_reg = S_ISREG(st.st_mode);
+	is_reg = S_ISREG(st.st_mode);
 	/* If the file is not regular the truncate was a no-op,
 	 * so no worries there.*/
 	if (!is_reg && require_regular) {
@@ -1045,14 +1047,16 @@ static void saveBuffer(int skip_backup) {
 	E.buf->external_mod = 0;
 	E.buf->internal_mod = 1;
 
-	int n = snprintf(NULL, 0, "Wrote %d bytes to %s", (int)len,
-			 E.buf->filename);
-	char *showName =
-		leftTruncate(E.buf->filename, nameFit(E.buf->filename, n));
+	{
+		int n = snprintf(NULL, 0, "Wrote %d bytes to %s", (int)len,
+				 E.buf->filename);
+		char *showName = leftTruncate(E.buf->filename,
+					      nameFit(E.buf->filename, n));
 
-	setStatusMessage("Wrote %d bytes to %s", (int)len, showName);
+		setStatusMessage("Wrote %d bytes to %s", (int)len, showName);
 
-	free(showName);
+		free(showName);
+	}
 
 out:
 	free(buf);

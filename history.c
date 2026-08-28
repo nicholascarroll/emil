@@ -47,8 +47,14 @@ void addHistoryWithRect(struct history *hist, const char *str, int is_rectangle,
 	hist->tail = entry;
 	hist->count++;
 
-	/* Remove oldest entries if we exceed the limit */
-	while (hist->count > HISTORY_MAX_ENTRIES) {
+	/* Remove oldest entries if we exceed the limit.
+	 *
+	 * The head test is not reachable today: count is only ever
+	 * incremented beside a list insertion.  It is here because
+	 * nothing local proves that, so the loop reads as a
+	 * dereference of whatever hist->head happens to be -- and a
+	 * count that outran the list would trim into a NULL. */
+	while (hist->count > HISTORY_MAX_ENTRIES && hist->head != NULL) {
 		struct historyEntry *old = hist->head;
 		hist->head = old->next;
 		if (hist->head) {

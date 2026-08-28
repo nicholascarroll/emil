@@ -114,7 +114,13 @@ static void restoreFinalNewline(struct buffer *buf) {
  * record produced be offered to the run at the head of the undo list
  * rather than pushed on top of it; it is honoured only for a mutation
  * that pushes exactly one record, since a paired delete+insert is one
- * atomic unit and must not be half-absorbed into a typing run. */
+ * atomic unit and must not be half-absorbed into a typing run.
+ *
+ * A coalescing record made during an input burst is additionally
+ * marked 'uncapped', exempting the run from UNDO_MERGE_LIMIT (§3.5).
+ * The burst flag is read here rather than in undo.c: undoMerge() is
+ * pure record arithmetic and reads no global state, so what it needs
+ * to know reaches it as a field on the record. */
 static void mutateReplaceEx(struct buffer *buf, int startx, int starty,
 			    int endx, int endy, const uint8_t *old_text,
 			    int old_len, const uint8_t *repl, int repl_len,
@@ -155,6 +161,7 @@ static void mutateReplaceEx(struct buffer *buf, int startx, int starty,
 		del->endy = endy;
 		del->delete = 1;
 		del->append = coalesce;
+		del->uncapped = coalesce && E.input_burst;
 		del->paired = chain_to_prev ? 1 : 0;
 		undoReplaceData(del, old_len + 1);
 		memcpy(del->data, old_text, old_len);
@@ -189,6 +196,7 @@ static void mutateReplaceEx(struct buffer *buf, int startx, int starty,
 				 &ins->endx, &ins->endy);
 		ins->delete = 0;
 		ins->append = coalesce;
+		ins->uncapped = coalesce && E.input_burst;
 		ins->paired = is_replace ? 1 : (chain_to_prev ? 1 : 0);
 		undoReplaceData(ins, adata.len + 1);
 		memcpy(ins->data, adata.buf, adata.len);

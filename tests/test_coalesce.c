@@ -540,6 +540,61 @@ void test_prefix_argument_newlines_are_one_record(void) {
 	TEST_ASSERT_EQUAL_STRING("ab", row_str(buf, 0));
 }
 
+
+/* ---- input bursts (#126) --------------------------------------- */
+
+/* Typed keys stay capped: 60 self-inserts is more than one run, so
+ * the buffer holds more than one record.  This is the rule the burst
+ * exemption must not disturb. */
+void test_typing_is_capped_into_several_runs(void) {
+	struct buffer *buf = loadedBuffer("Z");
+	for (int i = 0; i < 60; i++)
+		selfInsert(buf, 'a' + (i % 26), 1);
+	TEST_ASSERT(nrecords(buf) > 1);
+}
+
+/* The same 60 inserts arriving in a burst collapse to one record.
+ *
+ * E.input_burst is what the drain loop sets when it finds bytes
+ * already waiting; the mutation layer copies it onto each record and
+ * undoMerge honours it.  Set directly here because the unit suites
+ * have no terminal -- the end-to-end path is covered by the pty
+ * scenarios. */
+void test_burst_lifts_the_cap(void) {
+	struct buffer *buf = loadedBuffer("Z");
+	E.input_burst = 1;
+	for (int i = 0; i < 60; i++)
+		selfInsert(buf, 'a' + (i % 26), 1);
+	E.input_burst = 0;
+	TEST_ASSERT_EQUAL_INT(1, nrecords(buf));
+}
+
+/* A burst run merges across newlines.  This is what makes a
+ * multi-line paste one undo step rather than one per line. */
+void test_burst_merges_across_newlines(void) {
+	struct buffer *buf = loadedBuffer("Z");
+	E.input_burst = 1;
+	for (int line = 0; line < 4; line++) {
+		for (int i = 0; i < 10; i++)
+			selfInsert(buf, 'a' + i, 1);
+		insertNewline(1);
+	}
+	E.input_burst = 0;
+	TEST_ASSERT_EQUAL_INT(1, nrecords(buf));
+}
+
+/* Undoing a burst run restores the buffer exactly. */
+void test_burst_run_undoes_whole(void) {
+	struct buffer *buf = loadedBuffer("keep");
+	buf->cx = 4;
+	E.input_burst = 1;
+	for (int i = 0; i < 50; i++)
+		selfInsert(buf, 'z', 1);
+	E.input_burst = 0;
+	doUndo(buf, 1);
+	TEST_ASSERT_EQUAL_STRING("keep", (char *)buf->row[0].chars);
+}
+
 int main(void) {
 	TEST_BEGIN();
 
@@ -572,6 +627,10 @@ int main(void) {
 	RUN_TEST(test_typing_at_virtual_eof_undoes_cleanly);
 
 	RUN_TEST(test_mixed_burst_round_trips);
+	RUN_TEST(test_typing_is_capped_into_several_runs);
+	RUN_TEST(test_burst_lifts_the_cap);
+	RUN_TEST(test_burst_merges_across_newlines);
+	RUN_TEST(test_burst_run_undoes_whole);
 
 	return TEST_END();
 }

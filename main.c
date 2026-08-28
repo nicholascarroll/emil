@@ -11,6 +11,7 @@
 #include "fileio.h"
 #include "history.h"
 #include "keymap.h"
+#include "undo.h"
 
 #include "terminal.h"
 #include "util.h"
@@ -436,9 +437,22 @@ int main(int argc, char *argv[]) {
 			    0)
 				break;
 
+			/* Bytes were already waiting: this key and the
+			 * next arrived together rather than being typed
+			 * one at a time.  That is the only signal emil
+			 * has that it is being pasted into (§3.5). */
+			E.input_burst = 1;
+
 			key = readKey();
 			if (key == -1)
 				break;
+		}
+
+		/* Burst over: the next key, whenever it comes, starts a
+		 * fresh undo run rather than extending this one. */
+		if (E.input_burst) {
+			E.input_burst = 0;
+			undoCloseRun(E.buf);
 		}
 	}
 }

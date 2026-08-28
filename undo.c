@@ -315,6 +315,7 @@ struct undo *newUndo(void) {
 	ret->endy = 0;
 	ret->append = 0; /* the mutation layer opts in; see pushUndo */
 	ret->nmerges = 0;
+	ret->uncapped = 0;
 	ret->delete = 0;
 	ret->datalen = 0;
 	ret->datasize = 22;
@@ -414,7 +415,13 @@ static int undoMerge(struct undo *prev, struct undo *new) {
 		return 0;
 	if (prev->paired || new->paired)
 		return 0;
-	if (prev->nmerges >= UNDO_MERGE_LIMIT)
+	/* Either side may carry the exemption.  The drain loop cannot
+	 * know a burst is a burst until it has dispatched one key and
+	 * found more waiting, so the record at the head of a pasted run
+	 * is always the one made before the flag was set.  Testing
+	 * 'new' as well is what lets the rest of the burst join it. */
+	if (!prev->uncapped && !new->uncapped &&
+	    prev->nmerges >= UNDO_MERGE_LIMIT)
 		return 0;
 	if (new->datalen <= 0)
 		return 0;
@@ -446,6 +453,7 @@ static int undoMerge(struct undo *prev, struct undo *new) {
 	prev->datalen += new->datalen;
 	prev->data[prev->datalen] = 0;
 	prev->nmerges++;
+	prev->uncapped |= new->uncapped;
 
 	computeInsertEnd(prev->data, prev->datalen, prev->startx, prev->starty,
 			 &prev->endx, &prev->endy);

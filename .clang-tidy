@@ -1,0 +1,18 @@
+# clang-tidy configuration for emil.
+#
+# Checks are opt-out from clang-tidy's defaults.  One exclusion, and a
+# reason for it:
+#
+#   security.insecureAPI.DeprecatedOrUnsafeBufferHandling
+#     Demands the C11 Annex K functions -- memcpy_s, snprintf_s,
+#     memset_s.  emil targets C99 (SS1.2), Annex K is optional even in
+#     C11, and glibc does not implement it, so the check cannot be
+#     satisfied on any platform emil supports.  It fired 159 times
+#     against 30 files while the only two real findings in the tree
+#     sat in the same output, which is the actual cost: an analysis
+#     stage nobody can read is an analysis stage nobody runs.
+#
+# Bounds safety for the calls this check flags is carried by the dbuf
+# and abuf allocators (SS6) and by the review rules in tests/, not by
+# a libc extension that does not exist here.
+Checks: '-clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling'
