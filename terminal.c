@@ -90,6 +90,7 @@ void disableRawModeKeepScreen(void) {
  *      region, re-enters raw mode, and redraws: closing the drawer.
  */
 
+#ifndef __wasi__ /* no job control; see dispatchMisc() in keymap.c */
 void openShellDrawer(void) {
 	struct winsize ws;
 	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_row < 12)
@@ -150,11 +151,35 @@ void openShellDrawer(void) {
 	 * ask for the same repair a real `fg` gets. */
 	requestTerminalResume();
 }
+#endif /* __wasi__ */
 
 /*
  * Apply raw-mode terminal settings without saving orig_termios.
  * Used on resume (SIGCONT) where the original state is already saved.
  */
+
+/* What a readback said we did not get.  APUE §18.4: tcsetattr reports
+ * success if it applied ANY of the requested changes, so a return of 0
+ * does not mean the terminal is in the mode we asked for.  Nothing in
+ * POSIX obliges the implementation to say which parts it dropped, so
+ * the only way to find out is to read the settings back and compare.
+ *
+ * Recorded rather than reported here because applyRawMode() runs
+ * before initEditor() on the startup path, so there is no status line
+ * to write to yet.  main() reports it once there is.
+ *
+ * A readback is only as honest as the layer answering it: a terminal
+ * emulated by a sandbox runtime may report flags that match neither
+ * the request nor the host tty, in which case a clean readback is not
+ * evidence that the mode took.  This check catches the layer that
+ * drops flags and admits it, which is the common case and the one
+ * POSIX warns about. */
+static struct {
+	tcflag_t iflag, oflag, lflag;
+	int vmin, vtime;
+	int diverged;
+} raw_divergence;
+
 void applyRawMode(void) {
 	/* Switch to alternate screen */
 	if (write(STDOUT_FILENO, CSI "?1049h", 8) == -1)
@@ -169,6 +194,83 @@ void applyRawMode(void) {
 	raw.c_cc[VTIME] = 0;
 	if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1)
 		die("applyRawMode tcsetattr");
+
+	/* Verify.  A failed readback is not itself an error: it tells us
+	 * nothing either way, so leave the record as it stands. */
+	struct termios got;
+	if (tcgetattr(STDIN_FILENO, &got) == -1)
+		return;
+
+	raw_divergence.iflag = (tcflag_t)(got.c_iflag & ~raw.c_iflag);
+	raw_divergence.oflag = (tcflag_t)(got.c_oflag & ~raw.c_oflag);
+	raw_divergence.lflag = (tcflag_t)(got.c_lflag & ~raw.c_lflag);
+	raw_divergence.vmin = got.c_cc[VMIN] != raw.c_cc[VMIN];
+	raw_divergence.vtime = got.c_cc[VTIME] != raw.c_cc[VTIME];
+	raw_divergence.diverged = raw_divergence.iflag ||
+				  raw_divergence.oflag ||
+				  raw_divergence.lflag || raw_divergence.vmin ||
+				  raw_divergence.vtime;
+
+	/* Do not refine this by consulting c_cc.  ISIG matters only if
+	 * some byte is still designated INTR, SUSP or QUIT, so
+	 * suppressing the ISIG report when those slots hold
+	 * _POSIX_VDISABLE looks like an accuracy improvement -- it is
+	 * what tests/wasix/emil-wasix arranges, and the flag then eats
+	 * nothing (§3.28.2).
+	 *
+	 * It is unreliable by construction.  A divergence exists here
+	 * only on a layer that misreports termios, and such a layer
+	 * cannot be trusted about c_cc either: under wasmer the guest
+	 * reads VINTR, VSUSP, VQUIT, VSTOP and VSTART as 0 -- which is
+	 * _POSIX_VDISABLE -- while the host has 3, 26, 28, 19 and 17.
+	 * The refinement therefore concludes "disarmed" on every WASIX
+	 * run and suppresses the warning exactly where the launcher is
+	 * absent and the keys really are being eaten.  Measured, and
+	 * reverted for it. */
+}
+
+/* Name the raw-mode settings that did not take, into buf.  Returns 1
+ * if anything diverged, 0 otherwise.  Only the flags whose absence
+ * changes what the user can type or see are named individually; the
+ * rest are covered by the count. */
+int rawModeDivergence(char *buf, size_t n) {
+	struct {
+		tcflag_t bit;
+		tcflag_t *field;
+		const char *name;
+	} interesting[] = {
+		{ IXON, &raw_divergence.iflag, "IXON (C-s, C-q eaten)" },
+		{ ICRNL, &raw_divergence.iflag, "ICRNL (RET arrives as C-j)" },
+		{ ISIG, &raw_divergence.lflag, "ISIG (C-c, C-z eaten)" },
+		{ OPOST, &raw_divergence.oflag, "OPOST (output translated)" },
+		{ ECHO, &raw_divergence.lflag, "ECHO (input echoed)" },
+		{ ICANON, &raw_divergence.lflag, "ICANON (line buffered)" },
+	};
+	size_t i;
+	int first = 1;
+
+	if (!raw_divergence.diverged || n == 0)
+		return 0;
+
+	buf[0] = '\0';
+	emil_strlcat(buf, "Terminal did not accept raw mode: ", n);
+	for (i = 0; i < sizeof(interesting) / sizeof(interesting[0]); i++) {
+		if (!(*interesting[i].field & interesting[i].bit))
+			continue;
+		if (!first)
+			emil_strlcat(buf, ", ", n);
+		emil_strlcat(buf, interesting[i].name, n);
+		first = 0;
+	}
+	if (raw_divergence.vmin || raw_divergence.vtime) {
+		if (!first)
+			emil_strlcat(buf, ", ", n);
+		emil_strlcat(buf, "VMIN/VTIME", n);
+		first = 0;
+	}
+	if (first)
+		emil_strlcat(buf, "some flags", n);
+	return 1;
 }
 
 void enableRawMode(void) {

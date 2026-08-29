@@ -327,6 +327,31 @@ void test_shell_region_replace_multiline(void) {
  * 4. Diff buffer with file
  * ================================================================ */
 
+/* Whether `diff` can be spawned at all.  Measured once, not assumed:
+ * the Redox image does not carry it, and diffBufferWithFile() has a
+ * documented answer for that case which is worth asserting rather than
+ * stepping around. */
+static int diffAvailable(void) {
+	static int cached = -1;
+	if (cached >= 0)
+		return cached;
+
+	const char *probe[] = { "diff", "--version", NULL };
+	struct subprocess_s proc;
+	if (subprocess_create(probe,
+			      subprocess_option_inherit_environment |
+				      subprocess_option_search_user_path,
+			      &proc) != 0) {
+		cached = 0;
+		return cached;
+	}
+	int ec;
+	subprocess_join(&proc, &ec);
+	subprocess_destroy(&proc);
+	cached = 1;
+	return cached;
+}
+
 void test_diff_no_filename(void) {
 	make_test_buffer("some content");
 	diffBufferWithFile();
@@ -353,36 +378,52 @@ void test_diff_identical(void) {
 
 	diffBufferWithFile();
 
-	TEST_ASSERT(strlen(E.statusmsg) > 0);
+	/* Both outcomes are asserted, so this cannot pass by the status
+	 * line merely being non-empty -- which is what it used to check,
+	 * and why it passed on Redox while proving nothing. */
+	if (diffAvailable())
+		TEST_ASSERT_EQUAL_STRING("No differences", E.statusmsg);
+	else
+		TEST_ASSERT_EQUAL_STRING("Diff failed: cannot create subprocess",
+					 E.statusmsg);
 	TEST_ASSERT_NULL(E.headbuf->next);
 
 	unlink(path);
 	free(path);
 }
 
-void test_diff_shows_differences(void) {
+/* These two cover run_command plus output_to_buffer: a command that
+ * exits non-zero, whose stdout is captured whole and split into buffer
+ * rows.  They used to invoke `diff -u` on two temp files, which meant
+ * they also required diff to be installed -- and on Redox, whose image
+ * does not carry it, both failed at subprocess_create with output NULL.
+ * That is the test asserting a property of the host.
+ *
+ * `sh` produces the same shape of output with no such dependency, and
+ * the suite already spawns /bin/sh elsewhere and passes on Redox doing
+ * it.  It is named without a slash on purpose: run_command passes
+ * subprocess_option_search_user_path, and the old `diff` argv was the
+ * only thing exercising that PATH search.
+ *
+ * Emil's own diff (editorDiff in pipe.c) does shell out to diff, and
+ * already handles its absence -- "Diff failed: cannot create
+ * subprocess".  That path is untested; it needs diff to be missing,
+ * which is awkward to arrange here. */
+void test_command_output_becomes_buffer_rows(void) {
 	make_test_buffer("");
 
-	char *path = write_temp_file("old line\n");
-	if (!path) { TEST_ASSERT_NOT_NULL(path); return; }
-
-	char *buf_path = write_temp_file("new line\n");
-	if (!buf_path) {
-		TEST_ASSERT_NOT_NULL(buf_path);
-		unlink(path); free(path);
-		return;
-	}
-
-	const char *diff_argv[] = { "diff", "-u", path, buf_path, NULL };
-	int diff_exit;
-	char *output = run_command(diff_argv, &diff_exit);
+	const char *argv[] = { "sh", "-c",
+			       "printf '%s\\n' '--- old' '+++ new' "
+			       "'-old line' '+new line'; exit 1",
+			       NULL };
+	int cmd_exit;
+	char *output = run_command(argv, &cmd_exit);
 	if (!output) {
 		TEST_ASSERT_NOT_NULL(output);
-		unlink(path); unlink(buf_path); free(path); free(buf_path);
 		return;
 	}
 
-	TEST_ASSERT_EQUAL_INT(1, diff_exit);
+	TEST_ASSERT_EQUAL_INT(1, cmd_exit);
 	TEST_ASSERT(strlen(output) > 0);
 
 	struct buffer *diff_buf = output_to_buffer(output);
@@ -400,36 +441,24 @@ void test_diff_shows_differences(void) {
 	TEST_ASSERT(found_new);
 
 	E.headbuf->next = diff_buf;
-	unlink(path);
-	unlink(buf_path);
-	free(path);
-	free(buf_path);
 	free(output);
 }
 
-void test_diff_multiline_changes(void) {
+void test_command_multiline_output_rows(void) {
 	make_test_buffer("");
 
-	char *path = write_temp_file("alpha\nbeta\ngamma\n");
-	if (!path) { TEST_ASSERT_NOT_NULL(path); return; }
-
-	char *buf_path = write_temp_file("alpha\nCHANGED\ngamma\n");
-	if (!buf_path) {
-		TEST_ASSERT_NOT_NULL(buf_path);
-		unlink(path); free(path);
-		return;
-	}
-
-	const char *diff_argv[] = { "diff", "-u", path, buf_path, NULL };
-	int diff_exit;
-	char *output = run_command(diff_argv, &diff_exit);
+	const char *argv[] = { "sh", "-c",
+			       "printf '%s\\n' ' alpha' '-beta' '+CHANGED' "
+			       "' gamma'; exit 1",
+			       NULL };
+	int cmd_exit;
+	char *output = run_command(argv, &cmd_exit);
 	if (!output) {
 		TEST_ASSERT_NOT_NULL(output);
-		unlink(path); unlink(buf_path); free(path); free(buf_path);
 		return;
 	}
 
-	TEST_ASSERT_EQUAL_INT(1, diff_exit);
+	TEST_ASSERT_EQUAL_INT(1, cmd_exit);
 
 	struct buffer *diff_buf = output_to_buffer(output);
 	TEST_ASSERT(diff_buf->numrows > 0);
@@ -446,10 +475,6 @@ void test_diff_multiline_changes(void) {
 	TEST_ASSERT(found_changed);
 
 	E.headbuf->next = diff_buf;
-	unlink(path);
-	unlink(buf_path);
-	free(path);
-	free(buf_path);
 	free(output);
 }
 
@@ -519,7 +544,15 @@ void test_pipe_child_exits_early(void) {
 	memset(in, 'x', n);
 	in[n] = 0;
 	watchdogStart(300);
-	uint8_t *r = pipeCommandCapture((const uint8_t *)"head -c 10", in);
+	/* dd, not `head -c 10`: -c is a GNU/BSD extension and POSIX head
+	 * takes only -n, so a strictly conforming head rejects it, writes
+	 * nothing, and the assertion below fails for a reason that has
+	 * nothing to do with the pipe.  Caught on WASIX against sbase
+	 * (§1.2 commits emil to POSIX.1-2001, so the suite should not
+	 * assume extensions either).  What the test needs is a child that
+	 * takes 10 bytes and exits while the parent is still writing. */
+	uint8_t *r = pipeCommandCapture(
+		(const uint8_t *)"dd bs=1 count=10 2>/dev/null", in);
 	watchdogStop();
 	TEST_ASSERT_NOT_NULL(r);
 	TEST_ASSERT_EQUAL_INT(10, (int)strlen((char *)r));
@@ -642,8 +675,8 @@ int main(void) {
 	RUN_TEST(test_diff_no_filename);
 	RUN_TEST(test_diff_not_dirty);
 	RUN_TEST(test_diff_identical);
-	RUN_TEST(test_diff_shows_differences);
-	RUN_TEST(test_diff_multiline_changes);
+	RUN_TEST(test_command_output_becomes_buffer_rows);
+	RUN_TEST(test_command_multiline_output_rows);
 #endif
 
 	return TEST_END();

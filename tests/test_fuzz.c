@@ -1,5 +1,14 @@
 /* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
-/* Invariant fuzzer for emil's buffer/undo layer.  Not part of the build.
+/* Invariant fuzzer for emil's buffer/undo layer.
+ *
+ * An ordinary suite, listed in SUITES and scored by its exit status
+ * like every other.  It was a special case in run_tests.sh for as long
+ * as it was invoked as a bare binary with a sequence count and a seed
+ * on the command line: sixty lines of shell to loop over seeds, its own
+ * verdict-by-grep, a build-only branch, and three environment knobs
+ * nothing set.  One RUN_TEST per seed does the same work and needs none
+ * of it -- and being named test_* means the Genode and Asterinas
+ * runners, which glob for that, now run it too.
  *
  * Drives random sequences of real commands through processKeypress and
  * checks, after every operation:
@@ -21,12 +30,25 @@
  * at a time for as long as the failure persists, which usually reduces a
  * sixty-operation sequence to two or three.
  *
- * Build:
- *   cc -std=c99 -D_DEFAULT_SOURCE -D_BSD_SOURCE -g -O0 -I. -Itests \
- *      -o /tmp/fuzz fuzz_undo.c $(ls *.o | grep -vE '^(main|terminal)\.o$') \
- *      /tmp/stubs.o
- *   /tmp/fuzz [iterations] [seed]
+ * Sequence count and seed set are compile-time, not environment.  The
+ * seeds are fixed rather than time-based on purpose: a suite that fails
+ * only on some days is worse than one that misses a bug, because nobody
+ * trusts it.  And there are eight rather than one because a single seed
+ * is a single walk through the state space -- a heap-buffer-overflow in
+ * clampCursorToViewport survived as long as it did because seed 1
+ * happens not to reach it while roughly half its neighbours do.
+ *
+ * Override for a deeper soak with -DFUZZ_SEQS=200000.
  */
+#ifndef FUZZ_SEQS
+#define FUZZ_SEQS 10000
+#endif
+
+/* Reported failures per seed, so one broken invariant does not print a
+ * thousand reduced sequences. */
+#define FUZZ_MAX_FAILURES 5
+
+#include "test.h"
 #include "test_harness.h"
 #include "buffer.h"
 #include "keymap.h"
@@ -366,7 +388,7 @@ static int runSequence(const struct step *steps, int n) {
 		}
 	}
 
-	if (rc == 0 && getenv("EMIL_FUZZ_SKIP_UNDO") == NULL) {
+	if (rc == 0) {
 		struct snapshot restored = contentOf(buf);
 		if (!snapshotEqual(&original, &restored)) {
 			size_t at = firstDifference(&original, &restored);
@@ -424,19 +446,14 @@ static int deltaDebug(struct step *steps, int n) {
 	return n;
 }
 
-int main(int argc, char **argv) {
-	int iterations = (argc > 1) ? atoi(argv[1]) : 2000;
-	rng_state = (argc > 2) ? (uint32_t)strtoul(argv[2], NULL, 10) : 12345u;
-	if (rng_state == 0)
-		rng_state = 1;
-
-	printf("fuzzing %d sequences over %d commands (seed %u)\n", iterations,
-	       NOPS, rng_state);
-
-	const char *mf = getenv("EMIL_FUZZ_MAX_FAILURES");
-	int max_failures = mf ? atoi(mf) : 5;
+/* One seed, FUZZ_SEQS random sequences.  Reports through the normal
+ * assertion path, so a failure prints the reduced sequence and the
+ * suite's exit status carries the verdict. */
+static void fuzzSeed(uint32_t seed) {
+	rng_state = seed ? seed : 1;
 	int failures = 0;
-	for (int it = 0; it < iterations; it++) {
+
+	for (int it = 0; it < FUZZ_SEQS; it++) {
 		int n = 2 + (int)(rnd() % 60);
 		struct step steps[64];
 		for (int i = 0; i < n; i++) {
@@ -452,23 +469,47 @@ int main(int argc, char **argv) {
 		if (runSequence(steps, n) != 0) {
 			char kept[256];
 			emil_strlcpy(kept, fail_reason, sizeof(kept));
-			printf("\n*** FAILURE (iteration %d, %d ops): %s\n", it,
-			       n, kept);
-			int m = getenv("EMIL_FUZZ_NO_REDUCE") ?
-					n :
-					deltaDebug(steps, n);
+			printf("  FAIL: %s:%d [seed %u]: iteration %d, "
+			       "%d ops: %s\n",
+			       __FILE__, __LINE__, (unsigned)seed, it, n, kept);
+			int m = deltaDebug(steps, n);
 			runSequence(steps, m);
-			printf("  reduced to %d op(s): %s\n", m, fail_reason);
+			printf("    reduced to %d op(s): %s\n", m,
+			       fail_reason);
 			printSequence(steps, m);
-			failures++;
-			if (failures >= max_failures) {
-				printf("\nstopping after %d failures\n",
-				       max_failures);
-				return 1;
+			_current_test_failed = 1;
+			if (++failures >= FUZZ_MAX_FAILURES) {
+				printf("    stopping after %d failures\n",
+				       FUZZ_MAX_FAILURES);
+				return;
 			}
 		}
 	}
+}
 
-	printf("%d failure(s)\n", failures);
-	return failures != 0;
+void setUp(void) {}
+void tearDown(void) {}
+
+static void test_seed_1(void) { fuzzSeed(1); }
+static void test_seed_2(void) { fuzzSeed(2); }
+static void test_seed_3(void) { fuzzSeed(3); }
+static void test_seed_4(void) { fuzzSeed(4); }
+static void test_seed_5(void) { fuzzSeed(5); }
+static void test_seed_6(void) { fuzzSeed(6); }
+static void test_seed_7(void) { fuzzSeed(7); }
+static void test_seed_8(void) { fuzzSeed(8); }
+
+int main(void) {
+	TEST_BEGIN();
+
+	RUN_TEST(test_seed_1);
+	RUN_TEST(test_seed_2);
+	RUN_TEST(test_seed_3);
+	RUN_TEST(test_seed_4);
+	RUN_TEST(test_seed_5);
+	RUN_TEST(test_seed_6);
+	RUN_TEST(test_seed_7);
+	RUN_TEST(test_seed_8);
+
+	return TEST_END();
 }

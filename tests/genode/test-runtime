@@ -1,0 +1,62 @@
+<!-- Runtime for the CI unit suites.
+     Copyright (c) 2026 Nicholas Carroll.  SPDX-License-Identifier: MIT
+
+     Not pkg/runtime: that file describes the editor as it is meant to
+     be deployed, wired to a terminal and a file system.  This one
+     describes what a test binary needs.  CI copies it over pkg/runtime
+     before calling `goa run-dir`, because a goa project has exactly one
+     pkg, and genode/run_suites.sh then swaps the binary named in the
+     generated config for each suite in turn.
+
+     The binary named here is a placeholder; run_suites.sh rewrites it.
+
+     Three requirements were each found by hitting them:
+
+     timer     without a Timer session declared, init denies the
+               request and the component dies before running a test.
+     rng       mkstemp needs entropy.  jitterentropy is used rather
+               than pointing rng at /dev/zero, which appears to work
+               but hands out a constant.
+     /tmp      test_fileio and friends create files under /tmp with
+               mkstemp and mkdtemp.  A ram filesystem is enough; none
+               of the suites expect anything to persist.
+     pipe      test_writeall calls pipe().  Genode's libc routes that
+               through a VFS plugin rather than the kernel, and
+               Vfs_plugin::pipe() returns EACCES with "pipe fs not
+               mounted" when the <libc pipe=".."/> attribute is unset.
+               Needs the vfs_pipe archive as well as the mount point;
+               see genodelabs/src/vfs_pipe in test-archives. -->
+
+<runtime ram="64M" caps="1000" binary="test_abuf">
+
+	<requires> <timer/> </requires>
+
+	<config>
+		<libc stdin="/dev/null" stdout="/dev/log" stderr="/dev/log"
+		      rng="/dev/random" pipe="/dev/pipe"/>
+
+		<vfs>
+			<dir name="dev">
+				<log/>
+				<null/>
+				<zero/>
+				<jitterentropy name="random"/>
+				<dir name="pipe"> <pipe/> </dir>
+			</dir>
+			<dir name="tmp"> <ram/> </dir>
+		</vfs>
+
+		<arg value="test_abuf"/>
+	</config>
+
+	<content>
+		<rom label="test_abuf"/>
+		<rom label="libc.lib.so"/>
+		<rom label="libm.lib.so"/>
+		<rom label="posix.lib.so"/>
+		<rom label="vfs.lib.so"/>
+		<rom label="vfs_jitterentropy.lib.so"/>
+		<rom label="vfs_pipe.lib.so"/>
+	</content>
+
+</runtime>

@@ -46,6 +46,33 @@ HEADERS = abuf.h adjust.h backup.h base64.h buffer.h completion.h ctags.h \
 # Default target
 all: $(PROGNAME)
 
+# Object files carry no target in their names, so a native build and a
+# cross build cannot share a tree: wasm-ld rejects native objects with
+# "unknown file type", and the host linker rejects wasm ones with "file
+# format not recognized".  Both directions used to require the user to
+# remember `make clean`, and the failure appears at link time with a
+# message that names neither cause nor cure.
+#
+# The stamp records which target produced the objects on disk.  When it
+# disagrees with the target now being built, the objects are removed
+# before anything is compiled.  The recipe writes the file only when the
+# tag actually changes, so its mtime -- and therefore any rebuild it
+# forces -- stays put across ordinary repeat builds.
+BUILD_TAG ?= native
+
+.build-tag: FORCE
+	@if [ ! -f $@ ] || [ "`cat $@`" != "$(BUILD_TAG)" ]; then \
+		if [ -f $@ ]; then \
+			echo "Makefile: build target changed (`cat $@` -> $(BUILD_TAG)); removing objects"; \
+			rm -f $(OBJECTS) $(PROGNAME) emil emil.wasm emil.raw.wasm tests/*.wasm; \
+		fi; \
+		echo "$(BUILD_TAG)" > $@; \
+	fi
+
+FORCE:
+
+$(OBJECTS): .build-tag
+
 # Every object depends on every header. emil.h alone reaches 25 of 30
 # translation units, and a full build is ~4s, so precise per-object
 # dependency tracking would save ~1s at the cost of correctness risk.
@@ -88,8 +115,11 @@ uninstall:
 	-rmdir $(DESTDIR)$(LICDIR) 2>/dev/null
 
 # Cleanup
+# emil.raw.wasm is the pre-asyncify link output.  The wasix target
+# unlinks it only on success, so a failed wasm-opt leaves it behind;
+# it is named here so that failure does not leave an untracked artifact.
 clean:
-	rm -f $(OBJECTS) $(PROGNAME) emil.wasm tests/*.wasm
+	rm -f $(OBJECTS) $(PROGNAME) emil.wasm emil.raw.wasm tests/*.wasm .build-tag
 
 # Testing
 test: $(PROGNAME)
@@ -167,7 +197,7 @@ darwin:
 #
 # Toolchain: wasi-sdk supplies clang and wasm-ld; wasix-libc supplies the
 # sysroot.  Point WASI_SDK and WASIX_SYSROOT at unpacked copies of each,
-# or run tests/wasix_setup.sh to fetch the pinned versions.
+# or run tests/wasix/setup.sh to fetch the pinned versions.
 #
 # Three details are load-bearing and easy to get wrong:
 #
@@ -177,7 +207,7 @@ darwin:
 #     path-resolution state in thread-local storage and an older wasm-ld
 #     lays that segment out differently.  The symptom is a trap in strcpy
 #     inside __wasilibc_find_relpath_alloc on the first open().  See
-#     WASIX_CLANG_MAJOR in tests/wasix_setup.sh.
+#     WASIX_CLANG_MAJOR in tests/wasix/setup.sh.
 #
 #  2. The target and sysroot flags have to be repeated in LDFLAGS.  The
 #     link rule uses LDFLAGS but not CFLAGS, so without them the link
@@ -186,8 +216,74 @@ darwin:
 #
 #  3. Do NOT define _WASI_EMULATED_SIGNAL.  WASIX has real signals and
 #     ships no libwasi-emulated-signal.a; the macro only redirects SIG_IGN
-#     to a __SIG_IGN that nothing defines.  The mman and process-clocks
-#     emulation libraries do exist and are used.
+#     to a __SIG_IGN that nothing defines.
+#
+#  4. _WASI_EMULATED_PROCESS_CLOCKS is required; _WASI_EMULATED_MMAN is
+#     not, and neither emulation library is linked.
+#
+#     The clocks macro is a header gate, not a symbol dependency: the
+#     sysroot's <sys/resource.h> is a bare #error without it, and
+#     pipe.c reaches that header through <sys/wait.h>.  So the shell
+#     needs it -- which is new, because pipe.c compiled to a stub under
+#     -DEMIL_DISABLE_SHELL and never included <sys/wait.h> at all.
+#
+#     Nothing needs the mman macro: the tree compiles without it.  And
+#     nothing needs either -lwasi-emulated-mman or
+#     -lwasi-emulated-process-clocks: emil calls no mmap and no
+#     getrusage, so the link resolves with -lc and -lm alone.  Verified
+#     by building the whole tree and every suite wasix-test compiles.
+#
+#     Do not "tidy" the clocks macro away on the grounds that emil
+#     calls nothing from it.  That is true and irrelevant; the header
+#     refuses to be included either way.
+#
+#  5. wasm-opt --asyncify is applied uniformly, to emil and to every
+#     sandbox binary, and that uniformity is the policy -- not a
+#     property of emil's own syscalls.
+#
+#     The mechanism: wasmer implements proc_fork by snapshotting the
+#     module, and the snapshot needs asyncify instrumentation to unwind
+#     and rewind the stack.  Without it fork() aborts the process with
+#     exit 79 -- the program runs up to the call and the child never
+#     appears.  The accompanying thread and TLS flags and the
+#     __wasm_init_tls / __wasm_signal exports are part of the same
+#     mechanism: omit the exports and the abort merely changes to
+#     exit 45.
+#
+#     That reasoning is load-bearing for the sandbox, where dash forks.
+#     It is NOT load-bearing for emil: emil reaches the shell through
+#     posix_spawn, which wasmer serves with proc_spawn3, and emil.wasm's
+#     import section names proc_spawn3 and no proc_fork.  A
+#     non-asyncified emil.wasm has been built and runs correctly,
+#     M-! and M-| pipelines included.
+#
+#     It is applied to emil anyway, deliberately.  The editor spawns
+#     binaries that do fork, the instrumentation is cheap, and a build
+#     rule that applies to every wasm artifact is one fewer condition to
+#     get wrong than a rule that exempts the one artifact whose import
+#     list happens to be clean today.  Do not remove it from emil on the
+#     grounds that emil does not fork; that is true and is not the
+#     reason it is there.
+#
+#     Recorded because none of this is discoverable from an error
+#     message.  The recipe comes from wasix-org/dash's own Makefile.
+#
+#  6. Suspend needs no flag here.  emil's job-control paths (C-z,
+#     C-x z and the C-x C-z shell drawer) are compiled out on
+#     __wasi__, in the source, the way __sun selects its headers.
+#     wasmer honours SIGTSTP and terminates rather than stopping into
+#     a shell that can fg it, so on this runtime suspending cost the
+#     user their unsaved buffer.  See dispatchMisc() in keymap.c for
+#     why this is a platform test and not a feature test.
+#
+#  7. -Wno-deprecated is not hiding anything in emil's own code.  It
+#     suppresses one clang driver notice, emitted once per translation
+#     unit and once at link: --target=wasm32-wasmer-wasi normalises to
+#     wasm32-wasi, which clang 22 deprecates in favour of wasm32-wasip1.
+#     The triple cannot move -- the sysroot's library directory is
+#     lib/wasm32-wasi, so a wasip1 triple fails to find crt1.o, -lc and
+#     -lm.  It lives in WASIX_TARGET so that it reaches LDFLAGS as well;
+#     when it was only in CFLAGS the link stayed noisy.
 #
 # -nodefaultlibs with an explicit library list is deliberate: clang looks
 # for compiler-rt builtins under a wasm32-wasmer-wasi directory that
@@ -198,74 +294,244 @@ darwin:
 # POSIX.1-2001, so Solaris make rejects '?=' outright -- "Badly formed
 # macro assignment", before any target is considered.  A command-line
 # assignment still overrides these, which is how CI supplies both.
-WASI_SDK      = $(HOME)/opt/wasi-sdk
-WASIX_SYSROOT = $(HOME)/opt/wasix-sysroot/sysroot
+# tests/wasix/setup.sh installs wasi-sdk, the wasix sysroot and
+# binaryen side by side under one prefix.  Resolve all three from that
+# prefix, so pointing the build at a toolchain configures the whole
+# toolchain.  WASM_OPT used to be a bare `wasm-opt` resolved from PATH
+# while these two were paths: a CI job that ran the setup script into
+# its own prefix and passed WASI_SDK and WASIX_SYSROOT then compiled
+# every object and failed on the last command of the build, because the
+# third component of the same toolchain was found by a different rule.
+WASIX_PREFIX  = $(HOME)/opt
+WASI_SDK      = $(WASIX_PREFIX)/wasi-sdk
+WASIX_SYSROOT = $(WASIX_PREFIX)/wasix-sysroot/sysroot
 WASIX_LIBDIR   = $(WASIX_SYSROOT)/lib/wasm32-wasi
+# -pthread/-mthread-model/-ftls-model and the __wasm_init_tls and
+# __wasm_signal exports below are what let the runtime snapshot a
+# process.  Without them the link fails on __wasm_init_tls (pulled in
+# by wasi_thread_start.o); with the flags but not the exports, fork()
+# aborts the process at run time instead.  See item 5.
 WASIX_TARGET   = --target=wasm32-wasmer-wasi --sysroot=$(WASIX_SYSROOT) \
-                 -matomics -mbulk-memory -mmutable-globals
+                 -matomics -mbulk-memory -mmutable-globals \
+                 -pthread -mthread-model posix -ftls-model=local-exec \
+                 -Wno-deprecated \
+                 -D_WASI_EMULATED_PROCESS_CLOCKS
+WASIX_EXPORTS  = -Wl,--shared-memory -Wl,--max-memory=4294967296 \
+                 -Wl,--import-memory -Wl,--export-dynamic \
+                 -Wl,--export=__heap_base -Wl,--export=__stack_pointer \
+                 -Wl,--export=__data_end -Wl,--export=__wasm_init_tls \
+                 -Wl,--export=__wasm_signal -Wl,--export=__tls_size \
+                 -Wl,--export=__tls_align -Wl,--export=__tls_base
 WASIX_LIBS     = -nodefaultlibs -lc -lm \
-                 -lwasi-emulated-mman -lwasi-emulated-process-clocks \
                  $(WASIX_LIBDIR)/libclang_rt.builtins-wasm32.a
+# Prefer the copy sitting beside WASI_SDK -- derived from WASI_SDK
+# rather than WASIX_PREFIX so that overriding WASI_SDK alone, as CI
+# does, still finds it -- and fall back to PATH.
+WASM_OPT       = $(firstword \
+                   $(wildcard $(dir $(patsubst %/,%,$(WASI_SDK)))binaryen/bin/wasm-opt) \
+                   wasm-opt)
+WASIX_ASYNCIFY = -O2 --asyncify --enable-threads --enable-bulk-memory \
+                 --enable-mutable-globals
 
-# Suites not run under WASIX.  These were previously all described as
-# platform gaps; that is true of one of them.  Stated accurately here,
-# because the earlier text reasoned about wasi-libc while this target
-# builds against wasix-libc, and the two differ in exactly the places
-# the reasoning depended on.  wasix-libc's sysroot ships fork, vfork,
+# Suites not run under WASIX, and why.  Each reason below was checked
+# against wasi-sdk 33 + the pinned wasix-libc sysroot and, where the
+# question was behavioural, against wasmer 7.2.1 -- not inferred from
+# the sysroot's symbol table.
+#
+# That distinction is the whole point.  wasix-libc ships fork, vfork,
 # the execv family, waitpid, pipe, select, kill, raise, sigaction and
 # the whole posix_spawn family, and its libc.imports names proc_fork,
-# proc_spawn, proc_join and proc_signal on the runtime side.
+# proc_spawn, proc_join and proc_signal on the runtime side.  An
+# earlier version of this comment reasoned from exactly that and
+# concluded three of these four suites were deferrals rather than
+# gaps.  They are not: a declared symbol that links is not a working
+# syscall, and under wasmer fork() terminates the process and
+# posix_spawn has nothing to exec.  Do not re-derive this from the
+# sysroot; run it.
 #
 #   warnings -- a real platform gap.  Needs POSIX record locking, and
-#     wasix-libc's fcntl.h defines struct flock and F_RDLCK/F_WRLCK/
-#     F_UNLCK but not the F_GETLK/F_SETLK commands.  fileio.c already
-#     guards on exactly that (#if !defined(F_GETLK) || !defined(F_SETLK)),
-#     so the lock is compiled out and the suite has nothing to assert.
-#     Note F_OFD_SETLK *is* defined; whether the runtime honours it is
-#     untested, and an OFD-based lock would be the way to close this.
+#     wasix-libc's fcntl.h declares struct flock but none of the locking
+#     constants: F_GETLK, F_SETLK, F_SETLKW, the F_RDLCK/F_WRLCK/F_UNLCK
+#     l_type values and the F_OFD_* commands all sit inside its
+#     __wasilibc_unmodified_upstream guard, which is not defined here.
+#     fileio.c guards on the command constants (#if !defined(F_GETLK) ||
+#     !defined(F_SETLK)), so the lock is compiled out and the suite has
+#     nothing to assert.  The guard tests two of the constants and the
+#     other branch needs six, which is sound only because they are all
+#     absent together -- verified against the pinned sysroot, and worth
+#     rechecking if WASIX_LIBC is bumped.
 #
-#   subprocess, shell -- NOT a platform gap.  They are skipped because
-#     this target passes -DEMIL_DISABLE_SHELL below, which compiles the
-#     shell drawer out.  That flag is a deferral, not a necessity: the
-#     symbols emil_subprocess.c needs are all present in the sysroot.
-#     Removing it is unfinished work, not an impossibility.
+#     There is no OFD-based way out: F_OFD_SETLK is absent too, so an
+#     OFD lock would not compile.  Closing this needs wasix-libc to
+#     expose the commands and the runtime to implement them.
 #
-#   writeall -- forks a reader and signals it to force a short write.
-#     The suite does not link under this toolchain: it drags in
-#     wasi_thread_start.o and fails on __wasm_init_tls.  That is a
-#     toolchain/threading-model problem, not an absence of fork or of
-#     signals -- WASIX has both, which is also why item 3 above says
-#     not to define _WASI_EMULATED_SIGNAL.  The property under test
-#     (writeAll() loops over a short write) is reachable on this
-#     target; it is the harness that does not build.
-WASIX_SKIP_SUITES = subprocess shell warnings writeall
+#   subprocess, shell -- run when a sandbox is present; skipped when
+#     it is not.  These were long described as unavailable on WASIX.
+#     That was wrong: posix_spawn and execve both work, and wasmer will
+#     exec a wasm module out of the mapped filesystem.  The sandbox is
+#     simply empty by default -- /bin exists, /bin/sh does not -- so
+#     spawning a shell fails with ENOEXEC for want of a file rather
+#     than a syscall.  tests/wasix/sandbox.sh builds dash and a set of
+#     sbase utilities to fill it, after which both suites run.
+#
+#   writeall -- forks a reader and signals it with SIGUSR1 to force a
+#     short write.  fork() works now (item 5), so the suite builds,
+#     links and runs -- but it is not reliable here.  Measured over
+#     repeated runs: 2 in 3 die with exit 127, "termination signal:
+#     User defined signal 1", and the third reports its one test
+#     skipped because write() was not interrupted.  wasmer terminates
+#     on SIGUSR1 rather than honouring the disposition the test
+#     expects, so the suite either aborts or cannot reach its
+#     precondition.
+#
+#     Left skipped for the flakiness, not for the build, which is a
+#     different reason from the one recorded here before.  Do not
+#     un-skip on the strength of a single green run; that is what
+#     happened while writing this.
+#
+WASIX_SANDBOX  = ./wasix-sandbox
 
-# -DEMIL_DISABLE_SHELL here is a deferral, not a platform requirement.
-# WASIX supplies posix_spawn, fork and exec, so the shell drawer could
-# build; it has not been exercised under a Wasm runtime, so it is left
-# out rather than shipped untested.  See WASIX_SKIP_SUITES above.
-wasix:
-	$(MAKE) CC="$(WASI_SDK)/bin/clang" \
-	CFLAGS="$(CFLAGS) $(WASIX_TARGET) -Wno-deprecated \
-	-D_WASI_EMULATED_MMAN -D_WASI_EMULATED_PROCESS_CLOCKS \
-	-DEMIL_DISABLE_SHELL" \
-	LDFLAGS="$(WASIX_TARGET) $(WASIX_LIBS)" \
-	PROGNAME=emil.wasm
+# No -DEMIL_DISABLE_SHELL.  It was passed here for as long as shell
+# integration was thought impossible on this target; it is not, so the
+# shell is built in.  What a stock WASIX sandbox lacks is a /bin/sh to
+# spawn, not a syscall -- see the note above and
+# tests/wasix/sandbox.sh, which builds one.
+#
+# The binary is therefore useful without a sandbox and more useful with
+# one: with no /bin/sh, M-! and M-| report the spawn failure and
+# nothing else misbehaves.
+# BUILD_TAG makes the object-format mismatch self-correcting in both
+# directions: see the stamp rule near the top.  This target does not
+# clean unconditionally -- it only pays for a rebuild when the previous
+# build in this tree was for a different target.
+wasix: wasix-toolchain-check
+	$(MAKE) BUILD_TAG=wasix CC="$(WASI_SDK)/bin/clang" \
+	CFLAGS="$(CFLAGS) $(WASIX_TARGET)" \
+	LDFLAGS="$(WASIX_TARGET) $(WASIX_EXPORTS) $(WASIX_LIBS)" \
+	PROGNAME=emil.raw.wasm
+	$(WASM_OPT) $(WASIX_ASYNCIFY) emil.raw.wasm -o emil.wasm
+	@rm -f emil.raw.wasm
+
+# Checked before anything is compiled, not after.  All three components
+# are needed for the target to produce output, so finding out about a
+# missing one at the last command -- having compiled thirty objects and
+# linked them -- wastes the whole build and reads as a build failure
+# rather than a setup problem.  Diagnostics go to stderr so they
+# interleave with make's own output in the right order; sent to stdout
+# they appeared after the sub-make's "Leaving directory" line, which
+# put the cause below the effect in CI logs.
+.PHONY: wasix-toolchain-check
+wasix-toolchain-check:
+	@fail=0; \
+	[ -x "$(WASI_SDK)/bin/clang" ] || { \
+	  echo "Makefile: no clang at $(WASI_SDK)/bin/clang" >&2; fail=1; }; \
+	[ -d "$(WASIX_SYSROOT)" ] || { \
+	  echo "Makefile: no wasix sysroot at $(WASIX_SYSROOT)" >&2; fail=1; }; \
+	command -v $(WASM_OPT) >/dev/null 2>&1 || { \
+	  echo "Makefile: no wasm-opt at $(WASM_OPT)" >&2; \
+	  echo "  asyncify instrumentation is what makes fork() work under" >&2; \
+	  echo "  wasmer; without it the binary aborts at the first fork." >&2; \
+	  fail=1; }; \
+	[ $$fail -eq 0 ] || { \
+	  echo "" >&2; \
+	  echo "  Run tests/wasix/setup.sh, which installs all three under one" >&2; \
+	  echo "  prefix, then build with WASIX_PREFIX=<that prefix>.  Override" >&2; \
+	  echo "  WASI_SDK, WASIX_SYSROOT or WASM_OPT individually if they are" >&2; \
+	  echo "  not installed together." >&2; \
+	  exit 1; }
 
 wasix-test: wasix
 	@echo "Makefile: Launching WASIX tests under wasmer"
+	@# Smoke test first, and deliberately.  It is the only thing here
+	@# that starts the real binary -- every unit suite links stubs.o in
+	@# place of main.o and terminal.o -- and the failure it catches is a
+	@# wasi-sdk/wasix-libc mismatch that links without a diagnostic and
+	@# then traps on the first open().  Running it after the suites meant
+	@# that a single failing suite stopped make before it ever ran, so
+	@# the check went missing exactly when the build was suspect.
+	./tests/wasix/smoke.sh
 	CC="$(WASI_SDK)/bin/clang" \
-	CFLAGS="$(DEFAULT_CFLAGS) $(CFLAGS) $(WASIX_TARGET) -Wno-deprecated \
-	-D_WASI_EMULATED_MMAN -D_WASI_EMULATED_PROCESS_CLOCKS \
-	-DEMIL_DISABLE_SHELL" \
-	LDFLAGS="$(WASIX_TARGET) $(WASIX_LIBS)" \
+	CFLAGS="$(DEFAULT_CFLAGS) $(CFLAGS) $(WASIX_TARGET)" \
+	LDFLAGS="$(WASIX_TARGET) $(WASIX_EXPORTS) $(WASIX_LIBS)" \
+	WASM_OPT="$(WASM_OPT)" \
+	WASIX_ASYNCIFY="$(WASIX_ASYNCIFY)" \
 	PROGNAME=emil.wasm \
-	RUNNER="wasmer run --dir ." \
+	RUNNER="wasmer run --volume $(PWD):$(PWD) --cwd $(PWD) $(if $(wildcard $(WASIX_SANDBOX)/bin/sh),--volume $(WASIX_SANDBOX)/bin:/bin --env PATH=/bin --env TMPDIR=/tmp,)" \
 	RUNNER_SEP="--" \
-	SKIP_SUITES="$(WASIX_SKIP_SUITES)" \
+	NM="$(WASI_SDK)/bin/llvm-nm" \
 	./tests/run_tests.sh
-	./tests/wasix_smoke.sh
 
+
+# Redox OS (https://redox-os.org)
+#
+# A Unix-like system written in Rust, with its own C library, relibc.
+# The Redox project publishes a prebuilt GCC cross compiler and a
+# matching relibc sysroot; tests/redox_setup.sh fetches both into one
+# prefix, which is what REDOX_TOOLCHAIN points at.
+#
+# No target-specific CFLAGS.  That is worth stating, because every other
+# non-Unix target here needs something: Android and Genode compile out
+# the shell, Solaris needs __EXTENSIONS__, WASIX needs a sysroot flag and
+# a post-link pass.  Redox needs none of it -- relibc supplies the whole
+# POSIX surface this editor uses, including posix_spawn and the pty
+# family, and the stock C99 flags are enough.
+#
+# BUILD_TAG is not optional here, and matters more than it does for
+# wasix.  A Redox object and a native Linux object are both x86-64 ELF,
+# so nothing rejects a mixture: in a tree that was last built natively,
+# `make CC=<redox-gcc>` finds every .o newer than its source, recompiles
+# nothing, relinks nothing, and exits 0 leaving the native binary in
+# place.  The wasm mismatch at least announces itself.  This one is
+# silent, and a job that trusted the exit status would report Redox as
+# building fine having never invoked the cross compiler.
+REDOX_TARGET ?= x86_64-unknown-redox
+REDOX_TOOLCHAIN ?= $(HOME)/opt/redox-toolchain
+REDOX_CC = $(REDOX_TOOLCHAIN)/bin/$(REDOX_TARGET)-gcc
+REDOX_NM = $(REDOX_TOOLCHAIN)/bin/$(REDOX_TARGET)-nm
+
+redox: redox-toolchain-check
+	$(MAKE) BUILD_TAG=redox CC="$(REDOX_CC)" $(PROGNAME)
+
+# Runs the unit suites inside a real Redox system, via redoxer, which
+# boots Redox under QEMU and execs a binary in it.  Each suite is one
+# boot, so this is minutes rather than seconds.
+#
+# RUNNER_CONSOLE is not optional here: redoxer does not reliably carry
+# the child's exit status back out of the VM.  See the block that
+# defines it in tests/run_tests.sh.
+REDOXER ?= redoxer
+
+redox-run: redox
+	@echo "Makefile: running the suites inside Redox via $(REDOXER)"
+	CC="$(REDOX_CC)" \
+	CFLAGS="$(DEFAULT_CFLAGS) $(CFLAGS)" \
+	LDFLAGS="$(LDFLAGS)" \
+	NM="$(REDOX_NM)" \
+	RUNNER="$(REDOXER) exec --folder . --" \
+	RUNNER_CONSOLE=1 \
+	RUNNER_MARKER="## running redoxer ##" \
+	./tests/run_tests.sh
+
+# Checked before anything is compiled, for the reason given above the
+# wasix equivalent: finding out about a missing sysroot after thirty
+# objects have compiled reads as a build failure rather than a setup
+# problem.
+.PHONY: redox-toolchain-check
+redox-toolchain-check:
+	@fail=0; \
+	[ -x "$(REDOX_CC)" ] || { \
+	  echo "Makefile: no Redox compiler at $(REDOX_CC)" >&2; fail=1; }; \
+	[ -d "$(REDOX_TOOLCHAIN)/$(REDOX_TARGET)/include" ] || { \
+	  echo "Makefile: no relibc sysroot at $(REDOX_TOOLCHAIN)/$(REDOX_TARGET)" >&2; \
+	  echo "  gcc-install.tar.gz on its own is not enough -- it has the" >&2; \
+	  echo "  compiler but no headers.  relibc-install.tar.gz carries the" >&2; \
+	  echo "  sysroot, and both unpack into the same prefix." >&2; \
+	  fail=1; }; \
+	[ $$fail -eq 0 ] || { \
+	  echo "" >&2; \
+	  echo "  Run tests/redox_setup.sh <prefix>, then build with" >&2; \
+	  echo "  REDOX_TOOLCHAIN=<prefix>/redox-toolchain." >&2; \
+	  exit 1; }
 
 # Help
 help:
@@ -281,18 +547,22 @@ help:
 	@echo "  msys2     Build for MSYS2"
 	@echo "  minimal   Build minimal version"
 	@echo "  solaris   Build for Solaris Developer Studio"
-	@echo "  wasix     Build emil.wasm for WASIX (see tests/wasix_setup.sh)"
+	@echo "  wasix     Build emil.wasm for WASIX (see tests/wasix/setup.sh)"
 	@echo "  wasix-test Build and test emil.wasm under wasmer"
+	@echo "  redox     Cross-build for Redox OS (see tests/redox_setup.sh)"
+	@echo "  redox-run Run the suites inside Redox via redoxer"
 	@echo "  check     Alias for test"
 	@echo "  format    Format code with clang-format"
 	@echo "  hal       HAL-9000 compliance"
 
-.PHONY: all install uninstall clean test check sanitize hal debug format android msys2 minimal solaris darwin wasix wasix-test help
+.PHONY: FORCE wasix-toolchain-check redox-toolchain-check all install uninstall clean test check sanitize hal debug format android msys2 minimal solaris darwin wasix wasix-test redox redox-run help
 
-# Terminal-level integration tests: drives the real binary under a
-# pseudo-terminal (also run at the end of `make test`).
+# Terminal-level integration tests on their own; run_tests.sh runs them
+# too, and decides there which of the two this platform can host.
 test-pty: $(PROGNAME)
-	$(CC) $(ALL_CFLAGS) -o tests/decoder_pty_test tests/decoder_pty_test.c
-	./tests/decoder_pty_test ./$(PROGNAME)
-	rm -f tests/decoder_pty_test
+	$(CC) $(ALL_CFLAGS) -Itests -o tests/pty_input_test tests/pty_input_test.c
+	./tests/pty_input_test ./$(PROGNAME)
+	$(CC) $(ALL_CFLAGS) -Itests -o tests/pty_signals_test tests/pty_signals_test.c
+	./tests/pty_signals_test ./$(PROGNAME)
+	rm -f tests/pty_input_test tests/pty_signals_test
 

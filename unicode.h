@@ -48,4 +48,24 @@ int nextScreenX(uint8_t *str, int *idx, int screen_x);
 
 int utf8_snapToBoundary(const uint8_t *chars, int size, int cx, int dir);
 
+/* Select a UTF-8 locale for LC_CTYPE if the platform has one, and say
+ * whether it worked.  Idempotent and cached; safe to call from anywhere.
+ *
+ * Emil decodes UTF-8 itself and never uses the libc multibyte
+ * functions, so the locale matters for exactly one thing: wcwidth().
+ * Without a UTF-8 locale wcwidth reports -1 for every non-ASCII
+ * codepoint -- correctly, since they have no defined width in the C
+ * locale -- and charAdvance maps that to one column.
+ *
+ * Returns 1 when wide characters will measure 2 columns, 0 when the
+ * platform offers only the C locale and everything non-ASCII will
+ * measure 1.  Genode is the second case: its libc build filters out
+ * setlocale.c, setrunelocale.c and every encoding module, so there is
+ * no UTF-8 locale to select and no configuration that adds one.
+ *
+ * The wcwidth probe is the check, not setlocale's return value:
+ * Genode's stub returns "C" rather than NULL for a locale it did not
+ * set, so trusting the return would conclude success wrongly. */
+int selectUtf8Locale(void);
+
 #endif /* EMIL_UNICODE_H */

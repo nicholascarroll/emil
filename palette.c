@@ -369,20 +369,38 @@ void expandPalette(void) {
 	bufferEnsureRow(pbuf);
 	updateBuffer(pbuf);
 	showPopupBuffer(pbuf);
-	/* Transfer focus to the palette window */
+	/* Transfer focus to the palette window.
+	 *
+	 * showPopupBuffer() creates the window if there was not one, and
+	 * createWindow() appends unconditionally, so this lookup cannot
+	 * fail today.  It is checked anyway, and the failure bails out
+	 * rather than continuing: the modal loop below depends on
+	 * E.buf == pbuf, and running it without that would walk the
+	 * user's own cursor with the palette's movement keys. */
 	int palette_win = findBufferWindow(pbuf);
-	int from_minibuf = (origin == E.minibuf);
-	if (palette_win >= 0) {
-		if (!from_minibuf) {
-			E.windows[origin_win]->cx = origin->cx;
-			E.windows[origin_win]->cy = origin->cy;
-		}
-		E.windows[origin_win]->focused = 0;
-		E.windows[palette_win]->focused = 1;
-		E.windows[palette_win]->cx = pbuf->cx;
-		E.windows[palette_win]->cy = pbuf->cy;
-		E.buf = pbuf;
+	if (palette_win < 0) {
+		restoreFocusTo(origin, origin_win);
+		setStatusMessage("Can't open palette window");
+		return;
 	}
+	int from_minibuf = (origin == E.minibuf);
+	if (!from_minibuf) {
+		E.windows[origin_win]->cx = origin->cx;
+		E.windows[origin_win]->cy = origin->cy;
+	}
+	E.windows[origin_win]->focused = 0;
+	E.windows[palette_win]->focused = 1;
+	E.windows[palette_win]->cx = pbuf->cx;
+	E.windows[palette_win]->cy = pbuf->cy;
+	E.buf = pbuf;
+
+	/* From here until restoreFocusTo(), E.buf == pbuf.  That equality
+	 * is load-bearing, not incidental: moveCursor(), beginningOfLine(),
+	 * endOfLine(), pageUp(), pageDown(), forwardWord() and backWord()
+	 * all take their subject from E.buf implicitly, and it is only
+	 * because E.buf is the palette that they move the palette's
+	 * cursor.  Established above unconditionally for that reason. */
+
 	/* Snap to the first symbol */
 	snapToSymbol(pbuf, 0);
 
@@ -409,7 +427,7 @@ void expandPalette(void) {
 						E.nunicode = nbytes;
 						restoreFocusTo(origin,
 							       origin_win);
-						if (rejectIfReadOnly(E.buf))
+						if (rejectIfReadOnly(origin))
 							return;
 						/* Insert the symbol */
 						insertUnicode(1);
@@ -460,7 +478,9 @@ void expandPalette(void) {
 			case CMD_END_OF_FILE:
 				/* bufferEnsureRow ran before this loop and
 				 * nothing in it resets rows, so numrows >= 1
-				 * holds throughout (#105). */
+				 * holds throughout (#105).  endOfLine() acts
+				 * on E.buf, which is pbuf here; the two
+				 * assignments name the same buffer. */
 				pbuf->cy = pbuf->numrows - 1;
 				pbuf->cx = 0;
 				endOfLine(0);

@@ -693,7 +693,7 @@ void test_rectangle_yank_at_virtual_eof_roundtrip(void) {
  * emil entered a mode where C-_ continued redoing -- but the mode was
  * never cleared when the redo stack emptied, so every later undo
  * keystroke was swallowed as a redo of nothing and undo appeared dead
- * until some unrelated key was pressed.  Found by fuzz_undo.c as
+ * until some unrelated key was pressed.  Found by the fuzzer as
  * "kill-para (uarg 6), undo (uarg 5), redo" failing to restore. */
 void test_redo_chain_releases_undo(void) {
 	const char *lines[] = { "alpha beta", "(gamma delta).", "  indented",

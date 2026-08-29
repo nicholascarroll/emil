@@ -1,0 +1,117 @@
+#!/bin/sh
+# emil-wasix -- run emil.wasm under wasmer with a usable terminal.
+#
+# WHY THIS EXISTS
+#
+# wasmer's tty bridge implements three of the terminal settings emil
+# asks for and silently discards the rest.  Measured against wasmer
+# 7.2.1 on a Linux pty, comparing the host tty against what the guest
+# requested and against what the guest is told it got:
+#
+#   flag     emil asks   host gets   guest is told
+#   ECHO     clear       clear       clear          forwarded
+#   ICANON   clear       clear       clear          forwarded
+#   IEXTEN   clear       clear       SET            forwarded, misreported
+#   ICRNL    clear       SET         clear          dropped, misreported
+#   IXON     clear       SET         clear          dropped, misreported
+#   OPOST    clear       SET         clear          dropped, misreported
+#   ISIG     clear       SET         SET            dropped
+#   VMIN=1   1           --          0              dropped, misreported
+#
+# c_iflag and c_oflag read back as 0x0 in the guest no matter what is
+# written to them, and tcsetattr returns 0 throughout.  So the guest is
+# not merely unable to change these settings, it cannot observe them
+# either: emil's own readback check (terminal.c) cannot see this.
+#
+# The consequences are not cosmetic.  With IXON set on the host, C-s is
+# swallowed as XOFF, so C-x C-s never reaches the editor and the file
+# cannot be saved.  With ISIG set, C-c raises SIGINT against wasmer
+# rather than reaching emil, so C-x C-c kills the runtime with the
+# buffer unsaved -- exit 127, not a clean quit.
+#
+# emil cannot fix this from inside the sandbox, so the terminal is set
+# up out here, before wasmer starts.
+#
+# WHY THIS IS RACE-FREE
+#
+# An earlier version of this script slept for one second after starting
+# wasmer and then ran stty, on the belief that wasmer re-asserts these
+# settings at startup and that a pre-exec setup would be undone.  That
+# is true of exactly one flag.  Measured:
+#
+#   ICRNL, IXON, OPOST   wasmer never touches them; clearing them
+#                        before exec survives the whole session.
+#   ISIG                 wasmer does set this at startup, so clearing
+#                        it before exec does NOT survive.
+#
+# ISIG is therefore not cleared here.  Instead the control characters
+# that make it matter are set to _POSIX_VDISABLE, and wasmer preserves
+# c_cc untouched.  With no byte designated INTR, SUSP or QUIT, ISIG has
+# nothing to act on and C-c, C-z and C-\ arrive as ordinary input.
+#
+# Every setting below is therefore applied once, before wasmer starts,
+# and none of it depends on timing.
+#
+# This is a workaround for a runtime defect, not part of emil's
+# terminal handling.  When wasmer forwards c_iflag, c_oflag and c_cc,
+# delete this script; emil already asks for the right things.
+
+set -u
+
+WASM=${EMIL_WASM:-emil.wasm}
+WASMER=${WASMER:-wasmer}
+
+if [ ! -f "$WASM" ]; then
+    printf '%s: no such file: %s\n' "$0" "$WASM" >&2
+    printf 'Set EMIL_WASM to the path of emil.wasm.\n' >&2
+    exit 1
+fi
+
+if ! command -v "$WASMER" >/dev/null 2>&1; then
+    printf '%s: wasmer not found on PATH\n' "$0" >&2
+    exit 1
+fi
+
+# Without a terminal there is nothing to repair and stty would fail.
+# Run wasmer directly so that piping into emil.wasm still works.
+if [ ! -t 0 ]; then
+    exec "$WASMER" run "$WASM" --volume "$PWD:$PWD" --cwd "$PWD" -- "$@"
+fi
+
+saved=$(stty -g 2>/dev/null) || {
+    printf '%s: cannot read terminal settings\n' "$0" >&2
+    exit 1
+}
+
+# Restore on every exit path.  Note that with intr/susp/quit disabled
+# below, this shell cannot receive SIGINT or SIGQUIT from the keyboard,
+# so EXIT is the path that matters; HUP and TERM are covered for the
+# case where they arrive from elsewhere.
+restore() { stty "$saved" 2>/dev/null || true; }
+trap restore EXIT HUP TERM
+
+# -ixon  -ixoff   C-s and C-q are input, not flow control.  This is
+#                 what makes C-x C-s reach the editor.
+# -icrnl -inlcr   deliver RET as CR, so C-q C-j stays distinguishable.
+#         -igncr  do not discard CR.
+# -opost          emil positions the cursor itself; no NL to CRNL
+#                 translation on output.
+# -brkint         a break must not raise SIGINT.
+# intr/quit/susp  undefined, so ISIG -- which wasmer re-asserts and
+#                 will not let us clear -- has no character to act on.
+#                 This is what makes C-x C-c a clean quit rather than
+#                 SIGINT killing wasmer with the buffer unsaved.
+# stop/start      the c_cc half of disabling flow control.
+stty -ixon -ixoff -icrnl -inlcr -igncr -opost -brkint \
+     intr undef quit undef susp undef stop undef start undef 2>/dev/null || {
+    printf '%s: cannot configure terminal\n' "$0" >&2
+    exit 1
+}
+
+# --volume rather than the deprecated --dir, with --cwd so that
+# relative paths on the command line resolve the way the user typed
+# them.  --dir warns on 7.x and is removed in 8.
+"$WASMER" run "$WASM" --volume "$PWD:$PWD" --cwd "$PWD" -- "$@"
+status=$?
+
+exit $status

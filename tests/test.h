@@ -12,8 +12,6 @@
 static int _tests_run = 0;
 static int _tests_failed = 0;
 static int _current_test_failed = 0;
-static int _current_test_skipped = 0;
-static int _tests_skipped = 0;
 static const char *_current_test_name = NULL;
 
 /* Name of the test currently executing, for failure messages.  Only
@@ -107,15 +105,11 @@ static const char *_current_test_name = NULL;
 #define RUN_TEST(func)                                 \
 	do {                                           \
 		_current_test_failed = 0;              \
-		_current_test_skipped = 0;             \
 		_current_test_name = #func;            \
 		setUp();                               \
 		func();                                \
 		tearDown();                            \
-		if (_current_test_skipped)             \
-			_tests_skipped++;              \
-		else                                   \
-			_tests_run++;                  \
+		_tests_run++;                          \
 		if (_current_test_failed) {            \
 			_tests_failed++;               \
 			printf("  %s: FAIL\n", #func); \
@@ -126,25 +120,23 @@ static const char *_current_test_name = NULL;
 /* Yields a process exit status: 0 on success, 1 on any failure.  The raw
  * failure count is deliberately NOT returned, since an exit status is
  * truncated to 8 bits and exactly 256 failures would be reported as
- * success. */
-/* Report the current test as skipped and stop counting it as a pass.
+ * success.
  *
- * For facts about the platform rather than about the code: a filesystem
- * with no hard links, a pty that cannot report its own termios.  The
- * alternative -- returning early and silently -- leaves a test that
- * looks green while asserting nothing, which is worse than a visible
- * gap.  The caller must return immediately after this. */
-#define TEST_SKIP(why)                                             \
-	do {                                                       \
-		printf("  SKIP: [%s]: %s\n", _TEST_NAME(), (why)); \
-		_current_test_skipped = 1;                         \
-	} while (0)
-
+ * A run of zero tests is a failure.  It means the binary linked and
+ * started and then asserted nothing -- every case removed, or a main()
+ * that stopped calling RUN_TEST -- which is not a state any suite should
+ * reach quietly.  The check lives here rather than in the harness that
+ * launches suites because this is the only place that knows the count
+ * without parsing it back out of the output, and because it then holds
+ * identically on every target: inside a Genode component and inside an
+ * Asterinas initramfs there is no launcher to do the checking. */
 #define TEST_END()                                                    \
-	(printf("%d Tests %d Failures %d Skipped\n", _tests_run,      \
-		_tests_failed, _tests_skipped),                       \
-	 (_tests_failed == 0) ? printf("OK\n") : printf("FAIL\n"),    \
-	 (_tests_failed != 0))
+	(printf("%d Tests %d Failures\n", _tests_run,                 \
+		_tests_failed),                                       \
+	 (_tests_run == 0)                                            \
+		 ? (printf("FAIL: no tests ran\n"), 1)                \
+		 : ((_tests_failed == 0) ? (printf("OK\n"), 0)        \
+					 : (printf("FAIL\n"), 1)))
 
 /* setUp/tearDown — implemented by each test file */
 void setUp(void);

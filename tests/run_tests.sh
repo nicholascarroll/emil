@@ -15,20 +15,109 @@ LDFLAGS=${LDFLAGS:-""}
 #                e.g. RUNNER="wasmer run --dir .".  Binaries are always
 #                invoked with a leading ./ so wasmer treats the argument
 #                as a path rather than a registry package name.
-#   SKIP_SUITES  space-separated suites to skip, for platforms that
-#                cannot build or run them.
 #   RUNNER_SEP   separator inserted between the binary and its own
 #                arguments.  wasmer needs a literal -- there, or it
 #                consumes flags like --version itself.
+#   NM           nm to use for the leaf-module invariant.  The host nm
+#                cannot read wasm objects, so a cross build must supply
+#                its own, e.g. NM=$WASI_SDK/bin/llvm-nm.
+#   BUILD_ONLY   compile and link everything, run none of it.  One
+#                caller: tests/asterinas/build_payload.sh, which builds
+#                the suites here and stages them into an initramfs to be
+#                run inside the VM.  It is the build half of a target
+#                that builds and runs, not a way to report a target as
+#                working without testing it -- there is no longer a
+#                verdict line for that, and no CI job uses this flag.
+#   KEEP_BUILT   with BUILD_ONLY, leave the linked suites on disk
+#                instead of deleting each one after it links, so they
+#                can be staged.  No effect without BUILD_ONLY.
 PROGNAME=${PROGNAME:-emil}
 RUNNER=${RUNNER:-}
 RUNNER_SEP=${RUNNER_SEP:-}
-SKIP_SUITES=${SKIP_SUITES:-}
+NM=${NM:-nm}
+BUILD_ONLY=${BUILD_ONLY:-}
+KEEP_BUILT=${KEEP_BUILT:-}
 
-# How many individual failure lines to print per suite.  The failure
-# *count* is always reported in full; this caps only the detail.  0
-# means print everything.
-MAX_FAIL_LINES=${MAX_FAIL_LINES:-10}
+# Runners that speak through a virtual machine's console rather than
+# returning a process status.
+#
+#   RUNNER_CONSOLE  the runner cannot be trusted to report the child's
+#                   exit status, and its console ends lines with CRLF.
+#                   Verdicts are then taken from what the suite printed
+#                   -- the TEST_END() summary and its OK/FAIL line --
+#                   rather than from $?.
+#   RUNNER_MARKER   a line the runner prints immediately before the
+#                   child's own output.  Everything up to and including
+#                   the last occurrence is dropped, so boot messages
+#                   cannot be mistaken for test output.  Ignored if the
+#                   marker never appears, which keeps the whole log when
+#                   the runner failed before starting the child.
+#
+# This is not defensive vagueness.  redoxer boots Redox under QEMU and
+# signals the child's status by having the guest write a magic value to
+# a debug-exit port; when the guest powers down before that write lands,
+# QEMU exits 0 and redoxer reports a failure it cannot describe.
+# Measured at 4 runs in 10 on one suite, with the suite printing correct
+# output and a clean summary in 10 runs out of 10.  Trusting $? there
+# would fail a green suite about 40% of the time, and the first instinct
+# on seeing that is to distrust the editor.
+#
+# Taking the verdict from the summary is not a workaround so much as the
+# stronger check: a binary that dies partway prints no summary at all,
+# which is caught here explicitly, whereas an exit status can be lost in
+# either direction.
+RUNNER_CONSOLE=${RUNNER_CONSOLE:-}
+RUNNER_MARKER=${RUNNER_MARKER:-}
+
+# Strip a VM console's CRLF, and drop everything the runner printed
+# before the child started.
+normalize_output() {
+    if [ -n "$RUNNER_CONSOLE" ]; then tr -d '\r'; else cat; fi |
+    if [ -n "$RUNNER_MARKER" ]; then
+        awk -v m="$RUNNER_MARKER" '
+            { line[NR] = $0; if (index($0, m)) seen = NR }
+            END {
+                start = (seen ? seen + 1 : 1)
+                for (i = start; i <= NR; i++) print line[i]
+            }'
+    else cat; fi
+}
+
+# Cross targets whose runtime needs post-link instrumentation.  When
+# WASIX_ASYNCIFY is set, every linked binary is passed through wasm-opt
+# before it is run: wasmer implements fork() by snapshotting the module,
+# which needs asyncify instrumentation, and an uninstrumented binary
+# aborts at the first fork rather than failing a test.
+WASM_OPT=${WASM_OPT:-wasm-opt}
+WASIX_ASYNCIFY=${WASIX_ASYNCIFY:-}
+
+# Instrument $1 in place.  A no-op when WASIX_ASYNCIFY is unset, which
+# is every native build.
+asyncify() {
+    [ -n "$WASIX_ASYNCIFY" ] || return 0
+    $WASM_OPT $WASIX_ASYNCIFY "$1" -o "$1.opt" 2>/dev/null &&
+        mv "$1.opt" "$1"
+}
+
+# How a suite is scored, here and in the Genode and Asterinas runners:
+# by its exit status, and by nothing else.
+#
+# Each suite already decides this for itself.  TEST_END() prints the
+# counts, prints OK or FAIL, and returns non-zero on any failure or on a
+# run of zero tests, and every main() ends with `return TEST_END()`.  So
+# the status is the verdict, already computed by the code that has the
+# numbers in hand.
+#
+# There was a scorer that re-derived it by grepping stdout for FAIL:.
+# That is how the bug above survived: with the verdict taken from the
+# text, rc being permanently 0 changed nothing visible, so nothing failed
+# loudly enough to be noticed.  Grep the output to *show* it; never to
+# decide it.
+#
+# The failing suite's own output is printed verbatim.  It already
+# contains the FAIL: lines, the per-case names and the summary, so there
+# is nothing to reformat and no count to recompute.
+FAIL_CONTEXT=40
 
 echo "run_tests.sh: Received CC=$CC"
 echo "run_tests.sh: Running tests on $(uname -s) $(uname -m)"
@@ -51,11 +140,27 @@ if [ ! -f "./$PROGNAME" ]; then
 fi
 
 # Can it run? Also note the version
+# Captured before normalizing: $? after a pipeline is the last
+# command's status, so piping straight into normalize_output made rc 0
+# here too -- and this rc gates an exit 1, so a binary that could not
+# run at all was reported as running.
 VERSION_OUTPUT=$($RUNNER "./$PROGNAME" $RUNNER_SEP --version 2>&1)
 rc=$?
+VERSION_OUTPUT=$(printf '%s\n' "$VERSION_OUTPUT" | normalize_output)
+
+# Under a console runner the status above is noise; the binary either
+# printed its version or it did not.
+if [ -n "$RUNNER_CONSOLE" ]; then
+    if echo "$VERSION_OUTPUT" | grep -q '^emil '; then
+        rc=0
+    else
+        rc=1
+    fi
+fi
 
 if [ $rc -ne 0 ]; then
     echo "✗ Binary failed to run (Exit Code $rc)"
+    echo "$VERSION_OUTPUT" | tail -20 | sed 's/^/    /'
     exit 1
 fi
 echo "✓ Binary runs"
@@ -138,6 +243,83 @@ else
     echo "✓ No banned unsafe functions"
 fi
 
+# regoff_t signedness invariant: regmatch_t offsets must be read as
+# signed, through matchOff() in region.c, before being tested against 0.
+#
+# POSIX requires regoff_t to be signed, and regexec marks a group that
+# did not participate in a match by setting rm_so and rm_eo to -1.
+# Redox's relibc declares it as size_t, so a bare `rm_so >= 0` is
+# always true and the sentinel is never seen.  Nothing here catches
+# that: the guard is dead only on relibc, and even there the mistake
+# is silent, because relibc sets both fields together and the bad
+# length comes out 0.  A grep is the whole defence.
+REGOFF_HITS=$(grep -nE '\.(rm_so|rm_eo)[[:space:]]*(<|>|<=|>=|==|!=)[[:space:]]*0' *.c 2>/dev/null \
+    | grep -vE ':[0-9]+:.*(/\*|//)' \
+    | grep -vE ':[0-9]+:[[:space:]]*\*')
+if [ -n "$REGOFF_HITS" ]; then
+    echo "✗ regoff_t signedness violation (compare matchOff(x), not x):"
+    echo "$REGOFF_HITS" | sed 's/^/    /'
+    INVARIANT_FAIL=1
+else
+    echo "✓ regoff_t read as signed"
+fi
+
+# Leaf-module invariant (§2.1): these translation units compute their
+# answers from their arguments and must not reach into the global
+# editor state.  wrap.c is the one the design document names, because
+# that boundary eroded once already (#117) and the review that caught
+# it had nothing mechanical to point at.  The rest are here for the
+# same reason: each is a leaf today, and a leaf stops being one the
+# first time somebody reaches for E to save passing a parameter.
+#
+# Checked against the objects rather than the source, so a reference
+# inside a macro expansion or a #ifdef branch counts and one inside a
+# comment does not.  main.o is excluded: it defines E.
+LEAF_OBJECTS="abuf.o backup.o base64.o dbuf.o decoder.o \
+    emil_subprocess.o history.o transform.o undo.o unicode.o util.o \
+    wrap.o"
+
+# Positive control.  A cross-target nm that cannot read these objects
+# would report every one of them clean, and the check would pass by
+# doing nothing.  keymap.o reads E all over dispatch, so if nm cannot
+# see the reference there, nm is not telling us anything.
+#
+# The control is why this is worth keeping rather than trusting: on the
+# WASIX target the host nm reports "file format not recognized" for
+# every object, so the invariant used to skip silently.  $NM lets that
+# build pass wasi-sdk's llvm-nm, which reads wasm objects and reports
+# the same "U E" the control expects.
+LEAF_CONTROL=keymap.o
+
+# Mach-O prefixes symbols with an underscore; ELF does not.
+refs_E() {
+    $NM -u "$1" 2>/dev/null | grep -qE '^[[:space:]]*U[[:space:]]+_?E$'
+}
+
+if [ ! -f "$LEAF_CONTROL" ]; then
+    echo "‣ Leaf-module invariant SKIP (objects not present)"
+elif ! refs_E "$LEAF_CONTROL"; then
+    echo "‣ Leaf-module invariant SKIP (nm cannot resolve E in $LEAF_CONTROL)"
+else
+    LEAF_HITS=""
+    for obj in $LEAF_OBJECTS; do
+        if [ ! -f "$obj" ]; then
+            LEAF_HITS="$LEAF_HITS
+    $obj: not built (listed in LEAF_OBJECTS but absent)"
+        elif refs_E "$obj"; then
+            LEAF_HITS="$LEAF_HITS
+    $obj: references the global E"
+        fi
+    done
+    if [ -n "$LEAF_HITS" ]; then
+        echo "✗ Leaf-module invariant violation:"
+        echo "$LEAF_HITS" | sed '/^$/d'
+        INVARIANT_FAIL=1
+    else
+        echo "✓ Leaf-module invariant"
+    fi
+fi
+
 if [ "$INVARIANT_FAIL" -ne 0 ]; then
     echo ""
     echo "Source invariant check failed — fix before proceeding."
@@ -197,44 +379,11 @@ TEST_OBJECTS="decoder.o unicode.o buffer.o region.o undo.o transform.o \
 
 # ===== Generated fixture: backup.c against fake syscalls (#125) =====
 #
-# backup.c carries no test hooks and no test-only macros; the editor
-# source is what ships.  Fault injection is done by copying it here and
-# rewriting its syscall names to the fk_* fakes that tests/test_backup.c
-# defines, so the suite drives the real control flow over a filesystem
-# that fails on demand.
-#
-# makeVerifiedBackup is renamed too.  test_backup.c #includes this copy
-# rather than linking it -- that is what makes the file-local helpers
-# reachable -- and the real backup.o is in TEST_OBJECTS, so without the
-# rename the two definitions would collide at link time.
-#
-# The substitution is deliberately blunt, so it is checked rather than
-# trusted: the expected number of call sites is asserted below, and a
-# drift in either direction fails the run instead of silently testing
-# the real filesystem.  BRE with an explicit leading-character class,
-# not \b, because \b is a GNU extension that BSD and Solaris sed lack.
-BACKUP_SYSCALLS="open close read write fsync unlink fcntl"
-BACKUP_EXPECTED_SITES=22
-
-sed_script=""
-for fn in $BACKUP_SYSCALLS; do
-    sed_script="$sed_script -e s/\\([^a-zA-Z0-9_]\\)$fn(/\\1fk_$fn(/g"
-done
-sed_script="$sed_script -e s/makeVerifiedBackup/fake_makeVerifiedBackup/g"
-
-# shellcheck disable=SC2086
-sed $sed_script backup.c > tests/backup_faked.c
-
-sites=$(grep -c 'fk_' tests/backup_faked.c)
-if [ "$sites" -ne "$BACKUP_EXPECTED_SITES" ]; then
-    echo "✗ backup.c syscall rewrite: expected $BACKUP_EXPECTED_SITES call"
-    echo "  sites, rewrote $sites.  backup.c changed shape -- update"
-    echo "  BACKUP_EXPECTED_SITES in tests/run_tests.sh after checking"
-    echo "  tests/test_backup.c still fakes every syscall it now uses."
-    exit 1
-fi
-if grep -q '[^a-zA-Z0-9_]makeVerifiedBackup(' tests/backup_faked.c; then
-    echo "✗ backup.c rewrite left an un-renamed makeVerifiedBackup"
+# See tests/make_backup_fixture.sh.  The Genode cross build needs the
+# same file before goa starts and cannot call this script, so the
+# generation lives in one place that both invoke.
+if ! sites=$(sh tests/make_backup_fixture.sh backup.c tests/backup_faked.c); then
+    echo "✗ backup.c fixture generation failed"
     exit 1
 fi
 echo "✓ backup.c rewritten against fake syscalls ($sites call sites)"
@@ -249,7 +398,8 @@ echo "Unit tests:"
 SUITES="decoder unicode wcwidth buffer undo coalesce edit fileio relpath offset
     visual_line utf8_validate rect replace transform subprocess shell adjust
     history abuf tilde keymap kill_ring insert_file status_bar cjk_indic
-    warnings ctags find display prompt regex_semantics writeall backup"
+    warnings ctags find display prompt regex_semantics writeall backup
+    fuzz"
 
 listed=$(echo $SUITES | wc -w)
 present=$(ls tests/test_*.c 2>/dev/null | wc -l)
@@ -273,26 +423,16 @@ fi
 for suite in $SUITES; do
     src="tests/test_${suite}.c"
     bin="tests/test_${suite}"
-    printf "  %-12s " "$suite"
-
-    skip_this=0
-    for skipped in $SKIP_SUITES; do
-        if [ "$suite" = "$skipped" ]; then
-            skip_this=1
-            break
-        fi
-    done
-    if [ "$skip_this" -eq 1 ]; then
-        echo "SKIP (unsupported on this target)"
-        continue
-    fi
+    printf "  %-16s " "$suite"
 
     # Compile and link (use TEST_CFLAGS for the test source, LDFLAGS for
     # linking).  Diagnostics are kept rather than sent to /dev/null: a
     # warning in test code was invisible for as long as it was discarded,
     # which is how a suite accumulates them unnoticed.
-    if ! $CC $TEST_CFLAGS $SANITIZER_FLAGS -o "$bin" "$src" $TEST_OBJECTS \
+    if $CC $TEST_CFLAGS $SANITIZER_FLAGS -o "$bin" "$src" $TEST_OBJECTS \
         $LDFLAGS 2>"$BUILD_LOG"; then
+        asyncify "$bin"
+    else
         echo "BUILD FAIL"
         tail -20 "$BUILD_LOG" | sed 's/^/    /'
         ANY_FAIL=1
@@ -305,140 +445,111 @@ for suite in $SUITES; do
         printf '  %-12s ' "$suite"
     fi
 
-    # Run
+    if [ -n "$BUILD_ONLY" ]; then
+        echo "BUILT (not run)"
+        # Kept only when something downstream will run them: the
+        # Asterinas job stages these into an initramfs.  Deleting by
+        # default keeps a build-only run from leaving binaries that
+        # cannot execute on this host lying around the tree.
+        [ -n "$KEEP_BUILT" ] || rm -f "$bin"
+        continue
+    fi
+
+    # Run.
+    #
+    # Captured first, normalized second.  $? after a pipeline is the
+    # LAST command's status, and normalize_output is tr/awk/cat, which
+    # always succeed -- so writing this as one pipeline made rc 0 for
+    # every suite on every target, and both branches below that read it
+    # went dead.  A suite killed by a signal, or aborted by a sanitizer,
+    # printed no FAIL: line and fell through to the success branch.
+    # Introduced by 622ed1d as part of a Redox CRLF fix; it disabled
+    # crash detection on Linux, macOS and the BSDs at the same time.
     output=$($RUNNER "./$bin" 2>&1)
     rc=$?
+    output=$(printf '%s\n' "$output" | normalize_output)
 
-    if [ $rc -gt 128 ]; then
-        echo "CRASH (signal $((rc - 128)))"
-        echo "$output" | grep -E ">>|run_shell|run_command|write_temp" | head -n 5 | sed 's/^/    /'
-        ANY_FAIL=1
-    elif echo "$output" | grep -q "FAIL"; then
-        # Report the true count, then show at most MAX_FAIL_LINES of
-        # detail.  The count and the detail are separate: capping the
-        # detail keeps the summary readable, but capping the count
-        # silently understates how much is broken.  Set
-        # MAX_FAIL_LINES=0 for no cap.
-        nfail=$(echo "$output" | grep -c "FAIL:")
-        if [ "$MAX_FAIL_LINES" -eq 0 ] || [ "$nfail" -le "$MAX_FAIL_LINES" ]; then
-            echo "FAIL ($nfail failures)"
-            echo "$output" | grep "FAIL:" | sed 's/^/    /'
+    # One runner cannot carry a status out, and only one: redoxer boots
+    # Redox under QEMU and signals the child's status by having the guest
+    # write to a debug-exit port, so when the guest powers down before
+    # that write lands, QEMU exits 0 and the status is lost.  There the
+    # suite's own OK/FAIL line stands in for it.  A suite that died
+    # partway printed neither, which is the third case.
+    if [ -n "$RUNNER_CONSOLE" ]; then
+        if printf '%s\n' "$output" | grep -q '^OK$'; then
+            rc=0
+        elif printf '%s\n' "$output" | grep -q '^FAIL$'; then
+            rc=1
         else
-            echo "FAIL ($nfail failures)"
-            echo "$output" | grep "FAIL:" | head -n "$MAX_FAIL_LINES" \
-                | sed 's/^/    /'
-            echo "    ... $((nfail - MAX_FAIL_LINES)) more (MAX_FAIL_LINES=$MAX_FAIL_LINES)"
-        fi
-        ANY_FAIL=1
-    elif [ $rc -ne 0 ]; then
-        echo "FAIL (Sanitizer/Error - Exit Code $rc)"
-        # REMOVED 'head -n 5' to show the full report
-        echo "$output" | grep -iE "runtime error|AddressSanitizer|LEAK|ERROR" -A 5 2>/dev/null | head -20 | sed 's/^/    /'
-        ANY_FAIL=1
-    else
-        # Success is the only place we report the test count
-        total=$(echo "$output" | awk '/Tests/{print $1; exit}')
-        skipped=$(echo "$output" | awk '/Tests/{print $5; exit}')
-        # A test that skips itself where the platform cannot host it
-        # (no hard links, no pty) must not read as a pass.  Show the
-        # count so a suite cannot quietly shrink.
-        if [ -n "$skipped" ] && [ "$skipped" -gt 0 ] 2>/dev/null; then
-            echo "PASS ($total tests, $skipped skipped)"
-            echo "$output" | grep '^  SKIP:' | sed 's/^/    /'
-        else
-            echo "PASS ($total tests)"
+            rc=125   # never reached TEST_END
         fi
     fi
 
+    if [ "$rc" -eq 0 ]; then
+        # Display only.  The count is worth showing so a suite cannot
+        # quietly shrink, but it is read back out of the output rather
+        # than trusted for anything.
+        echo "PASS ($(printf '%s\n' "$output" \
+            | awk '/Tests/{print $1; exit}') tests)"
+    else
+        if [ "$rc" -eq 125 ] && [ -n "$RUNNER_CONSOLE" ]; then
+            echo "FAIL (did not reach TEST_END)"
+        elif [ "$rc" -gt 128 ]; then
+            echo "FAIL (killed by signal $((rc - 128)))"
+        else
+            echo "FAIL (exit $rc)"
+        fi
+        printf '%s\n' "$output" | head -n "$FAIL_CONTEXT" | sed 's/^/    /'
+        ANY_FAIL=1
+    fi
 
     rm -f "$bin"
 done
 
-# Invariant fuzzer: random command sequences through the mutation and
-# undo layers, checking after every operation that the buffer is still
-# well-formed and that undoing everything restores the original text.
-# Cheap enough to run every time -- 10k sequences is ~0.2s on a plain
-# build and ~1.1s under sanitizers -- and it guards exactly the
-# invariants the mutation layer is built around.  FUZZ_SEQS=0 skips it.
-FUZZ_SEQS="${FUZZ_SEQS:-10000}"
-# One pinned seed is one walk through the state space, and a green run
-# says only that this walk is clean.  A heap-buffer-overflow in
-# clampCursorToViewport lived here for as long as it did because seed 1
-# happens not to reach it while roughly half of its neighbours do.
-# Run a fixed set instead, so a regression has to survive several
-# independent walks to stay hidden, and keep the set fixed rather than
-# time-seeded: a suite that fails only on some days is worse than one
-# that misses a bug, because nobody trusts it.  FUZZ_SEEDS overrides
-# for a deeper soak (`FUZZ_SEEDS="$(seq 1 200)" make test`).
-FUZZ_SEEDS="${FUZZ_SEEDS:-${FUZZ_SEED:-1 2 3 4 5 6 7 8}}"
-if [ "$FUZZ_SEQS" -gt 0 ]; then
-    printf '%-14s ' "  fuzz_undo"
-    if ! $CC $TEST_CFLAGS -Itests $SANITIZER_FLAGS -o tests/fuzz_undo \
-        tests/fuzz_undo.c $TEST_OBJECTS $LDFLAGS 2>/dev/null; then
-        echo "BUILD FAIL"
-        $CC $TEST_CFLAGS -Itests $SANITIZER_FLAGS -o tests/fuzz_undo \
-            tests/fuzz_undo.c $TEST_OBJECTS $LDFLAGS 2>&1 | tail -5
-        ANY_FAIL=1
-    else
-        fuzz_failed=0
-        fuzz_nseeds=0
-        for fuzz_seed in $FUZZ_SEEDS; do
-            fuzz_nseeds=$((fuzz_nseeds + 1))
-            fuzz_out=$($RUNNER ./tests/fuzz_undo $RUNNER_SEP "$FUZZ_SEQS" "$fuzz_seed" 2>&1)
-            fuzz_rc=$?
-            # The fuzzer reports "N failure(s)" and exits non-zero on any.
-            if [ $fuzz_rc -ne 0 ] ||
-               ! echo "$fuzz_out" | grep -q "^0 failure"; then
-                if [ $fuzz_failed -eq 0 ]; then
-                    echo "FAIL"
-                fi
-                echo "    seed $fuzz_seed:"
-                echo "$fuzz_out" | tail -20 | sed 's/^/      /'
-                fuzz_failed=1
-                ANY_FAIL=1
-            fi
-        done
-        if [ $fuzz_failed -eq 0 ]; then
-            echo "PASS ($FUZZ_SEQS sequences x $fuzz_nseeds seeds)"
-        fi
-    fi
-    rm -f tests/fuzz_undo
-fi
-
 rm -f tests/stubs.o tests/backup_faked.c
 
 # Terminal-level integration: drive the built binary under a pty.
-# decoder_pty_test skips itself (exit 0) if no pty is available.
+#
+# Two binaries, because there are two requirements:
+#
+#   pty_input_test    needs a pty.  Escape sequences, key batching,
+#                     burst detection.  Runs wherever posix_openpt does.
+#   pty_signals_test  needs a pty whose master reports the slave's
+#                     termios, and real job control.  Linux and macOS.
+#
+# That split is the whole of the platform handling.  It replaces a
+# runtime probe, three environment variables and a skip facility inside
+# the C, all of which existed because the two requirements were in one
+# binary and the weaker scenarios had to be excused wherever the
+# stronger ones could not run.
+#
+# Both need to execute the editor here, so neither runs under a RUNNER.
+PTY_TESTS="pty_input_test"
+case "$(uname -s)" in
+Linux|Darwin) PTY_TESTS="$PTY_TESTS pty_signals_test" ;;
+esac
+
 if [ -z "$RUNNER" ] && [ -x ./emil ]; then
-    printf '%-14s ' "  decoder_pty"
-    if $CC $TEST_CFLAGS tests/decoder_pty_test.c -o tests/decoder_pty_test \
-        && ./tests/decoder_pty_test ./emil > /tmp/pty_test_out 2>&1; then
-        pty_scenarios=$(grep -c '^  .*PASS$' /tmp/pty_test_out)
-        pty_skipped=$(grep -c '^  .*SKIP (' /tmp/pty_test_out)
-        # Individual scenarios skip themselves where the platform
-        # cannot observe what they assert on -- illumos ptys are
-        # STREAMS devices whose master reports no termios of the
-        # slave.  Surface the count rather than let a suite quietly
-        # shrink.
-        if [ "$pty_skipped" -gt 0 ]; then
-            echo "PASS ($pty_scenarios scenarios, $pty_skipped skipped)"
+    for t in $PTY_TESTS; do
+        printf '  %-16s ' "$t"
+        if $CC $TEST_CFLAGS -Itests "tests/$t.c" -o "tests/$t" \
+            && "./tests/$t" ./emil > /tmp/pty_out 2>&1; then
+            n=$(grep -c '^  .*PASS$' /tmp/pty_out)
+            if [ "$n" -eq 0 ]; then
+                # Exit 0 having run nothing is not a pass.
+                echo "FAIL (no scenarios ran)"
+                cat /tmp/pty_out
+                ANY_FAIL=1
+            else
+                echo "PASS ($n scenarios)"
+            fi
         else
-            echo "PASS ($pty_scenarios scenarios)"
+            echo "FAIL"
+            cat /tmp/pty_out
+            ANY_FAIL=1
         fi
-    else
-        echo "FAIL"
-        cat /tmp/pty_test_out
-        ANY_FAIL=1
-    fi
-    rm -f tests/decoder_pty_test /tmp/pty_test_out
-elif [ -n "$RUNNER" ]; then
-    # decoder_pty_test is a host program that allocates a pty and execs
-    # the editor.  Under a Wasm runtime the editor is not directly
-    # executable, so this scenario is covered by tests/wasix_smoke.sh
-    # instead, which drives emil.wasm through the runtime under a pty.
-    echo "  decoder_pty   SKIP (cross target; see tests/wasix_smoke.sh)"
-else
-    echo "  decoder_pty   SKIP (emil binary not built)"
+        rm -f "tests/$t" /tmp/pty_out
+    done
 fi
 
 # Print the last line of the report
@@ -446,6 +557,10 @@ echo ""
 echo "-------------------------------------------------------"
 
 if [ "$ANY_FAIL" -ne 0 ]; then
+    if [ -n "$BUILD_ONLY" ]; then
+        echo "BUILD STATUS: FAILED"
+        exit 1
+    fi
     echo "TEST STATUS: FAILED"
     exit 1
 elif [ "$ANY_WARN" -ne 0 ]; then

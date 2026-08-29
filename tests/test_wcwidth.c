@@ -66,15 +66,15 @@ void test_next_screen_x_multibyte(void) {
 	uint8_t cjk[] = "\xE4\xB8\x80";
 	idx = 0;
 	result = nextScreenX(cjk, &idx, 0);
-	TEST_ASSERT_EQUAL_INT(2, result);
+	TEST_ASSERT_EQUAL_INT(wideCols(), result);
 	TEST_ASSERT_EQUAL_INT(2, idx);
 }
 
 void test_string_width_mixed(void) {
-	/* "A一B" = 1 + 2 + 1 = 4 columns */
+	/* "A一B" = 1 + wide + 1 columns. */
 	uint8_t mixed[] = "A\xE4\xB8\x80"
 			  "B";
-	TEST_ASSERT_EQUAL_INT(4, stringWidth(mixed));
+	TEST_ASSERT_EQUAL_INT(2 + wideCols(), stringWidth(mixed));
 }
 
 
@@ -85,13 +85,12 @@ void tearDown(void) {
 }
 
 int main(void) {
-	/* Set up locale so wcwidth works in tests too */
-	const char *attempts[] = { "", "C.UTF-8", "en_US.UTF-8", NULL };
-	for (int i = 0; attempts[i] != NULL; i++) {
-		if (setlocale(LC_CTYPE, attempts[i]) != NULL &&
-		    wcwidth((wchar_t)0x4E00) == 2)
-			break;
-	}
+	/* The same locale selection the editor performs, so what these
+	 * tests assert and what emil does cannot drift apart.  Returns 0
+	 * where the platform has no UTF-8 locale (Genode), and the wide
+	 * widths below are expressed as wideCols() rather than a literal
+	 * 2 for that reason. */
+	(void)selectUtf8Locale();
 
 	TEST_BEGIN();
 	RUN_TEST(test_string_width);

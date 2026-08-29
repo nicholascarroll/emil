@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h> /* ssize_t, for matchOff() below */
 
 void addToKillRing(const char *text, int is_rect, int rect_width,
 		   int rect_height) {
@@ -582,6 +583,31 @@ const char *replacementTemplateError(const uint8_t *tmpl, size_t nsub) {
 	return NULL;
 }
 
+/* Read a regmatch_t offset as a signed value.
+ *
+ * POSIX requires regoff_t to be a signed type, and regexec reports a
+ * group that did not participate in the match by setting rm_so and
+ * rm_eo to -1.  Redox's relibc declares `typedef size_t regoff_t`, so
+ * that sentinel arrives as (size_t)-1 and a bare `rm_so >= 0` test is
+ * always true -- gcc says so outright, with -Wtype-limits.  The guard
+ * is then dead code and the expansion below takes its offset from
+ * subject + (size_t)-1.
+ *
+ * It does not currently misbehave, which is the awkward part.  relibc
+ * fills both fields from one `unwrap_or((!0, !0))`, so rm_eo - rm_so
+ * is 0, dbuf_append ignores a non-positive length, and the group
+ * expands to nothing exactly as intended.  The output is right by
+ * coincidence rather than by contract: nothing promises the two fields
+ * stay equal, and the out-of-range pointer is computed either way.
+ *
+ * Reading through a signed type of the same width recovers the
+ * sentinel.  POSIX sizes regoff_t to fit ssize_t, so this cannot
+ * truncate, and it compiles to nothing wherever regoff_t is declared
+ * correctly -- which is everywhere except relibc. */
+static ssize_t matchOff(regoff_t v) {
+	return (ssize_t)v;
+}
+
 /* Expand 'tmpl' for a single match into 'out'.  'm' holds offsets
  * absolute to 'subject'.  replacementTemplateError has already
  * passed, so nothing is validated here. */
@@ -600,9 +626,10 @@ static void expandTemplate(struct dbuf *out, const uint8_t *tmpl,
 		int g = (c == '&') ? 0 : c - '0';
 		/* A group that did not participate in the match
 		 * contributes nothing, as in Emacs. */
-		if (m[g].rm_so >= 0)
-			dbuf_append(out, subject + m[g].rm_so,
-				    (int)(m[g].rm_eo - m[g].rm_so));
+		ssize_t so = matchOff(m[g].rm_so);
+		if (so >= 0)
+			dbuf_append(out, subject + so,
+				    (int)(matchOff(m[g].rm_eo) - so));
 	}
 }
 
@@ -642,8 +669,12 @@ int regexSubstituteAll(const regex_t *re, const uint8_t *subject, int len,
 		int eo = pos + (int)m[0].rm_eo;
 
 		for (size_t g = 0; g < nmatch; g++) {
-			abs[g].rm_so = m[g].rm_so < 0 ? -1 : pos + m[g].rm_so;
-			abs[g].rm_eo = m[g].rm_eo < 0 ? -1 : pos + m[g].rm_eo;
+			ssize_t gso = matchOff(m[g].rm_so);
+			ssize_t geo = matchOff(m[g].rm_eo);
+			abs[g].rm_so = gso < 0 ? (regoff_t)-1 :
+						 (regoff_t)(pos + gso);
+			abs[g].rm_eo = geo < 0 ? (regoff_t)-1 :
+						 (regoff_t)(pos + geo);
 		}
 
 		/* An empty match butted against the end of the previous

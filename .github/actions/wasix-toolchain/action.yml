@@ -1,0 +1,33 @@
+# Copyright (c) 2026 Nicholas Carroll.
+# SPDX-License-Identifier: MIT
+#
+# The wasix and wasix-pty-advisory jobs need the identical three steps.
+# They were copied into both, so a change to one was a change nobody
+# made to the other.
+name: WASIX toolchain
+description: Install the pinned wasi-sdk, wasix sysroot and binaryen, and put wasmer on PATH.
+
+inputs:
+  prefix:
+    description: Directory to unpack the toolchain into.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # The unpacked toolchain is large, so it is cached.  The key is the
+    # setup script itself, which is where every pinned version lives:
+    # editing a pin necessarily invalidates the cache.
+    - name: Cache WASIX toolchain
+      uses: actions/cache@v4
+      with:
+        path: ${{ inputs.prefix }}
+        key: wasix-${{ runner.os }}-${{ hashFiles('tests/wasix/setup.sh') }}
+
+    - name: Install WASIX toolchain
+      shell: bash
+      run: ./tests/wasix/setup.sh "${{ inputs.prefix }}"
+
+    - name: Add wasmer to PATH
+      shell: bash
+      run: echo "$HOME/.wasmer/bin" >> "$GITHUB_PATH"

@@ -142,14 +142,16 @@ void test_char_advance_rule(void) {
 					     &nb));
 	TEST_ASSERT_EQUAL_INT(1, nb);
 
-	/* CJK: 2 columns, 3 bytes (U+65E5 日). */
-	TEST_ASSERT_EQUAL_INT(2, charAdvance((const uint8_t *)"\xe6\x97\xa5",
-					     0, 0, &nb));
+	/* CJK: wide, 3 bytes (U+65E5 日). */
+	TEST_ASSERT_EQUAL_INT(wideCols(),
+			      charAdvance((const uint8_t *)"\xe6\x97\xa5", 0,
+					  0, &nb));
 	TEST_ASSERT_EQUAL_INT(3, nb);
 
-	/* Combining mark: 0 columns, 2 bytes (U+0301). */
-	TEST_ASSERT_EQUAL_INT(0, charAdvance((const uint8_t *)"\xcc\x81", 0,
-					     0, &nb));
+	/* Combining mark: 0 columns under UTF-8, 2 bytes (U+0301). */
+	TEST_ASSERT_EQUAL_INT(combiningCols(),
+			      charAdvance((const uint8_t *)"\xcc\x81", 0, 0,
+					  &nb));
 	TEST_ASSERT_EQUAL_INT(2, nb);
 
 	/* nbytes may be NULL. */
@@ -189,23 +191,28 @@ void test_utf8_cols_to_bytes(void) {
 	TEST_ASSERT_EQUAL_INT(9, utf8ColsToBytes(ascii, 6, 5, 3, &used));
 	TEST_ASSERT_EQUAL_INT(3, used);
 
-	/* CJK straddle: 3 chars of 日 (9 bytes, 6 cols).  A budget of 5
-	 * takes two whole characters and comes up one column short. */
+	/* CJK straddle: 3 chars of 日 (9 bytes).  A budget one column
+	 * short of all three takes two whole characters and stops.  The
+	 * budget is written in wideCols() so the scenario is the same
+	 * one on a platform where a CJK character is a single column. */
 	const uint8_t *cjk =
 		(const uint8_t *)"\xe6\x97\xa5\xe6\x97\xa5\xe6\x97\xa5";
-	TEST_ASSERT_EQUAL_INT(6, utf8ColsToBytes(cjk, 0, 9, 5, &used));
-	TEST_ASSERT_EQUAL_INT(4, used);
+	TEST_ASSERT_EQUAL_INT(
+		6, utf8ColsToBytes(cjk, 0, 9, 3 * wideCols() - 1, &used));
+	TEST_ASSERT_EQUAL_INT(2 * wideCols(), used);
 
 	/* Honest zero progress: first char wider than the budget. */
-	TEST_ASSERT_EQUAL_INT(0, utf8ColsToBytes(cjk, 0, 9, 1, &used));
+	TEST_ASSERT_EQUAL_INT(
+		0, utf8ColsToBytes(cjk, 0, 9, wideCols() - 1, &used));
 	TEST_ASSERT_EQUAL_INT(0, used);
 
 	/* Combining marks are 0 columns and ride along with the budget
 	 * exhausted: "e" + U+0301 + "x" with 1 column takes e and the
 	 * mark but not x. */
 	const uint8_t *comb = (const uint8_t *)"e\xcc\x81x";
-	TEST_ASSERT_EQUAL_INT(3, utf8ColsToBytes(comb, 0, 4, 1, &used));
-	TEST_ASSERT_EQUAL_INT(1, used);
+	TEST_ASSERT_EQUAL_INT(
+		3, utf8ColsToBytes(comb, 0, 4, 1 + combiningCols(), &used));
+	TEST_ASSERT_EQUAL_INT(1 + combiningCols(), used);
 
 	/* Zero-length input. */
 	TEST_ASSERT_EQUAL_INT(0, utf8ColsToBytes(ascii, 0, 0, 5, &used));
@@ -220,10 +227,12 @@ void test_utf8_cols_to_bytes(void) {
 void test_utf8_width_n(void) {
 	TEST_ASSERT_EQUAL_INT(5, utf8WidthN((const uint8_t *)"hello", 5));
 	TEST_ASSERT_EQUAL_INT(0, utf8WidthN((const uint8_t *)"", 0));
-	/* 3 CJK = 6 columns, 9 bytes. */
-	TEST_ASSERT_EQUAL_INT(6, utf8WidthN((const uint8_t *)
-					    "\xE8\xAF\xAD\xE8\xAF\xAD"
-					    "\xE8\xAF\xAD", 9));
+	/* 3 CJK, 9 bytes. */
+	TEST_ASSERT_EQUAL_INT(3 * wideCols(),
+			      utf8WidthN((const uint8_t *)"\xE8\xAF\xAD"
+							  "\xE8\xAF\xAD"
+							  "\xE8\xAF\xAD",
+					 9));
 	/* A tab is priced by tab stop, not as a 2-column control —
 	 * this is where it differs from stringWidth. */
 	TEST_ASSERT_EQUAL_INT(8, utf8WidthN((const uint8_t *)"\t", 1));
@@ -241,15 +250,18 @@ void test_utf8_drop_to_fit(void) {
 	TEST_ASSERT_EQUAL_INT(5, utf8DropToFit(a, 10, 5));
 	TEST_ASSERT_EQUAL_INT(10, utf8DropToFit(a, 10, 0));
 
-	/* CJK: drops whole characters, so an odd budget leaves the
-	 * result one column under rather than splitting. */
+	/* CJK: drops whole characters, so a budget that does not land on
+	 * a character boundary leaves the result short rather than
+	 * splitting one.  Budgets are written in wideCols() so each line
+	 * describes the same case where a CJK character is one column. */
 	const uint8_t *c = (const uint8_t *)"\xE8\xAF\xAD\xE8\xAF\xAD"
-					    "\xE8\xAF\xAD"; /* 6 cols */
-	TEST_ASSERT_EQUAL_INT(0, utf8DropToFit(c, 9, 6));
-	TEST_ASSERT_EQUAL_INT(3, utf8DropToFit(c, 9, 4));
-	TEST_ASSERT_EQUAL_INT(3, utf8DropToFit(c, 9, 5)); /* whole chars */
-	TEST_ASSERT_EQUAL_INT(6, utf8DropToFit(c, 9, 2));
-	TEST_ASSERT_EQUAL_INT(9, utf8DropToFit(c, 9, 1)); /* nothing fits */
+					    "\xE8\xAF\xAD";
+	int w = wideCols();
+	TEST_ASSERT_EQUAL_INT(0, utf8DropToFit(c, 9, 3 * w)); /* all fit */
+	TEST_ASSERT_EQUAL_INT(3, utf8DropToFit(c, 9, 2 * w)); /* drop one */
+	TEST_ASSERT_EQUAL_INT(3, utf8DropToFit(c, 9, 3 * w - 1)); /* whole */
+	TEST_ASSERT_EQUAL_INT(6, utf8DropToFit(c, 9, w));     /* drop two */
+	TEST_ASSERT_EQUAL_INT(9, utf8DropToFit(c, 9, w - 1)); /* none fit */
 
 	/* The offset always lands on a character boundary. */
 	for (int b = 0; b <= 7; b++) {
@@ -260,9 +272,12 @@ void test_utf8_drop_to_fit(void) {
 
 int main(void) {
 	TEST_BEGIN();
-	/* charAdvance routes multibyte widths through wcwidth, which
-	 * needs an LC_CTYPE under which it is meaningful (§1.3). */
-	setlocale(LC_CTYPE, "C.UTF-8");
+	/* The same locale selection the editor performs, so what these
+	 * tests assert and what emil does cannot drift apart.  Returns 0
+	 * where the platform has no UTF-8 locale (Genode), and the wide
+	 * widths below are expressed as wideCols() rather than a literal
+	 * 2 for that reason. */
+	(void)selectUtf8Locale();
 	RUN_TEST(test_utf8_continuation);
 	RUN_TEST(test_utf8_char_types);
 	RUN_TEST(test_control_chars);

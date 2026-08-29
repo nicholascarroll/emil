@@ -1087,11 +1087,33 @@ static int dispatchMisc(int c, int uarg) {
 	case CMD_UNDO:
 		doUndo(E.buf, uarg);
 		return 1;
+	/* No job control under WASI.  Both suspend paths hand the
+	 * terminal to a parent shell and wait to be resumed (§3.1.1,
+	 * §3.18); wasmer honours the stop and terminates instead, exit
+	 * 127, taking the unsaved buffer with it and leaving the
+	 * alternate screen and a DECSTBM region set.
+	 *
+	 * There is no feature to test for.  wasix-libc defines
+	 * SIGTSTP, declares tcsetpgrp() and sets _POSIX_JOB_CONTROL to
+	 * 1, so the header claims support the runtime does not have --
+	 * unlike the locking case, where the absent F_GETLK is honest
+	 * about it (fileio.c).  Hence __wasi__, as for __sun elsewhere.
+	 *
+	 * The keys stay bound and answer, rather than going quiet:
+	 * a C-z that does nothing at all reads as a hang. */
 	case CMD_SUSPEND:
+#ifdef __wasi__
+		setStatusMessage("Suspend not available on this platform");
+#else
 		raise(SIGTSTP);
+#endif
 		return 1;
 	case CMD_SHELL_DRAWER:
+#ifdef __wasi__
+		setStatusMessage("Shell drawer not available on this platform");
+#else
 		openShellDrawer();
+#endif
 		return 1;
 	case CMD_CTAGS_JUMP:
 		ctagsJump();

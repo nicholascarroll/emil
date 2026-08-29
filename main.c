@@ -17,7 +17,6 @@
 #include "util.h"
 #include <errno.h>
 #include <fcntl.h>
-#include <locale.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,7 +24,7 @@
 #include <termios.h>
 #include <sys/select.h>
 #include <unistd.h>
-#include <wchar.h>
+#include "unicode.h"
 
 const int page_overlap = 2;
 
@@ -39,6 +38,7 @@ static volatile sig_atomic_t got_sigcont = 0;
 static volatile sig_atomic_t got_sigterm = 0;
 static volatile sig_atomic_t got_sighup = 0;
 
+#ifndef __wasi__ /* no job control; see dispatchMisc() in keymap.c */
 static void editorSuspend(int sig) {
 	(void)sig;
 	IGNORE_RETURN(tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_termios));
@@ -58,6 +58,7 @@ static void editorSuspend(int sig) {
 	 * reinstalling the handler the SIG_DFL above just cleared. */
 	got_sigcont = 1;
 }
+#endif /* __wasi__ */
 
 static void editorResume(int sig) {
 	(void)sig;
@@ -167,7 +168,9 @@ void setupHandlers(void) {
 	installHandler(SIGWINCH, sigwinchHandler, 0);
 #endif
 	installHandler(SIGCONT, editorResume, 0);
+#ifndef __wasi__ /* nothing raises SIGTSTP there */
 	installHandler(SIGTSTP, editorSuspend, SA_NODEFER);
+#endif
 	installHandler(SIGTERM, handleSigterm, 0);
 	installHandler(SIGHUP, handleSighup, 0);
 
@@ -266,16 +269,10 @@ static void initEditor(void) {
 }
 
 int main(int argc, char *argv[]) {
-	/*
-	 * Set up a UTF-8 locale so that system wcwidth() works.
-	 * Try the user's environment first, then common fallbacks.
-	 */
-	const char *locale_attempts[] = { "", "C.UTF-8", "en_US.UTF-8", NULL };
-	for (int i = 0; locale_attempts[i] != NULL; i++) {
-		if (setlocale(LC_CTYPE, locale_attempts[i]) != NULL &&
-		    wcwidth((wchar_t)0x4E00) == 2)
-			break;
-	}
+	/* Set up a UTF-8 locale so that system wcwidth() works.  The
+	 * same call the width-dependent suites make, so what they
+	 * assert and what the editor does cannot drift apart. */
+	(void)selectUtf8Locale();
 
 	// Check for flags before entering raw mode
 	if (argc >= 2 && strncmp(argv[1], "--", 2) == 0) {
@@ -403,6 +400,16 @@ int main(int argc, char *argv[]) {
 	E.minibuf->special_buffer = 1;
 	E.edbuf = E.buf;
 	computeDisplayNames();
+
+	/* Report a terminal that did not accept raw mode.  Issued last so
+	 * it is the message on screen at the first frame: a terminal that
+	 * eats C-s or C-c changes what the user can do, which outranks the
+	 * load message it displaces. */
+	{
+		char why[256];
+		if (rawModeDivergence(why, sizeof(why)))
+			setStatusMessage("%s", why);
+	}
 
 	for (;;) {
 		/* Also called from readKey(); repeated here so a flag

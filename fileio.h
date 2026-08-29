@@ -3,12 +3,43 @@
 #define EMIL_FILEIO_H
 
 #include <stddef.h>
+#include <fcntl.h>
 
 struct buffer;
 struct config;
 
+/* POSIX advisory record locking is not universally available.  WASIX
+ * (and wasi-libc generally) declares struct flock but none of the
+ * locking constants, because there is no host lock manager behind
+ * them: F_GETLK, F_SETLK, F_SETLKW, the F_RDLCK/F_WRLCK/F_UNLCK
+ * l_type values and the F_OFD_* commands all sit inside the
+ * __wasilibc_unmodified_upstream guards in its <fcntl.h>.  Detect that
+ * by the absence of the command constants rather than by testing for a
+ * specific platform macro, so any libc making the same choice is
+ * handled without further edits here.
+ *
+ * Testing two constants to guard code that needs six is sound only
+ * because they are absent together, which is a property of that header
+ * rather than of C.  It holds on the pinned sysroot; a libc that
+ * declared the l_type values without the commands would break the
+ * build rather than misbehave, which is the failure direction to want.
+ *
+ * This lives in the header rather than in fileio.c because the tests
+ * need the same answer.  test_warnings.c used to reach for F_WRLCK
+ * directly and simply failed to compile on WASIX, which told us
+ * nothing about the editor; it now asserts the contract below. */
+#if !defined(F_GETLK) || !defined(F_SETLK)
+#define EMIL_NO_FILE_LOCKING 1
+#endif
+
 /* File locking.
- * 
+ *
+ * Where EMIL_NO_FILE_LOCKING is set the contract is: probeLock() always
+ * reports 0 (nothing held), lockFile() always returns LOCK_UNAVAILABLE
+ * and never sets bufr->lock_fd, releaseLock() and relockIfDirty() are
+ * no-ops, and the editor opens, edits and saves exactly as it otherwise
+ * would -- it simply cannot warn about a rival holding the file.
+ *
  * ENOLCK is what an NFS mount without a running rpc.lockd returns.*/
 enum lockResult {
 	LOCK_ACQUIRED = 0,
@@ -25,7 +56,7 @@ void releaseLock(struct buffer *bufr);
  * called after any operation that opens and closes a file, because
  * closing any descriptor on an inode drops every lock this process
  * holds on it -- see the comment on the definition in fileio.c. */
-void relockAll(void);
+void relockIfDirty(struct buffer *bufr);
 void checkFileModified(void);
 void initFileCheck(void);
 void resetFileCheckThrottle(void);

@@ -1,0 +1,43 @@
+<runtime ram="32M" caps="1000" binary="emil">
+
+	<requires>
+		<terminal/>
+		<file_system label="files"/>
+	</requires>
+
+	<config>
+		<!-- The editor drives a VT100 through termios.  Binding stdio to
+		     a terminal session rather than to /dev/log is what makes the
+		     difference between a program that runs and one that merely
+		     links: raw mode, window size, and the escape stream all
+		     arrive through this path.  Terminal fidelity here is the
+		     least certain part of this port. -->
+		<libc stdin="/dev/terminal" stdout="/dev/terminal"
+		      stderr="/dev/terminal" rtc="/dev/rtc"/>
+
+		<vfs>
+			<dir name="dev">
+				<terminal name="terminal"/>
+				<log/>
+				<null/>
+				<zero/>
+				<rtc/>
+			</dir>
+			<!-- Files the editor is permitted to see.  There is no
+			     ambient filesystem: this is the whole world as far as
+			     open() is concerned. -->
+			<dir name="files"> <fs label="files"/> </dir>
+		</vfs>
+
+		<arg value="emil"/>
+	</config>
+
+	<content>
+		<rom label="emil"/>
+		<rom label="libc.lib.so"/>
+		<rom label="libm.lib.so"/>
+		<rom label="posix.lib.so"/>
+		<rom label="vfs.lib.so"/>
+	</content>
+
+</runtime>

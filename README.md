@@ -52,27 +52,6 @@ pacman -S msys2-devel msys2-runtime-devel
 make && make install
 ```
 
-**WebAssembly (WASIX)**
-
-`emil` builds as a standalone Wasm binary against
-[WASIX](https://wasix.org) using
-[wasi-sdk](https://github.com/WebAssembly/wasi-sdk) +
-[wasix-libc](https://github.com/wasix-org/wasix-libc), and runs on any
-[Wasmer](https://wasmer.io) host. 
-
-```bash
-./tests/wasix_setup.sh ~/opt          # pinned toolchain, one-time
-make wasix WASI_SDK=~/opt/wasi-sdk WASIX_SYSROOT=~/opt/wasix-sysroot/sysroot
-wasmer run emil.wasm --dir . -- FILE
-```
-- Shell integration is excluded. WASIX supplies `fork`, `exec` and
-  `posix_spawn`, so this is a deferral rather than a platform limit:
-  the shell drawer is left out because it has not been exercised under
-  a Wasm runtime.
-- Advisory file locking is unavailable. `wasix-libc` declares
-  `struct flock` but not the `F_GETLK`/`F_SETLK` commands, so the lock
-  is compiled out.
-
 
 ## Getting Started
 

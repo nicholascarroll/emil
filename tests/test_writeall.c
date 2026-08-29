@@ -2,7 +2,7 @@
 /* test_writeall.c: writeAll() delivers every byte across a signal.
  *
  * This is the coverage for findings §H1.  It replaces a scenario in
- * decoder_pty_test.c that asserted the same property through a whole
+ * the pty tests that assert the same property through a whole
  * rendered frame on a pseudo-terminal.  That scenario needed three
  * conditions to coincide -- a frame larger than the pty buffer, a
  * reader deliberately behind, and a signal arriving mid-write -- and
@@ -130,6 +130,41 @@ static int reap(pid_t pid) {
 	return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 }
 
+/* One attempt at the control: a bare write() under the same signal
+ * storm the real case runs under.  Returns 1 if write() came up short,
+ * which is the condition writeAll() exists to survive.  Drains the
+ * remainder either way so the child reaches EOF and exits. */
+static int bareWriteComesUpShort(unsigned char *buf) {
+	pid_t kid = -1;
+	int wfd = startDrain(&kid, 0);
+	if (wfd < 0)
+		return 0;
+
+	signals_seen = 0;
+	ssize_t bare = write(wfd, buf, PAYLOAD);
+	int was_short = (bare >= 0 && bare < PAYLOAD);
+
+	if (bare > 0) {
+		size_t left = PAYLOAD - (size_t)bare;
+		const unsigned char *p = buf + bare;
+		while (left > 0) {
+			ssize_t n = write(wfd, p, left);
+			if (n <= 0) {
+				if (n < 0 && errno == EINTR)
+					continue;
+				break;
+			}
+			p += n;
+			left -= (size_t)n;
+		}
+	}
+	close(wfd);
+	(void)reap(kid);
+	return was_short;
+}
+
+#define CONTROL_ATTEMPTS 3
+
 void test_writeall_delivers_every_byte_across_signals(void) {
 	struct sigaction sa, old_usr1, old_pipe;
 	unsigned char *buf = xmalloc(PAYLOAD);
@@ -152,63 +187,67 @@ void test_writeall_delivers_every_byte_across_signals(void) {
 	sa.sa_flags = 0;
 	sigaction(SIGPIPE, &sa, &old_pipe);
 
-	/* --- Control: establish that a bare write() really is cut
-	 * short under these conditions.  Without this the test below
-	 * could pass on a system where write() is never interrupted,
-	 * having exercised nothing. */
-	pid_t kid;
-	int wfd = startDrain(&kid, 0);
+	/* --- Can this platform cut a write() short at all? ---
+	 *
+	 * Attempted up to CONTROL_ATTEMPTS times.  One attempt cannot
+	 * tell "this platform never interrupts a write" from "the
+	 * scheduling did not happen to produce one this run", and those
+	 * need different answers: the first is a fact about the host,
+	 * the second is a flake that must not fail the suite.  Several
+	 * attempts all coming up long is the platform speaking.
+	 *
+	 * WASIX is the platform that does: under wasmer write() is never
+	 * cut short, measured at 12 runs out of 12.  Asserting the
+	 * control unconditionally made that a permanent red for a
+	 * property emil satisfies there perfectly well. */
+	int interruptible = 0;
+	for (int attempt = 0; attempt < CONTROL_ATTEMPTS && !interruptible;
+	     attempt++)
+		interruptible = bareWriteComesUpShort(buf);
+
+	/* --- The assertion proper: same conditions, writeAll(), and
+	 * every byte must arrive intact. */
+	pid_t kid = -1;
+	int wfd = startDrain(&kid, 1);
+	TEST_ASSERT(wfd >= 0);
 	if (wfd < 0) {
 		free(buf);
 		sigaction(SIGUSR1, &old_usr1, NULL);
 		sigaction(SIGPIPE, &old_pipe, NULL);
-		TEST_SKIP("cannot create a pipe or fork");
 		return;
 	}
-	signals_seen = 0;
-	ssize_t bare = write(wfd, buf, PAYLOAD);
-	int short_write = (bare >= 0 && bare < PAYLOAD);
-	/* Drain the remainder so the child reaches EOF and exits. */
-	if (bare > 0) {
-		size_t left = PAYLOAD - (size_t)bare;
-		const unsigned char *p = buf + bare;
-		while (left > 0) {
-			ssize_t n = write(wfd, p, left);
-			if (n <= 0) {
-				if (n < 0 && errno == EINTR)
-					continue;
-				break;
-			}
-			p += n;
-			left -= (size_t)n;
-		}
-	}
-	close(wfd);
-	(void)reap(kid);
-
-	if (!short_write) {
-		free(buf);
-		sigaction(SIGUSR1, &old_usr1, NULL);
-		sigaction(SIGPIPE, &old_pipe, NULL);
-		TEST_SKIP("write() was not interrupted here, so the "
-			  "conditions this test needs do not hold");
-		return;
-	}
-
-	/* --- The assertion proper: same conditions, writeAll(), and
-	 * every byte must arrive intact. */
-	wfd = startDrain(&kid, 1);
-	TEST_ASSERT(wfd >= 0);
 	signals_seen = 0;
 	int rc = writeAll(wfd, buf, PAYLOAD);
 	close(wfd);
 	int child_rc = reap(kid);
 
+	/* Asserted on every platform: whatever write() does underneath,
+	 * writeAll() delivers the payload. */
 	TEST_ASSERT_EQUAL_INT(0, rc);
 	/* Child exits 0 only if it saw exactly PAYLOAD bytes and every
 	 * one matched, so this covers both loss and corruption. */
 	TEST_ASSERT_EQUAL_INT(0, child_rc);
-	TEST_ASSERT(signals_seen > 0);
+
+	/* The handler having run is only guaranteed where signals can
+	 * cut a write short in the first place -- that is what
+	 * `interruptible` measured, and it cannot be true without
+	 * delivery.  Where it is false the runtime's signal delivery is
+	 * its own business: wasmer sometimes runs the handler during the
+	 * writeAll() pass and sometimes does not, so requiring it there
+	 * made this suite fail intermittently on a property emil does
+	 * not depend on. */
+	if (interruptible)
+		TEST_ASSERT(signals_seen > 0);
+
+	/* Say which of the two ran, so a host that quietly stops cutting
+	 * writes short is visible in the log rather than silently
+	 * downgrading to the weaker case. */
+	printf("    %s\n",
+	       interruptible ?
+		       "(write() was cut short under these conditions, so "
+		       "the retry path was exercised)" :
+		       "(write() is never cut short here; delivery asserted, "
+		       "but the retry path is not reachable on this platform)");
 
 	sigaction(SIGUSR1, &old_usr1, NULL);
 	sigaction(SIGPIPE, &old_pipe, NULL);

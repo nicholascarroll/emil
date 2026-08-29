@@ -1,7 +1,7 @@
 #!/bin/sh
 # End-to-end smoke test for the WASIX build.
 #
-# Usage: ./tests/wasix_smoke.sh [path-to-emil.wasm]
+# Usage: ./tests/wasix/smoke.sh [path-to-emil.wasm]
 #
 # The unit suites run under wasmer too (see `make wasix-test`), but they
 # link stubs.o in place of main.o and terminal.o, so none of them starts
@@ -27,7 +27,7 @@ if [ ! -f "$WASM" ]; then
     exit 1
 fi
 if ! command -v "$WASMER" >/dev/null 2>&1; then
-    echo "✗ wasmer not found on PATH (run: ./tests/wasix_setup.sh)" >&2
+    echo "✗ wasmer not found on PATH (run: ./tests/wasix/setup.sh)" >&2
     exit 1
 fi
 
@@ -44,12 +44,20 @@ echo "wasix_smoke: driving $WASM under $WASMER"
 # --- 1. the binary runs at all --------------------------------------
 #
 # stderr is folded in so a real failure is visible, then the emil line
-# is picked out of it: wasmer 7 prints a deprecation notice about --dir
-# on every run.  --dir is kept deliberately -- its suggested
-# replacement, --volume, does not make the mapped directory reachable
-# by the paths the editor is given, so file writes silently do nothing.
-# See the WASIX notes in README.md.
-raw=$("$WASMER" run ./emil.wasm --dir . -- --version 2>&1 </dev/null || true)
+# is picked out of it.
+#
+# --volume, not --dir: wasmer 7 warns that --dir is deprecated and 8
+# removes it.  An earlier version of this file kept --dir and claimed
+# --volume "does not make the mapped directory reachable by the paths
+# the editor is given, so file writes silently do nothing".  That is
+# true only of the naive form, --volume .:/somewhere, which maps the
+# directory without setting the guest's working directory, so a
+# relative path resolves somewhere else and the write is discarded.
+# --volume "$WORK:$WORK" --cwd "$WORK" maps the directory at its own
+# path and starts the guest there; a relative filename then reaches
+# the host file.  Verified by round-tripping a save through both forms
+# and comparing the host file.
+raw=$("$WASMER" run ./emil.wasm --volume "$WORK:$WORK" --cwd "$WORK" -- --version 2>&1 </dev/null || true)
 version=$(printf '%s\n' "$raw" | grep '^emil ' || true)
 case "$version" in
     emil\ *) ok "binary runs and reports a version" ;;
@@ -71,28 +79,42 @@ fi
 # 030 = C-x, 023 = C-s, 003 = C-c.
 printf 'alpha\nbeta\n' > "$WORK/round.txt"
 ( cd "$WORK" && printf 'ZZZ\030\023\030\003' \
-    | "$WASMER" run ./emil.wasm --dir . -- round.txt >/dev/null 2>&1 ) || true
+    | "$WASMER" run ./emil.wasm --volume "$WORK:$WORK" --cwd "$WORK" -- round.txt >/dev/null 2>&1 ) || true
 
 expected=$(printf 'ZZZalpha\nbeta\n')
 actual=$(cat "$WORK/round.txt")
+roundtrip_ok=0
 if [ "$actual" = "$expected" ]; then
+    roundtrip_ok=1
     ok "open, edit and save round-trip to disk"
 else
     bad "open, edit and save round-trip to disk" \
         "expected [$expected] got [$actual]"
 fi
 
-# --- 3. the save was atomic -----------------------------------------
+# --- 3. the save cleaned up its backup ------------------------------
 #
-# emil writes through a mkstemp temporary and renames over the target.
-# A leftover round.txt.tmpXXXXXX means the rename half did not happen,
-# which on a host with unusual filesystem semantics is a real risk and
-# is invisible if you only diff the contents.
-leftovers=$(find "$WORK" -name 'round.txt.tmp*' 2>/dev/null | wc -l | tr -d ' ')
-if [ "$leftovers" = "0" ]; then
-    ok "atomic save left no temporary files"
+# emil's save is not atomic and uses no temporary file: it writes a
+# verified backup, overwrites the target in place, then unlinks the
+# backup (EMIL-DESIGN.md 3.21.2).  A surviving round.txt~ means the
+# unlink half did not happen.
+#
+# This check previously looked for round.txt.tmp*, a mkstemp-and-rename
+# pattern emil has never used, so it could not fail.  The wasm binary
+# imports no path_rename at all, which is the cheapest way to see it.
+# It does import path_unlink_file, so the path asserted here is live.
+#
+# Absence of a backup is only evidence of cleanup if a save actually
+# ran, so this check is gated on check 2.  Reporting PASS here after
+# check 2 failed would be the same vacuous green the old check gave.
+leftovers=$(find "$WORK" -name 'round.txt~' 2>/dev/null | wc -l | tr -d ' ')
+if [ "$roundtrip_ok" != "1" ]; then
+    bad "save removed its backup file" \
+        "not established: the save in check 2 did not happen"
+elif [ "$leftovers" = "0" ]; then
+    ok "save removed its backup file"
 else
-    bad "atomic save left no temporary files" "$leftovers left behind"
+    bad "save removed its backup file" "$leftovers left behind"
 fi
 
 # --- 4. UTF-8 survives the round trip -------------------------------
@@ -101,7 +123,7 @@ fi
 # rather than against the unit tests' synthetic key scripts.
 printf 'seed\n' > "$WORK/utf8.txt"
 ( cd "$WORK" && printf '\346\227\245\346\234\254\030\023\030\003' \
-    | "$WASMER" run ./emil.wasm --dir . -- utf8.txt >/dev/null 2>&1 ) || true
+    | "$WASMER" run ./emil.wasm --volume "$WORK:$WORK" --cwd "$WORK" -- utf8.txt >/dev/null 2>&1 ) || true
 if head -n 1 "$WORK/utf8.txt" | grep -q '日本'; then
     ok "UTF-8 input round-trips to disk"
 else

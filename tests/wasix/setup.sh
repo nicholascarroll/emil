@@ -1,7 +1,7 @@
 #!/bin/sh
 # Fetch the pinned WASIX toolchain into $PREFIX (default $HOME/opt).
 #
-# Usage:  ./tests/wasix_setup.sh [prefix]
+# Usage:  ./tests/wasix/setup.sh [prefix]
 # Then:   make wasix WASI_SDK=<prefix>/wasi-sdk \
 #                    WASIX_SYSROOT=<prefix>/wasix-sysroot/sysroot
 #
@@ -18,13 +18,19 @@ PREFIX=${1:-$HOME/opt}
 # WASIX_CLANG_MAJOR must track the clang that wasix-libc built its
 # sysroot with.  wasi-sdk 33 ships clang 22; wasi-sdk 25 ships clang 19
 # and miscompiles this sysroot's thread-local storage layout.  If you
-# bump WASIX_LIBC, re-run tests/wasix_smoke.sh before trusting the
+# bump WASIX_LIBC, re-run tests/wasix/smoke.sh before trusting the
 # result: that test exists to catch exactly this failure.
 WASI_SDK_VERSION=33
 WASI_SDK_RELEASE=33.0
 WASIX_CLANG_MAJOR=22
 WASIX_LIBC=v2026-07-30.1
 WASMER_VERSION=7.2.1
+
+# binaryen, for wasm-opt.  Not optional: `make wasix` pipes the linked
+# module through `wasm-opt --asyncify`, because wasmer implements
+# proc_fork by snapshotting the module and the snapshot needs asyncify
+# instrumentation.  An uninstrumented binary aborts at the first fork().
+BINARYEN_VERSION=123
 
 ARCH=$(uname -m)
 case "$ARCH" in
@@ -110,6 +116,35 @@ else
     echo "==> wasmer already present"
 fi
 
+if ! command -v wasm-opt >/dev/null 2>&1 && \
+   [ ! -x "$PREFIX/binaryen/bin/wasm-opt" ]; then
+    echo "==> fetching binaryen ${BINARYEN_VERSION}"
+    # binaryen names its assets <arch>-linux / <arch>-macos, not by
+    # `uname -s`.  "$ARCH-$OS" happens to resolve on Linux only because
+    # GitHub matches asset names case-insensitively, so x86_64-Linux
+    # finds x86_64-linux; on macOS it asks for x86_64-Darwin and 404s.
+    # The arch spellings do match uname -m: x86_64 and aarch64 on
+    # Linux, arm64 on macOS.
+    case "$OS" in
+        Linux) BINARYEN_OS=linux ;;
+        Darwin) BINARYEN_OS=macos ;;
+        *) echo "unsupported OS for binaryen: $OS" >&2; exit 1 ;;
+    esac
+    BINARYEN_TARBALL="binaryen-version_${BINARYEN_VERSION}-${ARCH}-${BINARYEN_OS}.tar.gz"
+    curl -fsSL -o "$BINARYEN_TARBALL" \
+        "https://github.com/WebAssembly/binaryen/releases/download/version_${BINARYEN_VERSION}/${BINARYEN_TARBALL}"
+    tar xzf "$BINARYEN_TARBALL"
+    rm -rf "$PREFIX/binaryen"
+    mv "binaryen-version_${BINARYEN_VERSION}" "$PREFIX/binaryen"
+    rm -f "$BINARYEN_TARBALL"
+else
+    echo "==> wasm-opt already present"
+fi
+
 echo ""
 echo "WASIX toolchain ready in $PREFIX"
+if ! command -v wasm-opt >/dev/null 2>&1; then
+    echo "  wasm-opt is in $PREFIX/binaryen/bin -- add it to PATH, or pass"
+    echo "  WASM_OPT=$PREFIX/binaryen/bin/wasm-opt to make."
+fi
 echo "  make wasix-test WASI_SDK=$PREFIX/wasi-sdk WASIX_SYSROOT=$PREFIX/wasix-sysroot/sysroot"

@@ -199,9 +199,10 @@ static void test_linecol_position(void) {
  *
  * Every offset asserted below differs from its own display column, so
  * a regression to printing cx raw cannot pass any of them by
- * coincidence.  The wide-character case needs an LC_CTYPE locale under
- * which wcwidth() is meaningful; main() sets one, as test_cjk_indic.c
- * does. */
+ * coincidence.  The two columns past 日 are written in wideCols() --
+ * the character measures one column where the platform has no UTF-8
+ * locale, and the point of the test is that the status bar reports
+ * whatever the display actually did. */
 static void test_linecol_is_display_column(void) {
 	struct buffer *buf = make_test_buffer("\ta\x01" "b\xE6\x97\xA5"
 					      "c");
@@ -224,15 +225,18 @@ static void test_linecol_is_display_column(void) {
 	TEST_ASSERT(strstr(s, "1:12") != NULL);
 	free(s);
 
-	buf->cx = 7; /* after 日: byte 7, cell 14 */
+	char want[16];
+	buf->cx = 7; /* after 日: byte 7, cell 12 + the width of 日 */
 	s = render_status();
-	TEST_ASSERT(strstr(s, "1:14") != NULL);
+	snprintf(want, sizeof(want), "1:%d", 12 + wideCols());
+	TEST_ASSERT(strstr(s, want) != NULL);
 	TEST_ASSERT(strstr(s, "1:7") == NULL);
 	free(s);
 
-	buf->cx = 8; /* end of line: byte 8, cell 15 */
+	buf->cx = 8; /* end of line: byte 8, one cell further */
 	s = render_status();
-	TEST_ASSERT(strstr(s, "1:15") != NULL);
+	snprintf(want, sizeof(want), "1:%d", 13 + wideCols());
+	TEST_ASSERT(strstr(s, want) != NULL);
 	free(s);
 }
 
@@ -452,10 +456,10 @@ void test_left_truncate_valid_utf8_at_every_width(void) {
 		free(r);
 	}
 
-	/* One exact expectation, at a width the old code corrupted:
-	 * budget 12 leaves 9 columns after "...", which holds the
-	 * rightmost 2 CJK (4 cols) + ".txt" (4 cols). */
-	char *r = leftTruncate(name, 12);
+	/* One exact expectation, at a width the old code corrupted.
+	 * "..." and ".txt" take 7 columns, so a budget of 7 + 2 wide
+	 * characters must keep exactly the rightmost two. */
+	char *r = leftTruncate(name, 7 + 2 * wideCols());
 	TEST_ASSERT_EQUAL_STRING("...\xE8\xAF\xAD\xE8\xAF\xAD.txt", r);
 	free(r);
 }
@@ -476,23 +480,28 @@ void test_left_truncate_tiny_budget_keeps_whole_chars(void) {
 	/* max_width <= 3 has no room for "..." and used to return a
 	 * raw byte tail — also mid-character for CJK.  Now: the bare
 	 * rightmost whole characters that fit. */
-	const char *cjk = "\xE8\xAF\xAD\xE8\xAF\xAD\xE8\xAF\xAD"; /* 6 cols */
-	char *r = leftTruncate(cjk, 2);
+	const char *cjk = "\xE8\xAF\xAD\xE8\xAF\xAD\xE8\xAF\xAD";
+	int w = wideCols();
+
+	/* Exactly one character's worth of budget: one character back,
+	 * whole, never a byte tail through the middle of one. */
+	char *r = leftTruncate(cjk, w);
 	TEST_ASSERT_EQUAL_STRING("\xE8\xAF\xAD", r);
 	free(r);
 
-	r = leftTruncate(cjk, 3); /* two chars = 4 cols > 3: still one */
+	/* One column short of two characters: still just the one. */
+	r = leftTruncate(cjk, 2 * w - 1);
 	TEST_ASSERT_EQUAL_STRING("\xE8\xAF\xAD", r);
 	free(r);
 }
 
 int main(void) {
-	/* wcwidth() only reports 2 for a CJK character under a UTF-8
-	 * LC_CTYPE; without this the display-column test below would
-	 * measure 日 as one cell.  Same call, same reason, as
-	 * test_cjk_indic.c.  No test in this file depends on the C
-	 * locale's widths. */
-	setlocale(LC_CTYPE, "C.UTF-8");
+	/* The same locale selection the editor performs, so what these
+	 * tests assert and what emil does cannot drift apart.  Returns 0
+	 * where the platform has no UTF-8 locale (Genode), and the wide
+	 * widths below are expressed as wideCols() rather than a literal
+	 * 2 for that reason. */
+	(void)selectUtf8Locale();
 
 	TEST_BEGIN();
 	RUN_TEST(test_dirty_readonly_flags);

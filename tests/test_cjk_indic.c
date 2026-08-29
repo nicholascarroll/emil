@@ -274,11 +274,12 @@ void test_wordwrap_cjk_breaks_between_chars(void) {
 	row.cached_width = -1;
 
 	int break_col, break_byte;
-	int more = wordWrapBreak(&row, 8, 0, 0, &break_col, &break_byte);
+	int w = wideCols();
+	int more = wordWrapBreak(&row, 4 * w, 0, 0, &break_col, &break_byte);
 
 	TEST_ASSERT_TRUE(more);
-	TEST_ASSERT_EQUAL(8, break_col);   /* 4 CJK chars × 2 cols */
-	TEST_ASSERT_EQUAL(12, break_byte); /* 4 CJK chars × 3 bytes */
+	TEST_ASSERT_EQUAL(4 * w, break_col); /* 4 CJK chars */
+	TEST_ASSERT_EQUAL(12, break_byte);   /* 4 CJK chars × 3 bytes */
 }
 
 void test_wordwrap_cjk_no_hard_break(void) {
@@ -293,11 +294,12 @@ void test_wordwrap_cjk_no_hard_break(void) {
 	row.cached_width = -1;
 
 	int break_col, break_byte;
-	int more = wordWrapBreak(&row, 6, 0, 0, &break_col, &break_byte);
+	int w = wideCols();
+	int more = wordWrapBreak(&row, 3 * w, 0, 0, &break_col, &break_byte);
 
 	TEST_ASSERT_TRUE(more);
-	/* Should break after 3rd CJK char (6 cols, 9 bytes) */
-	TEST_ASSERT_EQUAL(6, break_col);
+	/* Should break after the 3rd CJK char (9 bytes) */
+	TEST_ASSERT_EQUAL(3 * w, break_col);
 	TEST_ASSERT_EQUAL(9, break_byte);
 }
 
@@ -344,11 +346,14 @@ void test_wordwrap_no_leading_close_punct(void) {
 	row.cached_width = -1;
 
 	int break_col, break_byte;
-	int more = wordWrapBreak(&row, 7, 0, 0, &break_col, &break_byte);
+	int w = wideCols();
+	/* Room for exactly 中文字, so the suppressed break after 字
+	 * has to fall back to 文. */
+	int more = wordWrapBreak(&row, 3 * w, 0, 0, &break_col, &break_byte);
 
 	TEST_ASSERT_TRUE(more);
-	TEST_ASSERT_EQUAL(4, break_col);  /* after 文 */
-	TEST_ASSERT_EQUAL(6, break_byte); /* 字。测试 wraps together */
+	TEST_ASSERT_EQUAL(2 * w, break_col); /* after 文 */
+	TEST_ASSERT_EQUAL(6, break_byte);    /* 字。测试 wraps together */
 }
 
 /* The ideal break is right AFTER closing punctuation: 。 is itself a
@@ -364,11 +369,12 @@ void test_wordwrap_break_after_close_punct(void) {
 	row.cached_width = -1;
 
 	int break_col, break_byte;
-	int more = wordWrapBreak(&row, 6, 0, 0, &break_col, &break_byte);
+	int w = wideCols();
+	int more = wordWrapBreak(&row, 3 * w, 0, 0, &break_col, &break_byte);
 
 	TEST_ASSERT_TRUE(more);
-	TEST_ASSERT_EQUAL(6, break_col);  /* after 。 */
-	TEST_ASSERT_EQUAL(9, break_byte); /* next line: 字词 */
+	TEST_ASSERT_EQUAL(3 * w, break_col); /* after 。 */
+	TEST_ASSERT_EQUAL(9, break_byte);    /* next line: 字词 */
 }
 
 /* Chained forbidden characters (」。) all travel together. */
@@ -384,10 +390,11 @@ void test_wordwrap_close_punct_chain(void) {
 	row.cached_width = -1;
 
 	int break_col, break_byte;
-	int more = wordWrapBreak(&row, 6, 0, 0, &break_col, &break_byte);
+	int w = wideCols();
+	int more = wordWrapBreak(&row, 3 * w, 0, 0, &break_col, &break_byte);
 
 	TEST_ASSERT_TRUE(more);
-	TEST_ASSERT_EQUAL(2, break_col);  /* after 文 */
+	TEST_ASSERT_EQUAL(w, break_col);  /* after 文 */
 	TEST_ASSERT_EQUAL(3, break_byte); /* next line: 字」。后 */
 }
 
@@ -405,10 +412,11 @@ void test_wordwrap_all_forbidden_fallback(void) {
 	row.cached_width = -1;
 
 	int break_col, break_byte;
-	int more = wordWrapBreak(&row, 4, 0, 0, &break_col, &break_byte);
+	int w = wideCols();
+	int more = wordWrapBreak(&row, 2 * w, 0, 0, &break_col, &break_byte);
 
 	TEST_ASSERT_TRUE(more);
-	TEST_ASSERT_EQUAL(4, break_col);
+	TEST_ASSERT_EQUAL(2 * w, break_col);
 	TEST_ASSERT_EQUAL(6, break_byte);
 }
 
@@ -427,11 +435,14 @@ void test_wordwrap_space_before_close_punct(void) {
 	row.cached_width = -1;
 
 	int break_col, break_byte;
-	int more = wordWrapBreak(&row, 8, 0, 0, &break_col, &break_byte);
+	/* "ab cd " is 6 columns; the line is one character wider, so 。
+	 * lands exactly at its end. */
+	int end = 6 + wideCols();
+	int more = wordWrapBreak(&row, end, 0, 0, &break_col, &break_byte);
 
 	TEST_ASSERT_TRUE(more);
-	TEST_ASSERT_EQUAL(8, break_col);  /* after 。 */
-	TEST_ASSERT_EQUAL(9, break_byte); /* next line: "ef" */
+	TEST_ASSERT_EQUAL(end, break_col); /* after 。 */
+	TEST_ASSERT_EQUAL(9, break_byte);  /* next line: "ef" */
 }
 
 /* ---- Thai/Lao/Khmer boundaries ---- */
@@ -475,7 +486,9 @@ void test_wordwrap_zwsp_break(void) {
 	int more = wordWrapBreak(&row, 4, 0, 0, &break_col, &break_byte);
 
 	TEST_ASSERT_TRUE(more);
-	TEST_ASSERT_EQUAL(3, break_col);   /* ZWSP itself is width 0 */
+	/* กขค is 3 columns; the ZWSP adds nothing under a UTF-8
+	 * locale, and one column where wcwidth cannot say. */
+	TEST_ASSERT_EQUAL(3 + combiningCols(), break_col);
 	TEST_ASSERT_EQUAL(12, break_byte); /* just past the ZWSP */
 }
 
@@ -537,15 +550,24 @@ void test_wordwrap_combining_cluster_intact(void) {
 	row.cached_width = -1;
 
 	int break_col, break_byte;
-	int more = wordWrapBreak(&row, 3, 0, 0, &break_col, &break_byte);
+	/* Three bases plus the mark, which costs nothing under a UTF-8
+	 * locale.  The point is that the mark never lands on the far
+	 * side of the break from its base, whatever it measures. */
+	int end = 3 + combiningCols();
+	int more = wordWrapBreak(&row, end, 0, 0, &break_col, &break_byte);
 
 	TEST_ASSERT_TRUE(more);
-	TEST_ASSERT_EQUAL(3, break_col);
+	TEST_ASSERT_EQUAL(end, break_col);
 	TEST_ASSERT_EQUAL(12, break_byte); /* after กิ, before ค */
 }
 
 int main(void) {
-	setlocale(LC_CTYPE, "C.UTF-8");
+	/* The same locale selection the editor performs, so what these
+	 * tests assert and what emil does cannot drift apart.  Returns 0
+	 * where the platform has no UTF-8 locale (Genode), and the wide
+	 * widths below are expressed as wideCols() rather than a literal
+	 * 2 for that reason. */
+	(void)selectUtf8Locale();
 
 	TEST_BEGIN();
 

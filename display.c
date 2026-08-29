@@ -1600,7 +1600,16 @@ void describeChar(void) {
 		byte_len = row->size - cx;
 
 	uint32_t cp = utf8Decode(row->chars, cx);
-	int sw = charInStringWidth(row->chars, cx);
+
+	/* Width comes from charAdvance, the one display-width rule (SPEC
+	 * 3.12.5).  A tab occupies the distance to the next tab stop, so its
+	 * width depends on the column it starts at; charInStringWidth() prices
+	 * every byte below 0x20 at 2 and is wrong for a tab at seven columns
+	 * in eight. */
+	int adv_bytes;
+	int sw = charAdvance(row->chars, cx, charsToDisplayColumn(row, cx),
+			     &adv_bytes);
+	(void)adv_bytes;
 
 	/* Build raw hex bytes string */
 	char raw[32] = "";

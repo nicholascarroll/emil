@@ -20,6 +20,7 @@
 #include "history.h"
 #include "undo.h"
 #include "util.h"
+#include "unicode.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -232,6 +233,29 @@ static inline void freeMinibuffer(void) {
 		destroyBuffer(E.minibuf);
 		E.minibuf = NULL;
 	}
+}
+
+/* Columns a wide (CJK) character occupies on this platform.
+ *
+ * Two under a UTF-8 locale.  One where the platform has only the C
+ * locale, in which wcwidth correctly reports -1 for every non-ASCII
+ * codepoint -- they have no defined width there -- and charAdvance maps
+ * that to a single column.  Genode's libc build filters out setlocale
+ * and every encoding module, so it is permanently the second case.
+ *
+ * Tests that used to hardcode 2 assert this instead.  That is not an
+ * excuse for a platform: both answers are asserted, and the value comes
+ * from the same selectUtf8Locale() the editor calls, so a test can only
+ * agree with what emil will actually draw. */
+static inline int wideCols(void) {
+	return selectUtf8Locale() ? 2 : 1;
+}
+
+/* Columns a zero-width character occupies -- a combining mark, or a
+ * ZERO WIDTH SPACE.  0 under a UTF-8 locale, 1 in the C locale, for the
+ * same reason and by the same rule as wideCols(). */
+static inline int combiningCols(void) {
+	return selectUtf8Locale() ? 0 : 1;
 }
 
 #endif /* TEST_HARNESS_H */

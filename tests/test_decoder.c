@@ -7,7 +7,7 @@
  * sequences, the lone-ESC-then-sequence rule, overflow, and a
  * deterministic random-stream soak.  No terminal is involved;
  * terminal-level behavior (real timing, signals, rendering) is
- * covered by tests/decoder_pty_test.py.
+ * covered by tests/pty_input_test.c.
  */
 
 #include "test.h"

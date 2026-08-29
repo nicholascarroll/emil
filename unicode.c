@@ -9,8 +9,29 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <wchar.h>
+#include <locale.h>
 #include "unicode.h"
 #include "emil.h"
+
+/* See unicode.h.  The environment's locale first, then the two names a
+ * UTF-8 locale is most likely to have; a platform with none of them
+ * keeps the C locale it started in. */
+int selectUtf8Locale(void) {
+	static int cached = -1;
+	if (cached >= 0)
+		return cached;
+
+	const char *attempts[] = { "", "C.UTF-8", "en_US.UTF-8", NULL };
+	for (int i = 0; attempts[i] != NULL; i++) {
+		if (setlocale(LC_CTYPE, attempts[i]) != NULL &&
+		    wcwidth((wchar_t)0x4E00) == 2) {
+			cached = 1;
+			return cached;
+		}
+	}
+	cached = 0;
+	return cached;
+}
 
 struct known_script_range {
 	uint32_t start;

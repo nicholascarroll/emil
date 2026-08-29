@@ -82,17 +82,8 @@ void resetFileCheckThrottle(void) {
 
 /*** file locking ***/
 
-/* POSIX advisory record locking is not universally available.  WASIX
- * (and wasi-libc generally) declares struct flock and the l_type
- * values but deliberately omits the F_GETLK/F_SETLK commands, because
- * there is no host lock manager behind them -- see the
- * __wasilibc_unmodified_upstream guards in its <fcntl.h>.  Detect that
- * by the absence of the command constants rather than by testing for a
- * specific platform macro, so any libc making the same choice is
- * handled without further edits here. */
-#if !defined(F_GETLK) || !defined(F_SETLK)
-#define EMIL_NO_FILE_LOCKING 1
-#endif
+/* EMIL_NO_FILE_LOCKING and the contract it implies are defined in
+ * fileio.h, so the tests get the same answer from the same place. */
 
 /* Probe whether an advisory lock is held on a file without acquiring one.
  * Returns 0 if no lock is held, PID if locked , -1 if unknown
@@ -198,63 +189,87 @@ void releaseLock(struct buffer *bufr) {
 	if (bufr->lock_fd >= 0) {
 		close(bufr->lock_fd);
 		bufr->lock_fd = -1;
-		relockAll();
 	}
 	bufr->lock_blocked_pid = 0;
 }
 
-/* Re-assert every advisory lock we believe we hold.
+/* Re-assert this buffer's advisory lock after we closed a descriptor
+ * on its file.
  *
  * POSIX record locks are owned by the process, not the descriptor:
  * closing *any* descriptor referring to an inode drops every lock the
- * process holds on it (APUE §14.3). */
+ * process holds on it (APUE §14.3).  So an operation as ordinary as
+ * `C-x i` on the file the buffer is already visiting -- one fopen()
+ * and one fclose() -- silently releases the lock markBufferDirty()
+ * took, while lock_fd stays open so emil goes on believing it holds
+ * one.  Every path that opens and closes a file behind a dirty buffer
+ * calls this afterwards.
+ *
+ * Nothing inside emil can otherwise notice the loss: F_GETLK reports
+ * F_UNLCK for a lock the calling process holds itself, so the only
+ * observer is the second emil instance that was supposed to be warned
+ * off.  Repair, not prevention: the only way to keep a lock across an
+ * unrelated close is F_OFD_SETLK, outside the POSIX.1-2001 baseline
+ * (§1.2).
+ *
+ * Re-issued on the retained descriptor, not by calling lockFile():
+ * lockFile() opens a fresh fd (whose later close would drop the lock
+ * again) and resets open_mtime, which would move the external-
+ * modification baseline (§3.21.4) on an operation that never touched
+ * the file's contents.  The lock type is recovered from the fd's
+ * access mode, which agrees with the type lockFile() took by
+ * construction (O_RDWR -> F_WRLCK, O_RDONLY -> F_RDLCK). */
 #ifdef EMIL_NO_FILE_LOCKING
-void relockAll(void) {
-	/* lockFile() never sets lock_fd on this platform, so no buffer
-	 * can be holding a lock to re-assert. */
+void relockIfDirty(struct buffer *bufr) {
+	/* lockFile() never sets lock_fd on this platform, so there is
+	 * no lock to re-assert. */
+	(void)bufr;
 }
 #else
-void relockAll(void) {
-	for (struct buffer *b = E.headbuf; b != NULL; b = b->next) {
-		if (b->lock_fd < 0)
-			continue;
+void relockIfDirty(struct buffer *bufr) {
+	if (!bufr->dirty || bufr->lock_fd < 0)
+		return;
 
-		int mode = fcntl(b->lock_fd, F_GETFL);
-		struct flock fl;
-		memset(&fl, 0, sizeof(fl));
-		fl.l_type = (mode >= 0 && (mode & O_ACCMODE) == O_RDWR) ?
-				    F_WRLCK :
-				    F_RDLCK;
-		fl.l_whence = SEEK_SET;
-		fl.l_start = 0;
-		fl.l_len = 0; /* whole file */
+	int mode = fcntl(bufr->lock_fd, F_GETFL);
+	struct flock fl;
+	memset(&fl, 0, sizeof(fl));
+	fl.l_type = (mode >= 0 && (mode & O_ACCMODE) == O_RDWR) ? F_WRLCK :
+								  F_RDLCK;
+	fl.l_whence = SEEK_SET;
+	fl.l_start = 0;
+	fl.l_len = 0; /* whole file */
 
-		if (fcntl(b->lock_fd, F_SETLK, &fl) == 0)
-			continue; /* still ours, or ours again */
+	while (fcntl(bufr->lock_fd, F_SETLK, &fl) != 0) {
+		if (errno == EINTR)
+			continue; /* no SA_RESTART: retry, don't give up */
 
 		int lock_errno = errno;
 
 		if (lock_errno == EACCES || lock_errno == EAGAIN) {
 			/* Another process took it in the window between
 			 * the close and here.  Name the holder and route
-			 * into the existing LOCK_CONFLICT presentation.*/
+			 * into the existing LOCK_CONFLICT presentation. */
 			struct flock query;
 			memset(&query, 0, sizeof(query));
 			query.l_type = F_WRLCK;
 			query.l_whence = SEEK_SET;
 			query.l_start = 0;
 			query.l_len = 0;
-			if (fcntl(b->lock_fd, F_GETLK, &query) == 0 &&
+			if (fcntl(bufr->lock_fd, F_GETLK, &query) == 0 &&
 			    query.l_type != F_UNLCK)
-				b->lock_blocked_pid = (int)query.l_pid;
+				bufr->lock_blocked_pid = (int)query.l_pid;
 			else
-				b->lock_blocked_pid = -1;
-			close(b->lock_fd);
-			b->lock_fd = -1;
+				bufr->lock_blocked_pid = -1;
 		} else {
-			close(b->lock_fd);
-			b->lock_fd = -1;
+			/* ENOLCK and the rest: no holder to wait for, and
+			 * nothing to re-probe.  Leave lock_blocked_pid so
+			 * the background poll does not chase a dead lock
+			 * manager (§3.21.3). */
+			bufr->lock_blocked_pid = -1;
 		}
+		close(bufr->lock_fd);
+		bufr->lock_fd = -1;
+		break;
 	}
 }
 #endif /* EMIL_NO_FILE_LOCKING */
@@ -369,7 +384,7 @@ void checkFileModified(void) {
 				E.buf->lock_blocked_pid = pid;
 			}
 		}
-		relockAll();
+		relockIfDirty(E.buf);
 		free(iopath);
 	}
 }
@@ -446,10 +461,12 @@ static int fileContainsNullBytes(FILE *fp) {
 
 static int editorOpenBody(struct buffer *bufr, const char *filename);
 
-/* The wrapper exists so that relockAll() cannot be bypassed. */
+/* The wrapper exists so that relockIfDirty() cannot be bypassed:
+ * editorOpenBody opens and closes the file, which drops any lock this
+ * buffer held on that inode. */
 int editorOpen(struct buffer *bufr, const char *filename) {
 	int rc = editorOpenBody(bufr, filename);
-	relockAll();
+	relockIfDirty(bufr);
 	return rc;
 }
 
@@ -933,7 +950,7 @@ static void saveBuffer(int skip_backup) {
 		if (stat(iopath, &st) == 0 && S_ISREG(st.st_mode)) {
 			int backup_rc = makeVerifiedBackup(iopath, backup_path,
 							   sizeof(backup_path));
-			relockAll();
+			relockIfDirty(E.buf);
 
 			if (backup_rc == 0) {
 				have_backup = 1;
@@ -975,7 +992,7 @@ static void saveBuffer(int skip_backup) {
 	while (1) {
 		int rc = writeInPlace(iopath, buf, len, have_backup,
 				      skip_backup, &damaged);
-		relockAll();
+		relockIfDirty(E.buf);
 
 		if (rc == 0) {
 			/*
@@ -1256,11 +1273,13 @@ void findFile(int read_only) {
 static int insertFileAtPathBody(struct buffer *buf, const char *path,
 				const char *display_name);
 
-/* Wrapped so that relockAll cannot be bypassed */
+/* Wrapped so that relockIfDirty cannot be bypassed: the body opens and
+ * closes the inserted file, which drops buf's lock when buf is already
+ * visiting that same file (C-x i on itself). */
 int insertFileAtPath(struct buffer *buf, const char *path,
 		     const char *display_name) {
 	int rc = insertFileAtPathBody(buf, path, display_name);
-	relockAll();
+	relockIfDirty(buf);
 	return rc;
 }
 

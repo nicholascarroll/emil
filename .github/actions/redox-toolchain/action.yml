@@ -1,0 +1,57 @@
+# Copyright (c) 2026 Nicholas Carroll.
+# SPDX-License-Identifier: MIT
+#
+# The redox and redox-run jobs need the identical three steps.  They
+# were copied into both, and the two copies had already diverged: only
+# one of them printed the provenance it had just gone to the trouble of
+# fetching.
+name: Redox toolchain
+description: Identify, cache and install the current Redox GCC + relibc toolchain.
+
+inputs:
+  prefix:
+    description: Directory to unpack the toolchain into.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # Upstream publishes no version to pin to: the archives sit at a
+    # fixed URL, carry no version in their names, and are rebuilt
+    # nightly.  The SHA256SUM beside them is the only identifier, so it
+    # is both the cache key and the provenance record.  The fetch is
+    # cache-busted, or a cached copy would pin the key to a build that
+    # is no longer being served.
+    - name: Identify the current Redox toolchain build
+      id: rxbuild
+      shell: bash
+      run: |
+        set -euo pipefail
+        curl -fsSL --retry 5 --retry-all-errors \
+          -o /tmp/redox-SHA256SUM \
+          "https://static.redox-os.org/toolchain/x86_64-unknown-redox/SHA256SUM?cb=${{ github.run_id }}"
+        echo "--- upstream SHA256SUM (the toolchain's only version) ---"
+        cat /tmp/redox-SHA256SUM
+        echo "key=$(sha256sum /tmp/redox-SHA256SUM | cut -c1-16)" >> "$GITHUB_OUTPUT"
+        echo "--- artifact timestamps ---"
+        for f in SHA256SUM gcc-install.tar.gz relibc-install.tar.gz; do
+          printf '%-24s ' "$f"
+          curl -fsSI --retry 3 \
+            "https://static.redox-os.org/toolchain/x86_64-unknown-redox/$f" \
+            | grep -i '^last-modified' | tr -d '\r' || echo '(no header)'
+        done
+
+    # The archives are cached, not the unpacked tree: 529M against 1.4G,
+    # and unpacking again costs about 18 seconds.  The Genode job
+    # already holds ~680M of the repository's cache budget.
+    - name: Cache Redox toolchain archives
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ inputs.prefix }}/gcc-install.tar.gz
+          ${{ inputs.prefix }}/relibc-install.tar.gz
+        key: redox-archives-${{ steps.rxbuild.outputs.key }}-${{ hashFiles('tests/redox_setup.sh') }}
+
+    - name: Install the Redox toolchain
+      shell: bash
+      run: ./tests/redox_setup.sh "${{ inputs.prefix }}"

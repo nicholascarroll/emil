@@ -1,0 +1,5 @@
+genodelabs/src/libc
+genodelabs/src/posix
+genodelabs/src/vfs
+genodelabs/src/vfs_jitterentropy
+genodelabs/src/vfs_pipe

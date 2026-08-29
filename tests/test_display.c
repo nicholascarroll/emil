@@ -152,7 +152,7 @@ void test_scroll_leaves_cursor_on_char_boundary(void) {
  * uarg-repeated command runs many operations per frame.  The word-wrap
  * path in scrollViewport indexes buf->row[win->rowoff] directly, so a
  * stale rowoff there read a row->chars that delRow had already freed
- * (heap-use-after-free, found by fuzz_undo.c under ASan).
+ * (heap-use-after-free, found by the fuzzer under ASan).
  *
  * Asserted as a bounds check rather than left to the sanitizer, so the
  * test fails on a plain build too. */
@@ -223,7 +223,7 @@ void test_scroll_down_with_stale_rowoff_stays_in_bounds(void) {
  * editor, because neither the height distribution nor sizePopupWindow
  * floors at one row -- makes the first branch assign cy = rowoff
  * outright, so a rowoff past a shortened buffer reads off the end of
- * the row array.  Found by fuzz_undo on seeds other than 1. */
+ * the row array.  Found by the fuzzer on seeds other than 1. */
 void test_clamp_cursor_zero_height_window_stays_in_bounds(void) {
 	initTestEditor();
 	static const char *lines[5] = { "alpha", "beta", "gamma", "delta",
@@ -704,7 +704,20 @@ void setUp(void) {
  * the number drawMinibuffer needs, and no message byte is lost.
  * ================================================================ */
 
-/* Repeat a CJK character (U+8A9E, 3 bytes / 2 columns) n times. */
+/* Lines a run of n CJK characters needs at a given screen width.
+ *
+ * Worked out from whole characters, which is the whole point of the
+ * report: the old code divided total columns by screen width and came
+ * up a line short whenever a character straddled the edge.  Computing
+ * it here rather than hardcoding it keeps the cases right on a platform
+ * where a CJK character measures one column instead of two -- the
+ * straddle cannot arise there, and the expected count says so. */
+static int cjkLinesNeeded(int screencols, int nchars) {
+	int per_line = screencols / wideCols();
+	return (nchars + per_line - 1) / per_line;
+}
+
+/* Repeat a CJK character (U+8A9E, 3 bytes) n times. */
 static char *cjkRepeat(int n) {
 	char *s = xmalloc(n * 3 + 1);
 	for (int i = 0; i < n; i++)
@@ -720,19 +733,17 @@ void test_minibuf_layout_sizes_wide_messages(void) {
 	struct {
 		int screencols;
 		int nchars;
-		int expected;
 	} cases[] = {
-		{ 9, 9, 3 },
-		{ 9, 13, 4 },
-		{ 11, 11, 3 },
-		{ 11, 16, 4 },
+		{ 9, 9 }, { 9, 13 }, { 11, 11 }, { 11, 16 },
 	};
 
 	for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
 		char *msg = cjkRepeat(cases[i].nchars);
 		int n = minibufLayout(msg, 0, cases[i].screencols, lines,
 				      MINIBUF_MAX_LINES);
-		TEST_ASSERT_EQUAL_INT(cases[i].expected, n);
+		TEST_ASSERT_EQUAL_INT(cjkLinesNeeded(cases[i].screencols,
+						     cases[i].nchars),
+				      n);
 		free(msg);
 	}
 }
@@ -857,12 +868,8 @@ void test_minibuf_sizing_matches_what_is_drawn(void) {
 	struct {
 		int screencols;
 		int nchars;
-		int expected;
 	} cases[] = {
-		{ 9, 9, 3 },
-		{ 9, 13, 4 },
-		{ 11, 11, 3 },
-		{ 11, 16, 4 },
+		{ 9, 9 }, { 9, 13 }, { 11, 11 }, { 11, 16 },
 	};
 
 	for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
@@ -873,7 +880,9 @@ void test_minibuf_sizing_matches_what_is_drawn(void) {
 
 		/* The sizing path, as refreshScreen runs it. */
 		int sized = minibufHeightNeeded();
-		TEST_ASSERT_EQUAL_INT(cases[i].expected, sized);
+		TEST_ASSERT_EQUAL_INT(cjkLinesNeeded(cases[i].screencols,
+						     cases[i].nchars),
+				      sized);
 
 		minibuffer_height = sized;
 		struct abuf ab = ABUF_INIT;
@@ -905,10 +914,12 @@ void tearDown(void) {
 }
 
 int main(void) {
-	/* charAdvance prices a CJK character at 2 columns only under a
-	 * UTF-8 LC_CTYPE (§1.3); the DEF-2 cases are all about wide
-	 * characters, so they need it. */
-	setlocale(LC_CTYPE, "C.UTF-8");
+	/* The same locale selection the editor performs, so what these
+	 * tests assert and what emil does cannot drift apart.  Returns 0
+	 * where the platform has no UTF-8 locale (Genode), and the wide
+	 * widths below are expressed as wideCols() rather than a literal
+	 * 2 for that reason. */
+	(void)selectUtf8Locale();
 
 	TEST_BEGIN();
 

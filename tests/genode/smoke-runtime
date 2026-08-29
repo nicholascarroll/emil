@@ -1,0 +1,42 @@
+<!-- Runtime for the CI smoke test: run the editor with the version
+     flag, so that it prints and exits.
+     Copyright (c) 2026 Nicholas Carroll.  SPDX-License-Identifier: MIT
+
+     This is deliberately not pkg/runtime.  That file describes the
+     editor as it is meant to be deployed, wired to a terminal and a
+     file system; this one describes the smallest scenario that proves
+     the binary actually runs.  CI copies it over pkg/runtime before
+     calling `goa run-dir`, because a goa project has exactly one pkg.
+
+     stdout goes to /dev/log rather than to a terminal.  The version
+     flag is handled in main() before raw mode and before the event
+     loop, so
+     the editor never opens a terminal on this path and none has to be
+     provided.  There is no file_system either: nothing is opened. -->
+
+<runtime ram="32M" caps="1000" binary="emil">
+
+	<config>
+		<libc stdin="/dev/null" stdout="/dev/log" stderr="/dev/log"/>
+
+		<vfs>
+			<dir name="dev">
+				<log/>
+				<null/>
+				<zero/>
+			</dir>
+		</vfs>
+
+		<arg value="emil"/>
+		<arg value="--version"/>
+	</config>
+
+	<content>
+		<rom label="emil"/>
+		<rom label="libc.lib.so"/>
+		<rom label="libm.lib.so"/>
+		<rom label="posix.lib.so"/>
+		<rom label="vfs.lib.so"/>
+	</content>
+
+</runtime>

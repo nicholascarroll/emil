@@ -1,0 +1,88 @@
+# Copyright (c) 2026 Nicholas Carroll.
+# SPDX-License-Identifier: MIT
+#
+# Makefile for the Genode cross build.  Installed as src/Makefile by
+# genode/stage.sh; not used by any native build.
+#
+# Goa supplies CC, CPPFLAGS, CFLAGS, LDFLAGS and LDLIBS on the make
+# command line, pointing at the Genode toolchain and at the libc and
+# posix APIs resolved from the depot.  A command-line assignment beats
+# any assignment in this file, so nothing here may be spelled with one
+# of those names and expect to survive.  Flags this build needs are
+# therefore held in EMIL_CPPFLAGS and EMIL_CFLAGS, which goa does not
+# set, and are placed ahead of goa's on each compiler line.
+
+PROGNAME = emil
+
+# Genode has no /bin/sh, so the shell-integration paths are compiled
+# out; emil_subprocess.c and pipe.c both reduce to their stub halves
+# under this define.  See emil_subprocess.h.  This is the same exclusion
+# the Android target makes, for the same reason.
+# Written by stage.sh from VERSION in the top-level Makefile.
+include version.mk
+
+EMIL_CPPFLAGS = -DEMIL_DISABLE_SHELL -D_DEFAULT_SOURCE -D_BSD_SOURCE \
+                -DEMIL_VERSION='"$(EMIL_VERSION)"'
+
+EMIL_CFLAGS = -std=c99 -Wall -Wextra -Wpedantic
+
+# Editor objects.  The wildcard is confined to the top level, so test
+# sources in tests/ cannot be swept in -- which would link a second
+# main() into the editor.
+SRCS = $(wildcard *.c)
+OBJS = $(SRCS:.c=.o)
+
+# The suites link the editor's objects minus main.o, plus the test
+# stubs.  This list is the same one tests/run_tests.sh uses; the two
+# should be changed together.
+TEST_OBJECTS = decoder.o unicode.o buffer.o region.o undo.o transform.o \
+    find.o pipe.o register.o fileio.o display.o keymap.o \
+    edit.o prompt.o util.o completion.o history.o base64.o abuf.o \
+    window.o ctags.o adjust.o mutate.o wrap.o motion.o dbuf.o \
+    emil_subprocess.o palette.o backup.o tests/stubs.o
+
+# Suites that cannot be built for this target.  These are not failures
+# and not skips-for-convenience; each names something that does not
+# exist here.
+#
+#   test_shell, test_subprocess  exercise the shell-integration API,
+#                                which EMIL_DISABLE_SHELL compiles out.
+#                                They do not link because the functions
+#                                they call are not in this build.
+#   test_warnings                drives the host compiler.
+#
+# tests/decoder_pty_test.c is not a test_*.c and so is never picked up;
+# it could not run in any case, as Genode's libc exports grantpt and
+# unlockpt but not posix_openpt.
+UNBUILDABLE = tests/test_shell.c tests/test_subprocess.c tests/test_warnings.c
+
+SUITE_SRCS = $(filter-out $(UNBUILDABLE),$(wildcard tests/test_*.c))
+
+# Suites are linked into their own directory so that the project's
+# `artifacts` file can select them with a directory selector.  Goa's
+# artifact selectors match a single file or the contents of a
+# directory -- there is no name globbing -- so listing them one by one
+# would mean editing `artifacts` every time a suite is added.
+SUITES = $(patsubst tests/test_%.c,suites/test_%,$(SUITE_SRCS))
+
+all: $(PROGNAME) $(SUITES)
+
+$(PROGNAME): $(OBJS)
+	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(LDLIBS)
+
+suites:
+	mkdir -p $@
+
+suites/test_%: tests/test_%.o $(TEST_OBJECTS) | suites
+	$(CC) $(LDFLAGS) -o $@ $< $(TEST_OBJECTS) $(LDLIBS)
+
+# -I. so that the suites find test.h, test_harness.h and the generated
+# tests/backup_faked.c by the same relative paths run_tests.sh uses.
+%.o: %.c
+	$(CC) $(EMIL_CPPFLAGS) $(CPPFLAGS) $(EMIL_CFLAGS) $(CFLAGS) -I. -c -o $@ $<
+
+clean:
+	rm -f $(OBJS) tests/*.o $(PROGNAME)
+	rm -rf suites
+
+.PHONY: all clean

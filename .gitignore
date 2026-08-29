@@ -3,12 +3,28 @@
 *.exe
 *.stackdump
 tempy
-emil
+/*.patch
+/emil
 unicodetest
 /build
 /tests/test_*
 !/tests/test_*.c
 !/tests/test_*.h
 !/tests/test_*.sh
+
+# Linked harnesses.  run_tests.sh unlinks these itself; the Asterinas
+# payload build leaves decoder_pty_test behind on purpose, because it is
+# staged into the initramfs.
+/tests/decoder_pty_test
+/tests/fuzz_undo
 tags
 
+
+# WASIX build artifacts
+*.wasm
+.build-tag
+/wasix-sandbox/
+
+# Genode/goa build (stage.sh output and goa's depot cache)
+tests/genode/emil/src/
+tests/genode/emil/var/
