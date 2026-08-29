@@ -383,6 +383,87 @@ void test_scroll_returns_the_cursor_display_column(void) {
 	cleanupTestEditor();
 }
 
+/* ---- The `Bot` indicator, in both wrap modes ----
+ *
+ * §5.1.2 says `Bot` when the end of the buffer is visible.  The end
+ * flag had one formula per mode -- `rowoff + height > numrows` without
+ * wrap, "does the last screen line fall within the window" with it --
+ * and they disagree by one line at exactly this position: the last row
+ * drawn on the window's last line, no blank line below it.  Without
+ * wrap the bar reported a percentage there; with wrap, `Bot`.
+ *
+ * Ten five-column rows plus the buffer's own final empty row (§4.9) is
+ * eleven screen lines in either mode, so a six-line window with its top
+ * on row 5 ends exactly on row 10.  The two modes draw the identical
+ * picture, which is the whole point: they must report it identically. */
+static struct buffer *last_row_on_last_line(int wrap, int rowoff) {
+	initTestEditor();
+	const char *lines[10];
+	for (int i = 0; i < 10; i++)
+		lines[i] = "short";
+	struct buffer *buf = make_test_buffer_lines(lines, 10);
+	E.buf = buf;
+	E.windows[0]->buf = buf;
+	E.windows[0]->focused = 1;
+	E.windows[0]->height = 6;
+	E.windows[0]->rowoff = rowoff;
+	E.windows[0]->skip_sublines = 0;
+	buf->word_wrap = wrap;
+	buf->cy = buf->numrows - 1;
+	buf->cx = 0;
+	return buf;
+}
+
+/* Draw the window, which is what sets buf->end, and report whether the
+ * status bar names the given indicator. */
+static int drawAndStatusHas(struct window *win, const char *needle) {
+	struct abuf rows = ABUF_INIT;
+	drawRows(win, &rows, win->height, E.screencols);
+	abFree(&rows);
+
+	struct abuf bar = ABUF_INIT;
+	drawStatusBar(win, &bar, win->height + 1, -1);
+	int found = containsBytes(bar.b, bar.len, needle, (int)strlen(needle));
+	abFree(&bar);
+	return found;
+}
+
+void test_bot_shown_when_the_last_row_is_on_the_windows_last_line(void) {
+	for (int wrap = 0; wrap <= 1; wrap++) {
+		struct buffer *buf = last_row_on_last_line(wrap, 5);
+		TEST_ASSERT_EQUAL_INT(11, buf->numrows);
+
+		TEST_ASSERT_TRUE(drawAndStatusHas(E.windows[0], "Bot"));
+		TEST_ASSERT_EQUAL_INT(1, buf->end);
+		cleanupTestEditor();
+	}
+}
+
+/* The complement, so the test above cannot be satisfied by an end flag
+ * that is simply always set: one line higher, row 10 is off screen. */
+void test_bot_not_shown_when_the_last_row_is_off_screen(void) {
+	for (int wrap = 0; wrap <= 1; wrap++) {
+		struct buffer *buf = last_row_on_last_line(wrap, 4);
+
+		TEST_ASSERT_FALSE(drawAndStatusHas(E.windows[0], "Bot"));
+		TEST_ASSERT_EQUAL_INT(0, buf->end);
+		cleanupTestEditor();
+	}
+}
+
+/* And at the top of a buffer that fits entirely, `All` rather than
+ * `Bot` -- the same flag, read together with rowoff == 0. */
+void test_all_shown_when_the_whole_buffer_fits(void) {
+	for (int wrap = 0; wrap <= 1; wrap++) {
+		struct buffer *buf = last_row_on_last_line(wrap, 0);
+		E.windows[0]->height = buf->numrows;
+
+		TEST_ASSERT_TRUE(drawAndStatusHas(E.windows[0], "All"));
+		TEST_ASSERT_EQUAL_INT(1, buf->end);
+		cleanupTestEditor();
+	}
+}
+
 /* ---- §D.4: C-l centres in screen lines ----
  *
  * recenter subtracted half the window height from cy, which is half a
@@ -494,9 +575,11 @@ void test_scroll_puts_a_cursor_below_the_window_on_its_last_line(void) {
 	buf->cy = 5; /* nine sub-lines below the window */
 	buf->cx = 0;
 
-	int cursor_col = scroll();
+	struct cursorHint hint;
+	int cursor_col = scrollFocused(&hint);
+	(void)cursor_col;
 	int scx, scy;
-	screenCursorPos(E.windows[0], cursor_col, &scx, &scy);
+	screenCursorPos(E.windows[0], &hint, &scx, &scy);
 
 	TEST_ASSERT_EQUAL_INT(E.windows[0]->height - 1, scy);
 	TEST_ASSERT_EQUAL_INT(0, scx);
@@ -511,14 +594,56 @@ void test_scroll_puts_a_cursor_above_the_window_on_its_first_line(void) {
 	buf->cy = 1;
 	buf->cx = 0;
 
-	int cursor_col = scroll();
+	struct cursorHint hint;
+	int cursor_col = scrollFocused(&hint);
+	(void)cursor_col;
 	int scx, scy;
-	screenCursorPos(E.windows[0], cursor_col, &scx, &scy);
+	screenCursorPos(E.windows[0], &hint, &scx, &scy);
 
 	TEST_ASSERT_EQUAL_INT(0, scy);
 	TEST_ASSERT_EQUAL_INT(0, scx);
 	cleanupTestEditor();
 }
+
+/* The hint scrollFocused() hands to screenCursorPos() must be the
+ * position screenCursorPos() would have computed for itself (#116).
+ * A hint that disagrees puts the terminal cursor in the wrong cell,
+ * with nothing in the frame to notice: the character under it is drawn
+ * by drawRows, which never consults either path.  So the two are
+ * asserted equal directly, over every row and a spread of columns, in
+ * both wrap modes and at four window heights -- including zero, where
+ * neither path has a real line to report. */
+void test_cursor_hint_matches_the_computed_position(void) {
+	static const int heights[] = { 0, 1, 2, 5 };
+	for (int wrap = 0; wrap <= 1; wrap++)
+	for (size_t h = 0; h < sizeof(heights) / sizeof(heights[0]); h++) {
+		struct buffer *buf = wrapped_buffer(6, heights[h]);
+		buf->word_wrap = wrap;
+
+		for (int cy = 0; cy < buf->numrows; cy++) {
+			int size = buf->row[cy].size;
+			for (int cx = 0; cx <= size; cx += 37) {
+				buf->cy = cy;
+				buf->cx = cx;
+
+				struct cursorHint hint;
+				scrollFocused(&hint);
+
+				int hx, hy, wx, wy;
+				screenCursorPos(E.windows[0], &hint, &hx, &hy);
+				screenCursorPos(E.windows[0], NULL, &wx, &wy);
+
+				TEST_ASSERT_EQUAL_INT(wx, hx);
+				TEST_ASSERT_EQUAL_INT(wy, hy);
+				/* Including the degenerate window: no
+				 * screen row is ever negative. */
+				TEST_ASSERT(hy >= 0 && hx >= 0);
+			}
+		}
+		cleanupTestEditor();
+	}
+}
+
 
 /* An edit above a non-focused window's top must leave that window
  * showing the same text.  4.1 asserts the anchor moves; this asserts
@@ -799,6 +924,13 @@ int main(void) {
 	RUN_TEST(test_drawrows_pads_short_row_to_full_width);
 	RUN_TEST(test_statusbar_uses_the_frames_cursor_column);
 	RUN_TEST(test_scroll_returns_the_cursor_display_column);
+
+	RUN_TEST(test_cursor_hint_matches_the_computed_position);
+
+	/* The `Bot` indicator, both wrap modes */
+	RUN_TEST(test_bot_shown_when_the_last_row_is_on_the_windows_last_line);
+	RUN_TEST(test_bot_not_shown_when_the_last_row_is_off_screen);
+	RUN_TEST(test_all_shown_when_the_whole_buffer_fits);
 
 	/* §D.4 */
 	RUN_TEST(test_recenter_centres_in_screen_lines_under_wrap);

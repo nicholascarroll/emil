@@ -132,8 +132,8 @@ struct buffer {
 	int word_wrap;
 	int rectangle_mode;
 	int read_only;
-	int read_only_by_lock;/* managed by the advisory lock */
-	int lock_fd; /* fd holding advisory lock, or -1 */
+	int read_only_by_lock; /* managed by the advisory lock */
+	int lock_fd;	       /* fd holding advisory lock, or -1 */
 	/* Only used for equality comparison with stat().st_mtime.
 	 * Safe across the 2038 boundary.  Do NOT do arithmetic on
 	 * this field. */

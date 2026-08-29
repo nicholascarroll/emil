@@ -403,18 +403,6 @@ void scrollViewport(struct window *win, struct buffer *buf, int n) {
 	}
 }
 
-/* Update buf->end: is the last buffer line visible in the window? */
-static void updateEndFlag(struct window *win, struct buffer *buf) {
-	if (!buf->word_wrap) {
-		buf->end = (win->rowoff + win->height > buf->numrows);
-		return;
-	}
-	/* Not "how far is the end of the buffer" but "does it fall within
-	 * the window": walk forward at most height lines and see whether
-	 * the buffer runs out (§D). */
-	buf->end = (linesToEnd(win, buf, win->height) <= win->height);
-}
-
 /* Where the cursor sits within its own row: which sub-line, and which
  * column of it.
  *
@@ -611,9 +599,18 @@ static int renderLineWithHighlighting(erow *row, struct abuf *ab, int start_col,
  * already computed for the same position this frame; -1 means compute
  * it here.  Recomputing it is O(cx), so on a long line the duplicate
  * cost the frame as much as the walk itself. */
-void screenCursorPos(struct window *win, int cursor_col, int *scx_out,
-		     int *scy_out) {
+void screenCursorPos(struct window *win, const struct cursorHint *hint,
+		     int *scx_out, int *scy_out) {
 	struct buffer *buf = win->buf;
+	if (hint) {
+		/* scrollFocused() placed this cursor earlier in the frame
+		 * and reported where it landed; recomputing it here walked
+		 * the row and the viewport a second time (#116). */
+		*scx_out = hint->scx;
+		*scy_out = hint->scy;
+		return;
+	}
+	int cursor_col = -1;
 	erow *row = &buf->row[buf->cy]; /* cy < numrows (#105) */
 	int total_width = cursor_col >= 0 ? cursor_col :
 					    charsToDisplayColumn(row, buf->cx);
@@ -635,53 +632,59 @@ void screenCursorPos(struct window *win, int cursor_col, int *scx_out,
 			    (buf->cy == top.row && sub_line < top.subline);
 		scy = above ? 0 : win->height - 1;
 	}
+	/* A window of no height has no line to report, and height - 1
+	 * above is then negative.  The frame has to put the cursor
+	 * somewhere; row 0 of the window is the only defensible
+	 * answer, and a negative one would address the wrong row. */
+	if (scy < 0)
+		scy = 0;
 
 	*scx_out = scx;
 	*scy_out = scy;
 }
 
-/* Returns the display column of the focused cursor, which it computes
- * to place the viewport.  screenCursorPos() and the status bar want the
- * same number for the same position, and each walk is O(cx). */
-int scroll(void) {
-	struct window *win = E.windows[windowFocusedIdx()];
-	struct buffer *buf = win->buf;
-	/* Both branches below assign it; initialised because they are
-	 * two separate ifs on the same condition, which the compiler
-	 * does not read as exhaustive. */
-	int cursor_col = 0;
-
-	if (buf->cy > buf->numrows - 1) {
-		buf->cy = buf->numrows - 1;
-		buf->cx = buf->row[buf->cy].size;
-	} else if (buf->cx > buf->row[buf->cy].size) {
-		buf->cx = buf->row[buf->cy].size;
-	}
+/* The vertical half of viewport placement: move `win`'s top so the
+ * cursor's screen line is inside the window, and report where the
+ * cursor landed.
+ *
+ * `cursor_col` is the display column of (cx, cy) and is read only
+ * under word wrap.  The screen row and the column within the sub-line
+ * fall out of the placement decision, so they are reported rather
+ * than recomputed by a caller that wants them (#116). */
+static void scrollVertical(struct window *win, struct buffer *buf,
+			   int cursor_col, int *out_scy, int *out_sub_col) {
+	int scy = 0, sub_col = cursor_col;
 
 	if (buf->word_wrap) {
-		cursor_col = charsToDisplayColumn(&buf->row[buf->cy], buf->cx);
-		int cursor_sub_line, sub_col;
-		cursorSubline(buf, cursor_col, &cursor_sub_line, &sub_col);
+		int sub_line;
+		cursorSubline(buf, cursor_col, &sub_line, &sub_col);
 
 		struct viewportTop top = topRead(win, buf);
-		int above =
-			buf->cy < top.row ||
-			(buf->cy == top.row && cursor_sub_line < top.subline);
+		int above = buf->cy < top.row ||
+			    (buf->cy == top.row && sub_line < top.subline);
 
 		if (above) {
 			/* Above the window: the cursor's own screen line
 			 * becomes the top one. */
-			topSet(win, buf, buf->cy, cursor_sub_line);
-		} else if (linesFromTop(win, buf, buf->cy, cursor_sub_line,
-					win->height - 1) < 0) {
-			/* Below it: put the cursor on the window's last
-			 * screen line by walking back height - 1 from it.*/
-			int row, subline;
-			linesBack(buf, buf->cy, cursor_sub_line,
-				  win->height - 1, &row, &subline);
-			topSet(win, buf, row, subline);
+			topSet(win, buf, buf->cy, sub_line);
+			scy = 0;
+		} else {
+			int n = linesFromTop(win, buf, buf->cy, sub_line,
+					     win->height - 1);
+			if (n < 0) {
+				/* Below it: put the cursor on the window's
+				 * last screen line by walking back
+				 * height - 1 from it. */
+				int row, subline;
+				linesBack(buf, buf->cy, sub_line,
+					  win->height - 1, &row, &subline);
+				topSet(win, buf, row, subline);
+				scy = win->height - 1;
+			} else {
+				/* Visible: the top stays. */
+				scy = n;
+			}
 		}
-		/* Otherwise the cursor is visible and the top stays. */
 	} else {
 		/* topSet() zeroes the skip: there are no sub-lines here. */
 		if (buf->cy < win->rowoff)
@@ -690,24 +693,59 @@ int scroll(void) {
 			topSet(win, buf, buf->cy - win->height + 1, 0);
 		else
 			topSet(win, buf, win->rowoff, 0);
+		scy = buf->cy - win->rowoff;
 	}
 
+	if (out_scy)
+		*out_scy = scy;
+	if (out_sub_col)
+		*out_sub_col = sub_col;
+}
+
+/* Returns the display column of the focused cursor, which it computes
+ * to place the viewport.  screenCursorPos() and the status bar want the
+ * same number for the same position, and each walk is O(cx). */
+int scrollFocused(struct cursorHint *hint) {
+	struct window *win = E.windows[windowFocusedIdx()];
+	struct buffer *buf = win->buf;
+
+	if (buf->cy > buf->numrows - 1) {
+		buf->cy = buf->numrows - 1;
+		buf->cx = buf->row[buf->cy].size;
+	} else if (buf->cx > buf->row[buf->cy].size) {
+		buf->cx = buf->row[buf->cy].size;
+	}
+
+	int cursor_col = charsToDisplayColumn(&buf->row[buf->cy], buf->cx);
+	int scy, sub_col;
+	scrollVertical(win, buf, cursor_col, &scy, &sub_col);
+
 	if (!buf->word_wrap) {
-		int rx = 0;
-		if (buf->cy < buf->numrows) {
-			rx = charsToDisplayColumn(&buf->row[buf->cy], buf->cx);
-		}
-		cursor_col = rx;
-		if (rx < win->coloff) {
-			win->coloff = rx;
-		} else if (rx >= win->coloff + E.screencols) {
-			win->coloff = rx - E.screencols + 1;
+		if (cursor_col < win->coloff) {
+			win->coloff = cursor_col;
+		} else if (cursor_col >= win->coloff + E.screencols) {
+			win->coloff = cursor_col - E.screencols + 1;
 		}
 	} else {
 		win->coloff = 0;
 	}
 
+	if (hint) {
+		hint->col = cursor_col;
+		hint->scx = buf->word_wrap ? sub_col : cursor_col - win->coloff;
+		if (hint->scx < 0)
+			hint->scx = 0;
+		hint->scy = scy;
+		if (hint->scy > win->height - 1)
+			hint->scy = win->height - 1;
+		if (hint->scy < 0)
+			hint->scy = 0;
+	}
 	return cursor_col;
+}
+
+int scroll(void) {
+	return scrollFocused(NULL);
 }
 
 /* Move `win`'s viewport so that `buf->cy` is visible, exactly as the
@@ -729,34 +767,11 @@ void scrollToShowCursor(struct window *win, struct buffer *buf) {
 	if (buf->cy > buf->numrows - 1)
 		buf->cy = buf->numrows - 1;
 
-	if (buf->word_wrap) {
-		int cursor_col =
-			charsToDisplayColumn(&buf->row[buf->cy], buf->cx);
-		int cursor_sub_line, sub_col;
-		cursorSubline(buf, cursor_col, &cursor_sub_line, &sub_col);
-
-		struct viewportTop top = topRead(win, buf);
-		int above =
-			buf->cy < top.row ||
-			(buf->cy == top.row && cursor_sub_line < top.subline);
-
-		if (above) {
-			topSet(win, buf, buf->cy, cursor_sub_line);
-		} else if (linesFromTop(win, buf, buf->cy, cursor_sub_line,
-					win->height - 1) < 0) {
-			int row, subline;
-			linesBack(buf, buf->cy, cursor_sub_line,
-				  win->height - 1, &row, &subline);
-			topSet(win, buf, row, subline);
-		}
-	} else {
-		if (buf->cy < win->rowoff)
-			topSet(win, buf, buf->cy, 0);
-		else if (buf->cy >= win->rowoff + win->height)
-			topSet(win, buf, buf->cy - win->height + 1, 0);
-		else
-			topSet(win, buf, win->rowoff, 0);
-	}
+	int cursor_col =
+		buf->word_wrap ?
+			charsToDisplayColumn(&buf->row[buf->cy], buf->cx) :
+			0;
+	scrollVertical(win, buf, cursor_col, NULL, NULL);
 }
 
 void drawRows(struct window *win, struct abuf *ab, int screenrows,
@@ -765,6 +780,7 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
 	int y;
 	int filerow = win->rowoff;
 	int skip = win->skip_sublines; /* sub-lines to skip on first row */
+	int truncated = 0; /* a row was cut off by the window's bottom */
 
 	for (y = 0; y < screenrows; y++) {
 		int filled =
@@ -880,6 +896,7 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
 						abAppend(ab, "\r\n", 2);
 						y++;
 					} else {
+						truncated = 1;
 						break;
 					}
 					line_start_col = break_col;
@@ -897,6 +914,18 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
 			abAppend(ab, "\r\n", 2);
 		}
 	}
+
+	/* Is the last buffer line visible?  The loop above just answered
+	 * that by running out of rows (or not) while filling the window;
+	 * asking again afterwards walked the same span a second time
+	 * (#116).
+	 *
+	 * One expression for both modes.  The two formulas this replaced
+	 * disagreed by one line: without wrap the flag demanded a blank
+	 * line past the last row, so the bar reported a percentage where
+	 * wrap reported `Bot` for the identical picture.  §5.1.2 says
+	 * `Bot` when the end of the buffer is visible, which is this. */
+	buf->end = (filerow >= buf->numrows && !truncated);
 }
 
 /* Truncate a UTF-8 string to fit within `max_cols` display columns,
@@ -1414,14 +1443,17 @@ void refreshScreen(void) {
 	/* The focused cursor's display column, computed once by scroll()
 	 * and reused by the status bar and the cursor placement below. */
 	int cursor_col = -1;
+	struct cursorHint hint;
+	int have_hint = 0;
 
 	for (int i = 0; i < E.nwindows; i++) {
 		struct window *win = E.windows[i];
 
-		if (win->focused)
-			cursor_col = scroll();
+		if (win->focused) {
+			cursor_col = scrollFocused(&hint);
+			have_hint = 1;
+		}
 		drawRows(win, ab, win->height, E.screencols);
-		updateEndFlag(win, win->buf);
 		cumulative_height += win->height + statusbar_height;
 		drawStatusBar(win, ab, cumulative_height,
 			      win->focused ? cursor_col : -1);
@@ -1437,7 +1469,7 @@ void refreshScreen(void) {
 	char buf[32];
 
 	int scx, scy;
-	screenCursorPos(focusedWin, cursor_col, &scx, &scy);
+	screenCursorPos(focusedWin, have_hint ? &hint : NULL, &scx, &scy);
 
 	int cursor_y = scy + 1; // 1-based index
 	for (int i = 0; i < focusedIdx; i++) {

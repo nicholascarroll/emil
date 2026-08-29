@@ -1127,7 +1127,7 @@ static int dispatchMisc(int c, int uarg) {
 		struct buffer *buf = w->buf;
 
 		int scx, scy;
-		screenCursorPos(w, -1, &scx, &scy);
+		screenCursorPos(w, NULL, &scx, &scy);
 
 		setStatusMessage(
 			"(buf->cx%d,cy%d) (screen %d,%d) win->height=%d "

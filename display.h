@@ -43,8 +43,17 @@ int scroll(void);
 void scrollViewport(struct window *win, struct buffer *buf, int n);
 void scrollToShowCursor(struct window *win, struct buffer *buf);
 void clampCursorToViewport(struct window *win, struct buffer *buf);
-void screenCursorPos(struct window *win, int cursor_col, int *scx_out,
-		     int *scy_out);
+/* Where the focused cursor landed, as a by-product of placing the
+ * viewport.  Filled by scrollFocused(); consumed by screenCursorPos(). */
+struct cursorHint {
+	int col; /* display column of (cx, cy) */
+	int scx; /* screen column within the window */
+	int scy; /* screen row within the window */
+};
+
+int scrollFocused(struct cursorHint *hint);
+void screenCursorPos(struct window *win, const struct cursorHint *hint,
+		     int *scx_out, int *scy_out);
 void cursorBottomLine(int curs);
 void resizeScreen(void);
 void recenter(struct window *win);
