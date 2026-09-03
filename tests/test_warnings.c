@@ -837,6 +837,40 @@ void test_insert_file_keeps_our_lock(void) {
 }
 #endif /* !EMIL_NO_FILE_LOCKING */
 
+/* The bare POSIX rule, with no editor in it. For issue #1880 on gitlab.redox.
+ *
+ * Same thing test_relock_reports_conflict_when_rival_takes_the_lock
+ * relies on, asserted against fcntl() alone. */
+#ifndef EMIL_NO_FILE_LOCKING
+void test_close_of_unrelated_descriptor_releases_lock(void) {
+	char *path = make_temp_file("0123456789");
+	TEST_ASSERT_NOT_NULL(path);
+
+	int fd = open(path, O_RDWR);
+	TEST_ASSERT_TRUE(fd >= 0);
+
+	struct flock fl;
+	memset(&fl, 0, sizeof(fl));
+	fl.l_type = F_WRLCK;
+	fl.l_whence = SEEK_SET;
+	fl.l_start = 0;
+	fl.l_len = 0;
+	TEST_ASSERT_EQUAL_INT(0, fcntl(fd, F_SETLK, &fl));
+
+	TEST_ASSERT_EQUAL_INT(1, lock_held_on(path)); /* baseline */
+
+	int scratch = open(path, O_RDONLY); /* never locks anything */
+	TEST_ASSERT_TRUE(scratch >= 0);
+	close(scratch);
+
+	TEST_ASSERT_EQUAL_INT(0, lock_held_on(path));
+
+	close(fd);
+	unlink(path);
+	free(path);
+}
+#endif /* !EMIL_NO_FILE_LOCKING */
+
 /* C-x C-f on a symlink to the open, dirty file.
  *
  * Same mechanism through a different door: editorOpen on a second
@@ -1034,6 +1068,9 @@ int main(void) {
 
 #ifndef EMIL_NO_FILE_LOCKING
 	RUN_TEST(test_insert_file_keeps_our_lock);
+#endif
+#ifndef EMIL_NO_FILE_LOCKING
+	RUN_TEST(test_close_of_unrelated_descriptor_releases_lock);
 #endif
 #ifndef EMIL_NO_FILE_LOCKING
 	RUN_TEST(test_relock_reports_conflict_when_rival_takes_the_lock);
