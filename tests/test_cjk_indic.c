@@ -454,16 +454,15 @@ void test_sentence_khmer_khan(void) {
 	struct buffer *buf = make_test_buffer(
 		"\xE1\x9E\x80\xE1\x9E\x81\xE1\x9F\x94"
 		"\xE1\x9E\x82\xE1\x9E\x83");
-	(void)buf;
 
 	int cx = 0, cy = 0;
-	TEST_ASSERT_EQUAL_INT(0, forwardSentenceEnd(&cx, &cy));
+	TEST_ASSERT_EQUAL_INT(0, forwardSentenceEnd(buf, &cx, &cy));
 	TEST_ASSERT_EQUAL_INT(9, cx); /* just past ។ */
 	TEST_ASSERT_EQUAL_INT(0, cy);
 
 	cx = 15;
 	cy = 0;
-	TEST_ASSERT_EQUAL_INT(0, backwardSentenceStart(&cx, &cy));
+	TEST_ASSERT_EQUAL_INT(0, backwardSentenceStart(buf, &cx, &cy));
 	TEST_ASSERT_EQUAL_INT(9, cx); /* sentence starts after ។ */
 	TEST_ASSERT_EQUAL_INT(0, cy);
 }
@@ -500,16 +499,14 @@ void test_word_motion_zwsp(void) {
 		"\xE2\x80\x8B"
 		"\xE0\xB8\x87\xE0\xB8\x88");
 
-	buf->cx = 0;
-	buf->cy = 0;
-	int dx, dy;
-	forwardWordEnd(&dx, &dy);
+	int dx = 0, dy = 0;
+	forwardWordEnd(buf, &dx, &dy);
 	TEST_ASSERT_EQUAL_INT(6, dx); /* stops at the ZWSP */
 	TEST_ASSERT_EQUAL_INT(0, dy);
 
-	buf->cx = 15;
-	buf->cy = 0;
-	backwardWordEnd(&dx, &dy);
+	dx = 15;
+	dy = 0;
+	backwardWordEnd(buf, &dx, &dy);
 	TEST_ASSERT_EQUAL_INT(9, dx); /* stops just after the ZWSP */
 	TEST_ASSERT_EQUAL_INT(0, dy);
 }

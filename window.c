@@ -16,6 +16,20 @@ int windowFocusedIdx(void) {
 	return 0;
 }
 
+const char *focusInvariantBreach(void) {
+	int nfocused = 0;
+	for (int i = 0; i < E.nwindows; i++)
+		if (E.windows[i]->focused)
+			nfocused++;
+	if (nfocused == 0)
+		return "no window is focused";
+	if (nfocused > 1)
+		return "more than one window is focused";
+	if (E.buf != E.windows[windowFocusedIdx()]->buf)
+		return "E.buf is not the focused window's buffer";
+	return NULL;
+}
+
 int findBufferWindow(struct buffer *buf) {
 	for (int i = 0; i < E.nwindows; i++) {
 		if (E.windows[i]->buf == buf) {
@@ -166,14 +180,25 @@ static void sizePopupWindow(int win_idx) {
 void showPopupBuffer(struct buffer *buf) {
 	int win_idx = findBufferWindow(buf);
 	if (win_idx < 0) {
-		/* First time: create the window and keep focus
-		 * on the original (first) window. */
+		/* First time: create the window.  Focus stays where it
+		 * is -- createWindow() appends the new window unfocused
+		 * and touches no other window's flag.
+		 *
+		 * This used to move focus to window 0 on the stated
+		 * assumption that window 0 was the one being edited.
+		 * With a split and the lower window focused, that left
+		 * E.buf naming one window's buffer while the cursor was
+		 * drawn in another: typing after C-g on a completion
+		 * list went to a buffer the user was not looking at,
+		 * and accepting a completion opened the file in the
+		 * wrong window.  It also left two windows focused once
+		 * the palette focused its own, which drew the cursor in
+		 * window 0 instead of the palette (#129) and was, by
+		 * accident, what kept restoreFocusTo() working; see
+		 * there. */
 		win_idx = E.nwindows;
 		createWindow();
 		E.windows[win_idx]->buf = buf;
-		E.windows[win_idx]->focused = 0;
-		for (int i = 0; i < E.nwindows; i++)
-			E.windows[i]->focused = (i == 0);
 	}
 
 	/* Always resize to match the current content. */

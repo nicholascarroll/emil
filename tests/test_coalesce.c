@@ -409,7 +409,7 @@ void test_deleting_past_the_end_repairs_in_one_step(void) {
 	assertContent(buf, "alpha\nbeta\n");
 
 	/* From inside the last line of text through the terminator. */
-	deleteRange(2, 1, 0, 2, 0);
+	deleteRange(buf, 2, 1, 0, 2, 0);
 
 	assertContent(buf, "alpha\nbe\n");
 	TEST_ASSERT_EQUAL_STRING("", row_str(buf, buf->numrows - 1));

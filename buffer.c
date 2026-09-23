@@ -450,7 +450,7 @@ void switchToNamedBuffer(void) {
 		snprintf(prompt, sizeof(prompt), "Switch to buffer: ");
 	}
 
-	uint8_t *buffer_name = editorPrompt(E.buf, prompt, PROMPT_BUFFER, NULL);
+	uint8_t *buffer_name = editorPrompt(prompt, PROMPT_BUFFER, NULL);
 
 	if (buffer_name == NULL) {
 		setStatusMessage("Buffer switch canceled");

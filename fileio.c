@@ -909,8 +909,8 @@ static void saveBuffer(int skip_backup) {
 	}
 
 	if (E.buf->filename == NULL || E.buf->special_buffer) {
-		char *input = (char *)editorPrompt(
-			E.buf, "Save as: ", PROMPT_FILES, NULL);
+		char *input =
+			(char *)editorPrompt("Save as: ", PROMPT_FILES, NULL);
 
 		if (input == NULL) {
 			setStatusMessage("Save aborted.");
@@ -1110,7 +1110,7 @@ void saveAs(void) {
 	}
 
 	char *new_filename =
-		(char *)editorPrompt(E.buf, "Save as: ", PROMPT_FILES, NULL);
+		(char *)editorPrompt("Save as: ", PROMPT_FILES, NULL);
 
 	if (new_filename == NULL) {
 		setStatusMessage("Save aborted.");
@@ -1140,16 +1140,67 @@ void saveAs(void) {
 	saveBuffer(0);
 }
 
-/* Switch the focused window to the named file.  If a buffer with that
- * filename already exists, reuse it; otherwise open a new one.
- * Returns the buffer on success, NULL on failure. */
+/* stat() under the 50ms deadline checkFileModified uses.  0 on success;
+ * a stat the deadline interrupts fails like any other. */
+static int timedStat(const char *filename, struct stat *st) {
+	char *iopath = expandTilde(filename);
+	armTimer();
+	int rc = stat(iopath, st);
+	disarmTimer();
+	free(iopath);
+	return rc;
+}
+
+/* By name first: findBufferByName compares literal and absolute forms,
+ * which settles foo.c against ./foo.c.  Then by file.  A symlink and
+ * its target, or two hard links, are different paths to one inode, and
+ * a second buffer on it is a second copy of the text, each saved over
+ * the other and each believing it holds the file's one advisory lock.
+ *
+ * Each open buffer's file is stat()ed now rather than remembered from
+ * when it was opened, so a file replaced on disk is compared as it is.
+ * The deadline keeps one buffer on a hung filesystem from stalling the
+ * open: a stat that times out or fails simply does not match.  An inode
+ * number of 0 is not trusted, since some filesystems and runtimes
+ * report it for every file. */
+struct buffer *findBufferForFile(const char *filename, int *by_file) {
+	if (by_file)
+		*by_file = 0;
+	struct buffer *buf = findBufferByName(filename);
+	if (buf || filename[0] == '*')
+		return buf;
+
+	struct stat want;
+	if (timedStat(filename, &want) != 0 || want.st_ino == 0)
+		return NULL;
+	for (struct buffer *b = E.headbuf; b != NULL; b = b->next) {
+		if (!b->filename || b->special_buffer)
+			continue;
+		struct stat have;
+		if (timedStat(b->filename, &have) == 0 &&
+		    have.st_dev == want.st_dev && have.st_ino == want.st_ino) {
+			if (by_file)
+				*by_file = 1;
+			return b;
+		}
+	}
+	return NULL;
+}
+
+/* Switch the focused window to the named file.  If a buffer already
+ * visits it (see findBufferForFile), reuse it; otherwise open a new
+ * one.  Returns the buffer on success, NULL on failure. */
 struct buffer *switchToFile(const char *filename) {
 	/* Check if already open */
-	struct buffer *buf = findBufferByName(filename);
+	int by_file;
+	struct buffer *buf = findBufferForFile(filename, &by_file);
 	if (buf) {
 		E.buf = buf;
 		E.windows[windowFocusedIdx()]->buf = buf;
 		resetFileCheckThrottle();
+		if (by_file)
+			setStatusMessage("%s and %s are the same file",
+					 filename, buf->filename);
 		return buf;
 	}
 
@@ -1182,9 +1233,9 @@ void findFile(int read_only) {
 		return;
 	}
 
-	uint8_t *prompt = editorPrompt(
-		E.buf, read_only ? "Find File Read Only: " : "Find File: ",
-		PROMPT_FILES, NULL);
+	uint8_t *prompt = editorPrompt(read_only ? "Find File Read Only: " :
+						   "Find File: ",
+				       PROMPT_FILES, NULL);
 
 	if (prompt == NULL) {
 		setStatusMessage("Canceled.");
@@ -1412,8 +1463,7 @@ void insertFile(void) {
 	if (rejectIfReadOnly(buf))
 		return;
 
-	uint8_t *filename =
-		editorPrompt(buf, "Insert file: ", PROMPT_FILES, NULL);
+	uint8_t *filename = editorPrompt("Insert file: ", PROMPT_FILES, NULL);
 	if (filename == NULL) {
 		return;
 	}
@@ -1618,7 +1668,7 @@ char *rebaseFilename(const char *filename, const char *old_cwd,
 }
 
 void changeDirectory(void) {
-	uint8_t *dir = editorPrompt(E.buf, "Directory: ", PROMPT_DIR, NULL);
+	uint8_t *dir = editorPrompt("Directory: ", PROMPT_DIR, NULL);
 	if (dir == NULL) {
 		setStatusMessage("Canceled.");
 		return;

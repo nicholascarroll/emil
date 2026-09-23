@@ -383,7 +383,7 @@ void test_rowoff_tracks_text_across_delete_above(void) {
 	struct buffer *buf = two_windows_scrolled(10);
 
 	/* Delete L00 and L01 entirely, from the start of the buffer. */
-	deleteRange(0, 0, 0, 2, 0);
+	deleteRange(buf, 0, 0, 0, 2, 0);
 
 	TEST_ASSERT_EQUAL_STRING("L02", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_INT(8, E.windows[1]->rowoff);
@@ -411,7 +411,7 @@ void test_rowoff_inside_deleted_span_collapses_to_first_row(void) {
 
 	/* The deletion spans the viewport top: rows 8..12 collapse into
 	 * one, so the top can only be the surviving row. */
-	deleteRange(0, 8, 0, 12, 0);
+	deleteRange(buf, 0, 8, 0, 12, 0);
 
 	TEST_ASSERT_EQUAL_INT(8, E.windows[1]->rowoff);
 	TEST_ASSERT_EQUAL_STRING("L12", row_str(buf, 8));
@@ -437,7 +437,7 @@ void test_rowoff_adjusted_for_focused_window_too(void) {
 	E.windows[0]->focused = 0;
 	E.windows[1]->focused = 1;
 
-	deleteRange(0, 0, 0, 2, 0);
+	deleteRange(buf, 0, 0, 0, 2, 0);
 
 	TEST_ASSERT_EQUAL_INT(8, E.windows[1]->rowoff);
 	TEST_ASSERT_EQUAL_STRING("L10", row_str(buf, E.windows[1]->rowoff));

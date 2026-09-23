@@ -133,8 +133,7 @@ static int minibufCursorCols(struct buffer *mb) {
 	return cols;
 }
 
-uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
-		      enum promptType t,
+uint8_t *editorPrompt(const char *prompt, enum promptType t,
 		      void (*callback)(struct buffer *, uint8_t *, int)) {
 	/* A prompt must not open while one is already running.  The loop
 	 * below dispatches ordinary commands, so C-x C-f, M-x, C-x b,
@@ -215,6 +214,21 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 
 		int callback_key = c;
 
+		/* Resolve the key once, here, and use the answer below.
+		 * resolveBinding() is stateful -- it carries the C-x and
+		 * C-x r prefixes from one call to the next -- so asking
+		 * it about the same key twice is a second keystroke, not
+		 * a second lookup.  This loop used to ask twice, once for
+		 * the popup check and again at default:, so C-x arrived
+		 * as C-x C-x (exchange point and mark) and no C-x command
+		 * could be typed in a prompt at all.
+		 *
+		 * A key the switch below claims for the prompt (RET, C-g,
+		 * TAB, ...) keeps that meaning even straight after C-x:
+		 * resolving it here has already ended the chord, which is
+		 * simply abandoned, as before. */
+		int cmd = resolveBinding(c);
+
 		/* PageUp/PageDown/C-v/M-v, if a completions popup is
 		 * visible, scroll *it* rather than falling through to
 		 * the default: dispatch below.  During a prompt, focus
@@ -238,9 +252,7 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 		 * see the KEY_ARROW_UP/KEY_META('p')/... case.  Catching
 		 * them here first would silently take that away. */
 		{
-			int cmd_peek = resolveBinding(c);
-			if (cmd_peek == CMD_PAGE_UP ||
-			    cmd_peek == CMD_PAGE_DOWN) {
+			if (cmd == CMD_PAGE_UP || cmd == CMD_PAGE_DOWN) {
 				struct buffer *comp_buf =
 					findBufferByName("*Completions*");
 				int win_idx =
@@ -258,7 +270,7 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 						popup->height - page_overlap;
 					if (scroll_lines < 1)
 						scroll_lines = 1;
-					if (cmd_peek == CMD_PAGE_UP)
+					if (cmd == CMD_PAGE_UP)
 						scroll_lines = -scroll_lines;
 
 					scrollViewport(popup, comp_buf,
@@ -473,9 +485,8 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 		default: {
 			/* C-p / C-n move the cursor inside the minibuffer;
 			 * they should NOT destroy visible completions. */
-			int cmd_peek = resolveBinding(c);
-			int is_cursor_move = (cmd_peek == CMD_PREV_LINE ||
-					      cmd_peek == CMD_NEXT_LINE);
+			int is_cursor_move =
+				(cmd == CMD_PREV_LINE || cmd == CMD_NEXT_LINE);
 
 			if (!is_cursor_move &&
 			    E.minibuf->completionState.last_completed_text !=
@@ -487,8 +498,8 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 			/* Dispatch */
 			if (c >= ' ' && c < KEY_ARROW_LEFT)
 				E.self_insert_key = c;
-			if (cmd_peek != CMD_NONE)
-				processKeypress(cmd_peek);
+			if (cmd != CMD_NONE)
+				processKeypress(cmd);
 
 			/* No single-row collapse here.  It concatenated
 			 * rows with no separator, so C-y of a multi-line
@@ -500,7 +511,7 @@ uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
 
 		if (callback) {
 			char *text = (char *)E.minibuf->row[0].chars;
-			callback(bufr, (uint8_t *)text, callback_key);
+			callback(E.edbuf, (uint8_t *)text, callback_key);
 		}
 	}
 

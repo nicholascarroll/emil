@@ -18,14 +18,18 @@ void setMarkSilent(void);
 void popMark(void);
 void toggleRectangleMode(void);
 void markBuffer(void);
-void deleteRange(int startx, int starty, int endx, int endy,
+/* Delete the range (either end first) from buf, optionally onto the
+ * kill ring, and leave buf's point at its start. */
+void deleteRange(struct buffer *buf, int startx, int starty, int endx, int endy,
 		 int add_to_kill_ring);
 void killRegion(void);
 void copyRegion(void);
 void yank(int uarg);
 void yankPop(int uarg);
-void transformRange(int startx, int starty, int endx, int endy,
-		    uint8_t *(*transformer)(uint8_t *));
+/* Replace the range (either end first) in buf with transformer's
+ * output, and leave buf's point at the end of the replacement. */
+void transformRange(struct buffer *buf, int startx, int starty, int endx,
+		    int endy, uint8_t *(*transformer)(uint8_t *));
 void transformRegion(uint8_t *(*transformer)(uint8_t *));
 void replaceRegex(void);
 

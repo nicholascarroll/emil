@@ -568,6 +568,45 @@ int resolveBinding(int key) {
 	return CMD_NONE;
 }
 
+/* Commands refused while a prompt is reading the minibuffer.
+ *
+ * Every other command runs in the minibuffer exactly as it does in a
+ * file: that is how C-a, M-f, C-k, C-y and the rest work in a prompt
+ * without being written twice.  These cannot, because the minibuffer is
+ * in no window and not in the buffer list, and editorPrompt() needs
+ * E.buf to stay E.minibuf until it returns:
+ *
+ *   - the window commands would move focus under the prompt;
+ *   - next-buffer and kill-buffer search the buffer list for E.buf and
+ *     dereference NULL when it is not there;
+ *   - previous-buffer, jump-to-register, the ctags jumps and the
+ *     header/body toggle move E.buf to a file, so the keys typed next
+ *     edit that file behind a prompt that still looks open;
+ *   - toggle-read-only would stick to the minibuffer, which outlives
+ *     the prompt, and silently refuse typing in every later prompt.
+ *
+ * A command that opens a prompt of its own needs no entry here:
+ * editorPrompt() refuses to nest. */
+static int refusedInMinibuffer(int c) {
+	switch (c) {
+	case CMD_OTHER_WINDOW:
+	case CMD_CREATE_WINDOW:
+	case CMD_DESTROY_WINDOW:
+	case CMD_DESTROY_OTHER_WINDOWS:
+	case CMD_NEXT_BUFFER:
+	case CMD_PREV_BUFFER:
+	case CMD_KILL_BUFFER:
+	case CMD_TOGGLE_READ_ONLY:
+	case CMD_JUMP_REGISTER:
+	case CMD_CTAGS_JUMP:
+	case CMD_CTAGS_BACK:
+	case CMD_TOGGLE_HEADER_BODY:
+		return 1;
+	default:
+		return 0;
+	}
+}
+
 /*
  * Grouped command dispatch functions.
  *
@@ -783,40 +822,21 @@ static int dispatchEdit(int c, int uarg) {
 	}
 }
 
-/* Window management */
+/* Window management.  Refused in the minibuffer; see
+ * refusedInMinibuffer(). */
 static int dispatchWindow(int c) {
 	switch (c) {
 	case CMD_OTHER_WINDOW:
-		if (E.buf == E.minibuf) {
-			setStatusMessage(
-				"Command attempted to use minibuffer while in minibuffer");
-		} else {
-			switchWindow();
-		}
+		switchWindow();
 		return 1;
 	case CMD_CREATE_WINDOW:
-		if (E.buf == E.minibuf) {
-			setStatusMessage(
-				"Command attempted to use minibuffer while in minibuffer");
-		} else {
-			createWindow();
-		}
+		createWindow();
 		return 1;
 	case CMD_DESTROY_WINDOW:
-		if (E.buf == E.minibuf) {
-			setStatusMessage(
-				"Command attempted to use minibuffer while in minibuffer");
-		} else {
-			destroyWindow(windowFocusedIdx());
-		}
+		destroyWindow(windowFocusedIdx());
 		return 1;
 	case CMD_DESTROY_OTHER_WINDOWS:
-		if (E.buf == E.minibuf) {
-			setStatusMessage(
-				"Command attempted to use minibuffer while in minibuffer");
-		} else {
-			destroyOtherWindows();
-		}
+		destroyOtherWindows();
 		return 1;
 	default:
 		return 0;
@@ -1135,8 +1155,7 @@ static int dispatchMisc(int c, int uarg) {
 			setStatusMessage("Not available during macro");
 			return 1;
 		}
-		uint8_t *cmd =
-			editorPrompt(E.buf, "M-x ", PROMPT_COMMAND, NULL);
+		uint8_t *cmd = editorPrompt("M-x ", PROMPT_COMMAND, NULL);
 		if (cmd != NULL) {
 			runCommand((char *)cmd);
 			free(cmd);
@@ -1251,6 +1270,13 @@ void processKeypress(int c) {
 	}
 
 	int uarg = E.uarg;
+
+	if (E.buf == E.minibuf && refusedInMinibuffer(c)) {
+		setStatusMessage("Not available in the minibuffer");
+		/* Or the prompt redraws over it before it is seen. */
+		E.minibuf->completionState.preserve_message = 1;
+		goto done;
+	}
 
 	/* Dispatch through grouped handlers */
 	if (dispatchMove(c, uarg, win))

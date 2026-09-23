@@ -286,30 +286,31 @@ static void rectPlaceCursor(struct buffer *buf, int x, int y) {
 
 /* Normalise rectangle columns so topx <= botx.  Also sets up
  * buf->cx, buf->cy, buf->markx, buf->marky for the rectangle. */
-static void normalizeRectCols(int *topx, int *topy, int *botx, int *boty) {
-	*boty = E.buf->marky;
-	*topy = E.buf->cy;
-	if (E.buf->cx > E.buf->markx) {
-		*topx = E.buf->markx;
-		*botx = E.buf->cx;
+static void normalizeRectCols(struct buffer *buf, int *topx, int *topy,
+			      int *botx, int *boty) {
+	*boty = buf->marky;
+	*topy = buf->cy;
+	if (buf->cx > buf->markx) {
+		*topx = buf->markx;
+		*botx = buf->cx;
 	} else {
-		*botx = E.buf->markx;
-		*topx = E.buf->cx;
+		*botx = buf->markx;
+		*topx = buf->cx;
 	}
 	/* topx comes from whichever of point/mark had the smaller
 	 * column, which need not be a character boundary in row topy
 	 * (and likewise botx in row boty), so snap the repositioned
 	 * point and mark onto boundaries.  topx/botx themselves stay
 	 * nominal: per-row snapping happens where rows are sliced. */
-	E.buf->cx = rectSnapFwd(&E.buf->row[*topy], *topx);
-	if (E.buf->cx > E.buf->row[*topy].size)
-		E.buf->cx = E.buf->row[*topy].size;
-	E.buf->cy = *topy;
-	E.buf->marky = *boty;
-	E.buf->markx = rectSnapBack(&E.buf->row[*boty], *botx);
+	buf->cx = rectSnapFwd(&buf->row[*topy], *topx);
+	if (buf->cx > buf->row[*topy].size)
+		buf->cx = buf->row[*topy].size;
+	buf->cy = *topy;
+	buf->marky = *boty;
+	buf->markx = rectSnapBack(&buf->row[*boty], *botx);
 }
 
-void deleteRange(int startx, int starty, int endx, int endy,
+void deleteRange(struct buffer *buf, int startx, int starty, int endx, int endy,
 		 int add_to_kill_ring) {
 	/* Normalise: ensure start comes before end */
 	if (starty > endy || (starty == endy && startx > endx)) {
@@ -321,9 +322,9 @@ void deleteRange(int startx, int starty, int endx, int endy,
 	}
 
 	/* Clamp end position within buffer */
-	if (endy >= E.buf->numrows) {
-		endy = E.buf->numrows - 1;
-		endx = E.buf->row[endy].size;
+	if (endy >= buf->numrows) {
+		endy = buf->numrows - 1;
+		endx = buf->row[endy].size;
 	}
 
 	/* Nothing to delete if start == end */
@@ -332,7 +333,7 @@ void deleteRange(int startx, int starty, int endx, int endy,
 
 	int old_len;
 	uint8_t *old_text =
-		collectRegionText(E.buf, startx, starty, endx, endy, &old_len);
+		collectRegionText(buf, startx, starty, endx, endy, &old_len);
 
 	/* Kill ring */
 	if (add_to_kill_ring) {
@@ -341,12 +342,12 @@ void deleteRange(int startx, int starty, int endx, int endy,
 		addToKillRing((char *)old_text, 0, 0, 0);
 	}
 
-	mutateDelete(E.buf, startx, starty, endx, endy, old_text, old_len);
+	mutateDelete(buf, startx, starty, endx, endy, old_text, old_len);
 	free(old_text);
 
 	/* Set cursor to start of deleted range */
-	E.buf->cx = startx;
-	E.buf->cy = starty;
+	buf->cx = startx;
+	buf->cy = starty;
 }
 
 void killRegion(void) {
@@ -355,7 +356,7 @@ void killRegion(void) {
 
 	if (markInvalid())
 		return;
-	deleteRange(E.buf->cx, E.buf->cy, E.buf->markx, E.buf->marky, 1);
+	deleteRange(E.buf, E.buf->cx, E.buf->cy, E.buf->markx, E.buf->marky, 1);
 }
 
 void copyRegion(void) {
@@ -498,9 +499,9 @@ void yankPop(int uarg) {
 	}
 }
 
-void transformRange(int startx, int starty, int endx, int endy,
-		    uint8_t *(*transformer)(uint8_t *)) {
-	if (rejectIfReadOnly(E.buf))
+void transformRange(struct buffer *buf, int startx, int starty, int endx,
+		    int endy, uint8_t *(*transformer)(uint8_t *)) {
+	if (rejectIfReadOnly(buf))
 		return;
 
 	/* Normalize: put start before end */
@@ -514,7 +515,7 @@ void transformRange(int startx, int starty, int endx, int endy,
 
 	int old_len;
 	uint8_t *old_text =
-		collectRegionText(E.buf, startx, starty, endx, endy, &old_len);
+		collectRegionText(buf, startx, starty, endx, endy, &old_len);
 
 	uint8_t *transformed = transformer(old_text);
 	/* A transformer may fail (transformerPipeCmd returns NULL when
@@ -527,11 +528,11 @@ void transformRange(int startx, int starty, int endx, int endy,
 	int repl_len = strlen((char *)transformed);
 
 	int ex, ey;
-	mutateReplace(E.buf, startx, starty, endx, endy, old_text, old_len,
+	mutateReplace(buf, startx, starty, endx, endy, old_text, old_len,
 		      transformed, repl_len, 0, &ex, &ey);
 
-	E.buf->cx = ex;
-	E.buf->cy = ey;
+	buf->cx = ex;
+	buf->cy = ey;
 
 	free(old_text);
 	free(transformed);
@@ -545,7 +546,7 @@ void transformRegion(uint8_t *(*transformer)(uint8_t *)) {
 		return;
 	normalizeRegion();
 
-	transformRange(E.buf->cx, E.buf->cy, E.buf->markx, E.buf->marky,
+	transformRange(E.buf, E.buf->cx, E.buf->cy, E.buf->markx, E.buf->marky,
 		       transformer);
 }
 
@@ -768,8 +769,7 @@ void replaceRegex(void) {
 
 	const char *cancel = "Canceled regex-replace.";
 
-	uint8_t *regex =
-		editorPrompt(buf, "Regex replace: ", PROMPT_REPLACE, NULL);
+	uint8_t *regex = editorPrompt("Regex replace: ", PROMPT_REPLACE, NULL);
 	if (regex == NULL) {
 		setStatusMessage("%s", cancel);
 		return;
@@ -784,7 +784,7 @@ void replaceRegex(void) {
 	char prompt[128];
 	snprintf(prompt, sizeof(prompt), "Regex replace %.35s with: ", esc);
 	free(esc);
-	uint8_t *repl = editorPrompt(buf, prompt, PROMPT_REPLACE, NULL);
+	uint8_t *repl = editorPrompt(prompt, PROMPT_REPLACE, NULL);
 	if (repl == NULL) {
 		free(regex);
 		setStatusMessage("%s", cancel);
@@ -866,8 +866,7 @@ void stringRectangle(void) {
 	if (markInvalid())
 		return;
 
-	uint8_t *string =
-		editorPrompt(E.buf, "String rectangle: ", PROMPT_RECT, NULL);
+	uint8_t *string = editorPrompt("String rectangle: ", PROMPT_RECT, NULL);
 	if (string == NULL) {
 		setStatusMessage("Canceled.");
 		return;
@@ -886,7 +885,7 @@ void stringRectangleWithText(uint8_t *string) {
 	struct buffer *buf = E.buf;
 	int slen = strlen((char *)string);
 	int topx, topy, botx, boty;
-	normalizeRectCols(&topx, &topy, &botx, &boty);
+	normalizeRectCols(E.buf, &topx, &topy, &botx, &boty);
 
 	/* Use full-row region so replacement text captures all content */
 	int old_len;
@@ -975,7 +974,7 @@ void copyRectangle(void) {
 	normalizeRegion();
 
 	int topx, topy, botx, boty;
-	normalizeRectCols(&topx, &topy, &botx, &boty);
+	normalizeRectCols(E.buf, &topx, &topy, &botx, &boty);
 	int rw = botx - topx;
 	int rh = (boty - topy) + 1;
 
@@ -1003,7 +1002,7 @@ void killRectangle(void) {
 
 	struct buffer *buf = E.buf;
 	int topx, topy, botx, boty;
-	normalizeRectCols(&topx, &topy, &botx, &boty);
+	normalizeRectCols(E.buf, &topx, &topy, &botx, &boty);
 	int rw = botx - topx;
 	int rh = (boty - topy) + 1;
 

@@ -220,7 +220,7 @@ void backSpace(int count) {
 			killRectangle();
 			E.buf->rectangle_mode = 0;
 		} else {
-			deleteRange(E.buf->cx, E.buf->cy, E.buf->markx,
+			deleteRange(E.buf, E.buf->cx, E.buf->cy, E.buf->markx,
 				    E.buf->marky, 0);
 		}
 		E.buf->mark_active = 0;
@@ -266,7 +266,7 @@ void wordTransform(int times, uint8_t *(*transformer)(uint8_t *)) {
 	int icx = E.buf->cx;
 	int icy = E.buf->cy;
 	for (int i = 0; i < times; i++) {
-		forwardWordEnd(&E.buf->cx, &E.buf->cy);
+		forwardWordEnd(E.buf, &E.buf->cx, &E.buf->cy);
 	}
 	E.buf->markx = icx;
 	E.buf->marky = icy;
@@ -281,10 +281,10 @@ static void wordTransformBackward(uint8_t *(*transformer)(uint8_t *)) {
 	int icx = E.buf->cx;
 	int icy = E.buf->cy;
 	int sx = icx, sy = icy;
-	backwardWordEnd(&sx, &sy);
+	backwardWordEnd(E.buf, &sx, &sy);
 	if (sx == icx && sy == icy)
 		return; /* no word before point */
-	transformRange(sx, sy, icx, icy, transformer);
+	transformRange(E.buf, sx, sy, icx, icy, transformer);
 }
 
 static void caseWord(int uarg, uint8_t *(*transformer)(uint8_t *)) {
@@ -308,29 +308,28 @@ void capitalCaseWord(int uarg) {
 
 /* Word deletion */
 
-static void deleteByWord(int count, void (*boundary)(int *, int *)) {
+static void deleteByWord(int count,
+			 void (*boundary)(struct buffer *, int *, int *)) {
 	if (rejectIfReadOnly(E.buf))
 		return;
 	E.buf->mark_active = 0;
 	int startx = E.buf->cx;
 	int starty = E.buf->cy;
+	int endx = startx;
+	int endy = starty;
 	int times = UARG_COUNT(count);
 	for (int i = 0; i < times; i++) {
-		int endx = E.buf->cx;
-		int endy = E.buf->cy;
-		boundary(&endx, &endy);
-		if (endx == E.buf->cx && endy == E.buf->cy)
+		int nx = endx;
+		int ny = endy;
+		boundary(E.buf, &nx, &ny);
+		if (nx == endx && ny == endy)
 			break;
-		E.buf->cx = endx;
-		E.buf->cy = endy;
+		endx = nx;
+		endy = ny;
 	}
-	if (E.buf->cx == startx && E.buf->cy == starty)
+	if (endx == startx && endy == starty)
 		return;
-	int endx = E.buf->cx;
-	int endy = E.buf->cy;
-	E.buf->cx = startx;
-	E.buf->cy = starty;
-	deleteRange(E.buf->cx, E.buf->cy, endx, endy, 1);
+	deleteRange(E.buf, startx, starty, endx, endy, 1);
 }
 
 void deleteWord(int count) {
@@ -362,36 +361,31 @@ static void transposeWordsBackward(void) {
 
 	/* W2 = word ending at or before point. */
 	int s2x = icx, s2y = icy;
-	backwardWordEnd(&s2x, &s2y);
+	backwardWordEnd(E.buf, &s2x, &s2y);
 	if (s2x == icx && s2y == icy) {
 		setStatusMessage("Cannot transpose here");
 		return;
 	}
 
-	/* W1 = word before W2.  backwardWordEnd reads from point, so
-	 * park point at the start of W2 for the query. */
-	E.buf->cx = s2x;
-	E.buf->cy = s2y;
+	/* W1 = word before W2. */
 	int s1x = s2x, s1y = s2y;
-	backwardWordEnd(&s1x, &s1y);
+	backwardWordEnd(E.buf, &s1x, &s1y);
 	if (s1x == s2x && s1y == s2y) {
-		E.buf->cx = icx;
-		E.buf->cy = icy;
 		setStatusMessage("Cannot transpose here");
 		return;
 	}
 
 	/* End of W2. */
 	int e2x = s2x, e2y = s2y;
-	forwardWordEnd(&e2x, &e2y);
+	forwardWordEnd(E.buf, &e2x, &e2y);
 
-	transformRange(s1x, s1y, e2x, e2y, transformerTransposeWords);
+	transformRange(E.buf, s1x, s1y, e2x, e2y, transformerTransposeWords);
 
 	/* Point after the dragged word, which is now the first word of
 	 * the transformed region. */
 	E.buf->cx = s1x;
 	E.buf->cy = s1y;
-	forwardWordEnd(&E.buf->cx, &E.buf->cy);
+	forwardWordEnd(E.buf, &E.buf->cx, &E.buf->cy);
 }
 
 void transposeWords(int uarg) {
@@ -415,16 +409,17 @@ void transposeWords(int uarg) {
 		return;
 	}
 
-	int startcx, startcy, endcx, endcy;
-	backwardWordEnd(&startcx, &startcy);
-	forwardWordEnd(&endcx, &endcy);
+	int startcx = E.buf->cx, startcy = E.buf->cy;
+	int endcx = E.buf->cx, endcy = E.buf->cy;
+	backwardWordEnd(E.buf, &startcx, &startcy);
+	forwardWordEnd(E.buf, &endcx, &endcy);
 	if ((startcx == E.buf->cx && E.buf->cy == startcy) ||
 	    (endcx == E.buf->cx && E.buf->cy == endcy)) {
 		setStatusMessage("Cannot transpose here");
 		return;
 	}
 
-	transformRange(startcx, startcy, endcx, endcy,
+	transformRange(E.buf, startcx, startcy, endcx, endcy,
 		       transformerTransposeWords);
 }
 
@@ -465,7 +460,7 @@ static void transposeCharsBackward(void) {
 	while (c1x > 0 && utf8_isCont(row->chars[c1x]))
 		c1x--;
 
-	transformRange(c1x, E.buf->cy, E.buf->cx, E.buf->cy,
+	transformRange(E.buf, c1x, E.buf->cy, E.buf->cx, E.buf->cy,
 		       transformerTransposeChars);
 
 	/* Point lands after the dragged character, which is now first in
@@ -515,7 +510,7 @@ void transposeChars(int uarg) {
 	/* Find the end of the character after point. */
 	int endx = E.buf->cx + utf8_nBytes(row->chars[E.buf->cx]);
 
-	transformRange(startx, E.buf->cy, endx, E.buf->cy,
+	transformRange(E.buf, startx, E.buf->cy, endx, E.buf->cy,
 		       transformerTransposeChars);
 }
 
@@ -551,13 +546,13 @@ void killLine(int count) {
 				 * char to pull next sub-line content up */
 				delChar(1);
 			} else {
-				deleteRange(E.buf->cx, E.buf->cy, end_byte,
-					    E.buf->cy, 1);
+				deleteRange(E.buf, E.buf->cx, E.buf->cy,
+					    end_byte, E.buf->cy, 1);
 			}
 		} else {
 			/* Kill to end of logical line */
-			deleteRange(E.buf->cx, E.buf->cy, row->size, E.buf->cy,
-				    1);
+			deleteRange(E.buf, E.buf->cx, E.buf->cy, row->size,
+				    E.buf->cy, 1);
 		}
 	}
 }
@@ -568,7 +563,7 @@ void killLineBackwards(void) {
 		return;
 	}
 
-	deleteRange(0, E.buf->cy, E.buf->cx, E.buf->cy, 1);
+	deleteRange(E.buf, 0, E.buf->cy, E.buf->cx, E.buf->cy, 1);
 }
 
 void quit(void) {
@@ -619,13 +614,13 @@ void killSexp(int count) {
 		int endy = E.buf->cy;
 		const char *errmsg = NULL;
 
-		if (bufferForwardSexpEnd(&endx, &endy, &errmsg) < 0) {
+		if (bufferForwardSexpEnd(E.buf, &endx, &endy, &errmsg) < 0) {
 			setStatusMessage("%s", errmsg);
 			return;
 		}
 		if (endx == E.buf->cx && endy == E.buf->cy)
 			return;
-		deleteRange(E.buf->cx, E.buf->cy, endx, endy, 1);
+		deleteRange(E.buf, E.buf->cx, E.buf->cy, endx, endy, 1);
 	}
 }
 
@@ -641,10 +636,10 @@ void killParagraph(int count) {
 	for (int i = 0; i < times; i++) {
 		int endx = E.buf->cx;
 		int endy = E.buf->cy;
-		forwardParaBoundary(&endx, &endy);
+		forwardParaBoundary(E.buf, &endx, &endy);
 		if (endx == E.buf->cx && endy == E.buf->cy)
 			return;
-		deleteRange(E.buf->cx, E.buf->cy, endx, endy, 1);
+		deleteRange(E.buf, E.buf->cx, E.buf->cy, endx, endy, 1);
 	}
 }
 
@@ -655,12 +650,12 @@ void markParagraph(void) {
 	/* Find paragraph end for the mark */
 	int endx = E.buf->cx;
 	int endy = E.buf->cy;
-	forwardParaBoundary(&endx, &endy);
+	forwardParaBoundary(E.buf, &endx, &endy);
 
 	/* Find paragraph start for point */
 	int startx = E.buf->cx;
 	int starty = E.buf->cy;
-	backwardParaBoundary(&startx, &starty);
+	backwardParaBoundary(E.buf, &startx, &starty);
 
 	E.buf->markx = endx;
 	E.buf->marky = endy;
@@ -688,14 +683,14 @@ static void transposeSentencesBackward(void) {
 
 	/* Sentence B: ends at or before point. */
 	int b_start_x = E.buf->cx, b_start_y = E.buf->cy;
-	if (backwardSentenceStart(&b_start_x, &b_start_y) < 0) {
+	if (backwardSentenceStart(E.buf, &b_start_x, &b_start_y) < 0) {
 		setStatusMessage("Beginning of buffer");
 		return;
 	}
 
 	/* Sentence A: the one before B. */
 	int a_start_x = b_start_x, a_start_y = b_start_y;
-	if (backwardSentenceStart(&a_start_x, &a_start_y) < 0) {
+	if (backwardSentenceStart(E.buf, &a_start_x, &a_start_y) < 0) {
 		setStatusMessage("Beginning of buffer");
 		return;
 	}
@@ -703,11 +698,11 @@ static void transposeSentencesBackward(void) {
 	/* A ends where the gap before B begins (same convention as the
 	 * forward version: gap is folded into the B segment). */
 	int a_end_x = a_start_x, a_end_y = a_start_y;
-	forwardSentenceEnd(&a_end_x, &a_end_y);
+	forwardSentenceEnd(E.buf, &a_end_x, &a_end_y);
 
 	/* B end: forward from B start. */
 	int b_end_x = b_start_x, b_end_y = b_start_y;
-	if (forwardSentenceEnd(&b_end_x, &b_end_y) < 0) {
+	if (forwardSentenceEnd(E.buf, &b_end_x, &b_end_y) < 0) {
 		setStatusMessage("End of buffer");
 		return;
 	}
@@ -736,7 +731,7 @@ static void transposeSentencesBackward(void) {
 	/* Point after the dragged sentence, now first in the region. */
 	E.buf->cx = a_start_x;
 	E.buf->cy = a_start_y;
-	forwardSentenceEnd(&E.buf->cx, &E.buf->cy);
+	forwardSentenceEnd(E.buf, &E.buf->cx, &E.buf->cy);
 
 	free(a_text);
 	free(b_text);
@@ -772,21 +767,21 @@ void transposeSentences(int uarg) {
 
 	/* Sentence A: ends at or before point */
 	int a_start_x = E.buf->cx, a_start_y = E.buf->cy;
-	if (backwardSentenceStart(&a_start_x, &a_start_y) < 0) {
+	if (backwardSentenceStart(E.buf, &a_start_x, &a_start_y) < 0) {
 		setStatusMessage("Beginning of buffer");
 		return;
 	}
 
 	/* Sentence B end: forward from point */
 	int b_end_x = E.buf->cx, b_end_y = E.buf->cy;
-	if (forwardSentenceEnd(&b_end_x, &b_end_y) < 0) {
+	if (forwardSentenceEnd(E.buf, &b_end_x, &b_end_y) < 0) {
 		setStatusMessage("End of buffer");
 		return;
 	}
 
 	/* Sentence A end / B start: forward from A start */
 	int a_end_x = a_start_x, a_end_y = a_start_y;
-	forwardSentenceEnd(&a_end_x, &a_end_y);
+	forwardSentenceEnd(E.buf, &a_end_x, &a_end_y);
 
 	/* Collect the three segments: A, gap, B */
 	int a_len, gap_len, b_len;
@@ -872,8 +867,8 @@ void zapToChar(void) {
 				/* Kill up to and including this char */
 				int endx = x + 1;
 				int endy = sy;
-				deleteRange(E.buf->cx, E.buf->cy, endx, endy,
-					    1);
+				deleteRange(E.buf, E.buf->cx, E.buf->cy, endx,
+					    endy, 1);
 				return;
 			}
 		}
@@ -891,7 +886,7 @@ void zapToChar(void) {
 /* Insert Unicode codepoint hex */
 void insertCharHex(void) {
 	/* Open the minibuffer prompt for input */
-	uint8_t *buf = editorPrompt(E.buf, "Enter Unicode codepoint (hex): U+",
+	uint8_t *buf = editorPrompt("Enter Unicode codepoint (hex): U+",
 				    PROMPT_PLAIN, NULL);
 
 	/* User pressed Ctrl-G to cancel */

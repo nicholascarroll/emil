@@ -34,7 +34,7 @@ void test_nested_prompt_preserves_buffer(void) {
 	scriptKeys(keys, 4);
 
 	muteStdout();
-	uint8_t *r = editorPrompt(file, "Find File: ", PROMPT_FILES, NULL);
+	uint8_t *r = editorPrompt("Find File: ", PROMPT_FILES, NULL);
 	unmuteStdout();
 
 	TEST_ASSERT_NULL(r);
@@ -58,7 +58,7 @@ void test_double_nested_prompt_preserves_buffer(void) {
 	scriptKeys(keys, 7);
 
 	muteStdout();
-	uint8_t *r = editorPrompt(file, "Find File: ", PROMPT_FILES, NULL);
+	uint8_t *r = editorPrompt("Find File: ", PROMPT_FILES, NULL);
 	unmuteStdout();
 
 	TEST_ASSERT(E.buf == file);

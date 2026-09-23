@@ -162,9 +162,14 @@ static void reclaimTerminal(struct cmd_terminal *ct) {
 	ct->active = 0;
 }
 
+/* Most of a command's stderr the pump keeps.  It ends up on the status
+ * line, which holds far less; the rest is drained and dropped. */
+#define STDERR_KEEP 4096
+
 /* Pump 'input' into sp's stdin while draining its stdout into 'out'
- * and discarding its stderr, using select() so neither side can
- * deadlock on a full pipe (~64 KB).  Closes and NULLs
+ * and its stderr into 'err' (the first STDERR_KEEP bytes; 'err' may
+ * be NULL to discard it all), using select() so no side can deadlock
+ * on a full pipe (~64 KB).  Closes and NULLs
  * sp->stdin_file once input is exhausted so the child sees EOF (and
  * join/destroy don't close it again).  'input' may be NULL for
  * commands that take no stdin.
@@ -185,7 +190,7 @@ static void reclaimTerminal(struct cmd_terminal *ct) {
  * Returns 0 if the command ran to completion, nonzero (the stage
  * reached) if cancelled. */
 static int pumpSubprocessIO(struct subprocess_s *sp, uint8_t *input,
-			    struct dbuf *out, int intr_fd) {
+			    struct dbuf *out, struct dbuf *err, int intr_fd) {
 	int in_fd = sp->stdin_file ? fileno(sp->stdin_file) : -1;
 	int out_fd = sp->stdout_file ? fileno(sp->stdout_file) : -1;
 	int err_fd = sp->stderr_file ? fileno(sp->stderr_file) : -1;
@@ -282,10 +287,13 @@ static int pumpSubprocessIO(struct subprocess_s *sp, uint8_t *input,
 				out_open = 0;
 		}
 		if (err_open && FD_ISSET(err_fd, &rfds)) {
-			/* Drain and discard: a chatty child must not
-			 * block on a full stderr pipe either. */
+			/* Keep the start, drain the rest: a chatty child
+			 * must not block on a full stderr pipe either. */
 			ssize_t n = read(err_fd, io, sizeof(io));
-			if (n < 0 && (errno == EINTR || errno == EAGAIN))
+			if (n > 0 && err && err->len < STDERR_KEEP) {
+				int room = STDERR_KEEP - err->len;
+				dbuf_append(err, io, n < room ? (int)n : room);
+			} else if (n < 0 && (errno == EINTR || errno == EAGAIN))
 				; /* interrupted: retry next iteration */
 			else if (n <= 0)
 				err_open = 0;
@@ -308,6 +316,54 @@ static int pumpSubprocessIO(struct subprocess_s *sp, uint8_t *input,
 	return cancel_stage;
 }
 
+/* The status line once a command has run to completion (#132).
+ *
+ * stderr comes first: it is where a command explains itself, and
+ * nothing else in the editor shows it.  It is sanitised before it goes
+ * anywhere near the terminal -- the minibuffer draws the status message
+ * raw, so an escape sequence or a stray byte from the child would be
+ * drawn as-is -- with its trailing newline dropped and inner ones shown
+ * as ^J, as the prompt shows them.  A nonzero exit status leads it.
+ *
+ * With nothing on stderr: say so when there was no output either,
+ * in Emacs's words, rather than leave the user to wonder whether the
+ * command ran at all; otherwise the byte count, or the exit status. */
+static void reportShellResult(int status, int out_len, const struct dbuf *err) {
+	int elen = err->len;
+	while (elen > 0 &&
+	       (err->buf[elen - 1] == '\n' || err->buf[elen - 1] == '\r'))
+		elen--;
+
+	if (elen > 0) {
+		char text[sizeof(E.statusmsg) - 32];
+		size_t used = utf8SanitizeLine(err->buf, (size_t)elen, text,
+					       sizeof(text) - 3);
+		if (used < (size_t)elen)
+			emil_strlcat(text, "...", sizeof(text));
+		if (status != 0)
+			setStatusMessage("Exit %d: %s", status, text);
+		else
+			setStatusMessage("%s", text);
+		return;
+	}
+
+	if (out_len == 0) {
+		if (status == 0)
+			setStatusMessage(
+				"(Shell command succeeded with no output)");
+		else
+			setStatusMessage(
+				"(Shell command failed with code %d and no output)",
+				status);
+		return;
+	}
+
+	if (status != 0)
+		setStatusMessage("Shell command exited with status %d", status);
+	else
+		setStatusMessage("Read %d bytes", out_len);
+}
+
 static uint8_t *transformerPipeCmd(uint8_t *input) {
 	pipe_last_canceled = 0;
 	/* Using sh -c lets us use pipes and stuff and takes care of quoting. */
@@ -327,6 +383,7 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 	 * pipe_intr_fd (the terminal in the editor) is watched so C-g
 	 * cancels a long-running command without losing the session. */
 	struct dbuf d = DBUF_INIT;
+	struct dbuf e = DBUF_INIT;
 	struct cmd_terminal ct = { .active = 0 };
 	int intr_fd = pipe_intr_fd;
 	if (intr_fd == STDIN_FILENO) {
@@ -335,7 +392,8 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 			intr_fd = fd;
 	}
 	pipe_interactive = (pipe_intr_fd == STDIN_FILENO);
-	int canceled = (pumpSubprocessIO(&subprocess, input, &d, intr_fd) != 0);
+	int canceled =
+		(pumpSubprocessIO(&subprocess, input, &d, &e, intr_fd) != 0);
 	pipe_interactive = 0;
 	reclaimTerminal(&ct);
 
@@ -355,6 +413,7 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 		}
 		subprocess_destroy(&subprocess);
 		dbuf_free(&d);
+		dbuf_free(&e);
 		setStatusMessage("Canceled.");
 		return NULL;
 	}
@@ -366,20 +425,13 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 			"Shell command failed: error waiting for subprocess");
 		subprocess_destroy(&subprocess);
 		dbuf_free(&d);
+		dbuf_free(&e);
 		return NULL;
 	}
 
-	/* Check if subprocess exited with error */
-	if (sub_ret != 0) {
-		setStatusMessage("Shell command exited with status %d",
-				 sub_ret);
-		/* Continue anyway to show any output/errors */
-	}
-
-	/* Only show byte count if subprocess succeeded */
-	if (sub_ret == 0) {
-		setStatusMessage("Read %d bytes", d.len);
-	}
+	/* A failing command still returns what it wrote to stdout. */
+	reportShellResult(sub_ret, d.len, &e);
+	dbuf_free(&e);
 
 	/* Reject output containing NUL bytes.*/
 	if (d.len > 0 && memchr(d.buf, '\0', (size_t)d.len) != NULL) {
@@ -422,7 +474,7 @@ uint8_t *editorPipe(int useRegion) {
 	cmd = NULL;
 	int u = E.uarg;
 	E.uarg = 0;
-	uint8_t *owned = editorPrompt(E.buf, "Shell: ", PROMPT_SHELL, NULL);
+	uint8_t *owned = editorPrompt("Shell: ", PROMPT_SHELL, NULL);
 	cmd = owned;
 
 	if (owned == NULL) {
@@ -468,6 +520,12 @@ void pipeCmd(int useRegion) {
 		return;
 	}
 	uint8_t *pipeOutput = editorPipe(useRegion);
+	if (pipeOutput != NULL && pipeOutput[0] == '\0') {
+		/* Nothing on stdout: leave the windows alone.  The
+		 * status line already says what happened (#132). */
+		free(pipeOutput);
+		return;
+	}
 	if (pipeOutput != NULL) {
 		size_t outputLen = strlen((char *)pipeOutput);
 
@@ -610,7 +668,7 @@ void diffBufferWithFile(void) {
 	 * joining: a diff larger than the pipe capacity (~64 KB) blocks
 	 * the child on write, and waitpid never returns. */
 	struct dbuf d = DBUF_INIT;
-	pumpSubprocessIO(&subprocess, NULL, &d, -1);
+	pumpSubprocessIO(&subprocess, NULL, &d, NULL, -1);
 
 	int sub_ret = -1;
 	subprocess_join(&subprocess, &sub_ret);

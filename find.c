@@ -402,8 +402,7 @@ static void searchInteractive(int direction, int regex,
 	search_origin_cx = saved_cx;
 	search_origin_cy = saved_cy;
 
-	uint8_t *query =
-		editorPrompt(E.buf, prompt_fmt, PROMPT_SEARCH, findCallback);
+	uint8_t *query = editorPrompt(prompt_fmt, PROMPT_SEARCH, findCallback);
 
 	free(E.buf->query);
 	E.buf->query = NULL;
@@ -490,7 +489,7 @@ void replaceString(void) {
 	uint8_t *saved_orig = replace_orig;
 	uint8_t *saved_repl = replace_repl;
 
-	replace_orig = editorPrompt(E.buf, "Replace: ", PROMPT_REPLACE, NULL);
+	replace_orig = editorPrompt("Replace: ", PROMPT_REPLACE, NULL);
 	if (replace_orig == NULL) {
 		setStatusMessage("Canceled replace-string.");
 		replace_orig = saved_orig;
@@ -506,7 +505,7 @@ void replaceString(void) {
 	char *prompt = xmalloc(psz);
 	snprintf(prompt, psz, "Replace %s with: ", esc);
 	free(esc);
-	replace_repl = editorPrompt(E.buf, prompt, PROMPT_REPLACE, NULL);
+	replace_repl = editorPrompt(prompt, PROMPT_REPLACE, NULL);
 	free(prompt);
 	if (replace_repl == NULL) {
 		free(replace_orig);
@@ -543,8 +542,8 @@ void queryReplace(void) {
 	uint8_t *saved_repl = replace_repl;
 
 	for (;;) {
-		replace_orig = editorPrompt(
-			E.buf, "Query replace: ", PROMPT_REPLACE, NULL);
+		replace_orig =
+			editorPrompt("Query replace: ", PROMPT_REPLACE, NULL);
 		if (replace_orig == NULL) {
 			setStatusMessage("Canceled query-replace.");
 			replace_orig = saved_orig;
@@ -570,7 +569,7 @@ void queryReplace(void) {
 	char prompt_buf[192];
 	snprintf(prompt_buf, sizeof(prompt_buf),
 		 "Query replace %.78s with: ", replace_orig);
-	replace_repl = editorPrompt(E.buf, prompt_buf, PROMPT_REPLACE, NULL);
+	replace_repl = editorPrompt(prompt_buf, PROMPT_REPLACE, NULL);
 	if (replace_repl == NULL) {
 		free(replace_orig);
 		setStatusMessage("Canceled query-replace.");
@@ -657,8 +656,8 @@ void queryReplace(void) {
 			char rprompt[192];
 			snprintf(rprompt, sizeof(rprompt),
 				 "Replace this %.78s with: ", replace_orig);
-			uint8_t *newStr = editorPrompt(E.buf, rprompt,
-						       PROMPT_REPLACE, NULL);
+			uint8_t *newStr =
+				editorPrompt(rprompt, PROMPT_REPLACE, NULL);
 			if (newStr != NULL) {
 				uint8_t *tmp = replace_repl;
 				replace_repl = newStr;
@@ -679,8 +678,8 @@ void queryReplace(void) {
 			char eprompt[192];
 			snprintf(eprompt, sizeof(eprompt),
 				 "Query replace %.78s with: ", replace_orig);
-			uint8_t *newStr = editorPrompt(E.buf, eprompt,
-						       PROMPT_REPLACE, NULL);
+			uint8_t *newStr =
+				editorPrompt(eprompt, PROMPT_REPLACE, NULL);
 			if (newStr != NULL) {
 				free(replace_repl);
 				replace_repl = newStr;

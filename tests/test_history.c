@@ -188,7 +188,7 @@ void test_history_free_resets(void) {
 
 void test_b8_down_without_browsing_keeps_typed_text(void) {
 	makeMinibuffer();
-	struct buffer *file = make_test_buffer("contents");
+	make_test_buffer("contents"); /* E.buf while no prompt is open */
 	addHistory(&E.file_history, "/tmp/previously-visited");
 
 	int keys[] = { '/', 't', 'm', 'p', '/', 'a', 'b', 'c',
@@ -196,7 +196,7 @@ void test_b8_down_without_browsing_keeps_typed_text(void) {
 	scriptKeys(keys, 10);
 
 	muteStdout();
-	uint8_t *r = editorPrompt(file, "Find File: ", PROMPT_FILES, NULL);
+	uint8_t *r = editorPrompt("Find File: ", PROMPT_FILES, NULL);
 	unmuteStdout();
 	clearKeys();
 
@@ -213,7 +213,7 @@ void test_b8_down_without_browsing_keeps_typed_text(void) {
  * 2 in the audit); the minimal fix only makes the test above pass. */
 void test_b8_up_then_down_restores_typed_text(void) {
 	makeMinibuffer();
-	struct buffer *file = make_test_buffer("contents");
+	make_test_buffer("contents"); /* E.buf while no prompt is open */
 	addHistory(&E.file_history, "/tmp/previously-visited");
 
 	int keys[] = { '/', 't', 'm', 'p', '/', 'a', 'b', 'c',
@@ -221,7 +221,7 @@ void test_b8_up_then_down_restores_typed_text(void) {
 	scriptKeys(keys, 11);
 
 	muteStdout();
-	uint8_t *r = editorPrompt(file, "Find File: ", PROMPT_FILES, NULL);
+	uint8_t *r = editorPrompt("Find File: ", PROMPT_FILES, NULL);
 	unmuteStdout();
 	clearKeys();
 

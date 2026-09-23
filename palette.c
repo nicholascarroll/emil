@@ -333,22 +333,34 @@ static void snapToSymbol(struct buffer *buf, int direction) {
 	}
 }
 
-/* Close the palette popup and restore window focus to the buffer that
-was active when the palette was opened.
-If `origin` still inhabits a visible window, focus that window.
-Otherwise (typically when the palette was invoked from the
-minibuffer, which is not in any window) fall back to whichever
-window held focus before the palette opened: clamped to the
-current window count, since windows may have been closed.
+/* Close the palette popup and give focus back to the window that held
+it when the palette was opened.
+origin_win is that window.  It is kept when it still shows `origin`,
+or when origin is the minibuffer, which is in no window: the window
+then is the one the user was editing before the prompt opened.  Only
+if neither holds does it fall back to the first window showing origin,
+then to window 0.  Choosing by buffer first, as this used to, sent
+focus to the upper window whenever both halves of a split showed the
+same buffer.
+Focus moves before the palette window is closed, not after.  Closing
+the focused window makes destroyWindow() call switchWindow(), which
+focuses the window after it and resets that window's buffer cursor
+from the window's saved position; with a shared buffer that is
+origin's cursor, which the insert that follows depends on.
 Updates E.windows[*]->focused and E.buf. */
 static void restoreFocusTo(struct buffer *origin, int origin_win) {
-	closeSpecialBuffer(PALETTE_BUF_NAME);
-	int ow = findBufferWindow(origin);
-	int target = (ow >= 0) ? ow :
-				 (origin_win < E.nwindows ? origin_win : 0);
+	int target = -1;
+	if (origin_win < E.nwindows &&
+	    (origin == E.minibuf || E.windows[origin_win]->buf == origin))
+		target = origin_win;
+	if (target < 0)
+		target = findBufferWindow(origin);
+	if (target < 0)
+		target = 0;
 	for (int i = 0; i < E.nwindows; i++)
 		E.windows[i]->focused = (i == target);
 	E.buf = origin;
+	closeSpecialBuffer(PALETTE_BUF_NAME);
 }
 
 void expandPalette(void) {

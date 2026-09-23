@@ -119,6 +119,8 @@ Shell integration is enabled by default and is disabled at build time with `-DEM
 - **`Alt-x diff-buffer-with-file`**
   Shows unsaved changes.
 
+A command's standard error goes to the status line. If it writes nothing to standard output, no `*Shell Output*` buffer opens.
+
 
 #### Example uses of Shell Integration
 

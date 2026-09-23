@@ -401,6 +401,13 @@ Show unsaved changes compared to file on disk.
 .It Cm M-x cd
 Change working directory (editor only).
 .El
+.Pp
+A command's standard error is shown on the status line, after its exit
+status when that is nonzero, with control characters in caret notation
+and invalid UTF-8 replaced.
+A command that writes nothing to standard output opens no
+.Ql *Shell Output*
+buffer; the status line says whether it wrote anything at all.
 .Ss Source File Navigation
 .Bl -tag -width Ds
 .It Cm M-.

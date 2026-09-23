@@ -592,6 +592,53 @@ int utf8_validate(const uint8_t *buf, int len) {
 	return 1;
 }
 
+size_t utf8SanitizeLine(const uint8_t *in, size_t len, char *out,
+			size_t outsz) {
+	static const char replacement[] = "\xEF\xBF\xBD"; /* U+FFFD */
+	size_t i = 0, o = 0;
+	if (outsz == 0)
+		return 0;
+	while (i < len) {
+		uint8_t c = in[i];
+		char caret[2];
+		const char *piece = (const char *)in + i;
+		size_t plen = 1, used = 1;
+
+		if (c < 0x20 || c == 0x7F) {
+			/* ^@ .. ^_, and ^? for DEL */
+			caret[0] = '^';
+			caret[1] = (char)(c ^ 0x40);
+			piece = caret;
+			plen = 2;
+		} else if (c >= 0x80) {
+			int n = utf8_nBytes(c);
+			if (n > 1 && (size_t)n <= len - i &&
+			    utf8_validate(in + i, n)) {
+				uint32_t cp = utf8Decode(in + i, 0);
+				used = (size_t)n;
+				if (cp <= 0x9F) {
+					/* C1 control: 8-bit CSI and
+					 * friends to a terminal */
+					piece = "?";
+				} else {
+					plen = (size_t)n;
+				}
+			} else {
+				piece = replacement;
+				plen = 3;
+			}
+		}
+
+		if (o + plen >= outsz)
+			break;
+		for (size_t k = 0; k < plen; k++)
+			out[o++] = piece[k];
+		i += used;
+	}
+	out[o] = '\0';
+	return i;
+}
+
 /* THE single display-width rule (issue #117 R1).
  *
  * Columns occupied by the character starting at str[idx] when it is

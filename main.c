@@ -15,6 +15,7 @@
 
 #include "terminal.h"
 #include "util.h"
+#include "window.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -369,16 +370,23 @@ int main(int argc, char *argv[]) {
 				continue;
 			}
 
-			struct buffer *newBuf = newBuffer();
-			if (editorOpen(newBuf, argv[i]) < 0) {
-				disableRawMode();
+			/* One buffer per file, as switchToFile keeps it:
+			 * "emil foo.c ./foo.c" or a file and a link to it
+			 * must not open it twice (#128). */
+			struct buffer *newBuf =
+				findBufferForFile(argv[i], NULL);
+			if (newBuf == NULL) {
+				newBuf = newBuffer();
+				if (editorOpen(newBuf, argv[i]) < 0) {
+					disableRawMode();
 
-				fprintf(stderr, "%s: %s\n", argv[i],
-					E.statusmsg);
-				exit(1);
+					fprintf(stderr, "%s: %s\n", argv[i],
+						E.statusmsg);
+					exit(1);
+				}
+				newBuf->next = E.headbuf;
+				E.headbuf = newBuf;
 			}
-
-			newBuf->next = E.headbuf;
 			if (linum > 0) {
 				if (linum - 1 >= newBuf->numrows) {
 					newBuf->cy = newBuf->numrows - 1;
@@ -387,7 +395,6 @@ int main(int argc, char *argv[]) {
 				}
 				linum = -1;
 			}
-			E.headbuf = newBuf;
 			E.buf = newBuf;
 		}
 	}
@@ -416,6 +423,21 @@ int main(int argc, char *argv[]) {
 		 * raised before the first read (or between drained
 		 * keys) is acted on without waiting for a keypress. */
 		handlePendingSignals();
+#ifdef EMIL_DEBUG_FOCUS
+		{
+			/* See E.buf in emil.h.  Checked here, between
+			 * commands, because that is where the invariant
+			 * is claimed: the modal loops break it on purpose
+			 * while they run. */
+			const char *breach = focusInvariantBreach();
+			if (breach) {
+				disableRawMode();
+				fprintf(stderr, "emil: focus invariant: %s\n",
+					breach);
+				abort();
+			}
+		}
+#endif
 		refreshScreen();
 
 		int key = readKey();

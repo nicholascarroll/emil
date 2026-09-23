@@ -69,6 +69,12 @@ void saveAs(void);
 void revert(void);
 void findFile(int read_only);
 struct buffer *switchToFile(const char *filename);
+
+/* The buffer already visiting filename, or NULL: by name, then by file,
+ * so a symlink, a hard link or another spelling of an open file finds
+ * the buffer that has it (#128).  *by_file, if not NULL, is set when the
+ * match was by file alone -- the paths differ but name one file. */
+struct buffer *findBufferForFile(const char *filename, int *by_file);
 void insertFile(void);
 
 /* Body of insert-file split from the prompt.  Loads `path`, validates

@@ -132,7 +132,7 @@ check: test
 
 sanitize:
 	$(MAKE) clean
-	$(MAKE) CFLAGS="-g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -fPIE -DEMIL_DEBUG_ROW_CACHE" \
+	$(MAKE) CFLAGS="-g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -fPIE -DEMIL_DEBUG_ROW_CACHE -DEMIL_DEBUG_FOCUS" \
 	        LDFLAGS="-fsanitize=address,undefined -pie" test
 
 # Sorry Dave

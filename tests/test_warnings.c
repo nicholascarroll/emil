@@ -929,19 +929,14 @@ void test_relock_reports_conflict_when_rival_takes_the_lock(void) {
 /* #128: opening a file by a second path that resolves to the same
  * inode must reuse the existing buffer, not create a second one.
  *
- * findBufferByName() already dedupes distinct spellings of one path by
+ * findBufferByName() dedupes distinct spellings of one path by
  * comparing absolute forms (foo.c vs ./foo.c), but a symlink and its
- * target are two different absolute paths naming one inode, and it
- * does not resolve them.  So switchToFile() through the symlink opens
- * a duplicate: two buffers on one file, each believing it holds the
+ * target are two different absolute paths naming one inode.  Before
+ * findBufferForFile(), switchToFile() through the symlink opened a
+ * duplicate: two buffers on one file, each believing it holds the
  * single per-(process,inode) advisory lock, and a save through one
- * silently discarding the other's edits.
- *
- * This asserts the dedupe that #128 will add: switchToFile() on the
- * symlink returns the buffer already open on the target.  It FAILS
- * until #128 lands -- deliberately, as a standing reminder in CI that
- * the relockIfDirty() design depends on no two buffers sharing an
- * inode.  Do not delete or skip it to make CI green; fix #128. */
+ * silently discarding the other's edits.  The relockIfDirty() design
+ * depends on no two buffers sharing an inode. */
 void test_no_duplicate_buffer_for_symlink_to_open_file(void) {
 	char *path = make_temp_file("content\n");
 	TEST_ASSERT_NOT_NULL(path);
@@ -964,6 +959,77 @@ void test_no_duplicate_buffer_for_symlink_to_open_file(void) {
 	unlink(linkpath);
 	unlink(path);
 	free(path);
+}
+
+/* The symlink opened first, then its target. */
+void test_no_duplicate_buffer_for_target_of_open_symlink(void) {
+	char *path = make_temp_file("content\n");
+	TEST_ASSERT_NOT_NULL(path);
+	char linkpath[80];
+	emil_strlcpy(linkpath, "/tmp/emil_warn_lnk_XXXXXX", sizeof(linkpath));
+	int lfd = mkstemp(linkpath);
+	TEST_ASSERT_TRUE(lfd >= 0);
+	close(lfd);
+	unlink(linkpath);
+	TEST_ASSERT_EQUAL_INT(0, symlink(path, linkpath));
+
+	struct buffer *first = switchToFile(linkpath);
+	struct buffer *second = switchToFile(path);
+	TEST_ASSERT_NOT_NULL(first);
+	TEST_ASSERT_TRUE(first == second);
+	/* Says why the name in the mode line is not the one asked for. */
+	TEST_ASSERT_TRUE(strstr(E.statusmsg, "are the same file") != NULL);
+
+	unlink(linkpath);
+	unlink(path);
+	free(path);
+}
+
+void test_no_duplicate_buffer_for_hard_link(void) {
+	char *path = make_temp_file("content\n");
+	TEST_ASSERT_NOT_NULL(path);
+	char linkpath[80];
+	emil_strlcpy(linkpath, "/tmp/emil_warn_hl_XXXXXX", sizeof(linkpath));
+	int lfd = mkstemp(linkpath);
+	TEST_ASSERT_TRUE(lfd >= 0);
+	close(lfd);
+	unlink(linkpath);
+	TEST_ASSERT_EQUAL_INT(0, link(path, linkpath));
+
+	struct buffer *first = switchToFile(path);
+	struct buffer *second = switchToFile(linkpath);
+	TEST_ASSERT_NOT_NULL(first);
+	TEST_ASSERT_TRUE(first == second);
+
+	unlink(linkpath);
+	unlink(path);
+	free(path);
+}
+
+/* Different files stay different buffers, and a path that does not
+ * exist yet matches nothing. */
+void test_distinct_files_get_distinct_buffers(void) {
+	char *a = make_temp_file("a\n");
+	char *b = make_temp_file("b\n");
+	TEST_ASSERT_NOT_NULL(a);
+	TEST_ASSERT_NOT_NULL(b);
+
+	struct buffer *ba = switchToFile(a);
+	struct buffer *bb = switchToFile(b);
+	TEST_ASSERT_NOT_NULL(ba);
+	TEST_ASSERT_NOT_NULL(bb);
+	TEST_ASSERT_TRUE(ba != bb);
+
+	char absent[80];
+	snprintf(absent, sizeof(absent), "%s.absent", a);
+	int by_file = -1;
+	TEST_ASSERT_NULL(findBufferForFile(absent, &by_file));
+	TEST_ASSERT_EQUAL_INT(0, by_file);
+
+	unlink(a);
+	unlink(b);
+	free(a);
+	free(b);
 }
 
 /* ---- setUp / tearDown / main ---- */
@@ -1076,6 +1142,9 @@ int main(void) {
 	RUN_TEST(test_relock_reports_conflict_when_rival_takes_the_lock);
 #endif
 	RUN_TEST(test_no_duplicate_buffer_for_symlink_to_open_file);
+	RUN_TEST(test_no_duplicate_buffer_for_target_of_open_symlink);
+	RUN_TEST(test_no_duplicate_buffer_for_hard_link);
+	RUN_TEST(test_distinct_files_get_distinct_buffers);
 
 #ifdef EMIL_NO_FILE_LOCKING
 	RUN_TEST(test_no_locking_still_edits_and_saves);

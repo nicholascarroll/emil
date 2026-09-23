@@ -5,9 +5,13 @@
 #include <stdint.h>
 #include "emil.h"
 
-/* Main prompt function for minibuffer input */
-uint8_t *editorPrompt(struct buffer *bufr, const char *prompt,
-		      enum promptType t,
+/* Read a line in the minibuffer.  Returns it malloc'd, or NULL on C-g
+ * or when a prompt is already open.
+ *
+ * callback, if not NULL, runs after every key with the buffer that was
+ * current when the prompt opened -- not E.buf, which is the minibuffer
+ * while the prompt runs -- the text so far, and the key. */
+uint8_t *editorPrompt(const char *prompt, enum promptType t,
 		      void (*callback)(struct buffer *, uint8_t *, int));
 
 /* Serialize minibuffer rows, joining them with sep: "\n" for the value

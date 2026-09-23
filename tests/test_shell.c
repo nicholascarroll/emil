@@ -646,6 +646,73 @@ void test_pipe_intr_ignores_other_bytes(void) {
 	close(intr[1]);
 }
 
+/* ---- stderr and empty output reach the status line (#132) ---- */
+
+void test_shell_stderr_goes_to_status(void) {
+	uint8_t *r = pipeCommandCapture((const uint8_t *)"echo oops >&2", NULL);
+	TEST_ASSERT_NOT_NULL(r);
+	if (r)
+		TEST_ASSERT_EQUAL_STRING("", (char *)r);
+	TEST_ASSERT_EQUAL_STRING("oops", E.statusmsg);
+	free(r);
+}
+
+void test_shell_stderr_leads_with_exit_status(void) {
+	uint8_t *r = pipeCommandCapture(
+		(const uint8_t *)"echo partial; echo bad >&2; exit 2", NULL);
+	TEST_ASSERT_NOT_NULL(r);
+	if (r) /* stdout still comes back */
+		TEST_ASSERT_EQUAL_STRING("partial\n", (char *)r);
+	TEST_ASSERT_EQUAL_STRING("Exit 2: bad", E.statusmsg);
+	free(r);
+}
+
+void test_shell_no_output_says_so(void) {
+	uint8_t *r = pipeCommandCapture((const uint8_t *)"true", NULL);
+	TEST_ASSERT_EQUAL_STRING("(Shell command succeeded with no output)",
+				 E.statusmsg);
+	free(r);
+
+	r = pipeCommandCapture((const uint8_t *)"exit 3", NULL);
+	TEST_ASSERT_EQUAL_STRING(
+		"(Shell command failed with code 3 and no output)",
+		E.statusmsg);
+	free(r);
+}
+
+void test_shell_stdout_only_reports_bytes(void) {
+	uint8_t *r = pipeCommandCapture((const uint8_t *)"echo hi", NULL);
+	TEST_ASSERT_EQUAL_STRING("Read 3 bytes", E.statusmsg);
+	free(r);
+}
+
+/* The status line is drawn raw, so the child's escape sequences,
+ * control bytes and invalid UTF-8 must not reach it as they are. */
+void test_shell_stderr_is_sanitised(void) {
+	uint8_t *r = pipeCommandCapture(
+		(const uint8_t *)"printf '\\033[31mred\\033[0m\\n\\377x\\n' >&2",
+		NULL);
+	free(r);
+	TEST_ASSERT_EQUAL_STRING("^[[31mred^[[0m^J\xEF\xBF\xBDx", E.statusmsg);
+}
+
+/* More than the status line holds: cut on a character boundary and
+ * marked, and a large stderr must not block the pump either. */
+void test_shell_long_stderr_is_cut_and_marked(void) {
+	watchdogStart(300);
+	uint8_t *r = pipeCommandCapture(
+		(const uint8_t *)"i=0; while [ $i -lt 3000 ]; do "
+				 "printf '\\303\\251' >&2; i=$((i+1)); done",
+		NULL);
+	watchdogStop();
+	free(r);
+	size_t n = strlen(E.statusmsg);
+	TEST_ASSERT_TRUE(n > 3 && n < sizeof(E.statusmsg));
+	TEST_ASSERT_EQUAL_STRING("...", E.statusmsg + n - 3);
+	TEST_ASSERT_TRUE(utf8_validate((const uint8_t *)E.statusmsg, (int)n));
+	TEST_ASSERT_TRUE(strncmp(E.statusmsg, "\xC3\xA9\xC3\xA9", 4) == 0);
+}
+
 int main(void) {
 	TEST_BEGIN();
 
@@ -662,6 +729,12 @@ int main(void) {
 	RUN_TEST(test_pipe_cancel_ctrl_g);
 	RUN_TEST(test_pipe_cancel_escalates_to_sigkill);
 	RUN_TEST(test_pipe_intr_ignores_other_bytes);
+	RUN_TEST(test_shell_stderr_goes_to_status);
+	RUN_TEST(test_shell_stderr_leads_with_exit_status);
+	RUN_TEST(test_shell_no_output_says_so);
+	RUN_TEST(test_shell_stdout_only_reports_bytes);
+	RUN_TEST(test_shell_stderr_is_sanitised);
+	RUN_TEST(test_shell_long_stderr_is_cut_and_marked);
 
 	/* 2. Shell command piping region */
 	RUN_TEST(test_shell_pipe_region);

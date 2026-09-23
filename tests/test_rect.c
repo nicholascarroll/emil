@@ -333,7 +333,7 @@ void test_delete_range_single_line_undo(void) {
 	int snap_n;
 	char **snap = snapshot_buffer(buf, &snap_n);
 
-	deleteRange(5, 0, 11, 0, 1);
+	deleteRange(buf, 5, 0, 11, 0, 1);
 	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
 
 	doUndo(buf, 1);
@@ -350,7 +350,7 @@ void test_delete_range_multi_line_undo(void) {
 	char **snap = snapshot_buffer(buf, &snap_n);
 
 	/* Delete from (3,0) to (2,2): "lo\nBeautiful\nWo" */
-	deleteRange(3, 0, 2, 2, 1);
+	deleteRange(buf, 3, 0, 2, 2, 1);
 
 	doUndo(buf, 1);
 	assert_buffer_matches(buf, snap, snap_n, "delete_range_multi_undo");

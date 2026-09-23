@@ -125,22 +125,23 @@ void moveCursor(int key, int count) {
 	}
 }
 
-/* Word movement */
+/* Word movement.  The two scanners start from (*dx, *dy), not from
+ * point; see motion.h. */
 
-void forwardWordEnd(int *dx, int *dy) {
-	int cx = E.buf->cx;
-	int icy = E.buf->cy;
+void forwardWordEnd(struct buffer *buf, int *dx, int *dy) {
+	int cx = *dx;
+	int icy = *dy;
 	int pre = 1;
-	for (int cy = icy; cy < E.buf->numrows; cy++) {
-		int l = E.buf->row[cy].size;
+	for (int cy = icy; cy < buf->numrows; cy++) {
+		int l = buf->row[cy].size;
 		while (cx < l) {
-			uint8_t c = E.buf->row[cy].chars[cx];
+			uint8_t c = buf->row[cy].chars[cx];
 			int nb = utf8_nBytes(c);
 
 			/* Decode codepoint for CJK check */
 			if (c >= 0x80) {
 				uint32_t cp =
-					utf8Decode(E.buf->row[cy].chars, cx);
+					utf8Decode(buf->row[cy].chars, cx);
 				if (isCJKChar(cp)) {
 					if (!pre) {
 						/* Stop before this CJK char */
@@ -183,33 +184,33 @@ void forwardWordEnd(int *dx, int *dy) {
 		}
 		cx = 0;
 	}
-	*dy = E.buf->numrows - 1; /* numrows >= 1 (#105) */
-	*dx = E.buf->row[*dy].size;
+	*dy = buf->numrows - 1; /* numrows >= 1 (#105) */
+	*dx = buf->row[*dy].size;
 }
 
-void backwardWordEnd(int *dx, int *dy) {
-	int cx = E.buf->cx;
-	int icy = E.buf->cy;
+void backwardWordEnd(struct buffer *buf, int *dx, int *dy) {
+	int cx = *dx;
+	int icy = *dy;
 
 	int pre = 1;
 
 	for (int cy = icy; cy >= 0; cy--) {
 		if (cy != icy) {
-			cx = E.buf->row[cy].size;
+			cx = buf->row[cy].size;
 		}
 		while (cx > 0) {
 			/* Step back to start of previous character */
 			int prev = cx - 1;
 			while (prev > 0 &&
-			       utf8_isCont(E.buf->row[cy].chars[prev]))
+			       utf8_isCont(buf->row[cy].chars[prev]))
 				prev--;
 
-			uint8_t c = E.buf->row[cy].chars[prev];
+			uint8_t c = buf->row[cy].chars[prev];
 
 			/* Decode codepoint for CJK check */
 			if (c >= 0x80) {
 				uint32_t cp =
-					utf8Decode(E.buf->row[cy].chars, prev);
+					utf8Decode(buf->row[cy].chars, prev);
 				if (isCJKChar(cp)) {
 					if (!pre) {
 						/* Stop after this CJK char */
@@ -257,34 +258,34 @@ void backwardWordEnd(int *dx, int *dy) {
 void forwardWord(int count) {
 	int times = UARG_COUNT(count);
 	for (int i = 0; i < times; i++) {
-		forwardWordEnd(&E.buf->cx, &E.buf->cy);
+		forwardWordEnd(E.buf, &E.buf->cx, &E.buf->cy);
 	}
 }
 
 void backWord(int count) {
 	int times = UARG_COUNT(count);
 	for (int i = 0; i < times; i++) {
-		backwardWordEnd(&E.buf->cx, &E.buf->cy);
+		backwardWordEnd(E.buf, &E.buf->cx, &E.buf->cy);
 	}
 }
 
 /* Paragraph movement */
 
-/* Buffer-parameterized helpers for paragraph boundary scanning.
- * These set cx=0 and update *cy to the boundary line. */
+/* Paragraph boundary scanners (see motion.h).  These set *cx = 0 and
+ * move *cy to the boundary line. */
 
-void backwardParaBoundary(int *cx, int *cy) {
+void backwardParaBoundary(struct buffer *buf, int *cx, int *cy) {
 	*cx = 0;
 	int icy = *cy;
 
-	if (bufferIsEmpty(E.buf)) {
+	if (bufferIsEmpty(buf)) {
 		return;
 	}
 
 	int pre = 1;
 
 	for (int y = icy; y >= 0; y--) {
-		erow *row = &E.buf->row[y];
+		erow *row = &buf->row[y];
 		if (isParaBoundary(row) && !pre) {
 			*cy = y;
 			return;
@@ -296,22 +297,22 @@ void backwardParaBoundary(int *cx, int *cy) {
 	*cy = 0;
 }
 
-void forwardParaBoundary(int *cx, int *cy) {
+void forwardParaBoundary(struct buffer *buf, int *cx, int *cy) {
 	*cx = 0;
 	int icy = *cy;
 
-	if (icy >= E.buf->numrows) {
+	if (icy >= buf->numrows) {
 		return;
 	}
 
-	if (bufferIsEmpty(E.buf)) {
+	if (bufferIsEmpty(buf)) {
 		return;
 	}
 
 	int pre = 1;
 
-	for (int y = icy; y < E.buf->numrows; y++) {
-		erow *row = &E.buf->row[y];
+	for (int y = icy; y < buf->numrows; y++) {
+		erow *row = &buf->row[y];
 		if (isParaBoundary(row) && !pre) {
 			*cy = y;
 			return;
@@ -320,20 +321,20 @@ void forwardParaBoundary(int *cx, int *cy) {
 		}
 	}
 
-	*cy = E.buf->numrows - 1;
+	*cy = buf->numrows - 1;
 }
 
 void backPara(int count) {
 	int times = UARG_COUNT(count);
 	for (int i = 0; i < times; i++) {
-		backwardParaBoundary(&E.buf->cx, &E.buf->cy);
+		backwardParaBoundary(E.buf, &E.buf->cx, &E.buf->cy);
 	}
 }
 
 void forwardPara(int count) {
 	int times = UARG_COUNT(count);
 	for (int i = 0; i < times; i++) {
-		forwardParaBoundary(&E.buf->cx, &E.buf->cy);
+		forwardParaBoundary(E.buf, &E.buf->cx, &E.buf->cy);
 	}
 }
 
@@ -370,14 +371,14 @@ static int isQuoteChar(uint8_t c) {
 }
 
 /* Advance one position forward in the buffer.  Returns 0 at end. */
-static int stepForward(int *cx, int *cy) {
-	if (*cy >= E.buf->numrows)
+static int stepForward(struct buffer *buf, int *cx, int *cy) {
+	if (*cy >= buf->numrows)
 		return 0;
-	if (*cx < E.buf->row[*cy].size) {
+	if (*cx < buf->row[*cy].size) {
 		(*cx)++;
 		return 1;
 	}
-	if (*cy + 1 < E.buf->numrows) {
+	if (*cy + 1 < buf->numrows) {
 		*cy += 1;
 		*cx = 0;
 		return 1;
@@ -386,14 +387,14 @@ static int stepForward(int *cx, int *cy) {
 }
 
 /* Retreat one position backward in the buffer.  Returns 0 at start. */
-static int stepBackward(int *cx, int *cy) {
+static int stepBackward(struct buffer *buf, int *cx, int *cy) {
 	if (*cx > 0) {
 		(*cx)--;
 		return 1;
 	}
 	if (*cy > 0) {
 		*cy -= 1;
-		*cx = E.buf->row[*cy].size;
+		*cx = buf->row[*cy].size;
 		return 1;
 	}
 	return 0;
@@ -401,10 +402,10 @@ static int stepBackward(int *cx, int *cy) {
 
 /* Get the character at (cx, cy).  Returns 0 at end-of-line / end-of-buffer.
  * End-of-line positions (cx == row->size) are treated as newline. */
-static uint8_t charAt(int cx, int cy) {
-	if (cy >= E.buf->numrows)
+static uint8_t charAt(struct buffer *buf, int cx, int cy) {
+	if (cy >= buf->numrows)
 		return 0;
-	erow *row = &E.buf->row[cy];
+	erow *row = &buf->row[cy];
 	if (cx >= row->size)
 		return '\n';
 	return row->chars[cx];
@@ -414,42 +415,43 @@ static uint8_t charAt(int cx, int cy) {
  * On success, updates (*cx, *cy) to just past the sexp and returns 0.
  * On failure (unmatched delimiter, end of buffer), returns -1 without
  * modifying *cx / *cy; *errmsg is set to a description. */
-int bufferForwardSexpEnd(int *cx, int *cy, const char **errmsg) {
+int bufferForwardSexpEnd(struct buffer *buf, int *cx, int *cy,
+			 const char **errmsg) {
 	int px = *cx, py = *cy;
 
-	/* Skip whitespace and newlines.  charAt() reports end-of-line
+	/* Skip whitespace and newlines.  charAt(buf, ) reports end-of-line
 	 * positions as '\n' and only returns 0 once cy passes numrows,
-	 * but stepForward() refuses to advance past the last row's end
+	 * but stepForward(buf, ) refuses to advance past the last row's end
 	 * — so a failed step must terminate the loop, or it spins
 	 * forever reading '\n' at the same position. */
-	while (py < E.buf->numrows) {
-		uint8_t ch = charAt(px, py);
+	while (py < buf->numrows) {
+		uint8_t ch = charAt(buf, px, py);
 		if (ch == 0) {
 			*errmsg = "End of buffer";
 			return -1;
 		}
 		if (ch != ' ' && ch != '\t' && ch != '\n')
 			break;
-		if (!stepForward(&px, &py)) {
+		if (!stepForward(buf, &px, &py)) {
 			*errmsg = "End of buffer";
 			return -1;
 		}
 	}
-	if (py >= E.buf->numrows) {
+	if (py >= buf->numrows) {
 		*errmsg = "End of buffer";
 		return -1;
 	}
 
-	uint8_t ch = charAt(px, py);
+	uint8_t ch = charAt(buf, px, py);
 
 	/* Opening delimiter: scan forward for matching close */
 	int close = matchingClose(ch);
 	if (close) {
 		int depth = 1;
 		int sx = px, sy = py;
-		stepForward(&sx, &sy);
+		stepForward(buf, &sx, &sy);
 		while (depth > 0) {
-			uint8_t c = charAt(sx, sy);
+			uint8_t c = charAt(buf, sx, sy);
 			if (c == 0) {
 				*errmsg = "Unmatched delimiter";
 				return -1;
@@ -458,14 +460,14 @@ int bufferForwardSexpEnd(int *cx, int *cy, const char **errmsg) {
 				depth--;
 			else if (c == ch)
 				depth++;
-			if (depth > 0 && !stepForward(&sx, &sy)) {
+			if (depth > 0 && !stepForward(buf, &sx, &sy)) {
 				/* End of buffer without a match */
 				*errmsg = "Unmatched delimiter";
 				return -1;
 			}
 		}
 		/* Land after the closing delimiter */
-		stepForward(&sx, &sy);
+		stepForward(buf, &sx, &sy);
 		*cx = sx;
 		*cy = sy;
 		return 0;
@@ -473,7 +475,7 @@ int bufferForwardSexpEnd(int *cx, int *cy, const char **errmsg) {
 
 	/* Closing delimiter while inside: jump past it */
 	if (matchingOpen(ch)) {
-		stepForward(&px, &py);
+		stepForward(buf, &px, &py);
 		*cx = px;
 		*cy = py;
 		return 0;
@@ -482,20 +484,20 @@ int bufferForwardSexpEnd(int *cx, int *cy, const char **errmsg) {
 	/* Quote character: scan forward for matching quote */
 	if (isQuoteChar(ch)) {
 		int sx = px, sy = py;
-		stepForward(&sx, &sy);
+		stepForward(buf, &sx, &sy);
 		while (1) {
-			uint8_t c = charAt(sx, sy);
+			uint8_t c = charAt(buf, sx, sy);
 			if (c == 0) {
 				*errmsg = "Unmatched quote";
 				return -1;
 			}
 			if (c == ch) {
-				stepForward(&sx, &sy);
+				stepForward(buf, &sx, &sy);
 				*cx = sx;
 				*cy = sy;
 				return 0;
 			}
-			if (!stepForward(&sx, &sy)) {
+			if (!stepForward(buf, &sx, &sy)) {
 				/* End of buffer without a match */
 				*errmsg = "Unmatched quote";
 				return -1;
@@ -506,7 +508,7 @@ int bufferForwardSexpEnd(int *cx, int *cy, const char **errmsg) {
 	/* Word: skip to end of word */
 	*cx = px;
 	*cy = py;
-	forwardWordEnd(cx, cy);
+	forwardWordEnd(buf, cx, cy);
 	return 0;
 }
 
@@ -518,7 +520,7 @@ void forwardSexp(int count) {
 		int cy = E.buf->cy;
 		const char *errmsg = NULL;
 
-		if (bufferForwardSexpEnd(&cx, &cy, &errmsg) < 0) {
+		if (bufferForwardSexpEnd(E.buf, &cx, &cy, &errmsg) < 0) {
 			setStatusMessage("%s", errmsg);
 			return;
 		}
@@ -535,21 +537,21 @@ void backwardSexp(int count) {
 		int cy = E.buf->cy;
 
 		/* Step back once then skip whitespace and newlines */
-		if (!stepBackward(&cx, &cy)) {
+		if (!stepBackward(E.buf, &cx, &cy)) {
 			setStatusMessage("Beginning of buffer");
 			return;
 		}
 		while (1) {
-			uint8_t ch = charAt(cx, cy);
+			uint8_t ch = charAt(E.buf, cx, cy);
 			if (ch != ' ' && ch != '\t' && ch != '\n')
 				break;
-			if (!stepBackward(&cx, &cy)) {
+			if (!stepBackward(E.buf, &cx, &cy)) {
 				setStatusMessage("Beginning of buffer");
 				return;
 			}
 		}
 
-		uint8_t ch = charAt(cx, cy);
+		uint8_t ch = charAt(E.buf, cx, cy);
 
 		/* Closing delimiter: scan backward for matching open */
 		int open = matchingOpen(ch);
@@ -557,11 +559,11 @@ void backwardSexp(int count) {
 			int depth = 1;
 			int sx = cx, sy = cy;
 			while (depth > 0) {
-				if (!stepBackward(&sx, &sy)) {
+				if (!stepBackward(E.buf, &sx, &sy)) {
 					setStatusMessage("Unmatched delimiter");
 					return;
 				}
-				uint8_t c = charAt(sx, sy);
+				uint8_t c = charAt(E.buf, sx, sy);
 				if ((int)c == open)
 					depth--;
 				else if (c == ch)
@@ -583,11 +585,11 @@ void backwardSexp(int count) {
 		if (isQuoteChar(ch)) {
 			int sx = cx, sy = cy;
 			while (1) {
-				if (!stepBackward(&sx, &sy)) {
+				if (!stepBackward(E.buf, &sx, &sy)) {
 					setStatusMessage("Unmatched quote");
 					return;
 				}
-				uint8_t c = charAt(sx, sy);
+				uint8_t c = charAt(E.buf, sx, sy);
 				if (c == ch) {
 					E.buf->cx = sx;
 					E.buf->cy = sy;
@@ -601,8 +603,8 @@ void backwardSexp(int count) {
 		E.buf->cx = cx;
 		E.buf->cy = cy;
 		/* stepForward to undo the stepBackward, then use word movement */
-		stepForward(&E.buf->cx, &E.buf->cy);
-		backwardWordEnd(&E.buf->cx, &E.buf->cy);
+		stepForward(E.buf, &E.buf->cx, &E.buf->cy);
+		backwardWordEnd(E.buf, &E.buf->cx, &E.buf->cy);
 	}
 }
 
@@ -700,7 +702,7 @@ void endOfLine(int count) {
 
 void gotoLine(void) {
 	setMarkSilent();
-	uint8_t *nls = editorPrompt(E.buf, "Goto line: ", PROMPT_PLAIN, NULL);
+	uint8_t *nls = editorPrompt("Goto line: ", PROMPT_PLAIN, NULL);
 	if (!nls)
 		return;
 
@@ -757,11 +759,11 @@ int isSentenceBoundary(erow *row, int x) {
  * Boundary: The space after punctuation OR a CJK/Indic sentence
  * terminator OR the end of the line.
  */
-int forwardSentenceEnd(int *cx, int *cy) {
+int forwardSentenceEnd(struct buffer *buf, int *cx, int *cy) {
 	int start_x = *cx, start_y = *cy;
 
-	for (int y = start_y; y < E.buf->numrows; y++) {
-		erow *row = &E.buf->row[y];
+	for (int y = start_y; y < buf->numrows; y++) {
+		erow *row = &buf->row[y];
 		int x = (y == start_y) ? start_x : 0;
 
 		while (x < row->size) {
@@ -812,11 +814,11 @@ int forwardSentenceEnd(int *cx, int *cy) {
  * Boundary: The Uppercase letter of a pattern, the character after a
  * CJK/Indic sentence terminator, or the start of a line (index 0).
  */
-int backwardSentenceStart(int *cx, int *cy) {
+int backwardSentenceStart(struct buffer *buf, int *cx, int *cy) {
 	int start_x = *cx, start_y = *cy;
 
 	for (int y = start_y; y >= 0; y--) {
-		erow *row = &E.buf->row[y];
+		erow *row = &buf->row[y];
 
 		// Start from current x on the first line, otherwise from the end
 		int x = (y == start_y) ? start_x : row->size;
@@ -871,13 +873,13 @@ int backwardSentenceStart(int *cx, int *cy) {
 void forwardSentence(int count) {
 	int times = UARG_COUNT(count);
 	for (int i = 0; i < times; i++) {
-		forwardSentenceEnd(&E.buf->cx, &E.buf->cy);
+		forwardSentenceEnd(E.buf, &E.buf->cx, &E.buf->cy);
 	}
 }
 
 void backwardSentence(int count) {
 	int times = UARG_COUNT(count);
 	for (int i = 0; i < times; i++) {
-		backwardSentenceStart(&E.buf->cx, &E.buf->cy);
+		backwardSentenceStart(E.buf, &E.buf->cx, &E.buf->cy);
 	}
 }
