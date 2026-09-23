@@ -1,4 +1,7 @@
 ## [Unreleased]
+- #131 TAB completes in the shell prompt (`M-!`, `M-|`) now.
+- #133 `emil -R file ...` opens the files read-only.
+- #127 `emil myfile | emil` no longer hangs the terminal.  
 - #132 STDERR from pipe/shell goes to status message
 - #129 In palette with 2 windows cursor display fixed
 - #128 Opening the same file by two paths fixed

@@ -926,6 +926,13 @@ void test_relock_reports_conflict_when_rival_takes_the_lock(void) {
 }
 #endif /* !EMIL_NO_FILE_LOCKING */
 
+/* Whether two paths name one file, by the filesystem's own account. */
+static int sameFile(const char *a, const char *b) {
+	struct stat sa, sb;
+	return stat(a, &sa) == 0 && stat(b, &sb) == 0 &&
+	       sa.st_dev == sb.st_dev && sa.st_ino == sb.st_ino;
+}
+
 /* #128: opening a file by a second path that resolves to the same
  * inode must reuse the existing buffer, not create a second one.
  *
@@ -936,7 +943,12 @@ void test_relock_reports_conflict_when_rival_takes_the_lock(void) {
  * duplicate: two buffers on one file, each believing it holds the
  * single per-(process,inode) advisory lock, and a save through one
  * silently discarding the other's edits.  The relockIfDirty() design
- * depends on no two buffers sharing an inode. */
+ * depends on no two buffers sharing an inode.
+ *
+ * The rule is one buffer per file, so the expectation follows what
+ * symlink() actually made rather than assuming it made a link.  On
+ * MSYS2 it does not by default: it copies the target, and a copy is a
+ * second file that must get a second buffer. */
 void test_no_duplicate_buffer_for_symlink_to_open_file(void) {
 	char *path = make_temp_file("content\n");
 	TEST_ASSERT_NOT_NULL(path);
@@ -951,10 +963,13 @@ void test_no_duplicate_buffer_for_symlink_to_open_file(void) {
 	struct buffer *first = switchToFile(path);
 	TEST_ASSERT_NOT_NULL(first);
 
-	/* Second open, through the symlink.  Same inode, different
-	 * absolute path.  Must reuse `first`. */
+	/* Second open, through the symlink: a different absolute path. */
 	struct buffer *second = switchToFile(linkpath);
-	TEST_ASSERT_TRUE(first == second);
+	TEST_ASSERT_NOT_NULL(second);
+	if (sameFile(path, linkpath))
+		TEST_ASSERT_TRUE(first == second);
+	else
+		TEST_ASSERT_TRUE(first != second);
 
 	unlink(linkpath);
 	unlink(path);

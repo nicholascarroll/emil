@@ -382,6 +382,9 @@ uint8_t *editorPrompt(const char *prompt, enum promptType t,
 			if (t == PROMPT_FILES || t == PROMPT_DIR ||
 			    t == PROMPT_COMMAND || t == PROMPT_BUFFER) {
 				handleMinibufferCompletion(E.minibuf, t);
+			} else if (t == PROMPT_SHELL) {
+				/* A literal TAB is C-q TAB, as in a shell. */
+				handleShellCompletion(E.minibuf);
 			} else {
 				insertChar(E.minibuf, '\t', 1);
 			}

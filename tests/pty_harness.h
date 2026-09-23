@@ -147,11 +147,14 @@ struct child {
 	int mfd;
 };
 
-/* Spawn emil on a fresh pty of the given size, optionally opening a
- * file.  Returns 0 on success, -1 if no pty is available (caller
- * should SKIP), exits on setup bugs. */
-static inline int spawnEmilOpts(struct child *c, const char *file, int cols,
-			 int rows) {
+/* Spawn emil on a fresh pty of the given size with the arguments in
+ * args (NULL-terminated; args may itself be NULL for none).  stdout_fd,
+ * if not -1, replaces the pty as the editor's stdout: how a test puts
+ * the editor on the left of a pipe.  Returns 0 on success, -1 if no
+ * pty is available (caller should SKIP), exits on setup bugs. */
+#define SPAWN_MAX_ARGS 8
+static inline int spawnEmilArgs(struct child *c, const char *const *args,
+				int cols, int rows, int stdout_fd) {
 	int mfd = posix_openpt(O_RDWR | O_NOCTTY);
 	if (mfd == -1)
 		return -1;
@@ -207,15 +210,20 @@ static inline int spawnEmilOpts(struct child *c, const char *file, int cols,
 		ws.ws_ypixel = 0;
 		ioctl(sfd, TIOCSWINSZ, &ws);
 		dup2(sfd, STDIN_FILENO);
-		dup2(sfd, STDOUT_FILENO);
+		dup2(stdout_fd == -1 ? sfd : stdout_fd, STDOUT_FILENO);
 		dup2(sfd, STDERR_FILENO);
 		if (sfd > STDERR_FILENO)
 			close(sfd);
+		if (stdout_fd > STDERR_FILENO)
+			close(stdout_fd);
 		close(mfd);
-		if (file != NULL)
-			execl(emil_path, emil_path, file, (char *)NULL);
-		else
-			execl(emil_path, emil_path, (char *)NULL);
+		char *argv[SPAWN_MAX_ARGS + 2];
+		int n = 0;
+		argv[n++] = (char *)emil_path;
+		for (; args && args[n - 1] && n <= SPAWN_MAX_ARGS; n++)
+			argv[n] = (char *)args[n - 1];
+		argv[n] = NULL;
+		execv(emil_path, argv);
 		_exit(127);
 	}
 
@@ -224,6 +232,14 @@ static inline int spawnEmilOpts(struct child *c, const char *file, int cols,
 	capReset();
 	pump(mfd, 700); /* first paint */
 	return 0;
+}
+
+/* Spawn emil on a fresh pty of the given size, optionally opening a
+ * file.  Returns as spawnEmilArgs does. */
+static inline int spawnEmilOpts(struct child *c, const char *file, int cols,
+				int rows) {
+	const char *args[] = { file, NULL };
+	return spawnEmilArgs(c, args, cols, rows, -1);
 }
 
 /* Spawn emil on a fresh 24x80 pty with no file: what every scenario

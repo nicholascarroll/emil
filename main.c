@@ -275,13 +275,50 @@ int main(int argc, char *argv[]) {
 	 * assert and what the editor does cannot drift apart. */
 	(void)selectUtf8Locale();
 
-	// Check for flags before entering raw mode
-	if (argc >= 2 && strncmp(argv[1], "--", 2) == 0) {
-		if (strcmp(argv[1], "--version") == 0) {
+	/* Options come before the files, as the synopsis says.  "--"
+	 * ends them, so a file whose name starts with '-' can still be
+	 * named; "-" alone is a file operand meaning stdin. */
+	int read_only = 0;
+	int linum = -1;
+	int argi = 1;
+	for (; argi < argc; argi++) {
+		const char *a = argv[argi];
+		if (strcmp(a, "--") == 0) {
+			argi++;
+			break;
+		}
+		if (strcmp(a, "--version") == 0) {
 			printf("emil %s\n", EMIL_VERSION);
 			return 0;
 		}
-		fprintf(stderr, "emil: unrecognised option '%s'\n", argv[1]);
+		if (strcmp(a, "-R") == 0) {
+			read_only = 1;
+			continue;
+		}
+		/* +N applies to the first file, so it needs one after it;
+		 * alone, "+N" is itself the name of a file. */
+		if (a[0] == '+' && argi + 1 < argc) {
+			linum = atoi(a + 1);
+			continue;
+		}
+		if (a[0] == '-' && a[1] != '\0') {
+			fprintf(stderr, "emil: unrecognised option '%s'\n", a);
+			return 1;
+		}
+		break;
+	}
+
+	/* Everything below draws on stdout, so it must be the terminal.
+	 * When it is a pipe or a file, the frames go there instead: in
+	 * "emil myfile | emil" the first editor paints into the second
+	 * one's stdin, which waits for an EOF that comes only when the
+	 * first exits, so the screen shows neither and the terminal looks
+	 * hung (#127).  Refuse before touching the terminal, as Emacs
+	 * does; the other end of the pipe then sees EOF at once.  Unlike
+	 * a piped stdin there is nothing useful to salvage by reopening
+	 * /dev/tty: whatever is reading stdout would get nothing. */
+	if (!isatty(STDOUT_FILENO)) {
+		fprintf(stderr, "emil: standard output is not a terminal\n");
 		return 1;
 	}
 
@@ -318,6 +355,7 @@ int main(int argc, char *argv[]) {
 
 	E.headbuf = newBuffer();
 	E.buf = E.headbuf;
+	struct buffer *scratch = E.headbuf;
 
 	/* Load piped stdin data if present */
 	if (stdin_data != NULL) {
@@ -350,52 +388,57 @@ int main(int argc, char *argv[]) {
 		stdin_data = NULL;
 	}
 
-	if (argc >= 2) {
-		int i = 1;
-		int linum = -1;
-		if (argv[1][0] == '+' && argc > 2) {
-			linum = atoi(argv[1] + 1);
-			i++;
-		}
-		for (; i < argc; i++) {
-			/* POSIX: "-" means read from stdin */
-			if (strcmp(argv[i], "-") == 0) {
-				if (stdin_buf_used) {
-					/* Already loaded stdin above */
-					continue;
-				}
-				/* stdin was a tty and not piped:
-				 * nothing to read */
-				setStatusMessage("stdin: no piped input");
+	for (int i = argi; i < argc; i++) {
+		/* POSIX: "-" means read from stdin */
+		if (strcmp(argv[i], "-") == 0) {
+			if (stdin_buf_used) {
+				/* Already loaded stdin above */
 				continue;
 			}
+			/* stdin was a tty and not piped:
+			 * nothing to read */
+			setStatusMessage("stdin: no piped input");
+			continue;
+		}
 
-			/* One buffer per file, as switchToFile keeps it:
-			 * "emil foo.c ./foo.c" or a file and a link to it
-			 * must not open it twice (#128). */
-			struct buffer *newBuf =
-				findBufferForFile(argv[i], NULL);
-			if (newBuf == NULL) {
-				newBuf = newBuffer();
-				if (editorOpen(newBuf, argv[i]) < 0) {
-					disableRawMode();
+		/* One buffer per file, as switchToFile keeps it:
+		 * "emil foo.c ./foo.c" or a file and a link to it
+		 * must not open it twice (#128). */
+		struct buffer *newBuf = findBufferForFile(argv[i], NULL);
+		if (newBuf == NULL) {
+			newBuf = newBuffer();
+			if (editorOpen(newBuf, argv[i]) < 0) {
+				disableRawMode();
 
-					fprintf(stderr, "%s: %s\n", argv[i],
-						E.statusmsg);
-					exit(1);
-				}
-				newBuf->next = E.headbuf;
-				E.headbuf = newBuf;
+				fprintf(stderr, "%s: %s\n", argv[i],
+					E.statusmsg);
+				exit(1);
 			}
-			if (linum > 0) {
-				if (linum - 1 >= newBuf->numrows) {
-					newBuf->cy = newBuf->numrows - 1;
-				} else {
-					newBuf->cy = linum - 1;
-				}
-				linum = -1;
+			newBuf->next = E.headbuf;
+			E.headbuf = newBuf;
+		}
+		if (linum > 0) {
+			if (linum - 1 >= newBuf->numrows) {
+				newBuf->cy = newBuf->numrows - 1;
+			} else {
+				newBuf->cy = linum - 1;
 			}
-			E.buf = newBuf;
+			linum = -1;
+		}
+		E.buf = newBuf;
+	}
+
+	/* -R (#133): every buffer the command line opened, stdin's too,
+	 * starts read-only.  The user's choice, as with C-x C-r, so not
+	 * one an advisory lock clearing may lift, and C-x C-q still
+	 * makes a buffer writable.  The initial *scratch* buffer was not
+	 * opened from the command line and stays writable. */
+	if (read_only) {
+		for (struct buffer *b = E.headbuf; b != NULL; b = b->next) {
+			if (b == scratch)
+				continue;
+			b->read_only = 1;
+			b->read_only_by_lock = 0;
 		}
 	}
 	E.windows[0]->buf = E.buf;

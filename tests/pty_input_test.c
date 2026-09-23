@@ -17,6 +17,7 @@
  */
 
 #include "pty_harness.h"
+#include <sys/stat.h>
 
 /* ---- scenarios ------------------------------------------------- */
 
@@ -283,6 +284,181 @@ static void scenarioBurstClosesRun(void) {
 	finish();
 }
 
+/* ---- command line and shell prompt (#127, #131, #133) ---------- *
+ *
+ * A scratch directory holding a.txt, c1.txt and c2.txt: the last two
+ * share a prefix, so completing "c" offers a list. */
+static char sdir[64];
+
+static void writeScratch(const char *name, const char *text) {
+	char path[128];
+	snprintf(path, sizeof(path), "%s/%s", sdir, name);
+	FILE *f = fopen(path, "w");
+	if (f) {
+		fputs(text, f);
+		fclose(f);
+	}
+}
+
+/* mkdtemp is POSIX.1-2008, beyond the _XOPEN_SOURCE 600 this harness
+ * asks for; reserve a unique name with mkstemp and reuse it. */
+static int makeScratchDir(void) {
+	snprintf(sdir, sizeof(sdir), "/tmp/emil_pty_XXXXXX");
+	int fd = mkstemp(sdir);
+	if (fd < 0)
+		return -1;
+	close(fd);
+	unlink(sdir);
+	if (mkdir(sdir, 0700) != 0)
+		return -1;
+	writeScratch("a.txt", "alpha\n");
+	writeScratch("c1.txt", "charlie\n");
+	writeScratch("c2.txt", "charlie two\n");
+	return 0;
+}
+
+static void removeScratchDir(void) {
+	const char *names[] = { "a.txt", "c1.txt", "c2.txt" };
+	char path[128];
+	for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+		snprintf(path, sizeof(path), "%s/%s", sdir, names[i]);
+		unlink(path);
+	}
+	rmdir(sdir);
+}
+
+static char *scratchPath(const char *name) {
+	static char path[128];
+	snprintf(path, sizeof(path), "%s/%s", sdir, name);
+	return path;
+}
+
+/* Pump until `text` is in the capture or max_ms (scaled) has passed.
+ * Each step waits for its own response rather than a fixed settle
+ * time, so a slow build does not send a key early. */
+static int pumpUntil(struct child *c, const char *text, int max_ms) {
+	for (int waited = 0; waited < max_ms; waited += 100) {
+		if (contains(stripped(), text))
+			return 1;
+		pump(c->mfd, 100);
+	}
+	return contains(stripped(), text);
+}
+
+/* Send keys and wait for `until` to be drawn in response. */
+static int step(struct child *c, const char *keys, const char *until) {
+	capReset();
+	sendStr(c, keys, 0);
+	return pumpUntil(c, until, 3000);
+}
+
+/* TAB in M-! completes (#131): a second TAB with nothing to add
+ * lists the candidates, as in Find File. */
+static void scenarioShellTabLists(void) {
+	struct child c;
+	begin("shell: TAB TAB lists file names");
+	if (makeScratchDir() == 0 &&
+	    spawnEmilOpts(&c, scratchPath("a.txt"), 80, 24) == 0) {
+		char typed[160];
+		snprintf(typed, sizeof(typed), "cat %s", scratchPath("c"));
+		expect(step(&c, "\033!", "Shell:"), "setup: no shell prompt");
+		expect(step(&c, typed, typed), "setup: typing not shown");
+		expect(step(&c, "\t", "[complete, but not unique]"),
+		       "first TAB did not report an ambiguous match");
+		expect(step(&c, "\t", "*Completions*"),
+		       "second TAB did not list the matches");
+		expect(contains(stripped(), "c1.txt") &&
+			       contains(stripped(), "c2.txt"),
+		       "list lacks c1.txt and c2.txt");
+		reap(&c);
+	}
+	removeScratchDir();
+	finish();
+}
+
+/* emil -R (#133): the files named start read-only -- the modeline
+ * says so and typing is refused -- and C-x C-q still lifts it. */
+static void scenarioReadOnlyFlag(void) {
+	struct child c;
+	begin("-R: files open read-only");
+	const char *args[] = { "-R", NULL, NULL };
+	if (makeScratchDir() == 0) {
+		args[1] = scratchPath("a.txt");
+		if (spawnEmilArgs(&c, args, 80, 24, -1) == 0) {
+			expect(pumpUntil(&c, "a.txt %%", 3000),
+			       "modeline does not show read-only");
+			expect(step(&c, "x", "Buffer is read-only"),
+			       "typing not refused");
+			expect(step(&c, "\030\021", /* C-x C-q */
+				    "Buffer set to writable"),
+			       "C-x C-q did not make it writable");
+			expect(step(&c, "x", "xalpha"),
+			       "typing refused after C-x C-q");
+			reap(&c);
+		}
+	}
+	removeScratchDir();
+	finish();
+}
+
+/* An option emil does not know is an error, not a file name. */
+static void scenarioUnknownOption(void) {
+	struct child c;
+	begin("options: unknown option refused");
+	const char *args[] = { "-Q", NULL };
+	if (spawnEmilArgs(&c, args, 80, 24, -1) == 0) {
+		expect(pumpUntil(&c, "unrecognised option '-Q'", 3000),
+		       "unknown option not reported");
+		reap(&c);
+	}
+	finish();
+}
+
+/* emil myfile | emil hung the terminal (#127): the first editor drew
+ * every frame into the pipe, where nothing showed it.  With stdout not
+ * a terminal emil now says so and exits at once, having written
+ * nothing down the pipe, so its reader sees EOF straight away. */
+static void scenarioStdoutNotTerminal(void) {
+	struct child c;
+	begin("stdout: a pipe is refused, not drawn into");
+	int pfd[2];
+	if (makeScratchDir() == 0 && pipe(pfd) == 0) {
+		const char *args[] = { scratchPath("a.txt"), NULL };
+		if (spawnEmilArgs(&c, args, 80, 24, pfd[1]) == 0) {
+			close(pfd[1]);
+			expect(pumpUntil(&c, "standard output is not a terminal",
+					 3000),
+			       "no message on the terminal");
+			int status = 0, gone = 0;
+			for (int waited = 0; waited < 3000 * timeScale();
+			     waited += 50) {
+				if (waitpid(c.pid, &status, WNOHANG) == c.pid) {
+					gone = 1;
+					break;
+				}
+				usleep(50 * 1000);
+			}
+			expect(gone, "editor still running");
+			if (gone) {
+				expect(WIFEXITED(status) &&
+					       WEXITSTATUS(status) == 1,
+				       "exit status not 1");
+				char b[64];
+				expect(read(pfd[0], b, sizeof(b)) == 0,
+				       "bytes written into the pipe");
+				close(c.mfd);
+			} else {
+				reap(&c);
+			}
+		} else {
+			close(pfd[1]);
+		}
+		close(pfd[0]);
+	}
+	removeScratchDir();
+	finish();
+}
+
 int main(int argc, char **argv) {
 	if (!ptyBegin("pty_input_test", argc, argv))
 		return 0;
@@ -304,6 +480,10 @@ int main(int argc, char **argv) {
 	scenarioBurstPasteUndoesInOneStep();
 	scenarioTypingStillCapped();
 	scenarioBurstClosesRun();
+	scenarioShellTabLists();
+	scenarioReadOnlyFlag();
+	scenarioUnknownOption();
+	scenarioStdoutNotTerminal();
 
 	return ptyEnd("pty_input_test");
 }

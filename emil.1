@@ -21,9 +21,28 @@ editor.
 Position the cursor at line
 .Ar N
 of the first file.
+.It Fl R
+Open the files read-only, as
+.Cm C-x C-r
+does.
+This includes text read from standard input.
+.Cm C-x C-q
+makes a buffer writable again.
 .It Cm --version
 Display version information and exit.
+.It Fl \-
+End the options: every argument after it is a file, even one that
+begins with
+.Ql - .
 .El
+.Pp
+Options precede the files.
+A file named
+.Ql -
+reads standard input; when standard input is not a terminal it is read
+in any case, into a buffer named
+.Ql *stdin* .
+Standard output must be a terminal.
 .Sh CONCEPTS
 .Nm
 follows Emacs paradigms.
@@ -408,6 +427,26 @@ and invalid UTF-8 replaced.
 A command that writes nothing to standard output opens no
 .Ql *Shell Output*
 buffer; the status line says whether it wrote anything at all.
+.Pp
+In the shell prompt,
+.Cm TAB
+completes the word before the cursor: the name of an executable on
+.Ev PATH
+when the word is in command position \(em the first word of the line
+or of a command after
+.Ql | ,
+.Ql \&; ,
+.Ql & ,
+.Ql \&( ,
+a variable assignment or a reserved word \(em and a file name anywhere
+else, including a command word that contains a
+.Ql / .
+A completed name is quoted to suit the quote open at the cursor, a
+unique match other than a directory is followed by a space, and a second
+.Cm TAB
+with nothing to add lists the candidates.
+.Cm C-q TAB
+inserts a literal tab.
 .Ss Source File Navigation
 .Bl -tag -width Ds
 .It Cm M-.
@@ -497,8 +536,8 @@ begins to edit the file, it receives a warning. The lock does not prevent other 
 is not designed for editing very large files. Files larger than 1 GiB cannot be opened.
 .Sh EXIT STATUS
 .Nm
-exits 0 on success and 1 if a file cannot be opened or an unrecognised
-option is given.
+exits 0 on success and 1 if a file cannot be opened, an unrecognised
+option is given, or standard output is not a terminal.
 .Sh SEE ALSO
 .Xr emacs 1
 .Sh AUTHORS
