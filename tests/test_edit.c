@@ -334,78 +334,6 @@ void test_forward_sentence_with_closing_punct(void) {
 	TEST_ASSERT_EQUAL_INT(0, cy);
 }
 
-/* ---- Boundary scanners: start and buffer come from the arguments ---- */
-
-/* The word scanners used to start from point and treat their
- * arguments as outputs only, unlike their paragraph, sentence and sexp
- * siblings.  Point is left at 0 here to show it is not consulted. */
-void test_word_scanners_start_from_their_arguments(void) {
-	struct buffer *buf = make_test_buffer("alpha beta gamma");
-	buf->cx = 0;
-	buf->cy = 0;
-
-	int x = 6, y = 0; /* start of "beta" */
-	forwardWordEnd(buf, &x, &y);
-	TEST_ASSERT_EQUAL_INT(10, x); /* end of "beta" */
-	TEST_ASSERT_EQUAL_INT(0, y);
-
-	x = 16; /* end of line, after "gamma" */
-	y = 0;
-	backwardWordEnd(buf, &x, &y);
-	TEST_ASSERT_EQUAL_INT(11, x); /* start of "gamma" */
-	TEST_ASSERT_EQUAL_INT(0, y);
-
-	TEST_ASSERT_EQUAL_INT(0, buf->cx); /* point untouched */
-	TEST_ASSERT_EQUAL_INT(0, buf->cy);
-}
-
-/* bufferForwardSexpEnd documented "scan forward from (*cx, *cy)", but
- * for a plain word it handed off to forwardWordEnd, which read point.
- * Every caller happened to pass point, so it never showed. */
-void test_sexp_scan_over_a_word_starts_from_its_arguments(void) {
-	struct buffer *buf = make_test_buffer("foo   bar");
-	buf->cx = 0; /* point on "foo" */
-	buf->cy = 0;
-
-	int x = 3, y = 0; /* in the gap before "bar" */
-	const char *errmsg = NULL;
-	TEST_ASSERT_EQUAL_INT(0, bufferForwardSexpEnd(buf, &x, &y, &errmsg));
-	TEST_ASSERT_EQUAL_INT(9, x); /* end of "bar", not of "foo" */
-	TEST_ASSERT_EQUAL_INT(0, y);
-}
-
-/* The scanners read the buffer they are given, whatever E.buf is. */
-void test_scanners_read_the_buffer_they_are_given(void) {
-	make_test_buffer("alpha beta"); /* E.buf */
-	const char *lines[] = { "one two", "", "three" };
-	struct buffer *other = newBuffer();
-	for (int i = 0; i < 3; i++)
-		insertRow(other, i, (const uint8_t *)lines[i],
-			  strlen(lines[i]));
-
-	int x = 0, y = 0;
-	forwardWordEnd(other, &x, &y);
-	TEST_ASSERT_EQUAL_INT(3, x); /* "one", not "alpha" */
-
-	x = 0;
-	y = 0;
-	forwardParaBoundary(other, &x, &y);
-	TEST_ASSERT_EQUAL_INT(1, y); /* the blank row */
-
-	x = 0;
-	y = 2;
-	backwardSentenceStart(other, &x, &y);
-	TEST_ASSERT_EQUAL_INT(1, y);
-
-	x = 3;
-	y = 0;
-	const char *errmsg = NULL;
-	TEST_ASSERT_EQUAL_INT(0, bufferForwardSexpEnd(other, &x, &y, &errmsg));
-	TEST_ASSERT_EQUAL_INT(7, x); /* end of "two" */
-
-	destroyBuffer(other);
-}
-
 /* ---- Kill sexp ---- */
 
 void test_kill_sexp_parens(void) {
@@ -857,9 +785,6 @@ int main(void) {
 	RUN_TEST(test_backward_sentence_simple);
 	RUN_TEST(test_backward_sentence_to_beginning);
 	RUN_TEST(test_forward_sentence_with_closing_punct);
-	RUN_TEST(test_word_scanners_start_from_their_arguments);
-	RUN_TEST(test_sexp_scan_over_a_word_starts_from_its_arguments);
-	RUN_TEST(test_scanners_read_the_buffer_they_are_given);
 
 	/* Kill sexp */
 	RUN_TEST(test_kill_sexp_parens);

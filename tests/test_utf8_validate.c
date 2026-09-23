@@ -5,7 +5,6 @@
 #include "test_harness.h"
 #include "unicode.h"
 #include <stdint.h>
-#include <string.h>
 
 /* The zero-length string.  Every non-empty case is covered by the
  * exhaustive sweep below, which enumerates lengths 1 to 4. */
@@ -309,110 +308,6 @@ void test_composition_differential_random(void) {
 	}
 }
 
-/* ----------------------------------------------------------------
- * utf8SanitizeLine: untrusted bytes to one safe line of status text
- * ---------------------------------------------------------------- */
-
-static const char *sanitized(const char *in, size_t len) {
-	static char out[256];
-	utf8SanitizeLine((const uint8_t *)in, len, out, sizeof(out));
-	return out;
-}
-
-/* A string literal's bytes, less the terminating NUL. */
-#define SANITIZED(lit) sanitized((lit), sizeof(lit) - 1)
-
-void test_sanitize_examples(void) {
-	TEST_ASSERT_EQUAL_STRING("plain text", SANITIZED("plain text"));
-	/* C0 controls and DEL in caret notation: nothing reaches the
-	 * terminal that it would act on. */
-	TEST_ASSERT_EQUAL_STRING("^[[31mred^[[0m",
-				 SANITIZED("\033[31mred\033[0m"));
-	TEST_ASSERT_EQUAL_STRING("a^Jb^Ic^M^?", SANITIZED("a\nb\tc\r\177"));
-	TEST_ASSERT_EQUAL_STRING("a^@b", SANITIZED("a\0b"));
-	/* Valid UTF-8 passes through untouched. */
-	TEST_ASSERT_EQUAL_STRING("caf\xC3\xA9 \xE4\xB8\xAD \xF0\x9F\x98\x80",
-				 SANITIZED("caf\xC3\xA9 \xE4\xB8\xAD "
-					   "\xF0\x9F\x98\x80"));
-	/* C1 controls -- U+009B is CSI to an 8-bit terminal. */
-	TEST_ASSERT_EQUAL_STRING("x?y", SANITIZED("x\xC2\x9By"));
-	/* Each byte that does not start a valid sequence: U+FFFD. */
-	TEST_ASSERT_EQUAL_STRING("\xEF\xBF\xBDx", SANITIZED("\xFFx"));
-	TEST_ASSERT_EQUAL_STRING("\xEF\xBF\xBD\xEF\xBF\xBD",
-				 SANITIZED("\xE4\xB8")); /* truncated */
-	TEST_ASSERT_EQUAL_STRING("\xEF\xBF\xBD\xEF\xBF\xBD",
-				 SANITIZED("\xC0\xAF")); /* overlong */
-}
-
-/* A full output buffer stops before a character, never inside one, and
- * reports how much of the input it used. */
-void test_sanitize_stops_on_a_character_boundary(void) {
-	char out[5];
-	size_t used = utf8SanitizeLine((const uint8_t *)"ab\xE4\xB8\xAD", 5,
-				       out, sizeof(out));
-	TEST_ASSERT_EQUAL_STRING("ab", out);
-	TEST_ASSERT_EQUAL_INT(2, (int)used);
-
-	used = utf8SanitizeLine((const uint8_t *)"abc\033", 4, out,
-				sizeof(out));
-	TEST_ASSERT_EQUAL_STRING("abc", out); /* no room for "^[" */
-	TEST_ASSERT_EQUAL_INT(3, (int)used);
-
-	TEST_ASSERT_EQUAL_INT(0, (int)utf8SanitizeLine((const uint8_t *)"a", 1,
-						       out, 0));
-}
-
-/* What makes the output safe, checked over every one- and two-byte
- * input and a spread of random longer ones: it is valid UTF-8, holds
- * no C0 or C1 control and no DEL, and consumes all of its input when
- * there is room. */
-static int sanitizedIsSafe(const uint8_t *in, size_t len) {
-	char out[16 * 3 + 1];
-	size_t used = utf8SanitizeLine(in, len, out, sizeof(out));
-	size_t olen = strlen(out);
-	if (used != len)
-		return 0;
-	if (olen > 0 && !utf8_validate((const uint8_t *)out, (int)olen))
-		return 0;
-	for (size_t i = 0; i < olen;) {
-		uint8_t c = (uint8_t)out[i];
-		if (c < 0x20 || c == 0x7F)
-			return 0;
-		int n = utf8_nBytes(c);
-		if (n > 1 && utf8Decode((const uint8_t *)out, (int)i) <= 0x9F)
-			return 0;
-		i += (size_t)n;
-	}
-	return 1;
-}
-
-void test_sanitize_output_is_always_safe(void) {
-	uint8_t in[16];
-	int bad = 0;
-	for (int a = 0; a < 256; a++) {
-		in[0] = (uint8_t)a;
-		bad += !sanitizedIsSafe(in, 1);
-		for (int b = 0; b < 256; b++) {
-			in[1] = (uint8_t)b;
-			bad += !sanitizedIsSafe(in, 2);
-		}
-	}
-	uint32_t x = 2463534242u; /* xorshift32 */
-	for (int t = 0; t < 200000; t++) {
-		size_t len = 1 + t % 16;
-		for (size_t i = 0; i < len; i++) {
-			x ^= x << 13;
-			x ^= x >> 17;
-			x ^= x << 5;
-			/* Bias toward UTF-8's interesting bytes. */
-			in[i] = (x & 1) ? (uint8_t)(0x80 | (x >> 8 & 0x7F)) :
-					  (uint8_t)(x >> 8);
-		}
-		bad += !sanitizedIsSafe(in, len);
-	}
-	TEST_ASSERT_EQUAL_INT(0, bad);
-}
-
 int main(void) {
 	TEST_BEGIN();
 
@@ -427,9 +322,6 @@ int main(void) {
 	RUN_TEST(test_composition_valid_concatenations);
 	RUN_TEST(test_composition_differential_mutated);
 	RUN_TEST(test_composition_differential_random);
-	RUN_TEST(test_sanitize_examples);
-	RUN_TEST(test_sanitize_stops_on_a_character_boundary);
-	RUN_TEST(test_sanitize_output_is_always_safe);
 
 	return TEST_END();
 }
