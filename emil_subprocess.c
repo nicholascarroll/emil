@@ -293,10 +293,17 @@ int subprocess_signal(struct subprocess_s *const process, int sig) {
 	 * always had: glibc's posix_spawn normally vfork-blocks until
 	 * the child has run its setpgid, but under QEMU user-mode vfork
 	 * degrades to fork and posix_spawn can return before the group
-	 * exists. */
-	if (process->grouped)
-		(void)kill(-process->child, sig);
-	return kill(process->child, sig);
+	 * exists.
+	 *
+	 * The order has one consequence: the group signal may already have
+	 * killed the child, and on Cygwin/MSYS2 an exited child is then
+	 * reported as ESRCH rather than accepted as a zombie, as POSIX
+	 * systems do.  The signal did its job, so that is success. */
+	int group_rc = process->grouped ? kill(-process->child, sig) : -1;
+	int rc = kill(process->child, sig);
+	if (rc != 0 && errno == ESRCH && group_rc == 0)
+		return 0;
+	return rc;
 }
 
 int subprocess_destroy(struct subprocess_s *const process) {

@@ -165,12 +165,19 @@ static char sh_root[256];
 static char sh_cwd[4096];
 static char *sh_saved_path;
 
+/* An executable fixture is a real script, not an empty file: on a
+ * filesystem mounted noacl, as MSYS2 mounts by default, Cygwin ignores
+ * chmod's x bits and counts a file executable only if its name ends in
+ * .exe, .com or .bat or its content starts with "#!". */
 static void shTouch(const char *rel, mode_t mode) {
 	char path[512];
 	snprintf(path, sizeof(path), "%s/%s", sh_root, rel);
 	FILE *f = fopen(path, "w");
-	if (f)
+	if (f) {
+		if (mode & 0111)
+			fputs("#!/bin/sh\n", f);
 		fclose(f);
+	}
 	chmod(path, mode);
 }
 
