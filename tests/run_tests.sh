@@ -399,7 +399,7 @@ SUITES="decoder unicode wcwidth buffer undo coalesce edit fileio relpath offset
     visual_line utf8_validate rect replace transform subprocess shell adjust
     history abuf tilde keymap kill_ring insert_file status_bar cjk_indic
     warnings ctags find display prompt regex_semantics writeall backup
-    fuzz"
+    fuzz search_nested search_stale register_preview"
 
 listed=$(echo $SUITES | wc -w)
 present=$(ls tests/test_*.c 2>/dev/null | wc -l)

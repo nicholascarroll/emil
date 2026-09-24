@@ -21,6 +21,7 @@
 #include "unicode.h"
 #include "keymap.h"
 #include "display.h"
+#include "window.h"
 
 void installHandler(int signum, void (*handler)(int), int flags) {
 	struct sigaction sa;
@@ -108,9 +109,8 @@ void openShellDrawer(void) {
 	int rows = ws.ws_row - drawerHeight;
 	E.screenrows = rows;
 
-	/* Force all windows to recalculate heights for the smaller space */
-	for (int i = 0; i < E.nwindows; i++)
-		E.windows[i]->height = 0;
+	/* Lay the windows out again in the smaller space */
+	resetWindowHeights();
 
 	/* Save cursor position */
 	if (write(STDOUT_FILENO, ESC "7", 2) != 2)

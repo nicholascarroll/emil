@@ -525,11 +525,7 @@ void switchToNamedBuffer(void) {
 	setStatusMessage("Switched to buffer %s", switchedName);
 	free(switchedName);
 
-	for (int i = 0; i < E.nwindows; i++) {
-		if (E.windows[i]->focused) {
-			E.windows[i]->buf = E.buf;
-		}
-	}
+	E.windows[windowFocusedIdx()]->buf = E.buf;
 
 	free(buffer_name);
 }
@@ -539,11 +535,7 @@ void previousBuffer(void) {
 	if (E.buf == NULL) {
 		E.buf = E.headbuf;
 	}
-	for (int i = 0; i < E.nwindows; i++) {
-		if (E.windows[i]->focused) {
-			E.windows[i]->buf = E.buf;
-		}
-	}
+	E.windows[windowFocusedIdx()]->buf = E.buf;
 	resetFileCheckThrottle();
 }
 
@@ -561,12 +553,7 @@ void nextBuffer(void) {
 		}
 		E.buf = temp;
 	}
-	// Update the focused buffer in all windows
-	for (int i = 0; i < E.nwindows; i++) {
-		if (E.windows[i]->focused) {
-			E.windows[i]->buf = E.buf;
-		}
-	}
+	E.windows[windowFocusedIdx()]->buf = E.buf;
 	resetFileCheckThrottle();
 }
 

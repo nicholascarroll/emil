@@ -609,7 +609,10 @@ void backwardSexp(int count) {
 
 /* Page/scroll navigation */
 
-void pageUp(int count) {
+/* One page of scrolling, dir -1 for up and +1 for down.  A page is the
+ * window height less the overlap that keeps a couple of lines in view,
+ * and never less than one line. */
+static void pageScroll(int count, int dir) {
 	struct window *win = E.windows[windowFocusedIdx()];
 	int times = UARG_COUNT(count);
 
@@ -618,39 +621,32 @@ void pageUp(int count) {
 		if (scroll_lines < 1)
 			scroll_lines = 1;
 
-		scrollViewport(win, E.buf, -scroll_lines);
+		scrollViewport(win, E.buf, dir * scroll_lines);
 		clampCursorToViewport(win, E.buf);
 	}
+}
+
+void pageUp(int count) {
+	pageScroll(count, -1);
 }
 
 void pageDown(int count) {
+	pageScroll(count, 1);
+}
+
+/* One line of scrolling per repeat, dir -1 for up and +1 for down. */
+static void scrollLines(int count, int dir) {
 	struct window *win = E.windows[windowFocusedIdx()];
-	int times = UARG_COUNT(count);
-
-	for (int n = 0; n < times; n++) {
-		int scroll_lines = win->height - page_overlap;
-		if (scroll_lines < 1)
-			scroll_lines = 1;
-
-		scrollViewport(win, E.buf, scroll_lines);
-		clampCursorToViewport(win, E.buf);
-	}
+	scrollViewport(win, E.buf, dir * UARG_COUNT(count));
+	clampCursorToViewport(win, E.buf);
 }
 
 void scrollLineUp(int count) {
-	struct window *win = E.windows[windowFocusedIdx()];
-	int times = UARG_COUNT(count);
-
-	scrollViewport(win, E.buf, -times);
-	clampCursorToViewport(win, E.buf);
+	scrollLines(count, -1);
 }
 
 void scrollLineDown(int count) {
-	struct window *win = E.windows[windowFocusedIdx()];
-	int times = UARG_COUNT(count);
-
-	scrollViewport(win, E.buf, times);
-	clampCursorToViewport(win, E.buf);
+	scrollLines(count, 1);
 }
 
 void beginningOfLine(void) {

@@ -117,21 +117,33 @@ static void showRegisterPreview(void) {
 			}
 			break;
 		}
-		case REGISTER_TEXT:
+		case REGISTER_TEXT: {
+			/* Up to 60 bytes of the text, cut on a character
+			 * boundary and with newlines as ^J.  "%.60s" cut
+			 * by bytes: it could end the row inside a
+			 * multibyte character, and it copied newlines
+			 * into it. */
+			const uint8_t *s = E.registers[i].data.text.str;
+			char shown[61];
+			if (!s)
+				s = (const uint8_t *)"";
+			utf8SanitizeLine(s, strlen((const char *)s), shown,
+					 sizeof(shown));
 			if (E.registers[i].data.text.is_rectangle) {
 				snprintf(
 					line, sizeof(line),
-					"%s: rectangle (w:%d h:%d) starting with '%.60s",
+					"%s: rectangle (w:%d h:%d) starting with '%s",
 					name,
 					E.registers[i].data.text.rect_width,
 					E.registers[i].data.text.rect_height,
-					E.registers[i].data.text.str);
+					shown);
 			} else {
 				snprintf(line, sizeof(line),
-					 "%s: text starting with '%.60s", name,
-					 E.registers[i].data.text.str);
+					 "%s: text starting with '%s", name,
+					 shown);
 			}
 			break;
+		}
 		case REGISTER_NULL:
 			break;
 		}
@@ -240,11 +252,7 @@ void jumpToRegister(void) {
 			setMarkSilent();
 		} else {
 			E.buf = E.registers[reg].data.point.buf;
-			for (int i = 0; i < E.nwindows; i++) {
-				if (E.windows[i]->focused) {
-					E.windows[i]->buf = E.buf;
-				}
-			}
+			E.windows[windowFocusedIdx()]->buf = E.buf;
 			registerMessage("Jumped to point in register %s", reg);
 		}
 		struct buffer *buf = E.buf;

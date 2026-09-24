@@ -186,6 +186,17 @@ uint8_t *editorPrompt(const char *prompt, enum promptType t,
 		}
 		recordKey(c);
 
+		/* In a search, C-M-s and C-M-r repeat it, as in Emacs
+		 * (isearch-repeat-forward / -backward): they start a
+		 * regexp search, so they are what repeats one.  Mapped
+		 * onto C-s / C-r, the switch and the callback see an
+		 * ordinary repeat.  Left to dispatch, they would start a
+		 * second search inside this one. */
+		if (t == PROMPT_SEARCH && c == KEY_META(CTRL('s')))
+			c = CTRL('s');
+		else if (t == PROMPT_SEARCH && c == KEY_META(CTRL('r')))
+			c = CTRL('r');
+
 		int callback_key = c;
 
 		/* Resolve once: resolveBinding() carries the C-x prefix

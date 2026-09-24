@@ -8,6 +8,7 @@ int windowFocusedIdx(void);
 int findBufferWindow(struct buffer *buf);
 void synchronizeBufferCursor(struct buffer *buf, struct window *win);
 void switchWindow(void);
+void resetWindowHeights(void);
 void createWindow(void);
 void destroyWindow(int window_idx);
 void destroyOtherWindows(void);

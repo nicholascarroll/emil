@@ -710,7 +710,9 @@ int utf8ColsToBytes(const uint8_t *str, int from, int len, int cols,
 		if (x + w > cols)
 			break;
 		x += w;
-		idx += nb;
+		/* An incomplete sequence at the end of the span must not
+		 * carry the offset past it: callers copy str[from..idx). */
+		idx += nb < from + len - idx ? nb : from + len - idx;
 	}
 	if (used)
 		*used = x;

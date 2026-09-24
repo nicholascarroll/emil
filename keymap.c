@@ -912,7 +912,6 @@ static int dispatchRegion(int c, int uarg) {
 		else
 			killRegion();
 		E.buf->mark_active = 0;
-		;
 		return 1;
 	case CMD_COPY:
 		if (E.buf->rectangle_mode)
@@ -920,13 +919,11 @@ static int dispatchRegion(int c, int uarg) {
 		else
 			copyRegion();
 		E.buf->mark_active = 0;
-		;
 		return 1;
 	case CMD_COPY_CLIPBOARD:
 		if (!E.buf->rectangle_mode) {
 			copyRegion();
 			E.buf->mark_active = 0;
-			;
 			copyToClipboard(E.kill.str);
 		} else {
 			setStatusMessage(
@@ -951,7 +948,6 @@ static int dispatchRegion(int c, int uarg) {
 			killRectangle();
 		}
 		E.buf->mark_active = 0;
-		;
 		return 1;
 	case CMD_UPCASE_REGION:
 		transformRegion(transformerUpcase);
@@ -968,7 +964,6 @@ static int dispatchRegion(int c, int uarg) {
 	case CMD_REGION_REGISTER:
 		regionToRegister();
 		E.buf->mark_active = 0;
-		;
 		return 1;
 	case CMD_INC_REGISTER:
 		incrementRegister();
@@ -985,12 +980,10 @@ static int dispatchRegion(int c, int uarg) {
 	case CMD_COPY_RECT:
 		copyRectangle();
 		E.buf->mark_active = 0;
-		;
 		return 1;
 	case CMD_KILL_RECT:
 		killRectangle();
 		E.buf->mark_active = 0;
-		;
 		return 1;
 	case CMD_YANK_RECT:
 		yankRectangle();
@@ -1169,7 +1162,6 @@ static int dispatchMisc(int c, int uarg) {
 		return 1;
 	case CMD_CANCEL:
 		E.buf->mark_active = 0;
-		;
 		setStatusMessage("Quit");
 		return 1;
 	case CMD_UNIVERSAL_ARG:

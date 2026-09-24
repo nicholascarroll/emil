@@ -146,8 +146,6 @@ void handlePendingSignals(void) {
 		IGNORE_RETURN(write(STDOUT_FILENO, ESC "8", 2));
 		setupHandlers();
 		applyRawMode();
-		for (int i = 0; i < E.nwindows; i++)
-			E.windows[i]->height = 0;
 		resizeScreen();
 		resetFileCheckThrottle();
 		/* resizeScreen() above already re-measured the

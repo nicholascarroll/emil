@@ -310,16 +310,21 @@ static void normalizeRectCols(struct buffer *buf, int *topx, int *topy,
 	buf->markx = rectSnapBack(&buf->row[*boty], *botx);
 }
 
+/* Swap (startx,starty) and (endx,endy) if needed so start comes before
+ * end in buffer order. */
+static void orderPoints(int *sx, int *sy, int *ex, int *ey) {
+	if (*sy > *ey || (*sy == *ey && *sx > *ex)) {
+		int tx = *sx, ty = *sy;
+		*sx = *ex;
+		*sy = *ey;
+		*ex = tx;
+		*ey = ty;
+	}
+}
+
 void deleteRange(struct buffer *buf, int startx, int starty, int endx, int endy,
 		 int add_to_kill_ring) {
-	/* Normalise: ensure start comes before end */
-	if (starty > endy || (starty == endy && startx > endx)) {
-		int tx = startx, ty = starty;
-		startx = endx;
-		starty = endy;
-		endx = tx;
-		endy = ty;
-	}
+	orderPoints(&startx, &starty, &endx, &endy);
 
 	/* Clamp end position within buffer */
 	if (endy >= buf->numrows) {
@@ -504,14 +509,7 @@ void transformRange(struct buffer *buf, int startx, int starty, int endx,
 	if (rejectIfReadOnly(buf))
 		return;
 
-	/* Normalize: put start before end */
-	if (starty > endy || (starty == endy && startx > endx)) {
-		int tx = startx, ty = starty;
-		startx = endx;
-		starty = endy;
-		endx = tx;
-		endy = ty;
-	}
+	orderPoints(&startx, &starty, &endx, &endy);
 
 	int old_len;
 	uint8_t *old_text =
@@ -721,20 +719,12 @@ int regexSubstituteAll(const regex_t *re, const uint8_t *subject, int len,
 
 /* Map a byte offset within region text back to buffer coordinates.
  * The region string joins rows with '\n' (see collectRegionText), so
- * walking it reproduces the row/column the offset came from. */
+ * walking it reproduces the row/column the offset came from -- which is
+ * exactly computeInsertEnd's newline-counting walk over the first 'off'
+ * bytes, seeded at (startx, starty). */
 static void offsetToCoords(int startx, int starty, const uint8_t *s, int off,
 			   int *x, int *y) {
-	int cx = startx, cy = starty;
-	for (int i = 0; i < off; i++) {
-		if (s[i] == '\n') {
-			cy++;
-			cx = 0;
-		} else {
-			cx++;
-		}
-	}
-	*x = cx;
-	*y = cy;
+	computeInsertEnd(s, off, startx, starty, x, y);
 }
 
 void replaceRegex(void) {
@@ -936,7 +926,6 @@ void stringRectangleWithText(uint8_t *string) {
 	free(old_text);
 	free(out);
 	E.buf->mark_active = 0;
-	;
 	restoreKill(okill);
 }
 
@@ -982,7 +971,6 @@ void copyRectangle(void) {
 
 	addToKillRing((char *)E.kill.str, 1, rw, rh);
 	E.buf->mark_active = 0;
-	;
 }
 
 void killRectangle(void) {
@@ -1066,7 +1054,6 @@ void killRectangle(void) {
 	free(old_text);
 	free(out);
 	E.buf->mark_active = 0;
-	;
 	clearText(&saved);
 }
 
@@ -1166,7 +1153,6 @@ void yankRectangle(void) {
 	free(old_text);
 	free(out);
 	E.buf->mark_active = 0;
-	;
 	clearText(&E.kill);
 	E.kill = saved;
 }

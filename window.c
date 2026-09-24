@@ -84,6 +84,14 @@ void switchWindow(void) {
 	synchronizeBufferCursor(E.buf, nextWindow);
 }
 
+/* Zero every window's height so the next frame lays them all out
+ * afresh: after a resize, a window created or destroyed, or the
+ * minibuffer changing height. */
+void resetWindowHeights(void) {
+	for (int i = 0; i < E.nwindows; i++)
+		E.windows[i]->height = 0;
+}
+
 void createWindow(void) {
 	E.windows =
 		xrealloc(E.windows, sizeof(struct window *) * (++E.nwindows));
@@ -95,10 +103,7 @@ void createWindow(void) {
 	E.windows[E.nwindows - 1]->rowoff = 0;
 	E.windows[E.nwindows - 1]->coloff = 0;
 
-	// Force all windows to recalculate heights
-	for (int i = 0; i < E.nwindows; i++) {
-		E.windows[i]->height = 0;
-	}
+	resetWindowHeights();
 }
 
 void destroyWindow(int window_idx) {
@@ -127,10 +132,7 @@ void destroyWindow(int window_idx) {
 	free(E.windows);
 	E.windows = windows;
 
-	/* reset heights */
-	for (int i = 0; i < E.nwindows; i++) {
-		E.windows[i]->height = 0;
-	}
+	resetWindowHeights();
 }
 
 void destroyOtherWindows(void) {
