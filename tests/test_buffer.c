@@ -7,6 +7,7 @@
 #include "completion.h"
 #include "buffer.h"
 #include "util.h"
+#include "unicode.h"
 #include <stdint.h>
 
 /* ---- Kill-buffer confirmation ----
@@ -241,24 +242,33 @@ void test_minibuf_bare_newline_is_not_empty(void) {
 	destroyBuffer(mb);
 }
 
-/* User text embedded into a prompt or status string must never carry
- * a raw 0x0A to the terminal; it is rewritten in caret notation. */
-void test_caret_escape_newlines(void) {
-	char *out = caretEscapeNewlines((const uint8_t *)"a\nb");
-	TEST_ASSERT_EQUAL_STRING("a^Jb", out);
-	free(out);
-
-	out = caretEscapeNewlines((const uint8_t *)"\n");
-	TEST_ASSERT_EQUAL_STRING("^J", out);
-	free(out);
-
-	out = caretEscapeNewlines((const uint8_t *)"plain");
-	TEST_ASSERT_EQUAL_STRING("plain", out);
-	free(out);
-
-	out = caretEscapeNewlines((const uint8_t *)"");
-	TEST_ASSERT_EQUAL_STRING("", out);
-	free(out);
+/* Text for a prompt or the status line is drawn raw, so control
+ * bytes become caret notation, C1 controls '?', invalid bytes U+FFFD,
+ * and a full output buffer never ends inside a character. */
+void test_utf8_sanitize_line(void) {
+	char out[32];
+	const struct {
+		const char *in, *want;
+	} cases[] = {
+		{ "a\nb", "a^Jb" },
+		{ "\t\x1b[2J\x7f", "^I^[[2J^?" },
+		{ "\xc2\x9b", "?" },		    /* U+009B, 8-bit CSI */
+		{ "x\xff", "x\xef\xbf\xbd" },	    /* invalid byte */
+		{ "\xe0\xb8\x81", "\xe0\xb8\x81" }, /* Thai passes through */
+		{ "", "" },
+	};
+	for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+		size_t len = strlen(cases[i].in);
+		TEST_ASSERT_EQUAL_UINT(
+			len, utf8SanitizeLine((const uint8_t *)cases[i].in, len,
+					      out, sizeof(out)));
+		TEST_ASSERT_EQUAL_STRING(cases[i].want, out);
+	}
+	/* Room for "ab" and part of U+0E01: stop before it. */
+	TEST_ASSERT_EQUAL_UINT(2, utf8SanitizeLine((const uint8_t *)"ab\xe0"
+								    "\xb8\x81",
+						   5, out, 4));
+	TEST_ASSERT_EQUAL_STRING("ab", out);
 }
 
 void test_minibuf_trailing_newline(void) {
@@ -424,7 +434,7 @@ int main(void) {
 	RUN_TEST(test_minibuf_single_line_unchanged);
 	RUN_TEST(test_minibuf_trailing_newline);
 	RUN_TEST(test_minibuf_bare_newline_is_not_empty);
-	RUN_TEST(test_caret_escape_newlines);
+	RUN_TEST(test_utf8_sanitize_line);
 
 	/* bufferLoadBlob (#117 R2) */
 	RUN_TEST(test_blob_trailing_newline);

@@ -38,14 +38,9 @@ int isIndicSentenceTerminator(uint32_t cp);
 
 int utf8_validate(const uint8_t *buf, int len);
 
-/* Copy untrusted bytes -- a child process's stderr, say -- into out as
- * text that is safe to draw raw on the terminal as one line: valid
- * UTF-8 passes through, C0 controls and DEL become caret notation
- * (^J, ^[, ^?), C1 controls become '?', and each byte that does not
- * start a valid UTF-8 sequence becomes U+FFFD.  out is always
- * NUL-terminated (outsz > 0) and never ends inside a character.
- * Returns how many bytes of in were consumed: less than len when out
- * filled first. */
+/* Copy untrusted bytes into out as one line safe to draw raw: C0 and
+ * DEL as ^X, C1 as '?', invalid bytes as U+FFFD.  out is NUL-terminated
+ * and never ends mid-character.  Returns the bytes of in consumed. */
 size_t utf8SanitizeLine(const uint8_t *in, size_t len, char *out, size_t outsz);
 
 /* The single display-width rule; see the comment at the definition.

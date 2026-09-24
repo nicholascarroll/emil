@@ -333,21 +333,11 @@ static void snapToSymbol(struct buffer *buf, int direction) {
 	}
 }
 
-/* Close the palette popup and give focus back to the window that held
-it when the palette was opened.
-origin_win is that window.  It is kept when it still shows `origin`,
-or when origin is the minibuffer, which is in no window: the window
-then is the one the user was editing before the prompt opened.  Only
-if neither holds does it fall back to the first window showing origin,
-then to window 0.  Choosing by buffer first, as this used to, sent
-focus to the upper window whenever both halves of a split showed the
-same buffer.
-Focus moves before the palette window is closed, not after.  Closing
-the focused window makes destroyWindow() call switchWindow(), which
-focuses the window after it and resets that window's buffer cursor
-from the window's saved position; with a shared buffer that is
-origin's cursor, which the insert that follows depends on.
-Updates E.windows[*]->focused and E.buf. */
+/* Close the palette and refocus origin_win, the window that had focus,
+if it still shows origin or origin is the minibuffer; else a window
+showing origin; else window 0.  Focus moves first: closing the focused
+window would make destroyWindow() refocus and reset the cursor of a
+buffer shared with origin.  Updates E.windows[*]->focused and E.buf. */
 static void restoreFocusTo(struct buffer *origin, int origin_win) {
 	int target = -1;
 	if (origin_win < E.nwindows &&

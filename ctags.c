@@ -4,7 +4,6 @@
 #include <string.h>
 #include <limits.h>
 #include <unistd.h>
-#include <sys/stat.h>
 #include "ctags.h"
 #include "emil.h"
 
@@ -307,25 +306,14 @@ static void freeMatches(struct tagMatch *v, int n) {
 
 /* Move the entries in the file being read to the front, keeping the
  * order within each group: the definition next to the reader is the
- * likeliest one.  Files are compared by device and inode, as
- * findBufferForFile() does, so a tags path and a buffer path that name
- * one file by different routes still match. */
+ * likeliest one.  findBufferForFile() matches a path that names the
+ * file by another route, such as a symlink. */
 static void currentFileFirst(struct tagMatch *v, int n) {
 	if (!E.buf->filename || E.buf->special_buffer)
 		return;
-	struct stat here, st;
-	char *p = expandTilde(E.buf->filename);
-	int ok = stat(p, &here) == 0 && here.st_ino != 0;
-	free(p);
-	if (!ok)
-		return;
 	int front = 0;
 	for (int i = 0; i < n; i++) {
-		p = expandTilde(v[i].path);
-		int same = stat(p, &st) == 0 && st.st_dev == here.st_dev &&
-			   st.st_ino == here.st_ino;
-		free(p);
-		if (same) {
+		if (findBufferForFile(v[i].path, NULL) == E.buf) {
 			struct tagMatch t = v[i];
 			memmove(&v[front + 1], &v[front],
 				(size_t)(i - front) * sizeof(*v));

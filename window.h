@@ -13,8 +13,7 @@ void destroyWindow(int window_idx);
 void destroyOtherWindows(void);
 void showPopupBuffer(struct buffer *buf);
 
-/* NULL when the focus invariant (see E.buf in emil.h) holds, else a
- * short description of how it is broken. */
+/* NULL if the focus invariant (E.buf in emil.h) holds, else what broke. */
 const char *focusInvariantBreach(void);
 
 #endif /* EMIL_WINDOW_H */

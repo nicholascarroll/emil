@@ -67,32 +67,6 @@ static int minibufEmpty(struct buffer *mb) {
 	return bufferIsEmpty(mb);
 }
 
-/* Copy 's' with each '\n' rewritten as the two bytes "^J", the same
- * caret notation minibufJoin uses for display.  For embedding user
- * text into a prompt or status string: E.statusmsg reaches the
- * terminal raw, so a literal 0x0A there executes as a line feed while
- * stringWidth charges it two columns -- the display and the cursor
- * math disagree, and the minibuffer visibly breaks in two.  Returns a
- * malloc'd string; caller frees. */
-char *caretEscapeNewlines(const uint8_t *s) {
-	size_t len = 0, extra = 0;
-	for (const uint8_t *p = s; *p; p++, len++)
-		if (*p == '\n')
-			extra++;
-	char *out = xmalloc(len + extra + 1);
-	char *o = out;
-	for (const uint8_t *p = s; *p; p++) {
-		if (*p == '\n') {
-			*o++ = '^';
-			*o++ = 'J';
-		} else {
-			*o++ = (char)*p;
-		}
-	}
-	*o = '\0';
-	return out;
-}
-
 /* The one place a prompt type maps to a history ring.  NULL means the
  * prompt keeps no history.  No default: -Wswitch turns a new enum
  * value into a build break here. */
@@ -214,19 +188,8 @@ uint8_t *editorPrompt(const char *prompt, enum promptType t,
 
 		int callback_key = c;
 
-		/* Resolve the key once, here, and use the answer below.
-		 * resolveBinding() is stateful -- it carries the C-x and
-		 * C-x r prefixes from one call to the next -- so asking
-		 * it about the same key twice is a second keystroke, not
-		 * a second lookup.  This loop used to ask twice, once for
-		 * the popup check and again at default:, so C-x arrived
-		 * as C-x C-x (exchange point and mark) and no C-x command
-		 * could be typed in a prompt at all.
-		 *
-		 * A key the switch below claims for the prompt (RET, C-g,
-		 * TAB, ...) keeps that meaning even straight after C-x:
-		 * resolving it here has already ended the chord, which is
-		 * simply abandoned, as before. */
+		/* Resolve once: resolveBinding() carries the C-x prefix
+		 * between calls, so a second lookup is a second keystroke. */
 		int cmd = resolveBinding(c);
 
 		/* PageUp/PageDown/C-v/M-v, if a completions popup is

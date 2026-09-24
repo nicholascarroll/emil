@@ -568,25 +568,10 @@ int resolveBinding(int key) {
 	return CMD_NONE;
 }
 
-/* Commands refused while a prompt is reading the minibuffer.
- *
- * Every other command runs in the minibuffer exactly as it does in a
- * file: that is how C-a, M-f, C-k, C-y and the rest work in a prompt
- * without being written twice.  These cannot, because the minibuffer is
- * in no window and not in the buffer list, and editorPrompt() needs
- * E.buf to stay E.minibuf until it returns:
- *
- *   - the window commands would move focus under the prompt;
- *   - next-buffer and kill-buffer search the buffer list for E.buf and
- *     dereference NULL when it is not there;
- *   - previous-buffer, jump-to-register, the ctags jumps and the
- *     header/body toggle move E.buf to a file, so the keys typed next
- *     edit that file behind a prompt that still looks open;
- *   - toggle-read-only would stick to the minibuffer, which outlives
- *     the prompt, and silently refuse typing in every later prompt.
- *
- * A command that opens a prompt of its own needs no entry here:
- * editorPrompt() refuses to nest. */
+/* Commands that cannot run in the minibuffer, which is in no window
+ * and not in the buffer list: they would move focus or E.buf under the
+ * prompt, crash searching the buffer list for it, or leave it read-only.
+ * Prompts need no entry: editorPrompt() refuses to nest. */
 static int refusedInMinibuffer(int c) {
 	switch (c) {
 	case CMD_OTHER_WINDOW:
@@ -822,8 +807,7 @@ static int dispatchEdit(int c, int uarg) {
 	}
 }
 
-/* Window management.  Refused in the minibuffer; see
- * refusedInMinibuffer(). */
+/* Window management */
 static int dispatchWindow(int c) {
 	switch (c) {
 	case CMD_OTHER_WINDOW:

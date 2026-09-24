@@ -401,9 +401,7 @@ int main(int argc, char *argv[]) {
 			continue;
 		}
 
-		/* One buffer per file, as switchToFile keeps it:
-		 * "emil foo.c ./foo.c" or a file and a link to it
-		 * must not open it twice (#128). */
+		/* One buffer per file, however named (#128). */
 		struct buffer *newBuf = findBufferForFile(argv[i], NULL);
 		if (newBuf == NULL) {
 			newBuf = newBuffer();
@@ -468,10 +466,7 @@ int main(int argc, char *argv[]) {
 		handlePendingSignals();
 #ifdef EMIL_DEBUG_FOCUS
 		{
-			/* See E.buf in emil.h.  Checked here, between
-			 * commands, because that is where the invariant
-			 * is claimed: the modal loops break it on purpose
-			 * while they run. */
+			/* See E.buf in emil.h: it holds between commands. */
 			const char *breach = focusInvariantBreach();
 			if (breach) {
 				disableRawMode();

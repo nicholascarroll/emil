@@ -70,10 +70,8 @@ void revert(void);
 void findFile(int read_only);
 struct buffer *switchToFile(const char *filename);
 
-/* The buffer already visiting filename, or NULL: by name, then by file,
- * so a symlink, a hard link or another spelling of an open file finds
- * the buffer that has it (#128).  *by_file, if not NULL, is set when the
- * match was by file alone -- the paths differ but name one file. */
+/* The buffer visiting filename, by name or by file (a symlink or hard
+ * link to it, #128), or NULL.  *by_file, if given, is set for the latter. */
 struct buffer *findBufferForFile(const char *filename, int *by_file);
 void insertFile(void);
 

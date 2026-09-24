@@ -69,6 +69,16 @@ static void disarmTimer(void) {
 	setitimer(ITIMER_REAL, &it, NULL);
 }
 
+/* stat() under the 50ms deadline; a timeout fails like any error. */
+static int timedStat(const char *filename, struct stat *st) {
+	char *iopath = expandTilde(filename);
+	armTimer();
+	int rc = stat(iopath, st);
+	disarmTimer();
+	free(iopath);
+	return rc;
+}
+
 /* How many seconds between file-check syscalls. */
 #define FILE_CHECK_INTERVAL_SEC 2
 
@@ -332,18 +342,12 @@ void checkFileModified(void) {
 	E.last_file_check = now;
 
 	/* Job 1: mtime check. */
-	if (E.buf->open_mtime != 0 && !E.buf->external_mod) {
-		char *iopath = expandTilde(E.buf->filename);
-		struct stat st;
-		armTimer();
-		int rc = stat(iopath, &st);
-		disarmTimer();
-		if (rc == 0 && (st.st_mtime != E.buf->open_mtime ||
-				st.st_size != E.buf->open_size)) {
-			E.buf->external_mod = 1;
-		}
-		free(iopath);
-	}
+	struct stat st;
+	if (E.buf->open_mtime != 0 && !E.buf->external_mod &&
+	    timedStat(E.buf->filename, &st) == 0 &&
+	    (st.st_mtime != E.buf->open_mtime ||
+	     st.st_size != E.buf->open_size))
+		E.buf->external_mod = 1;
 
 	/* Job 2: stale-lock clearing. */
 	if (E.buf->lock_blocked_pid != 0 && E.buf->lock_fd < 0 &&
@@ -1140,29 +1144,9 @@ void saveAs(void) {
 	saveBuffer(0);
 }
 
-/* stat() under the 50ms deadline checkFileModified uses.  0 on success;
- * a stat the deadline interrupts fails like any other. */
-static int timedStat(const char *filename, struct stat *st) {
-	char *iopath = expandTilde(filename);
-	armTimer();
-	int rc = stat(iopath, st);
-	disarmTimer();
-	free(iopath);
-	return rc;
-}
-
-/* By name first: findBufferByName compares literal and absolute forms,
- * which settles foo.c against ./foo.c.  Then by file.  A symlink and
- * its target, or two hard links, are different paths to one inode, and
- * a second buffer on it is a second copy of the text, each saved over
- * the other and each believing it holds the file's one advisory lock.
- *
- * Each open buffer's file is stat()ed now rather than remembered from
- * when it was opened, so a file replaced on disk is compared as it is.
- * The deadline keeps one buffer on a hung filesystem from stalling the
- * open: a stat that times out or fails simply does not match.  An inode
- * number of 0 is not trusted, since some filesystems and runtimes
- * report it for every file. */
+/* Buffers are stat()ed now, under the deadline, so a file replaced on
+ * disk compares as it is and a hung filesystem just fails to match.
+ * Some systems report inode 0 for every file, so 0 is not trusted. */
 struct buffer *findBufferForFile(const char *filename, int *by_file) {
 	if (by_file)
 		*by_file = 0;
@@ -1187,9 +1171,8 @@ struct buffer *findBufferForFile(const char *filename, int *by_file) {
 	return NULL;
 }
 
-/* Switch the focused window to the named file.  If a buffer already
- * visits it (see findBufferForFile), reuse it; otherwise open a new
- * one.  Returns the buffer on success, NULL on failure. */
+/* Show filename in the focused window, reusing a buffer that already
+ * visits it.  Returns the buffer, or NULL on failure. */
 struct buffer *switchToFile(const char *filename) {
 	/* Check if already open */
 	int by_file;

@@ -162,8 +162,7 @@ static void reclaimTerminal(struct cmd_terminal *ct) {
 	ct->active = 0;
 }
 
-/* Most of a command's stderr the pump keeps.  It ends up on the status
- * line, which holds far less; the rest is drained and dropped. */
+/* stderr bytes kept for the status line; the rest is drained. */
 #define STDERR_KEEP 4096
 
 /* Pump 'input' into sp's stdin while draining its stdout into 'out'
@@ -287,8 +286,7 @@ static int pumpSubprocessIO(struct subprocess_s *sp, uint8_t *input,
 				out_open = 0;
 		}
 		if (err_open && FD_ISSET(err_fd, &rfds)) {
-			/* Keep the start, drain the rest: a chatty child
-			 * must not block on a full stderr pipe either. */
+			/* Keep the start; drain the rest so the child never blocks. */
 			ssize_t n = read(err_fd, io, sizeof(io));
 			if (n > 0 && err && err->len < STDERR_KEEP) {
 				int room = STDERR_KEEP - err->len;
@@ -316,18 +314,9 @@ static int pumpSubprocessIO(struct subprocess_s *sp, uint8_t *input,
 	return cancel_stage;
 }
 
-/* The status line once a command has run to completion (#132).
- *
- * stderr comes first: it is where a command explains itself, and
- * nothing else in the editor shows it.  It is sanitised before it goes
- * anywhere near the terminal -- the minibuffer draws the status message
- * raw, so an escape sequence or a stray byte from the child would be
- * drawn as-is -- with its trailing newline dropped and inner ones shown
- * as ^J, as the prompt shows them.  A nonzero exit status leads it.
- *
- * With nothing on stderr: say so when there was no output either,
- * in Emacs's words, rather than leave the user to wonder whether the
- * command ran at all; otherwise the byte count, or the exit status. */
+/* After a command ran (#132): its stderr, sanitised and led by a
+ * nonzero exit status; else Emacs's no-output messages, the exit
+ * status or the byte count. */
 static void reportShellResult(int status, int out_len, const struct dbuf *err) {
 	int elen = err->len;
 	while (elen > 0 &&
@@ -521,8 +510,7 @@ void pipeCmd(int useRegion) {
 	}
 	uint8_t *pipeOutput = editorPipe(useRegion);
 	if (pipeOutput != NULL && pipeOutput[0] == '\0') {
-		/* Nothing on stdout: leave the windows alone.  The
-		 * status line already says what happened (#132). */
+		/* Nothing on stdout: leave the windows alone. */
 		free(pipeOutput);
 		return;
 	}

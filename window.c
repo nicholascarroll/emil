@@ -180,22 +180,8 @@ static void sizePopupWindow(int win_idx) {
 void showPopupBuffer(struct buffer *buf) {
 	int win_idx = findBufferWindow(buf);
 	if (win_idx < 0) {
-		/* First time: create the window.  Focus stays where it
-		 * is -- createWindow() appends the new window unfocused
-		 * and touches no other window's flag.
-		 *
-		 * This used to move focus to window 0 on the stated
-		 * assumption that window 0 was the one being edited.
-		 * With a split and the lower window focused, that left
-		 * E.buf naming one window's buffer while the cursor was
-		 * drawn in another: typing after C-g on a completion
-		 * list went to a buffer the user was not looking at,
-		 * and accepting a completion opened the file in the
-		 * wrong window.  It also left two windows focused once
-		 * the palette focused its own, which drew the cursor in
-		 * window 0 instead of the palette (#129) and was, by
-		 * accident, what kept restoreFocusTo() working; see
-		 * there. */
+		/* First time: create the window.  Focus stays put;
+		 * createWindow() adds the new window unfocused. */
 		win_idx = E.nwindows;
 		createWindow();
 		E.windows[win_idx]->buf = buf;

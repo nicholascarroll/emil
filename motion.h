@@ -10,18 +10,9 @@ int isParaBoundary(erow *row);
 /* Cursor movement */
 void moveCursor(int key, int count);
 
-/* Boundary scanners.
- *
- * Each takes the buffer to scan and a position in it, and moves that
- * position -- in place -- to the boundary it looks for.  None reads
- * or moves point, and none consults E.buf: the position names the
- * start, the buffer names what it indexes.  Callers that want to move
- * point pass &buf->cx, &buf->cy.
- *
- * The word scanners used to take their start from point and treat the
- * arguments as outputs only, while their paragraph, sentence and sexp
- * siblings, with the same signature, started from the arguments.
- * Callers had to move point to ask about any other position. */
+/* Boundary scanners.  Each moves a position in buf, in place, to the
+ * boundary it seeks; none reads or moves point.  To move point, pass
+ * &buf->cx, &buf->cy. */
 
 /* Word movement */
 void forwardWordEnd(struct buffer *buf, int *dx, int *dy);

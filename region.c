@@ -775,15 +775,11 @@ void replaceRegex(void) {
 		return;
 	}
 
-	/* Cap the displayed pattern to 35 chars.  The prompt is a plain
-	 * prefix (see editorPrompt), so no percent escaping is needed
-	 * and %.35s truncation is safe.  A literal newline in the
-	 * pattern is shown as ^J; embedded raw it would reach the
-	 * terminal as a line feed and split the minibuffer. */
-	char *esc = caretEscapeNewlines(regex);
-	char prompt[128];
-	snprintf(prompt, sizeof(prompt), "Regex replace %.35s with: ", esc);
-	free(esc);
+	/* At most 35 bytes of the pattern, sanitised: the prompt is one
+	 * line and reaches the terminal raw. */
+	char esc[36], prompt[64];
+	utf8SanitizeLine(regex, strlen((const char *)regex), esc, sizeof(esc));
+	snprintf(prompt, sizeof(prompt), "Regex replace %s with: ", esc);
 	uint8_t *repl = editorPrompt(prompt, PROMPT_REPLACE, NULL);
 	if (repl == NULL) {
 		free(regex);

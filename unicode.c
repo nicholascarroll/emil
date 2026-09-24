@@ -617,8 +617,7 @@ size_t utf8SanitizeLine(const uint8_t *in, size_t len, char *out,
 				uint32_t cp = utf8Decode(in + i, 0);
 				used = (size_t)n;
 				if (cp <= 0x9F) {
-					/* C1 control: 8-bit CSI and
-					 * friends to a terminal */
+					/* C1: 8-bit CSI and friends */
 					piece = "?";
 				} else {
 					plen = (size_t)n;

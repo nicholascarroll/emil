@@ -125,8 +125,7 @@ void moveCursor(int key, int count) {
 	}
 }
 
-/* Word movement.  The two scanners start from (*dx, *dy), not from
- * point; see motion.h. */
+/* Word movement; see motion.h. */
 
 void forwardWordEnd(struct buffer *buf, int *dx, int *dy) {
 	int cx = *dx;

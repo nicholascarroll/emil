@@ -497,12 +497,10 @@ void replaceString(void) {
 		return;
 	}
 
-	/* Prompt is a plain prefix (see editorPrompt), so no percent
-	 * escaping, but a literal newline in the pattern must be
-	 * shown as ^J, not fed raw to the terminal. */
-	char *esc = caretEscapeNewlines(replace_orig);
-	size_t psz = strlen(esc) + 20;
-	char *prompt = xmalloc(psz);
+	/* The prompt reaches the terminal raw: sanitise the pattern. */
+	size_t olen = strlen((const char *)replace_orig), psz = 3 * olen + 20;
+	char *esc = xmalloc(psz), *prompt = xmalloc(psz);
+	utf8SanitizeLine(replace_orig, olen, esc, psz);
 	snprintf(prompt, psz, "Replace %s with: ", esc);
 	free(esc);
 	replace_repl = editorPrompt(prompt, PROMPT_REPLACE, NULL);
@@ -523,17 +521,17 @@ void replaceString(void) {
 	replace_repl = saved_repl;
 }
 
-/* Build the "Query replacing X with Y:" status line shown during the
- * y/n loop.  The pattern is newline-free (rejected up front), but the
- * replacement may contain one and must be shown as ^J.  Returns a
- * malloc'd string; caller frees. */
+/* The y/n loop's "Query replacing X with Y:", sanitised.  Caller frees. */
 static char *qrStatusPrompt(void) {
-	char *esc_repl = caretEscapeNewlines(replace_repl);
-	size_t sz = strlen((const char *)replace_orig) + strlen(esc_repl) + 32;
-	char *prompt = xmalloc(sz);
-	snprintf(prompt, sz, "Query replacing %s with %s:", replace_orig,
-		 esc_repl);
-	free(esc_repl);
+	size_t olen = strlen((const char *)replace_orig);
+	size_t rlen = strlen((const char *)replace_repl);
+	size_t sz = 3 * (olen + rlen) + 32;
+	char *o = xmalloc(sz), *r = xmalloc(sz), *prompt = xmalloc(sz);
+	utf8SanitizeLine(replace_orig, olen, o, sz);
+	utf8SanitizeLine(replace_repl, rlen, r, sz);
+	snprintf(prompt, sz, "Query replacing %s with %s:", o, r);
+	free(o);
+	free(r);
 	return prompt;
 }
 
