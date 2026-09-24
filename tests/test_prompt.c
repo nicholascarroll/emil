@@ -191,6 +191,8 @@ static const char *const sh_files[] = {
 	"bin/zqalpha", "bin/zqbeta", "bin/zqdata", "work/notes.txt",
 	"work/My File.txt", "work/glob[1].txt", "work/report-2025.txt",
 	"work/report-2026.txt", "work/.hidden", "work/src/main.c",
+	"work/x\u0E01\u0E49\u0E32\u0E27.txt", /* xก้าว.txt */
+	"work/x\u0E01\u0E34\u0E19.txt",	      /* xกิน.txt */
 };
 
 static int shFixtureUp(void) {
@@ -240,8 +242,9 @@ static void shFixtureDown(void) {
 }
 
 /* Type 'typed', then the keys in 'after' (up to a 0), then RET.
- * Returns what the shell prompt hands back; caller frees. */
-static char *shellPromptAfter(const char *typed, const int *after) {
+ * Returns what a prompt of type t hands back; caller frees. */
+static char *promptAfter(enum promptType t, const char *typed,
+			 const int *after) {
 	int keys[64];
 	int n = 0;
 	for (const char *p = typed; *p && n < 60; p++)
@@ -252,7 +255,7 @@ static char *shellPromptAfter(const char *typed, const int *after) {
 	scriptKeys(keys, n);
 
 	muteStdout();
-	uint8_t *r = editorPrompt("Shell: ", PROMPT_SHELL, NULL);
+	uint8_t *r = editorPrompt("Prompt: ", t, NULL);
 	unmuteStdout();
 	clearKeys();
 	return (char *)r;
@@ -260,14 +263,16 @@ static char *shellPromptAfter(const char *typed, const int *after) {
 
 static const int TAB_ONCE[] = { '\t', 0 };
 
-#define SHELL_CASE(typed, keys, expected)                                   \
+#define PROMPT_CASE(t, typed, keys, expected)                               \
 	do {                                                               \
-		char *got_ = shellPromptAfter((typed), (keys));            \
+		char *got_ = promptAfter((t), (typed), (keys));            \
 		TEST_ASSERT_NOT_NULL(got_);                                \
 		if (got_)                                                  \
 			TEST_ASSERT_EQUAL_STRING((expected), got_);        \
 		free(got_);                                                \
 	} while (0)
+#define SHELL_CASE(typed, keys, expected)                                   \
+	PROMPT_CASE(PROMPT_SHELL, typed, keys, expected)
 
 static void shellCompletionSetUp(void) {
 	initTestEditor();
@@ -308,6 +313,10 @@ void test_shell_tab_command_position(void) {
 	SHELL_CASE("if zqa", TAB_ONCE, "if zqalpha ");
 	SHELL_CASE("zqalpha zqa", TAB_ONCE, "zqalpha zqa"); /* an argument */
 	SHELL_CASE("zqalpha 2>&1 | zqb", TAB_ONCE, "zqalpha 2>&1 | zqbeta ");
+	SHELL_CASE("FOO=\"a b\" zqa", TAB_ONCE, "FOO=\"a b\" zqalpha ");
+	SHELL_CASE(">out zqa", TAB_ONCE, ">out zqalpha "); /* after a target */
+	SHELL_CASE("zqalpha >&no", TAB_ONCE, "zqalpha >&notes.txt ");
+	SHELL_CASE("\"if\" zqa", TAB_ONCE, "\"if\" zqa"); /* quoted: a command */
 
 	shellCompletionTearDown();
 	shFixtureDown();
@@ -332,6 +341,42 @@ void test_shell_tab_completes_files(void) {
 	SHELL_CASE("./sr", TAB_ONCE, "./src/"); /* a path, not a command */
 	SHELL_CASE("zqalpha --file=no", TAB_ONCE, "zqalpha --file=notes.txt ");
 	SHELL_CASE("cat nothing", TAB_ONCE, "cat nothing");
+
+	shellCompletionTearDown();
+	shFixtureDown();
+}
+
+/* An empty PATH entry is the current directory. */
+void test_shell_tab_empty_path_entry(void) {
+	TEST_ASSERT_EQUAL_INT(0, shFixtureUp());
+	shellCompletionSetUp();
+
+	char path[600];
+	snprintf(path, sizeof(path), "%s/bin:", sh_root);
+	setenv("PATH", path, 1);
+	shTouch("work/zqlocal", 0755);
+	SHELL_CASE("zql", TAB_ONCE, "zqlocal ");
+	snprintf(path, sizeof(path), "%s/work/zqlocal", sh_root);
+	unlink(path);
+
+	shellCompletionTearDown();
+	shFixtureDown();
+}
+
+/* The file prompts share the shell prompt's file lister.  A name is
+ * literal text, not a glob pattern, and a common prefix never ends
+ * inside a UTF-8 character. */
+void test_file_prompt_completion(void) {
+	TEST_ASSERT_EQUAL_INT(0, shFixtureUp());
+	shellCompletionSetUp();
+
+	PROMPT_CASE(PROMPT_FILES, "no", TAB_ONCE, "notes.txt");
+	PROMPT_CASE(PROMPT_FILES, "glob[1]", TAB_ONCE, "glob[1].txt");
+	PROMPT_CASE(PROMPT_FILES, "src/m", TAB_ONCE, "src/main.c");
+	PROMPT_CASE(PROMPT_FILES, "x", TAB_ONCE, "x\u0E01");
+	PROMPT_CASE(PROMPT_DIR, "s", TAB_ONCE, "src"); /* RET drops the /  */
+	PROMPT_CASE(PROMPT_DIR, "no", TAB_ONCE, "no"); /* not a directory */
+	SHELL_CASE("cat x", TAB_ONCE, "cat x\u0E01");
 
 	shellCompletionTearDown();
 	shFixtureDown();
@@ -384,6 +429,8 @@ int main(void) {
 	RUN_TEST(test_shell_tab_completes_command);
 	RUN_TEST(test_shell_tab_command_position);
 	RUN_TEST(test_shell_tab_completes_files);
+	RUN_TEST(test_shell_tab_empty_path_entry);
+	RUN_TEST(test_file_prompt_completion);
 	RUN_TEST(test_shell_tab_mid_line);
 	RUN_TEST(test_shell_tab_quoted_insert_and_undo);
 

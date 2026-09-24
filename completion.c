@@ -1,6 +1,5 @@
 /* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 #include <dirent.h>
-#include <glob.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -42,217 +41,190 @@ void resetCompletionState(struct completionState *state) {
 }
 
 static void freeCompletionResult(struct completionResult *result) {
-	if (result->matches) {
-		for (int i = 0; i < result->n_matches; i++) {
-			free(result->matches[i]);
-		}
-		free(result->matches);
-	}
+	for (int i = 0; i < result->n_matches; i++)
+		free(result->matches[i]);
+	free(result->matches);
 	free(result->common_prefix);
-	result->matches = NULL;
-	result->common_prefix = NULL;
-	result->n_matches = 0;
-	result->prefix_len = 0;
+	memset(result, 0, sizeof(*result));
 }
 
+/* Append m, which the result takes ownership of. */
+static void pushMatch(struct completionResult *r, char *m) {
+	if (r->n_matches == r->cap) {
+		r->cap = r->cap ? r->cap * 2 : 16;
+		r->matches =
+			xrealloc(r->matches, (size_t)r->cap * sizeof(char *));
+	}
+	r->matches[r->n_matches++] = m;
+}
+
+static int cmpMatch(const void *a, const void *b) {
+	return strcmp(*(char *const *)a, *(char *const *)b);
+}
+
+/* Sort, and drop repeats: a name in two PATH directories is one
+ * command, and the shell runs the first. */
+static void sortUniqueMatches(struct completionResult *r) {
+	if (r->n_matches == 0)
+		return;
+	qsort(r->matches, (size_t)r->n_matches, sizeof(char *), cmpMatch);
+	int dst = 1;
+	for (int i = 1; i < r->n_matches; i++) {
+		if (strcmp(r->matches[i], r->matches[dst - 1]) == 0)
+			free(r->matches[i]);
+		else
+			r->matches[dst++] = r->matches[i];
+	}
+	r->n_matches = dst;
+}
+
+/* The longest prefix common to every string, cut back to a character
+ * boundary so a partial completion never ends mid-UTF-8. */
 static char *findCommonPrefix(char **strings, int count) {
 	if (count == 0)
 		return NULL;
-	if (count == 1)
-		return xstrdup(strings[0]);
-
-	int prefix_len = 0;
-	while (1) {
-		char ch = strings[0][prefix_len];
-		if (ch == '\0')
-			break;
-
-		int all_match = 1;
-		for (int i = 1; i < count; i++) {
-			if (strings[i][prefix_len] != ch) {
-				all_match = 0;
-				break;
-			}
-		}
-
-		if (!all_match)
-			break;
-		prefix_len++;
+	int len = (int)strlen(strings[0]);
+	for (int i = 1; i < count; i++) {
+		int k = 0;
+		while (k < len && strings[i][k] == strings[0][k])
+			k++;
+		len = k;
 	}
-
-	char *prefix = xmalloc(prefix_len + 1);
-	emil_strlcpy(prefix, strings[0], prefix_len + 1);
+	while (count > 1 && len > 0 && utf8_isCont((uint8_t)strings[0][len]))
+		len--;
+	char *prefix = xmalloc((size_t)len + 1);
+	memcpy(prefix, strings[0], (size_t)len);
+	prefix[len] = '\0';
 	return prefix;
 }
 
-static void getFileCompletions(const char *prefix,
-			       struct completionResult *result) {
-	glob_t globlist;
-	result->matches = NULL;
-	result->n_matches = 0;
-	result->common_prefix = NULL;
-	result->prefix_len = strlen(prefix);
+/* A name the minibuffer can hold as typed text: valid UTF-8 and no
+ * control characters.  A newline would split the prompt into rows,
+ * and an escape would reach the terminal through the status line. */
+static int nameInsertable(const char *name) {
+	for (const unsigned char *q = (const unsigned char *)name; *q; q++)
+		if (*q < 0x20 || *q == 0x7f)
+			return 0;
+	return utf8_validate((const uint8_t *)name, (int)strlen(name));
+}
 
-	/* pattern_to_use borrows prefix or points at expanded, the only
-	 * one to free. */
-	const char *pattern_to_use = prefix;
-	char *expanded = NULL;
+enum scanKind { SCAN_ANY, SCAN_DIRS, SCAN_EXEC };
 
-	/* Manual tilde expansion */
-	if (*prefix == '~') {
-		char *home_dir = getenv("HOME");
-		if (!home_dir) {
-			return;
-		}
-
-		size_t home_len = strlen(home_dir);
-		size_t prefix_len = strlen(prefix);
-		expanded = xmalloc(home_len + prefix_len);
-		emil_strlcpy(expanded, home_dir, home_len + prefix_len);
-		emil_strlcat(expanded, prefix + 1, home_len + prefix_len);
-		pattern_to_use = expanded;
+/* Add each entry of dir whose name extends base, as typed[0..tlen)
+ * followed by the name, and a '/' after a directory.  Read with
+ * readdir, not glob: typed text is literal, and a '[' or '*' in a
+ * file name must not be taken as a pattern.  Dot files match only a
+ * base that starts with a dot. */
+static void scanDir(const char *dir, const char *typed, int tlen,
+		    const char *base, enum scanKind kind,
+		    struct completionResult *r) {
+	DIR *d = opendir(dir);
+	if (d == NULL)
+		return;
+	size_t blen = strlen(base), dlen = strlen(dir);
+	struct dirent *de;
+	while ((de = readdir(d)) != NULL) {
+		const char *name = de->d_name;
+		if (strncmp(name, base, blen) != 0 ||
+		    (name[0] == '.' && base[0] != '.') ||
+		    strcmp(name, ".") == 0 ||
+		    (strcmp(name, "..") == 0 && strcmp(base, "..") != 0) ||
+		    !nameInsertable(name))
+			continue;
+		size_t nlen = strlen(name);
+		char *path = xmalloc(dlen + nlen + 2);
+		snprintf(path, dlen + nlen + 2, "%s/%s", dir, name);
+		struct stat st;
+		int found = stat(path, &st) == 0;
+		int is_dir = found && S_ISDIR(st.st_mode);
+		int ok = kind == SCAN_ANY || (kind == SCAN_DIRS && is_dir) ||
+			 (kind == SCAN_EXEC && found && S_ISREG(st.st_mode) &&
+			  access(path, X_OK) == 0);
+		free(path);
+		if (!ok)
+			continue;
+		size_t mlen = (size_t)tlen + nlen + 2;
+		char *m = xmalloc(mlen);
+		snprintf(m, mlen, "%.*s%s%s", tlen, typed, name,
+			 is_dir && kind != SCAN_EXEC ? "/" : "");
+		pushMatch(r, m);
 	}
+	closedir(d);
+}
 
-	/* Append '*' so the prefix matches as a prefix. */
-	int len = strlen(pattern_to_use);
-	char *glob_pattern = xmalloc(len + 2);
-	emil_strlcpy(glob_pattern, pattern_to_use, len + 2);
-	glob_pattern[len] = '*';
-	glob_pattern[len + 1] = '\0';
-
-	free(expanded);
-	pattern_to_use = glob_pattern;
-
-	int glob_result = glob(pattern_to_use, GLOB_MARK, NULL, &globlist);
-	if (glob_result == 0) {
-		if (globlist.gl_pathc > 0) {
-			result->matches =
-				xmalloc(globlist.gl_pathc * sizeof(char *));
-			result->n_matches = globlist.gl_pathc;
-
-			for (size_t i = 0; i < globlist.gl_pathc; i++) {
-				if (*prefix == '~')
-					result->matches[i] = collapseHome(
-						globlist.gl_pathv[i]);
-				else
-					result->matches[i] =
-						xstrdup(globlist.gl_pathv[i]);
-			}
-
-			result->common_prefix = findCommonPrefix(
-				result->matches, result->n_matches);
-		}
-		globfree(&globlist);
-	} else if (glob_result == GLOB_NOMATCH) {
-		/* No matches found */
-		result->n_matches = 0;
+/* Files whose path extends value.  Each keeps value's directory part
+ * exactly as typed, ~ and all, so it extends the text in the prompt.
+ * A leading ~ is expanded only when 'tilde' says it is unquoted. */
+static void getFileCompletions(const char *value, int tilde, enum scanKind kind,
+			       struct completionResult *r) {
+	if (tilde && strcmp(value, "~") == 0) {
+		pushMatch(r, xstrdup("~/"));
+		return;
 	}
+	char *look = tilde ? expandTilde(value) : xstrdup(value);
+	char *slash = strrchr(look, '/');
+	const char *vslash = strrchr(value, '/');
+	char *base = xstrdup(slash ? slash + 1 : look);
+	if (slash)
+		slash[1] = '\0';
+	scanDir(slash ? look : ".", value,
+		vslash ? (int)(vslash - value) + 1 : 0, base, kind, r);
+	free(base);
+	free(look);
+	sortUniqueMatches(r);
+}
 
-	free(glob_pattern);
+/* Executables on PATH whose name starts with value. */
+static void getPathCompletions(const char *value, struct completionResult *r) {
+	const char *p = getenv("PATH");
+	while (p != NULL) {
+		size_t len = strcspn(p, ":");
+		/* An empty PATH entry means the current directory. */
+		int n = len ? (int)len : 1;
+		char *dir = xmalloc((size_t)n + 1);
+		snprintf(dir, (size_t)n + 1, "%.*s", n, len ? p : ".");
+		scanDir(dir, "", 0, value, SCAN_EXEC, r);
+		free(dir);
+		p = p[len] == ':' ? p + len + 1 : NULL;
+	}
+	sortUniqueMatches(r);
 }
 
 static void getBufferCompletions(const char *prefix,
 				 struct buffer *currentBuffer,
 				 struct completionResult *result) {
-	result->matches = NULL;
-	result->n_matches = 0;
-	result->common_prefix = NULL;
-	result->prefix_len = strlen(prefix);
-
-	int capacity = 8;
-	result->matches = xmalloc(capacity * sizeof(char *));
-
-	/* We also collect basenames for computing the common prefix,
-	 * since the user types basenames in the prompt. */
-	char **basenames = xmalloc(capacity * sizeof(char *));
-
+	/* The common prefix is taken over basenames, since the user
+	 * types basenames in the prompt. */
+	struct completionResult bases = { 0 };
 	for (struct buffer *b = E.headbuf; b != NULL; b = b->next) {
-		if (b == currentBuffer)
+		if (b == currentBuffer ||
+		    (b->filename && strcmp(b->filename, "*Completions*") == 0))
 			continue;
-
-		/* Skip the *Completions* buffer */
-		if (b->filename && strcmp(b->filename, "*Completions*") == 0)
-			continue;
-
 		const char *name = b->filename ? b->filename : "*scratch*";
-
-		/* Match against the basename portion */
 		const char *slash = strrchr(name, '/');
 		const char *base = slash ? slash + 1 : name;
-
 		if (strncmp(base, prefix, strlen(prefix)) == 0) {
-			if (result->n_matches >= capacity) {
-				capacity *= 2;
-				result->matches =
-					xrealloc(result->matches,
-						 capacity * sizeof(char *));
-				basenames = xrealloc(basenames,
-						     capacity * sizeof(char *));
-			}
-			result->matches[result->n_matches] = xstrdup(name);
-			basenames[result->n_matches] = xstrdup(base);
-			result->n_matches++;
+			pushMatch(result, xstrdup(name));
+			pushMatch(&bases, xstrdup(base));
 		}
 	}
-
-	if (result->n_matches > 0) {
-		/* Compute common prefix over basenames so TAB-completion
-		 * extends the basename the user is typing. */
-		result->common_prefix =
-			findCommonPrefix(basenames, result->n_matches);
-	} else {
-		free(result->matches);
-		result->matches = NULL;
-	}
-
-	for (int i = 0; i < result->n_matches; i++)
-		free(basenames[i]);
-	free(basenames);
+	result->common_prefix =
+		findCommonPrefix(bases.matches, bases.n_matches);
+	freeCompletionResult(&bases);
 }
 
+/* M-x commands, matched case-insensitively. */
 static void getCommandCompletions(const char *prefix,
 				  struct completionResult *result) {
-	result->matches = NULL;
-	result->n_matches = 0;
-	result->common_prefix = NULL;
-	result->prefix_len = strlen(prefix);
-
-	int capacity = 8;
-	result->matches = xmalloc(capacity * sizeof(char *));
-
-	/* Convert prefix to lowercase for case-insensitive matching */
-	int prefix_len = strlen(prefix);
-	char *lower_prefix = xmalloc(prefix_len + 1);
-	for (int i = 0; i <= prefix_len; i++) {
-		char c = prefix[i];
-		if ('A' <= c && c <= 'Z') {
-			c |= 0x60;
-		}
-		lower_prefix[i] = c;
-	}
-
-	for (int i = 0; i < E.cmd_count; i++) {
-		if (strncmp(E.cmd[i].key, lower_prefix, prefix_len) == 0) {
-			if (result->n_matches >= capacity) {
-				capacity *= 2;
-				result->matches =
-					xrealloc(result->matches,
-						 capacity * sizeof(char *));
-			}
-			result->matches[result->n_matches++] =
-				xstrdup(E.cmd[i].key);
-		}
-	}
-
-	free(lower_prefix);
-
-	if (result->n_matches > 0) {
-		result->common_prefix =
-			findCommonPrefix(result->matches, result->n_matches);
-	} else {
-		free(result->matches);
-		result->matches = NULL;
-	}
+	size_t len = strlen(prefix);
+	char *lower = xstrdup(prefix);
+	for (char *q = lower; *q; q++)
+		if (*q >= 'A' && *q <= 'Z')
+			*q |= 0x20;
+	for (int i = 0; i < E.cmd_count; i++)
+		if (strncmp(E.cmd[i].key, lower, len) == 0)
+			pushMatch(result, xstrdup(E.cmd[i].key));
+	free(lower);
 }
 
 void replaceMinibufferText(struct buffer *minibuf, const char *text) {
@@ -419,19 +391,64 @@ void closeCompletionsBuffer(void) {
 	closeSpecialBuffer("*Completions*");
 }
 
-void handleMinibufferCompletion(struct buffer *minibuf, enum promptType type) {
-	/* Get current buffer text */
-	char *current_text = (char *)minibuf->row[0].chars;
+/* Point as a byte offset into minibufJoin(mb, "\n"). */
+static int minibufPointOffset(struct buffer *mb) {
+	int off = 0;
+	for (int i = 0; i < mb->cy && i < mb->numrows; i++)
+		off += mb->row[i].size + 1;
+	return off + mb->cx;
+}
 
-	/* Check if text changed since last completion */
-	if (minibuf->completionState.last_completed_text == NULL ||
-	    strcmp(current_text,
-		   minibuf->completionState.last_completed_text) != 0) {
-		/* Text changed - reset completion state */
-		resetCompletionState(&minibuf->completionState);
+/* Start a TAB: return the prompt's text and set *point.
+ * successive_tabs counts TABs that changed nothing; typing resets the
+ * state in editorPrompt, and moving point (C-p/C-n) is caught here. */
+static char *tabBegin(struct buffer *mb, int *point) {
+	struct completionState *cs = &mb->completionState;
+	char *text = minibufJoin(mb, "\n");
+	*point = minibufPointOffset(mb);
+	if (cs->last_completed_text == NULL ||
+	    strcmp(text, cs->last_completed_text) != 0 ||
+	    cs->completion_start_pos != *point)
+		resetCompletionState(cs);
+	return text;
+}
+
+static void tabEnd(struct buffer *mb) {
+	struct completionState *cs = &mb->completionState;
+	cs->successive_tabs++;
+	free(cs->last_completed_text);
+	cs->last_completed_text = minibufJoin(mb, "\n");
+	cs->completion_start_pos = minibufPointOffset(mb);
+}
+
+/* What every prompt's TAB does with the matches for a word of 'typed'
+ * bytes: report no match; or, when the common prefix adds nothing and
+ * the match is not unique, say so, and list the matches on a second
+ * TAB.  Returns 1 when the caller should extend the word to
+ * r->common_prefix, which for a unique match is the whole match. */
+static int tabOutcome(struct buffer *mb, struct completionResult *r,
+		      size_t typed, enum promptType type) {
+	struct completionState *cs = &mb->completionState;
+	if (r->n_matches > 0 && r->common_prefix == NULL)
+		r->common_prefix = findCommonPrefix(r->matches, r->n_matches);
+	if (r->n_matches == 1 ||
+	    (r->n_matches > 1 && strlen(r->common_prefix) > typed)) {
+		closeCompletionsBuffer();
+		return 1;
 	}
+	if (r->n_matches > 1 && cs->successive_tabs > 0) {
+		showCompletionsBuffer(r->matches, r->n_matches, type);
+		return 0;
+	}
+	setStatusMessage(r->n_matches ? "[complete, but not unique]" :
+					"[No match]");
+	cs->preserve_message = 1;
+	return 0;
+}
 
-	/* Get matches based on type */
+void handleMinibufferCompletion(struct buffer *minibuf, enum promptType type) {
+	int point;
+	char *text = tabBegin(minibuf, &point);
 	struct completionResult result = { 0 };
 	switch (type) {
 	case PROMPT_PLAIN:
@@ -440,89 +457,26 @@ void handleMinibufferCompletion(struct buffer *minibuf, enum promptType type) {
 	case PROMPT_RECT:
 		break;
 	case PROMPT_FILES:
-		getFileCompletions(current_text, &result);
-		break;
 	case PROMPT_DIR:
-		getFileCompletions(current_text, &result);
-		/* Filter to directories only (trailing '/') */
-		if (result.n_matches > 0) {
-			int dst = 0;
-			for (int i = 0; i < result.n_matches; i++) {
-				int len = (int)strlen(result.matches[i]);
-				if (len > 0 &&
-				    result.matches[i][len - 1] == '/') {
-					if (dst != i) {
-						free(result.matches[dst]);
-						result.matches[dst] =
-							result.matches[i];
-						result.matches[i] = NULL;
-					}
-					dst++;
-				} else {
-					free(result.matches[i]);
-					result.matches[i] = NULL;
-				}
-			}
-			result.n_matches = dst;
-			if (result.n_matches > 0) {
-				free(result.common_prefix);
-				result.common_prefix = findCommonPrefix(
-					result.matches, result.n_matches);
-			} else {
-				free(result.common_prefix);
-				result.common_prefix = NULL;
-				free(result.matches);
-				result.matches = NULL;
-			}
-		}
+		getFileCompletions(text, text[0] == '~',
+				   type == PROMPT_DIR ? SCAN_DIRS : SCAN_ANY,
+				   &result);
 		break;
 	case PROMPT_BUFFER:
-		getBufferCompletions(current_text, E.edbuf, &result);
+	case PROMPT_SEARCH:
+		getBufferCompletions(text, E.edbuf, &result);
 		break;
 	case PROMPT_COMMAND:
-		getCommandCompletions(current_text, &result);
-		break;
-	case PROMPT_SEARCH:
-		/* For search, we can provide buffer completions */
-		getBufferCompletions(current_text, E.edbuf, &result);
+		getCommandCompletions(text, &result);
 		break;
 	}
-
-	/* Handle based on number of matches */
-	if (result.n_matches == 0) {
-		setStatusMessage("[No match]");
-		minibuf->completionState.preserve_message = 1;
-	} else if (result.n_matches == 1) {
-		/* Complete fully */
-		replaceMinibufferText(minibuf, result.matches[0]);
-		closeCompletionsBuffer();
-	} else {
-		/* Multiple matches */
-		if (result.common_prefix &&
-		    strlen(result.common_prefix) > strlen(current_text)) {
-			/* Can extend to common prefix */
-			replaceMinibufferText(minibuf, result.common_prefix);
-			closeCompletionsBuffer();
-		} else {
-			/* Already at common prefix (or no common prefix found) */
-			if (minibuf->completionState.successive_tabs > 0) {
-				showCompletionsBuffer(result.matches,
-						      result.n_matches, type);
-			} else {
-				setStatusMessage("[complete, but not unique]");
-				minibuf->completionState.preserve_message = 1;
-			}
-		}
-	}
-
-	/* Update state BEFORE cleanup */
-	minibuf->completionState.successive_tabs++;
-	free(minibuf->completionState.last_completed_text);
-	minibuf->completionState.last_completed_text =
-		xstrdup((char *)minibuf->row[0].chars);
-
-	/* Cleanup */
+	if (tabOutcome(minibuf, &result, strlen(text), type))
+		replaceMinibufferText(minibuf, result.n_matches == 1 ?
+						       result.matches[0] :
+						       result.common_prefix);
+	tabEnd(minibuf);
 	freeCompletionResult(&result);
+	free(text);
 }
 
 void cycleCompletion(struct buffer *minibuf, int direction) {
@@ -546,6 +500,7 @@ void cycleCompletion(struct buffer *minibuf, int direction) {
 	/* Update last_completed_text so TAB doesn't reset */
 	free(cs->last_completed_text);
 	cs->last_completed_text = xstrdup(base);
+	cs->completion_start_pos = minibufPointOffset(minibuf);
 
 	/* Update the completions buffer cursor to highlight the
 	 * selected row.  Data rows start at row 2. */
@@ -573,27 +528,18 @@ void cycleCompletion(struct buffer *minibuf, int direction) {
  * TAB in the M-! / M-| prompt completes the word that ends at point:
  * an executable on PATH when that word is in command position, a file
  * name anywhere else (and in command position too once the word holds
- * a '/', as in ./configure or /usr/bin/env).
- *
- * The text before point is lexed as sh would read it, far enough to
- * know three things: the word's value with quoting removed, which
- * quote (if any) is open at point, and whether the word is in command
- * position.  Completion only ever inserts at point -- what the user
- * typed is never rewritten -- so the new text is quoted to suit the
- * quote open there: backslashes outside quotes, and the rules of the
- * open quote inside one.  A literal TAB is still C-q TAB. */
+ * a '/', as in ./configure).  Completion only ever inserts at point,
+ * quoted to suit the quote open there.  A literal TAB is C-q TAB. */
 
-struct shellPoint {
-	struct dbuf word; /* the word at point, quoting removed */
-	int cmd_pos;	  /* that word is in command position */
+struct shellWord {
+	struct dbuf text; /* the word before point, quoting removed */
+	int cmd;	  /* it is in command position */
 	int quote;	  /* 0, '\'' or '"': the quote open at point */
-	int tilde;	  /* the word began with an unquoted '~' */
-	int eq;		  /* offset in word past its last unquoted '=', or -1 */
-	int in_word;	  /* point is inside a word rather than between */
-	int unusable;	  /* point is in a comment, or after a lone '\' */
+	int tilde;	  /* it began with an unquoted '~' */
+	int fresh;	  /* point is between words */
 };
 
-/* Words after which the next word is again in command position. */
+/* After one of these as a whole word, a command follows. */
 static int isReservedWord(const uint8_t *w, int len) {
 	static const char *const words[] = { "!",     "{",    "if", "then",
 					     "else",  "elif", "do", "while",
@@ -605,387 +551,83 @@ static int isReservedWord(const uint8_t *w, int len) {
 	return 0;
 }
 
-static int isNameChar(uint8_t c, int first) {
-	if (c == '_' || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))
-		return 1;
-	return !first && c >= '0' && c <= '9';
+/* NAME=..., which leaves the next word in command position. */
+static int isAssignment(const uint8_t *w, int len) {
+	int i = 0;
+	while (i < len &&
+	       (w[i] == '_' || ((w[i] | 0x20) >= 'a' && (w[i] | 0x20) <= 'z') ||
+		(i > 0 && w[i] >= '0' && w[i] <= '9')))
+		i++;
+	return i > 0 && i < len && w[i] == '=';
 }
 
-/* Lex s[0..len) -- the prompt's text up to point -- into *p. */
-static void lexShellToPoint(const uint8_t *s, int len, struct shellPoint *p) {
-	int expect_cmd = 1;   /* the next word starts a command */
-	int redir = 0;	      /* the next word is a redirection target */
-	int saved_expect = 0; /* expect_cmd to restore after that target */
-	int prev_redir = 0;   /* last unquoted byte was '<' or '>' */
-	int esc = 0, quote = 0, comment = 0;
-	int in_word = 0, word_cmd = 0, plain = 1, name_ok = 1, assign = 0;
-
-	memset(p, 0, sizeof(*p));
-	p->eq = -1;
-
-#define START_WORD()                                           \
-	do {                                                   \
-		if (!in_word) {                                \
-			in_word = 1;                           \
-			word_cmd = redir ? 0 : expect_cmd;     \
-			p->word.len = 0;                       \
-			plain = 1;                             \
-			name_ok = 1;                           \
-			assign = 0;                            \
-			p->eq = -1;                            \
-			p->tilde = 0;                          \
-		}                                              \
-	} while (0)
-
-#define END_WORD()                                                         \
-	do {                                                               \
-		if (in_word) {                                             \
-			if (redir) {                                       \
-				redir = 0;                                 \
-				expect_cmd = saved_expect;                 \
-			} else if (word_cmd) {                             \
-				expect_cmd =                               \
-					assign ||                          \
-					(plain &&                          \
-					 isReservedWord(p->word.buf,       \
-							p->word.len));     \
-			}                                                  \
-			in_word = 0;                                       \
-		}                                                          \
-	} while (0)
-
+/* Lex s[0..len), the prompt up to point, as far as needed to find the
+ * word being completed.  | ; & ( ` and newline start a command; < and
+ * > make the next word a file.  Returns 0 if point follows a lone '\'. */
+static int lexShellWord(const uint8_t *s, int len, struct shellWord *w) {
+	int cmd = 1, target = 0, in_word = 0, plain = 0, esc = 0, quote = 0;
+	memset(w, 0, sizeof(*w));
 	for (int i = 0; i < len; i++) {
 		uint8_t c = s[i];
-
-		if (comment) {
-			if (c == '\n') {
-				comment = 0;
-				expect_cmd = 1;
-			}
-			continue;
-		}
-		if (quote == '\'') {
-			if (c == '\'')
-				quote = 0;
-			else
-				dbuf_byte(&p->word, c);
-			continue;
-		}
-		if (quote == '"') {
-			if (esc) {
-				esc = 0;
-				if (c == '\n')
-					continue; /* line continuation */
-				if (!strchr("$`\"\\", c))
-					dbuf_byte(&p->word, '\\');
-				dbuf_byte(&p->word, c);
-			} else if (c == '\\') {
-				esc = 1;
-			} else if (c == '"') {
-				quote = 0;
-			} else {
-				dbuf_byte(&p->word, c);
-			}
-			continue;
-		}
-		if (esc) {
+		if (esc || (quote == '\'' && c != '\'') ||
+		    (quote == '"' && c != '"' && c != '\\')) {
+			if (esc && quote == '"' && !strchr("$`\"\\", c))
+				dbuf_byte(&w->text, '\\');
 			esc = 0;
-			if (c == '\n')
-				continue; /* line continuation */
-			START_WORD();
-			dbuf_byte(&p->word, c);
-			prev_redir = 0;
-			continue;
-		}
-
-		int was_redir = prev_redir;
-		prev_redir = 0;
-		switch (c) {
-		case '\\':
-			START_WORD();
-			esc = 1;
-			plain = 0;
-			name_ok = 0;
-			break;
-		case '\'':
-		case '"':
-			START_WORD();
-			quote = c;
-			plain = 0;
-			name_ok = 0;
-			break;
-		case ' ':
-		case '\t':
-			END_WORD();
-			break;
-		case '&':
-		case '|':
-			/* >& and >| are part of the redirection. */
-			if (was_redir)
-				break;
-			/* fall through */
-		case '\n':
-		case ';':
-		case '(':
-		case '`':
-			END_WORD();
-			redir = 0;
-			expect_cmd = 1;
-			break;
-		case ')':
-			END_WORD();
-			redir = 0;
-			expect_cmd = 0;
-			break;
-		case '<':
-		case '>': {
-			/* The 2 of 2>file names a descriptor; it is not
-			 * a word and so not the command. */
-			int fd_digits = in_word && plain && p->word.len > 0;
-			for (int k = 0; fd_digits && k < p->word.len; k++)
-				if (p->word.buf[k] < '0' ||
-				    p->word.buf[k] > '9')
-					fd_digits = 0;
-			if (fd_digits)
-				in_word = 0;
+			dbuf_byte(&w->text, c);
+		} else if (quote) { /* a closing quote, or '\\' inside "" */
+			if (c == '\\')
+				esc = 1;
 			else
-				END_WORD();
-			if (!redir) {
-				saved_expect = expect_cmd;
-				redir = 1;
+				quote = 0;
+		} else if (c && strchr(" \t\n|;&()`<>", c)) {
+			if (in_word && target)
+				target = 0;
+			else if (in_word && w->cmd)
+				cmd = plain &&
+				      (isReservedWord(w->text.buf,
+						      w->text.len) ||
+				       isAssignment(w->text.buf, w->text.len));
+			in_word = 0;
+			if (c == '<' || c == '>')
+				target = 1;
+			else if (c == ')')
+				cmd = 0;
+			else if (c != ' ' && c != '\t' &&
+				 s[i ? i - 1 : 0] != '>') {
+				cmd = 1; /* but >& and >| are redirections */
+				target = 0;
 			}
-			prev_redir = 1;
-			break;
-		}
-		case '#':
-			if (!in_word) {
-				comment = 1;
-				break;
-			}
-			/* fall through */
-		default:
-			START_WORD();
-			if (c == '=') {
-				if (name_ok && p->word.len > 0 && p->eq < 0)
-					assign = 1;
-				p->eq = p->word.len + 1;
-			} else if (p->eq < 0 && name_ok &&
-				   !isNameChar(c, p->word.len == 0)) {
-				name_ok = 0;
-			}
-			if (c == '~' && p->word.len == 0)
-				p->tilde = 1;
-			dbuf_byte(&p->word, c);
-			break;
-		}
-	}
-#undef START_WORD
-#undef END_WORD
-
-	dbuf_byte(&p->word, '\0'); /* terminate; not counted */
-	p->word.len--;
-	p->quote = quote;
-	p->in_word = in_word;
-	p->unusable = comment || esc;
-	if (!in_word) {
-		p->word.len = 0;
-		p->word.buf[0] = '\0';
-		p->eq = -1;
-		p->tilde = 0;
-		p->cmd_pos = redir ? 0 : expect_cmd;
-	} else {
-		p->cmd_pos = word_cmd;
-	}
-}
-
-struct shellCand {
-	char *full; /* the completed value, quoting removed */
-	char *show; /* what the *Completions* list shows */
-};
-
-struct shellCands {
-	struct shellCand *v;
-	int n, cap;
-};
-
-static void candsAdd(struct shellCands *c, const char *prefix, int plen,
-		     const char *name, const char *tail) {
-	if (c->n == c->cap) {
-		c->cap = c->cap ? c->cap * 2 : 16;
-		c->v = xrealloc(c->v, (size_t)c->cap * sizeof(*c->v));
-	}
-	size_t nlen = strlen(name), tlen = strlen(tail);
-	char *full = xmalloc((size_t)plen + nlen + tlen + 1);
-	memcpy(full, prefix, (size_t)plen);
-	memcpy(full + plen, name, nlen);
-	memcpy(full + plen + nlen, tail, tlen + 1);
-	char *show = xmalloc(nlen + tlen + 1);
-	memcpy(show, name, nlen);
-	memcpy(show + nlen, tail, tlen + 1);
-	c->v[c->n].full = full;
-	c->v[c->n].show = show;
-	c->n++;
-}
-
-static void candsFree(struct shellCands *c) {
-	for (int i = 0; i < c->n; i++) {
-		free(c->v[i].full);
-		free(c->v[i].show);
-	}
-	free(c->v);
-	c->v = NULL;
-	c->n = c->cap = 0;
-}
-
-static int candCmp(const void *a, const void *b) {
-	return strcmp(((const struct shellCand *)a)->full,
-		      ((const struct shellCand *)b)->full);
-}
-
-/* Sort, and drop repeats: a name in two PATH directories is one
- * command, and the shell runs the first. */
-static void candsSortUnique(struct shellCands *c) {
-	if (c->n == 0)
-		return;
-	qsort(c->v, (size_t)c->n, sizeof(*c->v), candCmp);
-	int dst = 1;
-	for (int i = 1; i < c->n; i++) {
-		if (strcmp(c->v[i].full, c->v[dst - 1].full) == 0) {
-			free(c->v[i].full);
-			free(c->v[i].show);
 		} else {
-			c->v[dst++] = c->v[i];
-		}
-	}
-	c->n = dst;
-}
-
-/* A name the minibuffer can hold as typed text: valid UTF-8 and no
- * control characters.  A newline would split the prompt into rows,
- * and an escape would reach the terminal through the status line. */
-static int nameInsertable(const char *name) {
-	for (const unsigned char *q = (const unsigned char *)name; *q; q++)
-		if (*q < 0x20 || *q == 0x7f)
-			return 0;
-	return utf8_validate((const uint8_t *)name, (int)strlen(name));
-}
-
-/* Join dir and name into a malloc'd path for stat(). */
-static char *joinPath(const char *dir, const char *name) {
-	size_t dlen = strlen(dir), nlen = strlen(name);
-	int slash = dlen > 0 && dir[dlen - 1] != '/';
-	char *out = xmalloc(dlen + (size_t)slash + nlen + 1);
-	memcpy(out, dir, dlen);
-	if (slash)
-		out[dlen] = '/';
-	memcpy(out + dlen + slash, name, nlen + 1);
-	return out;
-}
-
-/* Files whose path starts with 'value'.  Read with readdir, not glob:
- * the value is literal text, and a '[' or '*' in a file name must not
- * be taken as a pattern.  Directories carry a trailing '/'. */
-static void shellFileCands(const char *value, int tilde,
-			   struct shellCands *out) {
-	if (tilde && strcmp(value, "~") == 0) {
-		candsAdd(out, "", 0, "~", "/");
-		return;
-	}
-
-	char *look = (tilde && strncmp(value, "~/", 2) == 0) ?
-			     expandTilde(value) :
-			     xstrdup(value);
-	const char *slash = strrchr(look, '/');
-	const char *base = slash ? slash + 1 : look;
-	size_t blen = strlen(base);
-	char *dir;
-	if (slash) {
-		size_t dlen = (size_t)(slash - look) + 1;
-		dir = xmalloc(dlen + 1);
-		memcpy(dir, look, dlen);
-		dir[dlen] = '\0';
-	} else {
-		dir = xstrdup(".");
-	}
-
-	/* The typed text up to the base name, kept as typed (~ and all)
-	 * so every candidate extends exactly what is in the prompt. */
-	const char *vslash = strrchr(value, '/');
-	int vplen = vslash ? (int)(vslash - value) + 1 : 0;
-
-	DIR *d = opendir(dir);
-	if (d) {
-		struct dirent *de;
-		while ((de = readdir(d)) != NULL) {
-			const char *name = de->d_name;
-			if (strcmp(name, ".") == 0)
-				continue;
-			if (strcmp(name, "..") == 0 && strcmp(base, "..") != 0)
-				continue;
-			if (name[0] == '.' && base[0] != '.')
-				continue;
-			if (strncmp(name, base, blen) != 0)
-				continue;
-			if (!nameInsertable(name))
-				continue;
-			char *path = joinPath(dir, name);
-			struct stat st;
-			int is_dir = stat(path, &st) == 0 &&
-				     S_ISDIR(st.st_mode);
-			free(path);
-			candsAdd(out, value, vplen, name, is_dir ? "/" : "");
-		}
-		closedir(d);
-	}
-	free(dir);
-	free(look);
-}
-
-/* Executables on PATH whose name starts with 'value'. */
-static void shellCommandCands(const char *value, struct shellCands *out) {
-	const char *path = getenv("PATH");
-	if (path == NULL)
-		return;
-	size_t vlen = strlen(value);
-
-	const char *p = path;
-	for (;;) {
-		const char *colon = strchr(p, ':');
-		size_t len = colon ? (size_t)(colon - p) : strlen(p);
-		/* An empty PATH entry means the current directory. */
-		char *dir = len ? xmalloc(len + 1) : xstrdup(".");
-		if (len) {
-			memcpy(dir, p, len);
-			dir[len] = '\0';
-		}
-
-		DIR *d = opendir(dir);
-		if (d) {
-			struct dirent *de;
-			while ((de = readdir(d)) != NULL) {
-				const char *name = de->d_name;
-				if (name[0] == '.' && value[0] != '.')
-					continue;
-				if (strncmp(name, value, vlen) != 0)
-					continue;
-				if (!nameInsertable(name))
-					continue;
-				char *full = joinPath(dir, name);
-				struct stat st;
-				int ok = stat(full, &st) == 0 &&
-					 S_ISREG(st.st_mode) &&
-					 access(full, X_OK) == 0;
-				free(full);
-				if (ok)
-					candsAdd(out, "", 0, name, "");
+			if (!in_word) {
+				in_word = plain = 1;
+				w->text.len = 0;
+				w->cmd = cmd && !target;
+				w->tilde = c == '~';
 			}
-			closedir(d);
+			/* Quoting after an '=' still allows an assignment. */
+			if ((c == '\\' || c == '\'' || c == '"') &&
+			    !(w->text.len &&
+			      memchr(w->text.buf, '=', (size_t)w->text.len)))
+				plain = 0;
+			if (c == '\\')
+				esc = 1;
+			else if (c == '\'' || c == '"')
+				quote = c;
+			else
+				dbuf_byte(&w->text, c);
 		}
-		free(dir);
-		if (!colon)
-			break;
-		p = colon + 1;
 	}
+	if (!in_word) {
+		w->text.len = 0;
+		w->cmd = cmd && !target;
+		w->tilde = 0;
+	}
+	dbuf_byte(&w->text, '\0'); /* terminate; not counted */
+	w->text.len--;
+	w->quote = quote;
+	w->fresh = !in_word;
+	return !esc;
 }
 
 /* Append 'text' to d quoted for where it lands: inside the quote that
@@ -1013,124 +655,48 @@ static void appendShellQuoted(struct dbuf *d, const char *text, int quote,
 	}
 }
 
-/* Length of the longest common prefix of every candidate, cut back to
- * a character boundary so a partial completion never ends mid-UTF-8. */
-static int candsCommonLen(const struct shellCands *c) {
-	int len = (int)strlen(c->v[0].full);
-	for (int i = 1; i < c->n; i++) {
-		int k = 0;
-		while (k < len && c->v[i].full[k] == c->v[0].full[k])
-			k++;
-		len = k;
-	}
-	while (len > 0 && ((uint8_t)c->v[0].full[len] & 0xC0) == 0x80)
-		len--;
-	return len;
-}
-
-/* Point as a byte offset into minibufJoin(mb, "\n"). */
-static int minibufPointOffset(struct buffer *mb) {
-	int off = 0;
-	for (int i = 0; i < mb->cy && i < mb->numrows; i++)
-		off += mb->row[i].size + 1;
-	return off + mb->cx;
-}
-
 void handleShellCompletion(struct buffer *minibuf) {
-	struct completionState *cs = &minibuf->completionState;
-
-	/* successive_tabs counts TABs that changed nothing.  Anything
-	 * else the user did in between -- typing resets the state in
-	 * editorPrompt, and C-p/C-n are caught by the point check --
-	 * starts the count again. */
-	char *joined = minibufJoin(minibuf, "\n");
-	int point = minibufPointOffset(minibuf);
-	if (cs->last_completed_text == NULL ||
-	    strcmp(joined, cs->last_completed_text) != 0 ||
-	    cs->completion_start_pos != point)
-		resetCompletionState(cs);
-
-	struct shellPoint sp;
-	lexShellToPoint((const uint8_t *)joined, point, &sp);
+	int point;
+	char *joined = tabBegin(minibuf, &point);
+	struct shellWord w;
+	int usable = lexShellWord((const uint8_t *)joined, point, &w);
 	free(joined);
 
-	struct shellCands cands = { NULL, 0, 0 };
-	const char *value = (const char *)sp.word.buf;
-	int tilde = sp.tilde;
-	int cmd_pos = sp.cmd_pos;
-
-	if (!sp.unusable) {
-		for (;;) {
-			if (cmd_pos && strchr(value, '/') == NULL &&
-			    !(tilde && strcmp(value, "~") == 0))
-				shellCommandCands(value, &cands);
-			else
-				shellFileCands(value, tilde, &cands);
-			if (cands.n > 0 || sp.eq < 0 ||
-			    value != (const char *)sp.word.buf)
-				break;
-			/* Nothing for the whole word: try what follows its
-			 * last '=', as in --file=src/ma or PREFIX=~/lo. */
-			value = (const char *)sp.word.buf + sp.eq;
-			tilde = value[0] == '~';
-			cmd_pos = 0;
-		}
+	struct completionResult r = { 0 };
+	const char *value = (const char *)w.text.buf;
+	const char *eq = strrchr(value, '=');
+	if (usable && w.cmd && !w.tilde && !strchr(value, '/'))
+		getPathCompletions(value, &r);
+	else if (usable)
+		getFileCompletions(value, w.tilde, SCAN_ANY, &r);
+	/* Nothing for the whole word: try what follows its last '=', as
+	 * in --file=src/ma or PREFIX=~/lo. */
+	if (usable && r.n_matches == 0 && eq) {
+		value = eq + 1;
+		getFileCompletions(value, value[0] == '~', SCAN_ANY, &r);
 	}
-	candsSortUnique(&cands);
 
-	int vlen = (int)strlen(value);
+	size_t vlen = strlen(value);
 	struct dbuf ins = DBUF_INIT;
-	int step_over_space = 0;
-
-	if (cands.n == 0) {
-		setStatusMessage("[No match]");
-		cs->preserve_message = 1;
-	} else {
-		int common = candsCommonLen(&cands);
-		const char *full0 = cands.v[0].full;
-		char *suffix = NULL;
-		if (common > vlen) {
-			suffix = xmalloc((size_t)(common - vlen) + 1);
-			memcpy(suffix, full0 + vlen, (size_t)(common - vlen));
-			suffix[common - vlen] = '\0';
-			appendShellQuoted(&ins, suffix, sp.quote,
-					  !sp.in_word && sp.quote == 0);
-		}
-		free(suffix);
-
-		if (cands.n == 1) {
-			/* A finished word: close the quote and move on to
-			 * the next one, as a shell does.  A directory stays
-			 * open so TAB can carry on into it. */
-			size_t flen = strlen(full0);
-			if (flen == 0 || full0[flen - 1] != '/') {
-				struct erow *row = &minibuf->row[minibuf->cy];
-				if (sp.quote)
-					dbuf_byte(&ins, (uint8_t)sp.quote);
-				/* Completing mid-line, before a space
-				 * already there: step over it. */
-				if (!sp.quote && minibuf->cx < row->size &&
-				    row->chars[minibuf->cx] == ' ')
-					step_over_space = 1;
-				else
-					dbuf_byte(&ins, ' ');
-			}
-			closeCompletionsBuffer();
-		} else if (ins.len > 0) {
-			closeCompletionsBuffer();
-		} else if (cs->successive_tabs > 0) {
-			char **shows =
-				xmalloc((size_t)cands.n * sizeof(char *));
-			for (int i = 0; i < cands.n; i++)
-				shows[i] = cands.v[i].show;
-			showCompletionsBuffer(shows, cands.n, PROMPT_SHELL);
-			free(shows);
-		} else {
-			setStatusMessage("[complete, but not unique]");
-			cs->preserve_message = 1;
+	int step = 0;
+	if (tabOutcome(minibuf, &r, vlen, PROMPT_SHELL)) {
+		const char *done = r.common_prefix;
+		size_t dlen = strlen(done);
+		appendShellQuoted(&ins, done + vlen, w.quote, w.fresh);
+		/* A finished word: close the quote and move on to the next
+		 * one, as a shell does, stepping over a space already there.
+		 * A directory stays open so TAB can carry on into it. */
+		if (r.n_matches == 1 && (dlen == 0 || done[dlen - 1] != '/')) {
+			const struct erow *row = &minibuf->row[minibuf->cy];
+			if (w.quote)
+				dbuf_byte(&ins, (uint8_t)w.quote);
+			else if (minibuf->cx < row->size &&
+				 row->chars[minibuf->cx] == ' ')
+				step = 1;
+			if (!step)
+				dbuf_byte(&ins, ' ');
 		}
 	}
-
 	if (ins.len > 0) {
 		int ex = minibuf->cx, ey = minibuf->cy;
 		mutateInsert(minibuf, minibuf->cx, minibuf->cy, ins.buf,
@@ -1138,14 +704,9 @@ void handleShellCompletion(struct buffer *minibuf) {
 		minibuf->cx = ex;
 		minibuf->cy = ey;
 	}
-	if (step_over_space)
-		minibuf->cx++;
+	minibuf->cx += step;
 	dbuf_free(&ins);
-	candsFree(&cands);
-	dbuf_free(&sp.word);
-
-	cs->successive_tabs++;
-	free(cs->last_completed_text);
-	cs->last_completed_text = minibufJoin(minibuf, "\n");
-	cs->completion_start_pos = minibufPointOffset(minibuf);
+	freeCompletionResult(&r);
+	dbuf_free(&w.text);
+	tabEnd(minibuf);
 }

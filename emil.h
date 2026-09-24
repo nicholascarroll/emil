@@ -107,7 +107,7 @@ struct completionResult {
 	char **matches;
 	int n_matches;
 	char *common_prefix;
-	int prefix_len;
+	int cap; /* slots allocated in matches */
 };
 
 #define MARK_RING_SIZE 8
