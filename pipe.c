@@ -57,25 +57,7 @@ static int pipe_last_canceled;
  * may write status messages to the screen. */
 static int pipe_interactive;
 
-/* The terminal while a command runs.
- *
- * emil used to watch the terminal itself for C-g, reading and
- * discarding every other key.  That breaks any program which prompts
- * on the terminal from outside the child's process group -- gpg's
- * pinentry is started by gpg-agent, not by the command -- because
- * emil and the prompt then race for each keystroke and emil throws
- * away the ones it wins.
- *
- * So emil stops reading the terminal for the duration.  Instead the
- * tty driver turns C-g into SIGINT (ISIG on, VINTR = C-g), and the
- * handler writes a C-g down a self-pipe that the pump watches in
- * place of the terminal, so the three-stage escalation in
- * pumpSubprocessIO is unchanged.  The child is in its own process
- * group, so the tty's SIGINT reaches emil only, never the child
- * directly.  QUIT and SUSP (and BSD's delayed suspend) are disabled
- * so that C-\ and C-z cannot stop or kill emil mid-command.
- *
- * Keys typed during a command are discarded afterwards, as before. */
+/* The terminal while a command runs.*/
 static int intr_pipe[2] = { -1, -1 };
 
 static void handleCommandSigint(int sig) {
@@ -162,8 +144,7 @@ static void reclaimTerminal(struct cmd_terminal *ct) {
 	ct->active = 0;
 }
 
-/* Most of a command's stderr the pump keeps.  It ends up on the status
- * line, which holds far less; the rest is drained and dropped. */
+/* stderr bytes kept for the status line; the rest is drained. */
 #define STDERR_KEEP 4096
 
 /* Pump 'input' into sp's stdin while draining its stdout into 'out'
@@ -287,8 +268,7 @@ static int pumpSubprocessIO(struct subprocess_s *sp, uint8_t *input,
 				out_open = 0;
 		}
 		if (err_open && FD_ISSET(err_fd, &rfds)) {
-			/* Keep the start, drain the rest: a chatty child
-			 * must not block on a full stderr pipe either. */
+			/* Keep the start; drain the rest so the child never blocks. */
 			ssize_t n = read(err_fd, io, sizeof(io));
 			if (n > 0 && err && err->len < STDERR_KEEP) {
 				int room = STDERR_KEEP - err->len;
@@ -316,18 +296,9 @@ static int pumpSubprocessIO(struct subprocess_s *sp, uint8_t *input,
 	return cancel_stage;
 }
 
-/* The status line once a command has run to completion (#132).
- *
- * stderr comes first: it is where a command explains itself, and
- * nothing else in the editor shows it.  It is sanitised before it goes
- * anywhere near the terminal -- the minibuffer draws the status message
- * raw, so an escape sequence or a stray byte from the child would be
- * drawn as-is -- with its trailing newline dropped and inner ones shown
- * as ^J, as the prompt shows them.  A nonzero exit status leads it.
- *
- * With nothing on stderr: say so when there was no output either,
- * in Emacs's words, rather than leave the user to wonder whether the
- * command ran at all; otherwise the byte count, or the exit status. */
+/* After a command ran (#132): its stderr, sanitised and led by a
+ * nonzero exit status; else Emacs's no-output messages, the exit
+ * status or the byte count. */
 static void reportShellResult(int status, int out_len, const struct dbuf *err) {
 	int elen = err->len;
 	while (elen > 0 &&
@@ -399,12 +370,7 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 
 	pipe_last_canceled = canceled;
 	if (canceled) {
-		/* Reap without ever blocking: the child has had SIGTERM
-		 * and possibly SIGKILL; if it is unreapable even now
-		 * (D-state on a hung filesystem), abandon it rather
-		 * than wedge the editor in waitpid — the one zombie is
-		 * the lesser evil.  select() doubles as a portable
-		 * sub-second sleep. */
+		/* Reap without blocking. */
 		for (int i = 0; i < 20; i++) {
 			if (subprocess_tryjoin(&subprocess, NULL) != 0)
 				break;
@@ -448,8 +414,7 @@ static uint8_t *transformerPipeCmd(uint8_t *input) {
 
 /* Run 'command' through /bin/sh -c with optional 'input' on stdin,
  * returning captured stdout (caller frees, NULL on spawn failure).
- * Thin wrapper over the static transformerPipeCmd so tests can
- * exercise the real subprocess I/O path instead of replicating it. */
+ * Thin wrapper over the static transformerPipeCmd for testing.*/
 uint8_t *pipeCommandCapture(const uint8_t *command, uint8_t *input) {
 	return pipeCommandCaptureIntr(command, input, -1, NULL);
 }
@@ -513,6 +478,46 @@ uint8_t *editorPipe(int useRegion) {
 	return NULL;
 }
 
+/* Singleton buffer: clear any content left over from the previous
+ * run and reset cursor/mark so stale positions don't dangle past the
+ * new content, then show it in a window. */
+static void showOutputBuffer(const char *name, const uint8_t *data, size_t len,
+			     int read_only) {
+	struct buffer *buf = findOrCreateSpecialBuffer(name);
+	bufferResetRows(buf);
+	buf->cx = 0;
+	buf->cy = 0;
+	buf->markx = -1;
+	buf->marky = -1;
+	buf->mark_active = 0;
+	if (read_only)
+		buf->read_only = 1;
+
+	bufferLoadBlob(buf, data, len, 0);
+	if (len > 0)
+		markBufferDirty(buf);
+	updateBuffer(buf);
+
+	int existing = findBufferWindow(buf);
+	if (existing >= 0) {
+		int curIdx = windowFocusedIdx();
+		if (existing != curIdx) {
+			struct window *cur = E.windows[curIdx];
+			cur->cx = cur->buf->cx;
+			cur->cy = cur->buf->cy;
+			cur->focused = 0;
+			E.windows[existing]->focused = 1;
+		}
+		E.buf = buf;
+		synchronizeBufferCursor(buf, E.windows[existing]);
+	} else {
+		int idx = windowFocusedIdx();
+		E.windows[idx]->buf = buf;
+		E.buf = buf;
+	}
+	refreshScreen();
+}
+
 void pipeCmd(int useRegion) {
 	/* Not allowed during macro record/playback */
 	if (E.recording || E.playback) {
@@ -521,8 +526,7 @@ void pipeCmd(int useRegion) {
 	}
 	uint8_t *pipeOutput = editorPipe(useRegion);
 	if (pipeOutput != NULL && pipeOutput[0] == '\0') {
-		/* Nothing on stdout: leave the windows alone.  The
-		 * status line already says what happened (#132). */
+		/* Nothing on stdout: leave the windows alone. */
 		free(pipeOutput);
 		return;
 	}
@@ -536,63 +540,11 @@ void pipeCmd(int useRegion) {
 			return;
 		}
 
-		struct buffer *shellBuf =
-			findOrCreateSpecialBuffer("*Shell Output*");
-
-		/* Singleton buffer — clear any content left over from a
-		 * previous shell invocation and reset cursor/mark so stale
-		 * positions don't dangle past the new content. */
-		bufferResetRows(shellBuf);
-		shellBuf->cx = 0;
-		shellBuf->cy = 0;
-		shellBuf->markx = -1;
-		shellBuf->marky = -1;
-		shellBuf->mark_active = 0;
-
-		bufferLoadBlob(shellBuf, pipeOutput, outputLen, 0);
-
-		/* Preserves prior behaviour: these rows used to be
-		 * added with insertRow, which marks the buffer dirty.
-		 * A regenerated read-only popup showing "modified" in
-		 * its mode line is questionable, but changing it is a
-		 * user-visible change and not part of #117 R2.
-		 * Guarded on non-empty output because insertRow was
-		 * never reached for an empty capture, and an
-		 * unconditional call would newly dirty the popup. */
-		if (outputLen > 0)
-			markBufferDirty(shellBuf);
-		updateBuffer(shellBuf);
-
-		/* Route the shell output to a window.  If a window is
-		 * already showing *Shell Output*, move focus there instead
-		 * of hijacking the current window.  Otherwise, swap the
-		 * current window's buffer to shellBuf (original behaviour). */
-		int existing = findBufferWindow(shellBuf);
-		if (existing >= 0) {
-			int curIdx = windowFocusedIdx();
-			if (existing != curIdx) {
-				/* Save the current window's view state
-				 * before moving focus. */
-				struct window *cur = E.windows[curIdx];
-				cur->cx = cur->buf->cx;
-				cur->cy = cur->buf->cy;
-				cur->focused = 0;
-				E.windows[existing]->focused = 1;
-			}
-			E.buf = shellBuf;
-			synchronizeBufferCursor(shellBuf, E.windows[existing]);
-		} else {
-			int idx = windowFocusedIdx();
-			E.windows[idx]->buf = shellBuf;
-			E.buf = shellBuf;
-		}
-		refreshScreen();
-
+		showOutputBuffer("*Shell Output*", pipeOutput, outputLen, 0);
 		free(pipeOutput);
 	}
 }
 
-/////
 void diffBufferWithFile(void) {
 	struct buffer *bufr = E.buf;
 	if (bufr->filename == NULL) {
@@ -693,51 +645,8 @@ void diffBufferWithFile(void) {
 		return;
 	}
 
-	struct buffer *diffBuf = findOrCreateSpecialBuffer("*Diff*");
-
-	/* Singleton buffer — clear any content left over from a
-	 * previous diff and reset cursor/mark so stale positions
-	 * don't dangle past the new content. */
-	bufferResetRows(diffBuf);
-	diffBuf->cx = 0;
-	diffBuf->cy = 0;
-	diffBuf->markx = -1;
-	diffBuf->marky = -1;
-	diffBuf->mark_active = 0;
-	diffBuf->read_only = 1;
-
-	/* The two copies of this split now share one implementation,
-	 * which is what DEF-4 asked for: this one dropped the final
-	 * byte of output not ending in a newline while the
-	 * shell-output copy above did not. */
-	bufferLoadBlob(diffBuf, (const uint8_t *)output, (size_t)output_len, 0);
-	if (output_len > 0)
-		markBufferDirty(diffBuf); /* as above */
-	updateBuffer(diffBuf);
-
-	/* Route the diff output to a window.  If a window is already
-	 * showing *Diff*, move focus there instead of hijacking the
-	 * current window.  Otherwise, swap the current window's
-	 * buffer to diffBuf. */
-	int existing = findBufferWindow(diffBuf);
-	if (existing >= 0) {
-		int curIdx = windowFocusedIdx();
-		if (existing != curIdx) {
-			struct window *cur = E.windows[curIdx];
-			cur->cx = cur->buf->cx;
-			cur->cy = cur->buf->cy;
-			cur->focused = 0;
-			E.windows[existing]->focused = 1;
-		}
-		E.buf = diffBuf;
-		synchronizeBufferCursor(diffBuf, E.windows[existing]);
-	} else {
-		int idx = windowFocusedIdx();
-		E.windows[idx]->buf = diffBuf;
-		E.buf = diffBuf;
-	}
-	refreshScreen();
-
+	showOutputBuffer("*Diff*", (const uint8_t *)output, (size_t)output_len,
+			 1);
 	free(output);
 }
 

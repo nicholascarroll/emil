@@ -327,13 +327,6 @@ const char *unicodeCharName(uint32_t cp) {
 
 /* Decode the UTF-8 character at str[idx] and return its Unicode codepoint. */
 uint32_t utf8Decode(const uint8_t *str, int idx) {
-	/* Each continuation byte is verified before the byte after it
-	 * is read.  Rows are NUL-terminated at chars[size], and NUL is
-	 * never a continuation byte, so decoding stops at the
-	 * terminator for truncated sequences (which can reach a buffer
-	 * via byte-column rectangle operations on multibyte text)
-	 * instead of reading past the allocation.  
-	 */
 	uint32_t ret = 0;
 	uint8_t ch = str[idx];
 	if (utf8_is2Char(ch)) {
@@ -476,11 +469,7 @@ int isCJKChar(uint32_t cp) {
 	       || (cp >= 0xD7B0 && cp <= 0xD7FF); /* Hangul Jamo Extended-B */
 }
 
-/* 行首禁则 are the characters forbidden at the start of a wrapped line.
- * Initial set: closing punctuation that must stay attached to the
- * character it follows.  Word wrap consults this to avoid recording
- * a break point immediately before any of these.  Extend the table
- * as needed (e.g. " ' 】 〉 〕 are natural future members). */
+/* 行首禁则: characters forbidden at the start of a wrapped line.*/
 int isLineStartForbidden(uint32_t cp) {
 	switch (cp) {
 	case 0x3001: /* 、 IDEOGRAPHIC COMMA */
@@ -617,8 +606,7 @@ size_t utf8SanitizeLine(const uint8_t *in, size_t len, char *out,
 				uint32_t cp = utf8Decode(in + i, 0);
 				used = (size_t)n;
 				if (cp <= 0x9F) {
-					/* C1 control: 8-bit CSI and
-					 * friends to a terminal */
+					/* C1: 8-bit CSI and friends */
 					piece = "?";
 				} else {
 					plen = (size_t)n;
@@ -639,7 +627,7 @@ size_t utf8SanitizeLine(const uint8_t *in, size_t len, char *out,
 	return i;
 }
 
-/* THE single display-width rule (issue #117 R1).
+/* THE single display-width rule.
  *
  * Columns occupied by the character starting at str[idx] when it is
  * drawn at display column x.  x matters only for '\t', whose width is
@@ -654,19 +642,7 @@ size_t utf8SanitizeLine(const uint8_t *in, size_t len, char *out,
  *                               (negative -> 1)
  *
  * Every walk that accumulates display columns over row or message
- * bytes must get its per-character widths from here.  Before this
- * function existed the rule was open-coded nine times, and copies
- * that had to agree exactly — wordWrapBreak deciding where a sub-line
- * ends versus the render loop drawing it; wordWrapBreak versus
- * displayColumnToByteOffset navigating within the sub-line it defined
- * — were kept in agreement only by inspection, which had already
- * failed on the NUL byte (DEF-5: one copy said 1 column, the other
- * three said 2).
- *
- * NUL is deliberately 2 here, siding with the majority and with
- * charInStringWidth: a NUL cannot reach a buffer (load rejects it,
- * §3.21.1) but the rule must still answer, and answering differently
- * per caller is exactly the defect class this function removes. */
+ * bytes must get its per-character widths from here.*/
 int charAdvance(const uint8_t *str, int idx, int x, int *nbytes) {
 	uint8_t ch = str[idx];
 	int width;
@@ -696,10 +672,9 @@ int charAdvance(const uint8_t *str, int idx, int x, int *nbytes) {
  * be short of `cols` when a wide character straddles the boundary.
  *
  * Column accounting starts at 0 relative to `from` (tabs expand
- * against that origin).  Honest about zero progress: if the first
- * character alone exceeds `cols`, the return is `from` and *used is 0;
- * a caller that must advance regardless (the minibuffer fill) forces
- * one character through itself. */
+ * against that origin). If the first character alone exceeds `cols`,
+ * the return is `from` and *used is 0;  a caller that must advance
+ * regardless (the minibuffer fill) forces one character through itself. */
 int utf8ColsToBytes(const uint8_t *str, int from, int len, int cols,
 		    int *used) {
 	int idx = from;
@@ -711,7 +686,9 @@ int utf8ColsToBytes(const uint8_t *str, int from, int len, int cols,
 		if (x + w > cols)
 			break;
 		x += w;
-		idx += nb;
+		/* An incomplete sequence at the end of the span must not
+		 * carry the offset past it: callers copy str[from..idx). */
+		idx += nb < from + len - idx ? nb : from + len - idx;
 	}
 	if (used)
 		*used = x;
@@ -736,15 +713,7 @@ int utf8WidthN(const uint8_t *str, int len) {
 
 /* Byte offset of the first character to KEEP so that the remainder of
  * str[0..len) fits within `budget` display columns, dropping whole
- * characters from the left.  Returns len if nothing fits.
- *
- * This is left-truncation's walk, shared by leftTruncate() (which
- * allocates a "..." + tail string) and statusLeft() (which formats
- * one into a fixed buffer).  They are the two places that truncate a
- * display_name, and the #117 report found them disagreeing — one
- * measuring bytes, the other columns.  Sharing the width rule was not
- * enough to stop that recurring: the walk itself has to be one
- * function, or the next divergence is a copy-edit away. */
+ * characters from the left.  Returns len if nothing fits. */
 int utf8DropToFit(const uint8_t *str, int len, int budget) {
 	int total = utf8WidthN(str, len);
 	int dropped = 0;
@@ -759,32 +728,13 @@ int utf8DropToFit(const uint8_t *str, int len, int budget) {
 }
 
 int nextScreenX(uint8_t *str, int *idx, int screen_x) {
-	/* Wrapper over charAdvance so the historical interface — and
-	 * test_wcwidth.c through it — keeps testing the same rule.
-	 * Advances *idx to the character's LAST byte; the caller's
-	 * loop increment steps onto the next character. */
 	int nbytes;
 	int width = charAdvance(str, *idx, screen_x, &nbytes);
 	*idx += nbytes - 1;
 	return screen_x + width;
 }
 
-/* Move cx to the nearest UTF-8 character boundary within a row.
- *
- * A cursor byte offset is legal only at the start of a character or at
- * the very end of the row.  Any code that carries a byte offset from
- * one row to another -- vertical motion, scrolling, restoring a saved
- * position -- can land inside a multibyte character and must snap.
- *
- * dir > 0 snaps forward, which is what vertical motion does: moving up
- * or down a line and finding yourself inside a character puts you at
- * the next one.  dir <= 0 snaps backward, for callers that are moving
- * left and must not jump the cursor forward past the character they
- * were headed for.
- *
- * cx == size is the end-of-line position and is already a boundary; it
- * is returned unchanged rather than snapped, and the early return also
- * keeps the backward scan from reading chars[size]. */
+/* Move cx to the nearest UTF-8 character boundary within a row.*/
 int utf8_snapToBoundary(const uint8_t *chars, int size, int cx, int dir) {
 	if (cx <= 0)
 		return 0;

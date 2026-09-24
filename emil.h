@@ -266,19 +266,9 @@ struct config {
 	int statusmsg_show;
 	struct termios orig_termios;
 	struct buffer *headbuf;
-	/* The buffer keystrokes edit.
-	 *
-	 * Focus invariant: between commands -- at the top of the main
-	 * loop -- exactly one window is focused and E.buf is the buffer
-	 * it shows.  The window list and E.buf are two records of the
-	 * same fact, so any code that changes one must change the other
-	 * to match.  focusInvariantBreach() (window.c) is the check;
-	 * building with -DEMIL_DEBUG_FOCUS runs it on every pass of the
-	 * main loop and aborts on a breach.
-	 *
-	 * Two modal loops move E.buf for their own duration and put it
-	 * back before returning: editorPrompt() to E.minibuf, which is
-	 * in no window, and expandPalette() to the palette buffer. */
+	/* The buffer keystrokes edit.  Between commands exactly one window
+	 * is focused and it shows E.buf; -DEMIL_DEBUG_FOCUS checks this.
+	 * editorPrompt() and expandPalette() move E.buf while they run. */
 	struct buffer *buf;
 	int nwindows;
 	struct window **windows;

@@ -411,6 +411,29 @@ void test_shell_tab_quoted_insert_and_undo(void) {
 	shFixtureDown();
 }
 
+void test_history_up_drops_stale_mark(void) {
+	initTestEditor();
+	makeMinibuffer();
+	make_test_buffer("");
+	addHistory(&E.search_history, ")\xE3\x80\x82");
+
+	int keys[] = { 'o', '6', CTRL('@'), KEY_ARROW_UP, CTRL('w'), '\r' };
+	scriptKeys(keys, 6);
+	muteStdout();
+	char *got = (char *)editorPrompt("Search: ", PROMPT_SEARCH, NULL);
+	unmuteStdout();
+	clearKeys();
+
+	TEST_ASSERT_NOT_NULL(got);
+	if (got)
+		TEST_ASSERT_EQUAL_INT(1, utf8_validate((uint8_t *)got,
+						       (int)strlen(got)));
+	free(got);
+	freeHistory(&E.search_history);
+	freeMinibuffer();
+	cleanupTestEditor();
+}
+
 /* These tests manage the editor themselves. */
 void setUp(void) {
 }
@@ -433,6 +456,7 @@ int main(void) {
 	RUN_TEST(test_file_prompt_completion);
 	RUN_TEST(test_shell_tab_mid_line);
 	RUN_TEST(test_shell_tab_quoted_insert_and_undo);
+	RUN_TEST(test_history_up_drops_stale_mark);
 
 	return TEST_END();
 }

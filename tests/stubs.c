@@ -41,6 +41,11 @@ int test_key_count = 0;
 int test_key_pos = 0;
 
 int readKey(void) {
+	if (E.playback) {
+		if (E.playback >= E.macro.nkeys)
+			return -1;
+		return E.macro.keys[E.playback++];
+	}
 	if (test_key_pos < test_key_count)
 		return test_key_script[test_key_pos++];
 	return 0;

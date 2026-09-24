@@ -16,10 +16,7 @@ struct config;
 extern int minibuffer_height;
 extern const int statusbar_height;
 
-/* Minibuffer layout (§5.5, #117 R3).  One model, run by the sizing in
- * refreshScreen, by drawMinibuffer and by cursorBottomLine; they
- * disagreed while each had its own.  Auto-sizing is capped at
- * MINIBUF_MAX_LINES screen lines. */
+/* Minibuffer layout. Auto-sizing is capped at MINIBUF_MAX_LINES screen lines.*/
 #define MINIBUF_MAX_LINES 5
 
 struct minibufLine {

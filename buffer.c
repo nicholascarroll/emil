@@ -225,37 +225,6 @@ struct buffer *newBuffer(void) {
 	return ret;
 }
 
-/* Discard every row, leaving the buffer transiently rowless.  For the
- * loaders, which build a row array from scratch and restore the
- * invariant before returning; see the invariant note in buffer.h. */
-/* Split a text blob into buffer rows, appending them (#117 R2).
- *
- * The one answer to "how does a blob of bytes become rows".  Five
- * places used to do this, and they disagreed in two ways the report
- * catalogued: only the stdin path stripped CR, and the *Diff* copy
- * dropped the final byte of output that did not end in a newline
- * (DEF-4) while its sibling 165 lines away in the same file got it
- * right.
- *
- * Appends rather than resets: register.c writes a header row first
- * and then the register's text beneath it.  Callers wanting a fresh
- * buffer call bufferResetRows() themselves, which is also where the
- * cursor/mark reset belongs.
- *
- * Rows are appended with appendRowRaw, so this does not mark the
- * buffer dirty or take a lock.  That is what a bulk population wants
- * — §3.21.1 requires it of the load path, so that an unedited file
- * is never rewritten merely because it was opened.
- *
- * BLOB_CRLF       strip one trailing '\r' from each line (DOS input).
- * BLOB_FINAL_NL   terminate with an empty final row unconditionally,
- *                 the representation of a trailing newline (§4.1).
- *                 Without it a blob not ending in '\n' yields a final
- *                 row holding those bytes, and one that does ends on
- *                 the last complete line.
- *
- * Guarantees at least one row on return (§4.9), so a caller need not
- * follow with bufferEnsureRow. */
 void bufferLoadBlob(struct buffer *buf, const uint8_t *data, size_t len,
 		    int flags) {
 	size_t start = 0;
@@ -270,9 +239,7 @@ void bufferLoadBlob(struct buffer *buf, const uint8_t *data, size_t len,
 		start = i + 1;
 	}
 
-	/* Trailing bytes with no newline after them are a row too.
-	 * Counting them here, rather than inside the loop on its last
-	 * iteration, is what the *Diff* copy got wrong. */
+	/* Trailing bytes with no newline after them are a row too.*/
 	if (start < len) {
 		size_t end = len;
 		if ((flags & BLOB_CRLF) && end > start && data[end - 1] == '\r')
@@ -382,10 +349,7 @@ struct buffer *findOrCreateSpecialBuffer(const char *name) {
 	return buf;
 }
 
-/* Restore the invariant after bufferResetRows.  The counterpart to it:
- * reset, append whatever rows the content produces, then call this so
- * that content which produced no rows at all still leaves a valid
- * buffer rather than a rowless one. */
+/* Row-count invariant. */
 void bufferEnsureRow(struct buffer *buf) {
 	if (buf->numrows == 0)
 		appendRowRaw(buf, (const uint8_t *)"", 0);
@@ -525,11 +489,7 @@ void switchToNamedBuffer(void) {
 	setStatusMessage("Switched to buffer %s", switchedName);
 	free(switchedName);
 
-	for (int i = 0; i < E.nwindows; i++) {
-		if (E.windows[i]->focused) {
-			E.windows[i]->buf = E.buf;
-		}
-	}
+	E.windows[windowFocusedIdx()]->buf = E.buf;
 
 	free(buffer_name);
 }
@@ -539,11 +499,7 @@ void previousBuffer(void) {
 	if (E.buf == NULL) {
 		E.buf = E.headbuf;
 	}
-	for (int i = 0; i < E.nwindows; i++) {
-		if (E.windows[i]->focused) {
-			E.windows[i]->buf = E.buf;
-		}
-	}
+	E.windows[windowFocusedIdx()]->buf = E.buf;
 	resetFileCheckThrottle();
 }
 
@@ -561,12 +517,7 @@ void nextBuffer(void) {
 		}
 		E.buf = temp;
 	}
-	// Update the focused buffer in all windows
-	for (int i = 0; i < E.nwindows; i++) {
-		if (E.windows[i]->focused) {
-			E.windows[i]->buf = E.buf;
-		}
-	}
+	E.windows[windowFocusedIdx()]->buf = E.buf;
 	resetFileCheckThrottle();
 }
 

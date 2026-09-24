@@ -31,8 +31,7 @@ char *expandTilde(const char *path);  /* ~/foo → /home/u/foo; caller frees */
 char *collapseHome(const char *path); /* /home/u/foo → ~/foo; caller frees */
 
 /* write(2) that does not stop part-way.  Returns 0 when every byte was
- * written, -1 otherwise with errno set.  See util.c for why the plain
- * write() this replaces was not enough. */
+ * written, -1 otherwise with errno set.*/
 int writeAll(int fd, const void *buf, size_t len);
 
 /* Character classification */

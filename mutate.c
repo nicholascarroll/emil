@@ -32,31 +32,16 @@ uint8_t *collectRegionText(struct buffer *buf, int startx, int starty, int endx,
 	return dbuf_detach(&d, out_len);
 }
 
-/* ---- Final-newline invariant ----
+/* Final-newline invariant: a file buffer's last row is empty, unless
+ * the buffer is empty.
  *
- * A file buffer ends in a newline, which under the representation
- * means its last row is empty -- unless the buffer is empty, which has
- * no lines to terminate and must still serialise to zero bytes.
- *
- *     bufferIsEmpty(buf) || row[numrows - 1].size == 0
- *
- * newBuffer establishes it (the empty buffer satisfies it), editorOpen
- * establishes it by appending the row a file without a trailing
- * newline lacks, and the two functions below maintain it.  save()
- * therefore has no policy of its own: it serialises a buffer that is
- * already correct. */
+ *     bufferIsEmpty(buf) || row[numrows - 1].size == 0 */
 static int wantsFinalNewline(struct buffer *buf) {
 	return buf != E.minibuf;
 }
 
 /* Would this mutation delete the final newline and nothing else?
- *
- * Such a request is a pure no-op under the final-newline invariant.
- * The deletion would be immediately restored by the repair below,
- * leaving the buffer byte-identical while adding two undo records,
- * marking the buffer dirty, and clearing the redo stack.  Refusing
- * the request up front preserves both the invariant and the integrity
- * of the undo history. */
+ * The repair below would restore it, so it is refused. */
 static int deletesOnlyFinalNewline(struct buffer *buf, int startx, int starty,
 				   int endx, int endy, int old_len,
 				   int repl_len) {
@@ -66,10 +51,7 @@ static int deletesOnlyFinalNewline(struct buffer *buf, int startx, int starty,
 		return 0;
 	if (buf->row[buf->numrows - 1].size != 0)
 		return 0;
-	/* Only a no-op if the repair would fire, which needs the row
-	 * surviving the join to be non-empty.  An empty one leaves the
-	 * invariant holding: this is a real edit, deleting a blank
-	 * line. */
+	/* An empty row before it: a real edit, deleting a blank line. */
 	if (buf->row[buf->numrows - 2].size == 0)
 		return 0;
 	return starty == buf->numrows - 2 &&
@@ -78,12 +60,7 @@ static int deletesOnlyFinalNewline(struct buffer *buf, int startx, int starty,
 }
 
 /* Restore the invariant after a mutation that consumed the final
- * newline along with real text -- a kill-region running off the end, a
- * regex replace matching it.  The appended row is recorded with
- * paired=1, so it and the mutation that provoked it undo as one step;
- * this is the same mechanism a replace already uses to bind its delete
- * and insert together.  Nothing else is needed: a row appended past
- * the end of the buffer moves no tracked point. */
+ * newline along with real text */
 static void restoreFinalNewline(struct buffer *buf) {
 	if (!wantsFinalNewline(buf) || bufferIsEmpty(buf))
 		return;
@@ -110,31 +87,19 @@ static void restoreFinalNewline(struct buffer *buf) {
 	bulkInsert(buf, atx, aty, (const uint8_t *)"\n", 1);
 }
 
-/* Shared body of every mutation.  'coalesce' asks that the single
- * record produced be offered to the run at the head of the undo list
- * rather than pushed on top of it; it is honoured only for a mutation
- * that pushes exactly one record, since a paired delete+insert is one
- * atomic unit and must not be half-absorbed into a typing run.
- *
- * A coalescing record made during an input burst is additionally
- * marked 'uncapped', exempting the run from UNDO_MERGE_LIMIT (§3.5).
- * The burst flag is read here rather than in undo.c: undoMerge() is
- * pure record arithmetic and reads no global state, so what it needs
- * to know reaches it as a field on the record. */
+/* Shared body of every mutation.  'coalesce' merges the record into
+ * the run at the head of the undo list; honoured only when exactly one
+ * record is pushed.  During an input burst the run is uncapped. */
 static void mutateReplaceEx(struct buffer *buf, int startx, int starty,
 			    int endx, int endy, const uint8_t *old_text,
 			    int old_len, const uint8_t *repl, int repl_len,
 			    int chain_to_prev, int coalesce, int *out_endx,
 			    int *out_endy) {
-	/* Authoritative read-only check for the mutation layer.  Must
-	 * precede clearRedos; on refusal the out-params are untouched
-	 * (see mutate.h). */
+	/* Before clearRedos; out-params untouched on refusal. */
 	if (rejectIfReadOnly(buf))
 		return;
 
-	/* Refused for the same reason and on the same terms as the
-	 * read-only check above: before clearRedos, with the out-params
-	 * left untouched (see mutate.h). */
+	/* As above. */
 	if (wantsFinalNewline(buf) &&
 	    deletesOnlyFinalNewline(buf, startx, starty, endx, endy, old_len,
 				    repl_len))
@@ -146,11 +111,8 @@ static void mutateReplaceEx(struct buffer *buf, int startx, int starty,
 
 	clearRedos(buf);
 
-	/* The first record pushed by this call pairs to the previous
-	 * mutation if chain_to_prev is set.  When this is a replace
-	 * (del + ins), the del record is first and takes the chain; the
-	 * ins record always pairs to the del.  When only one side is
-	 * non-empty, whichever is present is "first". */
+	/* With chain_to_prev, the first record pushed pairs to the
+	 * previous mutation; in a replace the ins pairs to the del. */
 
 	/* Delete undo record */
 	if (old_len > 0) {
@@ -174,17 +136,12 @@ static void mutateReplaceEx(struct buffer *buf, int startx, int starty,
 	if (old_len > 0)
 		bulkDelete(buf, startx, starty, endx, endy);
 
-	/* Compute insert end position.  This is the LOGICAL end: it is
-	 * what the caller is told and what point adjustment uses.  The
-	 * record below states the anchored end instead. */
+	/* The logical insert end, as told to the caller. */
 	int iex = startx, iey = starty;
 	if (repl_len > 0)
 		computeInsertEnd(repl, repl_len, startx, starty, &iex, &iey);
 
-	/* Insert undo record.  paired=1 if this pairs to the del just
-	 * above (is_replace), or if chain_to_prev is set and the del was
-	 * empty: in the latter case this ins is the "first record" and
-	 * takes the chain. */
+	/* Insert undo record */
 	if (repl_len > 0) {
 		struct dbuf adata = DBUF_INIT;
 		dbuf_append(&adata, repl, repl_len);
@@ -205,8 +162,7 @@ static void mutateReplaceEx(struct buffer *buf, int startx, int starty,
 		pushUndo(buf, ins);
 		dbuf_free(&adata);
 
-		/* bulkInsert anchors the row mutation itself and calls
-		 * adjustAllPoints on the logical range. */
+		/* bulkInsert calls adjustAllPoints internally */
 		bulkInsert(buf, startx, starty, repl, repl_len);
 	}
 
@@ -266,26 +222,12 @@ void mutateExtendRows(struct buffer *buf, int from_row, int n_rows) {
 	for (int i = 0; i < n_rows; i++)
 		insertRow(buf, buf->numrows, (const uint8_t *)"", 0);
 
-	/* Build a pure-insert undo record:
-	 *   starty = last row of original buffer
-	 *   startx = end of that row (i.e. where the first newline was
-	 *            appended)
-	 *   endy   = last row of extended buffer
-	 *   endx   = 0 (cursor sits at start of the last empty row)
-	 *   data   = n_rows '\n' bytes
-	 *
-	 * paired=0: this is the head of a chain; a following
-	 * mutateReplace with chain_to_prev=1 pairs onto it. */
+	/* A pure-insert undo record of the appended newlines, heading a
+	 * chain that a following mutateReplace may pair onto. */
 	struct undo *ext = newUndo();
 	int n_newlines;
 	if (from_row == 0) {
-		/* Extending a rowless buffer: there is no preceding row
-		 * to anchor to, so the record starts at the origin and
-		 * the n inserted rows read as n-1 joining newlines.
-		 * Undoing restores a single empty row: the closest
-		 * representable state to a rowless buffer.  Without
-		 * this case starty would be -1 and the buf->row[]
-		 * read below is out of bounds. */
+		/* A rowless buffer: anchor at the origin, n-1 newlines. */
 		ext->starty = 0;
 		ext->startx = 0;
 		n_newlines = n_rows - 1;

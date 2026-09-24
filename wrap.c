@@ -46,12 +46,7 @@ int calculateLineWidth(erow *row) {
 /* Display column of a byte offset within a row.
  *
  * char_pos >= row->size means "the whole row", which is  what
- * calculateLineWidth() computes and caches.  The comparison must be
- * >=, not >: a > here sends a cursor at end of line down the
- * O(row->size) walk while the cached answer sits unused.  The
- * frame computes this column once and passes it to the status bar
- * and the cursor placement, so the cache serves repeat frames on an
- * unedited row rather than repeat callers within one frame.*/
+ * calculateLineWidth() computes and caches.*/
 int charsToDisplayColumn(erow *row, int char_pos) {
 	if (!row || char_pos < 0)
 		return 0;
@@ -72,8 +67,7 @@ int charsToDisplayColumn(erow *row, int char_pos) {
  * earlier, carrying the punctuation to the next line attached to its
  * preceding character; chains (字」。) resolve by suppressing each
  * candidate in turn.  If every candidate on a segment is suppressed,
- * the hard-break fallback still applies, so a pathological line of
- * pure punctuation can neither loop nor produce an empty line. */
+ * the hard-break fallback still applies.*/
 static int breakForbiddenBefore(erow *row, int next_bidx) {
 	if (next_bidx >= row->size)
 		return 0;
@@ -171,12 +165,6 @@ int wordWrapBreak(erow *row, int screencols, int line_start_col,
 			hard_byte = bidx;
 		}
 		uint8_t c = row->chars[bidx];
-		/* Width from THE rule (charAdvance, #117 R1).  The
-		 * render loop draws each sub-line with the same rule;
-		 * a one-column disagreement between the two shifts
-		 * text and moves the cursor off its character, so
-		 * they must share the computation, not agree by
-		 * inspection. */
 		int nb;
 		int cwidth = charAdvance(row->chars, bidx, col, &nb);
 
@@ -223,14 +211,7 @@ int wordWrapBreak(erow *row, int screencols, int line_start_col,
 		*break_byte = hard_byte;
 	} else {
 		/* Nothing fit: the segment's first character is wider
-		 * than the window.  Emit it anyway.  Returning a break
-		 * at line_start_byte would make callers loop forever.
-		 * charAdvance, not charInStringWidth: the main loop
-		 * above priced this character with tab-stop context
-		 * when deciding it didn't fit, and the render loop
-		 * will expand a tab to its stop, so break_col must be
-		 * charged the same way (a leading tab on a sub-8-col
-		 * window was previously charged 2 here). */
+		 * than the window.  Emit it anyway.*/
 		if (bidx == line_start_byte && bidx < row->size) {
 			int nb;
 			col += charAdvance(row->chars, bidx, col, &nb);
@@ -422,15 +403,6 @@ int displayColumnToByteOffset(erow *row, int screencols, int target_subline,
 	int bidx = ls_byte;
 
 	while (bidx < subline_end_byte) {
-		/* charAdvance, THE width rule (#117 R1, fixes DEF-5).
-		 * This walk navigates WITHIN a sub-line whose
-		 * boundaries wordWrapBreak defined, so the two must
-		 * price every byte identically.  The open-coded rule
-		 * here had an `else if (c < 0x80) cwidth = 1` that
-		 * caught NUL at 1 column while wordWrapBreak gave it
-		 * 2 — unreachable through a buffer (load rejects NUL,
-		 * §3.21.1) but exactly the divergence class the
-		 * shared rule exists to make impossible. */
 		int nb;
 		int cwidth = charAdvance(row->chars, bidx, ls_col + col, &nb);
 

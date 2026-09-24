@@ -38,14 +38,9 @@ int isIndicSentenceTerminator(uint32_t cp);
 
 int utf8_validate(const uint8_t *buf, int len);
 
-/* Copy untrusted bytes -- a child process's stderr, say -- into out as
- * text that is safe to draw raw on the terminal as one line: valid
- * UTF-8 passes through, C0 controls and DEL become caret notation
- * (^J, ^[, ^?), C1 controls become '?', and each byte that does not
- * start a valid UTF-8 sequence becomes U+FFFD.  out is always
- * NUL-terminated (outsz > 0) and never ends inside a character.
- * Returns how many bytes of in were consumed: less than len when out
- * filled first. */
+/* Copy untrusted bytes into out as one line safe to draw raw: C0 and
+ * DEL as ^X, C1 as '?', invalid bytes as U+FFFD.  out is NUL-terminated
+ * and never ends mid-character.  Returns the bytes of in consumed. */
 size_t utf8SanitizeLine(const uint8_t *in, size_t len, char *out, size_t outsz);
 
 /* The single display-width rule; see the comment at the definition.
@@ -59,15 +54,9 @@ int nextScreenX(uint8_t *str, int *idx, int screen_x);
 
 int utf8_snapToBoundary(const uint8_t *chars, int size, int cx, int dir);
 
-/* Select a UTF-8 locale for LC_CTYPE if the platform has one, and say
- * whether it worked.  Idempotent and cached; safe to call from anywhere.
- *
- * Emil decodes UTF-8 itself and never uses the libc multibyte
- * functions, so the locale matters for exactly one thing: wcwidth().
- * Without a UTF-8 locale wcwidth reports -1 for every non-ASCII
- * codepoint -- correctly, since they have no defined width in the C
- * locale -- and charAdvance maps that to one column.
- *
+/* Select a UTF-8 locale for LC_CTYPE if the platform has one.
+ * Idempotent and cached; safe to call from anywhere.
+ * Only used by wcwidth().
  * Returns 1 when wide characters will measure 2 columns, 0 when the
  * platform offers only the C locale and everything non-ASCII will
  * measure 1.  Genode is the second case: its libc build filters out

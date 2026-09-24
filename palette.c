@@ -252,9 +252,8 @@ const int palette_size = sizeof(palette) / sizeof(palette[0]);
 /* ------------------------------------------------------------------ */
 #define PALETTE_BUF_NAME "Palette"
 
-/* Populate the palette buffer.  Mirrors the dump_palette utility:
-concatenate every entry's utf8[] with a trailing space.  The
-PALETTE_BREAK entries contain '\n', producing line breaks. */
+/* Populate the palette buffer: every entry's utf8[] with a trailing
+space.  PALETTE_BREAK entries contain '\n'. */
 static void populatePaletteBuffer(struct buffer *buf) {
 	bufferResetRows(buf);
 	buf->read_only = 0;
@@ -333,21 +332,9 @@ static void snapToSymbol(struct buffer *buf, int direction) {
 	}
 }
 
-/* Close the palette popup and give focus back to the window that held
-it when the palette was opened.
-origin_win is that window.  It is kept when it still shows `origin`,
-or when origin is the minibuffer, which is in no window: the window
-then is the one the user was editing before the prompt opened.  Only
-if neither holds does it fall back to the first window showing origin,
-then to window 0.  Choosing by buffer first, as this used to, sent
-focus to the upper window whenever both halves of a split showed the
-same buffer.
-Focus moves before the palette window is closed, not after.  Closing
-the focused window makes destroyWindow() call switchWindow(), which
-focuses the window after it and resets that window's buffer cursor
-from the window's saved position; with a shared buffer that is
-origin's cursor, which the insert that follows depends on.
-Updates E.windows[*]->focused and E.buf. */
+/* Close the palette and refocus origin_win if it still shows origin
+or origin is the minibuffer; else a window showing origin; else
+window 0.  Focus moves before the palette window is destroyed. */
 static void restoreFocusTo(struct buffer *origin, int origin_win) {
 	int target = -1;
 	if (origin_win < E.nwindows &&
@@ -381,14 +368,7 @@ void expandPalette(void) {
 	bufferEnsureRow(pbuf);
 	updateBuffer(pbuf);
 	showPopupBuffer(pbuf);
-	/* Transfer focus to the palette window.
-	 *
-	 * showPopupBuffer() creates the window if there was not one, and
-	 * createWindow() appends unconditionally, so this lookup cannot
-	 * fail today.  It is checked anyway, and the failure bails out
-	 * rather than continuing: the modal loop below depends on
-	 * E.buf == pbuf, and running it without that would walk the
-	 * user's own cursor with the palette's movement keys. */
+	/* Transfer focus to the palette window. */
 	int palette_win = findBufferWindow(pbuf);
 	if (palette_win < 0) {
 		restoreFocusTo(origin, origin_win);
@@ -406,12 +386,8 @@ void expandPalette(void) {
 	E.windows[palette_win]->cy = pbuf->cy;
 	E.buf = pbuf;
 
-	/* From here until restoreFocusTo(), E.buf == pbuf.  That equality
-	 * is load-bearing, not incidental: moveCursor(), beginningOfLine(),
-	 * endOfLine(), pageUp(), pageDown(), forwardWord() and backWord()
-	 * all take their subject from E.buf implicitly, and it is only
-	 * because E.buf is the palette that they move the palette's
-	 * cursor.  Established above unconditionally for that reason. */
+	/* Until restoreFocusTo(), E.buf == pbuf: the movement commands
+	 * below act on E.buf. */
 
 	/* Snap to the first symbol */
 	snapToSymbol(pbuf, 0);
@@ -420,8 +396,11 @@ void expandPalette(void) {
 	for (;;) {
 		refreshScreen();
 		int key = readKey();
-		if (key == -1)
-			continue;
+		if (key == -1) {
+			if (!E.playback)
+				continue;
+			key = CTRL('g');
+		}
 		recordKey(key);
 
 		/* Enter: read symbol at cursor and insert into origin */
@@ -488,11 +467,7 @@ void expandPalette(void) {
 				pbuf->cx = 0;
 				break;
 			case CMD_END_OF_FILE:
-				/* bufferEnsureRow ran before this loop and
-				 * nothing in it resets rows, so numrows >= 1
-				 * holds throughout (#105).  endOfLine() acts
-				 * on E.buf, which is pbuf here; the two
-				 * assignments name the same buffer. */
+				/* numrows >= 1: bufferEnsureRow ran above. */
 				pbuf->cy = pbuf->numrows - 1;
 				pbuf->cx = 0;
 				endOfLine(0);

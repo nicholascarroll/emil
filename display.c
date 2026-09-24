@@ -67,10 +67,6 @@ static void computeRowHighlightBounds(struct buffer *buf, int filerow,
 		return;
 	}
 
-	/* markInvalidBuf(buf), not markInvalidSilent(): this function is
-	 * called for every window, so 'buf' is frequently not E.buf.  The
-	 * no-arg form asked whether the *focused* buffer's mark was valid
-	 * before drawing an unfocused buffer's selection. */
 	if (buf->mark_active && !markInvalidBuf(buf)) {
 		if (buf->rectangle_mode) {
 			int top = buf->cy < buf->marky ? buf->cy : buf->marky;
@@ -553,6 +549,11 @@ static int renderLineWithHighlighting(erow *row, struct abuf *ab, int start_col,
 
 		int nb;
 		int width = charAdvance(row->chars, char_idx, render_x, &nb);
+		/* nb is the length the lead byte announces.  A row that
+		 * ends in an incomplete sequence has fewer bytes left than
+		 * that, and the raw copy below must not read past it. */
+		if (nb > row->size - char_idx)
+			nb = row->size - char_idx;
 
 		if (c == '\t') {
 			/* width is the distance to the next tab stop. */
@@ -1308,6 +1309,8 @@ int minibufLayout(const char *msg, int prefix_cols, int screencols,
 			used = charAdvance((const uint8_t *)msg, offset, 0,
 					   &nb);
 			next = offset + nb;
+			if (next > msglen) /* incomplete final sequence */
+				next = msglen;
 		}
 
 		out[n].start = offset;
@@ -1411,8 +1414,7 @@ void refreshScreen(void) {
 	int needed_mb = minibufHeightNeeded();
 	if (needed_mb != minibuffer_height) {
 		minibuffer_height = needed_mb;
-		for (int i = 0; i < E.nwindows; i++)
-			E.windows[i]->height = 0;
+		resetWindowHeights();
 	}
 
 	int cumulative_height = 0;
@@ -1555,10 +1557,7 @@ void cursorBottomLine(int curs) {
 /* Re-measure the terminal and rebuild the layout.*/
 void resizeScreen(void) {
 	getWindowSize(&E.screenrows, &E.screencols);
-	/* Reset window heights so they get recalculated */
-	for (int i = 0; i < E.nwindows; i++) {
-		E.windows[i]->height = 0;
-	}
+	resetWindowHeights();
 	computeDisplayNames();
 	refreshScreen();
 }

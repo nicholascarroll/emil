@@ -84,6 +84,14 @@ void switchWindow(void) {
 	synchronizeBufferCursor(E.buf, nextWindow);
 }
 
+/* Zero every window's height so the next frame lays them all out
+ * afresh: after a resize, a window created or destroyed, or the
+ * minibuffer changing height. */
+void resetWindowHeights(void) {
+	for (int i = 0; i < E.nwindows; i++)
+		E.windows[i]->height = 0;
+}
+
 void createWindow(void) {
 	E.windows =
 		xrealloc(E.windows, sizeof(struct window *) * (++E.nwindows));
@@ -95,10 +103,7 @@ void createWindow(void) {
 	E.windows[E.nwindows - 1]->rowoff = 0;
 	E.windows[E.nwindows - 1]->coloff = 0;
 
-	// Force all windows to recalculate heights
-	for (int i = 0; i < E.nwindows; i++) {
-		E.windows[i]->height = 0;
-	}
+	resetWindowHeights();
 }
 
 void destroyWindow(int window_idx) {
@@ -127,10 +132,7 @@ void destroyWindow(int window_idx) {
 	free(E.windows);
 	E.windows = windows;
 
-	/* reset heights */
-	for (int i = 0; i < E.nwindows; i++) {
-		E.windows[i]->height = 0;
-	}
+	resetWindowHeights();
 }
 
 void destroyOtherWindows(void) {
@@ -180,22 +182,8 @@ static void sizePopupWindow(int win_idx) {
 void showPopupBuffer(struct buffer *buf) {
 	int win_idx = findBufferWindow(buf);
 	if (win_idx < 0) {
-		/* First time: create the window.  Focus stays where it
-		 * is -- createWindow() appends the new window unfocused
-		 * and touches no other window's flag.
-		 *
-		 * This used to move focus to window 0 on the stated
-		 * assumption that window 0 was the one being edited.
-		 * With a split and the lower window focused, that left
-		 * E.buf naming one window's buffer while the cursor was
-		 * drawn in another: typing after C-g on a completion
-		 * list went to a buffer the user was not looking at,
-		 * and accepting a completion opened the file in the
-		 * wrong window.  It also left two windows focused once
-		 * the palette focused its own, which drew the cursor in
-		 * window 0 instead of the palette (#129) and was, by
-		 * accident, what kept restoreFocusTo() working; see
-		 * there. */
+		/* First time: create the window.  Focus stays put;
+		 * createWindow() adds the new window unfocused. */
 		win_idx = E.nwindows;
 		createWindow();
 		E.windows[win_idx]->buf = buf;

@@ -26,21 +26,7 @@ int sublineBounds(erow *row, int screencols, int target_subline,
 int displayColumnToByteOffset(erow *row, int screencols, int target_subline,
 			      int target_col);
 
-/* A cursor over screen lines, walked forward from a starting position.
- *
- * It carries the wrap state within the current row, so advancing costs
- * one wordWrapBreak() rather than a re-walk from the row's start, and a
- * walk bounded to the window's height touches only the bytes the window
- * shows.  Advancing never asks a row for its total sub-line count,
- * which is what makes a partially visible row cost only its visible
- * part.
- *
- * That is a claim about screenWalkNext(), not about viewport arithmetic
- * generally.  Two costs sit outside it and are proportional to content
- * rather than to the window: screenWalkStart() below, and linesBack()
- * in display.c, which needs a row's LAST sub-line index and can only
- * get it by wrapping the whole row.  A frame whose cursor sits deep
- * inside one very long row therefore still scales with that depth. */
+/* A cursor over screen lines, walked forward from a starting position.*/
 struct screenWalk {
 	struct buffer *buf;
 	int screencols;

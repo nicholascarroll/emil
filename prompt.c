@@ -21,12 +21,11 @@
 
 /* The minibuffer is a real buffer.  C-q C-j splits it into rows exactly
  * as in any other buffer, so no row anywhere in emil ever holds a
- * literal 0x0A -- the invariant that keeps undo's row arithmetic and
- * every serialization ('\n' as row separator) honest.
+ * literal 0x0A.
  *
  * It is *drawn* on one line, with row breaks in caret notation, which
  * is what Emacs shows when a multi-line entry is recalled into a
- * replace prompt.  Model and rendering are separate choices here.
+ * replace prompt.
  *
  * Hence two serializations, both returning malloc'd strings:
  *   minibufJoin(mb, "\n")  the value handed back to the caller
@@ -56,46 +55,12 @@ char *minibufJoin(struct buffer *mb, const char *sep) {
 	return out;
 }
 
-/* Empty means the *joined value* has zero length: exactly the state
- * where RET should submit "".  Two or more rows is a real entry even
- * when every row is blank -- typing only C-q C-j means the string
- * "\n", the canonical way to join lines in a replace command.  The
- * per-row test used here before swallowed that entry as "". */
 static int minibufEmpty(struct buffer *mb) {
 	if (mb->numrows > 1)
 		return 0;
 	return bufferIsEmpty(mb);
 }
 
-/* Copy 's' with each '\n' rewritten as the two bytes "^J", the same
- * caret notation minibufJoin uses for display.  For embedding user
- * text into a prompt or status string: E.statusmsg reaches the
- * terminal raw, so a literal 0x0A there executes as a line feed while
- * stringWidth charges it two columns -- the display and the cursor
- * math disagree, and the minibuffer visibly breaks in two.  Returns a
- * malloc'd string; caller frees. */
-char *caretEscapeNewlines(const uint8_t *s) {
-	size_t len = 0, extra = 0;
-	for (const uint8_t *p = s; *p; p++, len++)
-		if (*p == '\n')
-			extra++;
-	char *out = xmalloc(len + extra + 1);
-	char *o = out;
-	for (const uint8_t *p = s; *p; p++) {
-		if (*p == '\n') {
-			*o++ = '^';
-			*o++ = 'J';
-		} else {
-			*o++ = (char)*p;
-		}
-	}
-	*o = '\0';
-	return out;
-}
-
-/* The one place a prompt type maps to a history ring.  NULL means the
- * prompt keeps no history.  No default: -Wswitch turns a new enum
- * value into a build break here. */
 static struct history *histFor(enum promptType t) {
 	switch (t) {
 	case PROMPT_FILES:
@@ -104,9 +69,6 @@ static struct history *histFor(enum promptType t) {
 	case PROMPT_COMMAND:
 		return &E.command_history;
 	case PROMPT_BUFFER:
-		/* No history: completion already offers every open
-		 * buffer by name, so a history ring would only ever
-		 * repeat what TAB already shows. */
 		return NULL;
 	case PROMPT_REPLACE:
 		return &E.replace_history;
@@ -135,19 +97,6 @@ static int minibufCursorCols(struct buffer *mb) {
 
 uint8_t *editorPrompt(const char *prompt, enum promptType t,
 		      void (*callback)(struct buffer *, uint8_t *, int)) {
-	/* A prompt must not open while one is already running.  The loop
-	 * below dispatches ordinary commands, so C-x C-f, M-x, C-x b,
-	 * C-x i, C-x C-w and M-| are all reachable from inside a prompt,
-	 * and a second prompt would share the one E.minibuf with the
-	 * first.  Emacs refuses the same thing by default
-	 * (enable-recursive-minibuffers is nil), and nothing in emil
-	 * needs recursive prompts, so refuse rather than make the
-	 * minibuffer a stack.
-	 *
-	 * E.buf is set to E.minibuf on entry below and restored at done:,
-	 * and nowhere else assigns it, so this is an exact test for "a
-	 * prompt is already running".  Returning NULL is the answer
-	 * callers already handle for C-g. */
 	if (E.buf == E.minibuf) {
 		setStatusMessage(
 			"Command attempted to use minibuffer while in minibuffer");
@@ -193,64 +142,42 @@ uint8_t *editorPrompt(const char *prompt, enum promptType t,
 
 		refreshScreen();
 
-		/* Position cursor on bottom line.  cursorBottomLine
-		 * expects a display column; E.minibuf->cx is a byte
-		 * index, so convert (a CJK character is 3 bytes but 2
-		 * columns; passing bytes drifts the cursor right of
-		 * the text). */
 		cursorBottomLine(prefix_width + minibufCursorCols(E.minibuf) +
 				 1);
 
 		/* Read key */
 		int c = readKey();
 		if (c == -1) {
+			if (E.playback) {
+				result = NULL;
+				goto done;
+			}
 			/* Interrupted by a signal (suspend/resume,
-			 * resize).  The main loop skips these; doing
-			 * anything else here would record -1 into a
-			 * running macro and feed -1 to the callback. */
+			 * resize).  The main loop skips these. */
 			continue;
 		}
 		recordKey(c);
 
+		/* Repeat search forward/backward */
+		if (t == PROMPT_SEARCH && c == KEY_META(CTRL('s')))
+			c = CTRL('s');
+		else if (t == PROMPT_SEARCH && c == KEY_META(CTRL('r')))
+			c = CTRL('r');
+
 		int callback_key = c;
 
-		/* Resolve the key once, here, and use the answer below.
-		 * resolveBinding() is stateful -- it carries the C-x and
-		 * C-x r prefixes from one call to the next -- so asking
-		 * it about the same key twice is a second keystroke, not
-		 * a second lookup.  This loop used to ask twice, once for
-		 * the popup check and again at default:, so C-x arrived
-		 * as C-x C-x (exchange point and mark) and no C-x command
-		 * could be typed in a prompt at all.
-		 *
-		 * A key the switch below claims for the prompt (RET, C-g,
-		 * TAB, ...) keeps that meaning even straight after C-x:
-		 * resolving it here has already ended the chord, which is
-		 * simply abandoned, as before. */
+		/* Resolve once: resolveBinding() carries the C-x prefix
+		 * between calls, so a second lookup is a second keystroke. */
 		int cmd = resolveBinding(c);
 
 		/* PageUp/PageDown/C-v/M-v, if a completions popup is
 		 * visible, scroll *it* rather than falling through to
-		 * the default: dispatch below.  During a prompt, focus
-		 * never moves to the popup's window (showPopupBuffer()
-		 * keeps focus on the window the user was editing before
-		 * the prompt opened), so processKeypress() would
-		 * otherwise scroll that unrelated window while the
-		 * popup itself sits static -- the long-standing "no
-		 * scroll" gap when a match list overflows the popup
-		 * (Find File with many matches is the usual case).
+		 * the default: dispatch below.
 		 *
 		 * The popup's existence is the only test: this applies
 		 * to every prompt type that can show one (File, Dir,
 		 * Command, Buffer, Unicode alike), not just the one
-		 * that motivated it.
-		 *
-		 * Deliberately NOT CMD_SCROLL_UP/CMD_SCROLL_DOWN: those
-		 * are M-p/M-n, which the switch below already claims
-		 * for a higher-priority, prompt-local purpose (cycle
-		 * the completion selection, or else browse history) --
-		 * see the KEY_ARROW_UP/KEY_META('p')/... case.  Catching
-		 * them here first would silently take that away. */
+		 * that motivated it.*/
 		{
 			if (cmd == CMD_PAGE_UP || cmd == CMD_PAGE_DOWN) {
 				struct buffer *comp_buf =
@@ -275,13 +202,7 @@ uint8_t *editorPrompt(const char *prompt, enum promptType t,
 
 					scrollViewport(popup, comp_buf,
 						       scroll_lines);
-					/* comp_buf isn't the minibuffer;
-					 * nothing here changed the typed
-					 * text, so there's nothing for
-					 * the callback (always NULL
-					 * whenever a popup exists -- see
-					 * editorPrompt callers) to react
-					 * to. */
+					/* comp_buf isn't the minibuffer. */
 					continue;
 				}
 			}
@@ -394,8 +315,6 @@ uint8_t *editorPrompt(const char *prompt, enum promptType t,
 		case CTRL('r'):
 			/* C-s C-s or C-r C-r: populate empty search with
 			 * the last search string. */
-			/* numrows >= 1 (#105); replaceMinibufferText
-			 * always leaves at least one row. */
 			if (t == PROMPT_SEARCH && E.minibuf->row[0].size == 0) {
 				char *last_search = NULL;
 				struct historyEntry *last_entry =
@@ -435,8 +354,6 @@ uint8_t *editorPrompt(const char *prompt, enum promptType t,
 			char *history_str = NULL;
 
 			if (hist && hist->count > 0) {
-				/* Whether a history entry -- rather than the
-				 * user's own input -- is currently on show. */
 				int was_browsing = (history_pos >= 0);
 
 				if (!down) {

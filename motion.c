@@ -125,8 +125,7 @@ void moveCursor(int key, int count) {
 	}
 }
 
-/* Word movement.  The two scanners start from (*dx, *dy), not from
- * point; see motion.h. */
+/* Word movement; see motion.h. */
 
 void forwardWordEnd(struct buffer *buf, int *dx, int *dy) {
 	int cx = *dx;
@@ -411,6 +410,43 @@ static uint8_t charAt(struct buffer *buf, int cx, int cy) {
 	return row->chars[cx];
 }
 
+/* Whether the character at (cx, cy) follows an odd number of
+ * backslashes on its line, as an escaped quote in a string does. */
+static int isEscaped(struct buffer *buf, int cx, int cy) {
+	int n = 0;
+	while (cx - n > 0 && buf->row[cy].chars[cx - n - 1] == '\\')
+		n++;
+	return n % 2;
+}
+
+/* Strings inside a balanced expression. Returns -1 at end of buffer. */
+static int skipStringForward(struct buffer *buf, int *sx, int *sy) {
+	for (;;) {
+		if (!stepForward(buf, sx, sy))
+			return -1;
+		uint8_t c = charAt(buf, *sx, *sy);
+		if (c == 0)
+			return -1;
+		if (c == '\\') {
+			if (!stepForward(buf, sx, sy))
+				return -1;
+		} else if (c == '"') {
+			return 0;
+		}
+	}
+}
+
+/* From the closing quote at (*sx, *sy), move back to the opening
+ * one.  Returns -1 at the start of the buffer. */
+static int skipStringBackward(struct buffer *buf, int *sx, int *sy) {
+	for (;;) {
+		if (!stepBackward(buf, sx, sy))
+			return -1;
+		if (charAt(buf, *sx, *sy) == '"' && !isEscaped(buf, *sx, *sy))
+			return 0;
+	}
+}
+
 /* Scan forward from (*cx, *cy) past one sexp (balanced expression).
  * On success, updates (*cx, *cy) to just past the sexp and returns 0.
  * On failure (unmatched delimiter, end of buffer), returns -1 without
@@ -419,11 +455,7 @@ int bufferForwardSexpEnd(struct buffer *buf, int *cx, int *cy,
 			 const char **errmsg) {
 	int px = *cx, py = *cy;
 
-	/* Skip whitespace and newlines.  charAt(buf, ) reports end-of-line
-	 * positions as '\n' and only returns 0 once cy passes numrows,
-	 * but stepForward(buf, ) refuses to advance past the last row's end
-	 * — so a failed step must terminate the loop, or it spins
-	 * forever reading '\n' at the same position. */
+	/* Skip whitespace and newlines.*/
 	while (py < buf->numrows) {
 		uint8_t ch = charAt(buf, px, py);
 		if (ch == 0) {
@@ -454,6 +486,10 @@ int bufferForwardSexpEnd(struct buffer *buf, int *cx, int *cy,
 			uint8_t c = charAt(buf, sx, sy);
 			if (c == 0) {
 				*errmsg = "Unmatched delimiter";
+				return -1;
+			}
+			if (c == '"' && skipStringForward(buf, &sx, &sy) < 0) {
+				*errmsg = "Unmatched quote";
 				return -1;
 			}
 			if ((int)c == close)
@@ -496,6 +532,10 @@ int bufferForwardSexpEnd(struct buffer *buf, int *cx, int *cy,
 				*cx = sx;
 				*cy = sy;
 				return 0;
+			}
+			if (c == '\\' && !stepForward(buf, &sx, &sy)) {
+				*errmsg = "Unmatched quote";
+				return -1;
 			}
 			if (!stepForward(buf, &sx, &sy)) {
 				/* End of buffer without a match */
@@ -564,6 +604,11 @@ void backwardSexp(int count) {
 					return;
 				}
 				uint8_t c = charAt(E.buf, sx, sy);
+				if (c == '"' && !isEscaped(E.buf, sx, sy) &&
+				    skipStringBackward(E.buf, &sx, &sy) < 0) {
+					setStatusMessage("Unmatched quote");
+					return;
+				}
 				if ((int)c == open)
 					depth--;
 				else if (c == ch)
@@ -590,7 +635,7 @@ void backwardSexp(int count) {
 					return;
 				}
 				uint8_t c = charAt(E.buf, sx, sy);
-				if (c == ch) {
+				if (c == ch && !isEscaped(E.buf, sx, sy)) {
 					E.buf->cx = sx;
 					E.buf->cy = sy;
 					break;
@@ -610,7 +655,10 @@ void backwardSexp(int count) {
 
 /* Page/scroll navigation */
 
-void pageUp(int count) {
+/* One page of scrolling, dir -1 for up and +1 for down.  A page is the
+ * window height less the overlap that keeps a couple of lines in view,
+ * and never less than one line. */
+static void pageScroll(int count, int dir) {
 	struct window *win = E.windows[windowFocusedIdx()];
 	int times = UARG_COUNT(count);
 
@@ -619,39 +667,32 @@ void pageUp(int count) {
 		if (scroll_lines < 1)
 			scroll_lines = 1;
 
-		scrollViewport(win, E.buf, -scroll_lines);
+		scrollViewport(win, E.buf, dir * scroll_lines);
 		clampCursorToViewport(win, E.buf);
 	}
+}
+
+void pageUp(int count) {
+	pageScroll(count, -1);
 }
 
 void pageDown(int count) {
+	pageScroll(count, 1);
+}
+
+/* One line of scrolling per repeat, dir -1 for up and +1 for down. */
+static void scrollLines(int count, int dir) {
 	struct window *win = E.windows[windowFocusedIdx()];
-	int times = UARG_COUNT(count);
-
-	for (int n = 0; n < times; n++) {
-		int scroll_lines = win->height - page_overlap;
-		if (scroll_lines < 1)
-			scroll_lines = 1;
-
-		scrollViewport(win, E.buf, scroll_lines);
-		clampCursorToViewport(win, E.buf);
-	}
+	scrollViewport(win, E.buf, dir * UARG_COUNT(count));
+	clampCursorToViewport(win, E.buf);
 }
 
 void scrollLineUp(int count) {
-	struct window *win = E.windows[windowFocusedIdx()];
-	int times = UARG_COUNT(count);
-
-	scrollViewport(win, E.buf, -times);
-	clampCursorToViewport(win, E.buf);
+	scrollLines(count, -1);
 }
 
 void scrollLineDown(int count) {
-	struct window *win = E.windows[windowFocusedIdx()];
-	int times = UARG_COUNT(count);
-
-	scrollViewport(win, E.buf, times);
-	clampCursorToViewport(win, E.buf);
+	scrollLines(count, 1);
 }
 
 void beginningOfLine(void) {

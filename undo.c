@@ -32,7 +32,7 @@ void computeInsertEnd(const uint8_t *text, int len, int startx, int starty,
 
 /* Perform the row-array mutation for an insert at (startx, starty).
  * Takes an ALREADY-ANCHORED position and payload, and does NOT adjust
- * tracked points — bulkInsert does that on the logical range.  Uses
+ * tracked points (bulkInsert does that on the logical range).  Uses
  * direct memmove/memcpy and insertRow, no character-at-a-time
  * primitives.  Does NOT record undo. */
 static void bulkInsertRaw(struct buffer *buf, int startx, int starty,
@@ -133,17 +133,7 @@ static void bulkInsertRaw(struct buffer *buf, int startx, int starty,
 }
 
 /* Bulk-insert text from 'data' (length 'datalen') into 'buf' at the
- * LOGICAL buffer position (startx, starty) -- which may be the virtual
- * EOF line.  Does NOT record undo.  Calls adjustAllPoints internally.
- *
- * The mutation runs on the anchored position and payload, so that
- * inserting at the virtual EOF materialises exactly one row and the
- * result matches what the typed paths produce.  The point adjustment
- * runs on the LOGICAL range, because a mark sitting at the end of the
- * last row -- which is precisely where the anchor lands -- must not be
- * dragged along by an insertion that happens after it.  adjustPoint's
- * insert branch treats a point exactly at startx as being after the
- * insertion, so handing it the anchored range would move that mark.
+ * LOGICAL buffer position (startx, starty). 
  *
  * Records name the insertion's own coordinates, so replaying
  * one through here is the identity translation and adjusts on the
@@ -161,18 +151,13 @@ void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
 	adjustAllPoints(buf, startx, starty, log_endx, log_endy, 0);
 }
 
-/* Bulk-delete text from (startx, starty) to (endx, endy).
- * Uses direct memmove/memcpy and delRow — no character-at-a-time
- * primitives.  Does NOT record undo.  Calls adjustAllPoints. */
+/* Bulk-delete text from (startx, starty) to (endx, endy).*/
 void bulkDelete(struct buffer *buf, int startx, int starty, int endx,
 		int endy) {
 	if (starty >= buf->numrows)
 		return;
 
-	/* Clamp to what the rows hold.  In-layer callers derive the range
-	 * from the current buffer, so this is a no-op for them; it guards
-	 * undo replay, where an out-of-range record would make
-	 * row->size - endx negative and hand memmove a huge size_t. */
+	/* Clamp to what the rows hold.*/
 	if (endy >= buf->numrows)
 		endy = buf->numrows - 1;
 	if (startx > buf->row[starty].size)
@@ -222,7 +207,7 @@ void bulkDelete(struct buffer *buf, int startx, int starty, int endx,
 }
 
 /* Apply one undo or redo step: replay the mutation and move the node
- * between the two lists.  Called only from doUndo/doRedo. */
+ * between the two lists. */
 static void undoStep(struct buffer *buf, int redo) {
 	struct undo **src = redo ? &buf->redo : &buf->undo;
 	struct undo **dst = redo ? &buf->undo : &buf->redo;
@@ -249,11 +234,7 @@ static void undoStep(struct buffer *buf, int redo) {
 	*src = node->prev;
 	node->prev = prev_dst;
 
-	/* Close whatever now sits at the head of the undo list.  A redo
-	 * puts a record back that may still have been open when it was
-	 * undone; without this, typing straight after a redo could fold
-	 * into it and the run would no longer be one uninterrupted
-	 * burst of editing. */
+	/* Close whatever now sits at the head of the undo list. */
 	undoCloseRun(buf);
 }
 
@@ -335,37 +316,10 @@ void undoReplaceData(struct undo *u, int newsize) {
 
 #define ALIGNED(x1, y1, x2, y2) ((x1 == x2) && (y1 == y2))
 
-/* Maximum number of operations folded into one record.  Counted as
- * operations, not bytes, so a run of CJK characters breaks at the
- * same place a run of ASCII does.
- *
- * Unbounded runs are correct but unrecoverable: one undo would throw
- * away an arbitrarily long burst of typing with no way to get part of
- * it back, because the intermediate states were never recorded.  A cap
- * that is too tight only costs the user extra keypresses. */
+/* Maximum number of operations folded into one record.*/
 #define UNDO_MERGE_LIMIT 20
 
-/* Grow u->data to hold at least 'needed' bytes plus a NUL.
- *
- * The overflow guard is the one dbuf_ensure() has and this twin did
- * not.  Latent rather than live: undoMerge is the only caller and it
- * reaches here with small values.  But `newsize *= 2` unchecked is a
- * signed overflow one caller away, and two functions doing the same
- * job by different rules is how the next reader gets it wrong.
- *
- * `needed == INT_MAX` aborts rather than being clamped, because the
- * NUL this function promises would need byte INT_MAX + 1 and there is
- * no such int.  Clamping to INT_MAX would return a buffer one byte
- * short of what every caller is entitled to assume, which is worse
- * than stopping.  abort() for the same reason as dbuf.c: a length
- * that cannot be represented has no recovery, and util.c's allocation
- * guards already end the process the same way.
- *
- * Not covered by a test: no caller can reach either branch, and a
- * test would have to call undoEnsureData() directly past the API it
- * is reached through.  Verified by inspection and by deliberately
- * lowering the thresholds to check the branches are live (see the
- * commit message); marked here so it is not mistaken for tested. */
+/* Grow u->data to hold at least 'needed' bytes plus a NUL. */
 static void undoEnsureData(struct undo *u, int needed) {
 	if (needed < 0 || needed == INT_MAX)
 		abort();
@@ -387,25 +341,15 @@ static void undoEnsureData(struct undo *u, int needed) {
  * list.  Returns 1 if merged ('new' is then spent and must be freed by
  * the caller), 0 if the records cannot be joined.
  *
- * Pure record arithmetic: no buffer, no cursor, no anchoring.  It
- * rests on the invariant every record in this design satisfies —
- *
+ * Invariant:
  *     end == computeInsertEnd(data, start)
  *
- * which is what undoStep already relies on, since undoing a delete
- * replays it as bulkInsert(start, data) and redoing it as
- * bulkDelete(start..end).  Given that, the merged end never has to be
- * reasoned about: it is recomputed from the merged payload.
- *
- * Three shapes join, and nothing else does:
+ * Only these three shapes join:
  *
  *   typing     prev.end   == new.start   append,  start unchanged
  *   C-d        prev.start == new.start   append,  start unchanged
  *   backspace  prev.start == new.end     prepend, start := new.start
- *
- * The backspace case is why the record start is taken from 'new':
- * deletion walks leftwards, so each operation extends the record's
- * reach backwards while its data must stay in forward file order. */
+ */
 static int undoMerge(struct undo *prev, struct undo *new) {
 	if (prev == NULL || new == NULL)
 		return 0;
@@ -415,11 +359,6 @@ static int undoMerge(struct undo *prev, struct undo *new) {
 		return 0;
 	if (prev->paired || new->paired)
 		return 0;
-	/* Either side may carry the exemption.  The drain loop cannot
-	 * know a burst is a burst until it has dispatched one key and
-	 * found more waiting, so the record at the head of a pasted run
-	 * is always the one made before the flag was set.  Testing
-	 * 'new' as well is what lets the rest of the burst join it. */
 	if (!prev->uncapped && !new->uncapped &&
 	    prev->nmerges >= UNDO_MERGE_LIMIT)
 		return 0;
@@ -432,9 +371,6 @@ static int undoMerge(struct undo *prev, struct undo *new) {
 			return 0;
 	} else if (ALIGNED(prev->startx, prev->starty, new->startx,
 			   new->starty)) {
-		/* forward delete: the buffer collapses to the start
-		 * point, so successive deletions arrive at the same
-		 * coordinates */
 	} else if (ALIGNED(prev->startx, prev->starty, new->endx, new->endy)) {
 		prepend = 1;
 	} else {
@@ -462,18 +398,7 @@ static int undoMerge(struct undo *prev, struct undo *new) {
 
 static void freeUndos(struct undo *first);
 
-/* Add a record to the undo list, taking ownership.
- *
- * A record arrives with 'append' already set by the mutation layer:
- * 1 means "this was a single interactive edit and may continue the run
- * at the head of the list", 0 means "this stands on its own".  Only
- * the mutation layer can tell a keystroke from a regex replace, so
- * only it makes that call; whether two given records can actually be
- * joined is decided here, as arithmetic on the records alone.
- *
- * A record that does not merge closes whatever run was open.  Without
- * that, typing either side of a bulk operation would find the earlier
- * record still aligned and fold across it. */
+/* Add a record to the undo list, taking ownership.*/
 void pushUndo(struct buffer *buf, struct undo *new) {
 	if (new->append && undoMerge(buf->undo, new)) {
 		new->prev = NULL;
@@ -486,11 +411,7 @@ void pushUndo(struct buffer *buf, struct undo *new) {
 	buf->undo = new;
 }
 
-/* Close any open run.  Called after undo or redo: typing straight
- * afterwards can land aligned with the record the operation exposed,
- * and while folding into it would still produce a correct record, "a
- * run is one uninterrupted burst of editing" is a cheaper invariant to
- * hold than to re-derive at each use. */
+/* Close any open run. */
 void undoCloseRun(struct buffer *buf) {
 	if (buf->undo != NULL)
 		buf->undo->append = 0;

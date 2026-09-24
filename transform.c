@@ -210,9 +210,6 @@ uint8_t *transformerTransposeWords(uint8_t *input) {
 		}
 	}
 	int offset = 0;
-	/* No second word in the region (startSecond was never found):
-	 * the copy sizes below would go negative, so return the input
-	 * unchanged. */
 	if (startSecond < endFirst) {
 		memcpy(output, input, len);
 		output[len] = 0;

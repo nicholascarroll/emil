@@ -24,7 +24,7 @@ int findTagsDir(char *out_dir, size_t dirsz);
  * directory containing that tags file) into a path suitable for
  * opening.  Absolute ("/...") and home-relative ("~...") paths are
  * copied through unchanged; anything else is joined onto tagsdir.
- * Returns 0 on success, -1 if the result would not fit in out.
+ * Returns 0 on success, -1 if the result would not fit in 'out'.
  * Exposed for testing. */
 int resolveTagPath(const char *tagsdir, const char *tagpath, char *out,
 		   size_t outsz);

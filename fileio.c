@@ -69,6 +69,16 @@ static void disarmTimer(void) {
 	setitimer(ITIMER_REAL, &it, NULL);
 }
 
+/* stat() under the 50ms deadline; a timeout fails like any error. */
+static int timedStat(const char *filename, struct stat *st) {
+	char *iopath = expandTilde(filename);
+	armTimer();
+	int rc = stat(iopath, st);
+	disarmTimer();
+	free(iopath);
+	return rc;
+}
+
 /* How many seconds between file-check syscalls. */
 #define FILE_CHECK_INTERVAL_SEC 2
 
@@ -198,27 +208,7 @@ void releaseLock(struct buffer *bufr) {
  *
  * POSIX record locks are owned by the process, not the descriptor:
  * closing *any* descriptor referring to an inode drops every lock the
- * process holds on it (APUE §14.3).  So an operation as ordinary as
- * `C-x i` on the file the buffer is already visiting -- one fopen()
- * and one fclose() -- silently releases the lock markBufferDirty()
- * took, while lock_fd stays open so emil goes on believing it holds
- * one.  Every path that opens and closes a file behind a dirty buffer
- * calls this afterwards.
- *
- * Nothing inside emil can otherwise notice the loss: F_GETLK reports
- * F_UNLCK for a lock the calling process holds itself, so the only
- * observer is the second emil instance that was supposed to be warned
- * off.  Repair, not prevention: the only way to keep a lock across an
- * unrelated close is F_OFD_SETLK, outside the POSIX.1-2001 baseline
- * (§1.2).
- *
- * Re-issued on the retained descriptor, not by calling lockFile():
- * lockFile() opens a fresh fd (whose later close would drop the lock
- * again) and resets open_mtime, which would move the external-
- * modification baseline (§3.21.4) on an operation that never touched
- * the file's contents.  The lock type is recovered from the fd's
- * access mode, which agrees with the type lockFile() took by
- * construction (O_RDWR -> F_WRLCK, O_RDONLY -> F_RDLCK). */
+ * process holds on it (APUE §14.3). */
 #ifdef EMIL_NO_FILE_LOCKING
 void relockIfDirty(struct buffer *bufr) {
 	/* lockFile() never sets lock_fd on this platform, so there is
@@ -261,10 +251,6 @@ void relockIfDirty(struct buffer *bufr) {
 			else
 				bufr->lock_blocked_pid = -1;
 		} else {
-			/* ENOLCK and the rest: no holder to wait for, and
-			 * nothing to re-probe.  Leave lock_blocked_pid so
-			 * the background poll does not chase a dead lock
-			 * manager (§3.21.3). */
 			bufr->lock_blocked_pid = -1;
 		}
 		close(bufr->lock_fd);
@@ -320,9 +306,7 @@ void checkFileModified(void) {
 	if (E.buf->filename == NULL || E.buf->special_buffer)
 		return;
 
-	/* Throttle: skip if we checked recently.  Fails closed -- if
-	 * the clock is unreadable we skip the check rather than run it
-	 * unthrottled on every frame. */
+	/* Throttle: skip if we checked recently. */
 	struct timespec now;
 	if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
 		return;
@@ -332,18 +316,12 @@ void checkFileModified(void) {
 	E.last_file_check = now;
 
 	/* Job 1: mtime check. */
-	if (E.buf->open_mtime != 0 && !E.buf->external_mod) {
-		char *iopath = expandTilde(E.buf->filename);
-		struct stat st;
-		armTimer();
-		int rc = stat(iopath, &st);
-		disarmTimer();
-		if (rc == 0 && (st.st_mtime != E.buf->open_mtime ||
-				st.st_size != E.buf->open_size)) {
-			E.buf->external_mod = 1;
-		}
-		free(iopath);
-	}
+	struct stat st;
+	if (E.buf->open_mtime != 0 && !E.buf->external_mod &&
+	    timedStat(E.buf->filename, &st) == 0 &&
+	    (st.st_mtime != E.buf->open_mtime ||
+	     st.st_size != E.buf->open_size))
+		E.buf->external_mod = 1;
 
 	/* Job 2: stale-lock clearing. */
 	if (E.buf->lock_blocked_pid != 0 && E.buf->lock_fd < 0 &&
@@ -355,15 +333,6 @@ void checkFileModified(void) {
 			int rc = lockFile(E.buf, iopath);
 			disarmTimer();
 			if (rc == LOCK_ACQUIRED || rc == LOCK_UNAVAILABLE) {
-				/* Acquired, or there is nothing here to
-				 * wait for.  Either way the warning is
-				 * no longer true; stop repeating it and,
-				 * for LOCK_UNAVAILABLE, stop asking.
-				 *
-				 * Silent: the user did not ask to take a
-				 * lock, and announcing it from a
-				 * background poll would clobber whatever
-				 * message they were reading. */
 				clearLockWarning(E.buf);
 			}
 			/* LOCK_CONFLICT: lockFile has refreshed
@@ -397,8 +366,7 @@ void checkFileModified(void) {
  * result is NUL-terminated for convenience; *buflen excludes it.
  *
  * Byte-exact against editorOpen for LF files.  CRLF input is
- * converted to LF on load and written back as LF; preserving CRLF is
- * a separate question. */
+ * converted to LF on load and written back as LF.*/
 char *rowsToString(struct buffer *bufr, size_t *buflen) {
 	size_t totlen = 0;
 	int j;
@@ -1140,29 +1108,9 @@ void saveAs(void) {
 	saveBuffer(0);
 }
 
-/* stat() under the 50ms deadline checkFileModified uses.  0 on success;
- * a stat the deadline interrupts fails like any other. */
-static int timedStat(const char *filename, struct stat *st) {
-	char *iopath = expandTilde(filename);
-	armTimer();
-	int rc = stat(iopath, st);
-	disarmTimer();
-	free(iopath);
-	return rc;
-}
-
-/* By name first: findBufferByName compares literal and absolute forms,
- * which settles foo.c against ./foo.c.  Then by file.  A symlink and
- * its target, or two hard links, are different paths to one inode, and
- * a second buffer on it is a second copy of the text, each saved over
- * the other and each believing it holds the file's one advisory lock.
- *
- * Each open buffer's file is stat()ed now rather than remembered from
- * when it was opened, so a file replaced on disk is compared as it is.
- * The deadline keeps one buffer on a hung filesystem from stalling the
- * open: a stat that times out or fails simply does not match.  An inode
- * number of 0 is not trusted, since some filesystems and runtimes
- * report it for every file. */
+/* Buffers are stat()ed now, under the deadline, so a file replaced on
+ * disk compares as it is and a hung filesystem just fails to match.
+ * Some systems report inode 0 for every file, so 0 is not trusted. */
 struct buffer *findBufferForFile(const char *filename, int *by_file) {
 	if (by_file)
 		*by_file = 0;
@@ -1187,9 +1135,8 @@ struct buffer *findBufferForFile(const char *filename, int *by_file) {
 	return NULL;
 }
 
-/* Switch the focused window to the named file.  If a buffer already
- * visits it (see findBufferForFile), reuse it; otherwise open a new
- * one.  Returns the buffer on success, NULL on failure. */
+/* Show filename in the focused window, reusing a buffer that already
+ * visits it.  Returns the buffer, or NULL on failure. */
 struct buffer *switchToFile(const char *filename) {
 	/* Check if already open */
 	int by_file;

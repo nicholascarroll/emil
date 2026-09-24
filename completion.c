@@ -99,8 +99,7 @@ static char *findCommonPrefix(char **strings, int count) {
 }
 
 /* A name the minibuffer can hold as typed text: valid UTF-8 and no
- * control characters.  A newline would split the prompt into rows,
- * and an escape would reach the terminal through the status line. */
+ * control characters.*/
 static int nameInsertable(const char *name) {
 	for (const unsigned char *q = (const unsigned char *)name; *q; q++)
 		if (*q < 0x20 || *q == 0x7f)
@@ -111,10 +110,8 @@ static int nameInsertable(const char *name) {
 enum scanKind { SCAN_ANY, SCAN_DIRS, SCAN_EXEC };
 
 /* Add each entry of dir whose name extends base, as typed[0..tlen)
- * followed by the name, and a '/' after a directory.  Read with
- * readdir, not glob: typed text is literal, and a '[' or '*' in a
- * file name must not be taken as a pattern.  Dot files match only a
- * base that starts with a dot. */
+ * followed by the name, and a '/' after a directory.
+ * Dot files match only a base that starts with a dot. */
 static void scanDir(const char *dir, const char *typed, int tlen,
 		    const char *base, enum scanKind kind,
 		    struct completionResult *r) {
@@ -152,9 +149,7 @@ static void scanDir(const char *dir, const char *typed, int tlen,
 	closedir(d);
 }
 
-/* Files whose path extends value.  Each keeps value's directory part
- * exactly as typed, ~ and all, so it extends the text in the prompt.
- * A leading ~ is expanded only when 'tilde' says it is unquoted. */
+/* Files whose path extends value. */
 static void getFileCompletions(const char *value, int tilde, enum scanKind kind,
 			       struct completionResult *r) {
 	if (tilde && strcmp(value, "~") == 0) {
@@ -233,6 +228,10 @@ void replaceMinibufferText(struct buffer *minibuf, const char *text) {
 	 * session gets its own undo history. */
 	clearUndosAndRedos(minibuf);
 
+	minibuf->markx = -1;
+	minibuf->marky = -1;
+	minibuf->mark_active = 0;
+
 	/* Clear current content */
 	while (minibuf->numrows > 0) {
 		delRow(minibuf, 0);
@@ -308,9 +307,7 @@ static void showCompletionsBuffer(char **matches, int n_matches,
 		/* Track selected row for highlighting (data starts row 2). */
 		comp_buf->cy = 2;
 	} else {
-		/* File/command completions: columnar layout.
-		 * Left-truncate long names so the basename is always
-		 * visible (issue #31). */
+		/* File/command completions: columnar layout.*/
 		int term_width = E.screencols;
 
 		/* Build truncated copies for display. */
@@ -340,15 +337,6 @@ static void showCompletionsBuffer(char **matches, int n_matches,
 				if (idx >= n_matches)
 					break;
 
-				/* Pad by display COLUMNS, not bytes
-				 * (DEF-1/#117).  "%-*s" counts bytes, so
-				 * an 18-byte 6-column CJK name got no
-				 * padding at all from "%-8s" and occupied
-				 * 6 columns where the grid expected 8,
-				 * misaligning every column after the
-				 * first.  col_width came from stringWidth
-				 * a few lines up, so the padding must be
-				 * measured the same way. */
 				int written = snprintf(line + line_pos,
 						       sizeof(line) - line_pos,
 						       "%s", display[idx]);
@@ -399,9 +387,7 @@ static int minibufPointOffset(struct buffer *mb) {
 	return off + mb->cx;
 }
 
-/* Start a TAB: return the prompt's text and set *point.
- * successive_tabs counts TABs that changed nothing; typing resets the
- * state in editorPrompt, and moving point (C-p/C-n) is caught here. */
+/* Start a TAB: return the prompt's text and set *point.*/
 static char *tabBegin(struct buffer *mb, int *point) {
 	struct completionState *cs = &mb->completionState;
 	char *text = minibufJoin(mb, "\n");
@@ -507,23 +493,13 @@ void cycleCompletion(struct buffer *minibuf, int direction) {
 	struct buffer *b = findBufferByName("*Completions*");
 	if (b) {
 		b->cy = cs->selected + 2;
-
-		/* Focus never moves to the popup's window during a
-		 * prompt (showPopupBuffer() keeps it on the window the
-		 * user was editing before the prompt opened), so
-		 * scroll() -- which only acts on the focused window --
-		 * never notices that b->cy just walked off the visible
-		 * range. Without this, the highlighted row keeps
-		 * advancing past the window edge while the viewport
-		 * sits still. Page up/down already need the same
-		 * "find the popup's window" step; see prompt.c. */
 		int win_idx = findBufferWindow(b);
 		if (win_idx >= 0)
 			scrollToShowCursor(E.windows[win_idx], b);
 	}
 }
 
-/*** Shell prompt completion (#131) ***
+/*** Shell prompt completion ***
  *
  * TAB in the M-! / M-| prompt completes the word that ends at point:
  * an executable on PATH when that word is in command position, a file

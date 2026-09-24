@@ -159,6 +159,34 @@ void test_redo_micro_reroutes_following_undo_to_redo(void) {
 	TEST_ASSERT_EQUAL_STRING("hello!", row_str(buf, 0));
 }
 
+void test_quoted_insert_refuses_nul(void) {
+	struct buffer *buf = make_test_buffer("ab");
+	buf->cx = 1;
+	buf->cy = 0;
+
+	int keys[] = { 0 };
+	scriptKeys(keys, 1);
+	processKeypress(CMD_QUOTED_INSERT);
+	clearKeys();
+
+	TEST_ASSERT_EQUAL_INT(2, buf->row[0].size);
+	TEST_ASSERT_EQUAL_STRING("ab", row_str(buf, 0));
+}
+
+void test_palette_cancels_when_macro_runs_out(void) {
+	struct buffer *buf = make_test_buffer("ab");
+	E.macro.keys = xmalloc(sizeof(int));
+	E.macro.keys[0] = KEY_META('/');
+	E.macro.nkeys = 1;
+	E.macro.skeys = 1;
+	muteStdout();
+	execMacro(&E.macro);
+	unmuteStdout();
+	TEST_ASSERT(E.buf == buf);
+	TEST_ASSERT_EQUAL_STRING("ab", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_STRING("Canceled.", E.statusmsg);
+}
+
 /* --- runner ------------------------------------------------------- */
 
 int main(void) {
@@ -168,5 +196,7 @@ int main(void) {
 	RUN_TEST(test_universal_arg_four_then_two_is_42);
 	RUN_TEST(test_negative_arg_refuses_digits);
 	RUN_TEST(test_redo_micro_reroutes_following_undo_to_redo);
+	RUN_TEST(test_quoted_insert_refuses_nul);
+	RUN_TEST(test_palette_cancels_when_macro_runs_out);
 	return TEST_END();
 }

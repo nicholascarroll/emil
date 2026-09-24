@@ -100,7 +100,11 @@ void bufPos(struct buffer *bufr, size_t off, int *cx, int *cy);
 
 struct buffer *findBufferByName(const char *name);
 struct buffer *findOrCreateSpecialBuffer(const char *name);
-/* Blob-to-rows loading (#117 R2); see the definition for semantics. */
+
+/* Blob-to-rows loading. Used when loading a buffer from file.
+ *
+ * BLOB_CRLF       strip one trailing '\r' from each line (DOS input).
+ * BLOB_FINAL_NL   terminate with an empty final row unconditionally.*/
 enum { BLOB_CRLF = 1, BLOB_FINAL_NL = 2 };
 void bufferLoadBlob(struct buffer *buf, const uint8_t *data, size_t len,
 		    int flags);

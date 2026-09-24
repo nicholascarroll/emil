@@ -80,35 +80,6 @@ static void sigwinchHandler(int sig) {
 }
 #endif
 
-/* Fatal signals: hand the terminal back, then die of the same signal.
- *
- * A crash -- a real fault, or emil's own abort() from the allocation
- * guards in util.c -- otherwise leaves the tty in raw mode on the
- * alternate screen.  The shell the user drops back into then echoes
- * nothing, reads no lines and ignores Ctrl-C, and the way out is to
- * type `reset` blind.  The terminal is a persistent object: its
- * settings outlive the process that made them, which is what turns a
- * crash into a second, separate problem for the user.
- *
- * Async-signal-safe only.  tcsetattr(), write(), signal() and raise()
- * are all on POSIX's list; perror() and free() are not, which is why
- * this cannot route through die() or editorCleanup().
- * disableRawMode() is exactly one tcsetattr() and one write() -- the
- * same restore the clean exit path uses, so there is one restore and
- * not two -- and terminal.c records that this handler depends on it
- * staying that way.
- *
- * The disposition is reset before the restore so that a fault inside
- * the restore cannot re-enter this handler, and re-raised after it
- * (SA_NODEFER, so it lands inside the handler rather than on return
- * from one that must not return) so the process still dies of what
- * killed it: the shell still reports the crash and the kernel still
- * writes the core.  A handler that tidied up and exited would leave a
- * clean terminal and no evidence, which is worse than the bug.
- *
- * Not routed through the got_* flag mechanism the other handlers use:
- * those signals are ones the main loop will live to see.
- */
 static void handleFatalSignal(int sig) {
 	signal(sig, SIG_DFL);
 	disableRawMode();
@@ -146,8 +117,6 @@ void handlePendingSignals(void) {
 		IGNORE_RETURN(write(STDOUT_FILENO, ESC "8", 2));
 		setupHandlers();
 		applyRawMode();
-		for (int i = 0; i < E.nwindows; i++)
-			E.windows[i]->height = 0;
 		resizeScreen();
 		resetFileCheckThrottle();
 		/* resizeScreen() above already re-measured the
@@ -308,15 +277,6 @@ int main(int argc, char *argv[]) {
 		break;
 	}
 
-	/* Everything below draws on stdout, so it must be the terminal.
-	 * When it is a pipe or a file, the frames go there instead: in
-	 * "emil myfile | emil" the first editor paints into the second
-	 * one's stdin, which waits for an EOF that comes only when the
-	 * first exits, so the screen shows neither and the terminal looks
-	 * hung (#127).  Refuse before touching the terminal, as Emacs
-	 * does; the other end of the pipe then sees EOF at once.  Unlike
-	 * a piped stdin there is nothing useful to salvage by reopening
-	 * /dev/tty: whatever is reading stdout would get nothing. */
 	if (!isatty(STDOUT_FILENO)) {
 		fprintf(stderr, "emil: standard output is not a terminal\n");
 		return 1;
@@ -401,9 +361,7 @@ int main(int argc, char *argv[]) {
 			continue;
 		}
 
-		/* One buffer per file, as switchToFile keeps it:
-		 * "emil foo.c ./foo.c" or a file and a link to it
-		 * must not open it twice (#128). */
+		/* One buffer per file, however named (#128). */
 		struct buffer *newBuf = findBufferForFile(argv[i], NULL);
 		if (newBuf == NULL) {
 			newBuf = newBuffer();
@@ -428,11 +386,6 @@ int main(int argc, char *argv[]) {
 		E.buf = newBuf;
 	}
 
-	/* -R (#133): every buffer the command line opened, stdin's too,
-	 * starts read-only.  The user's choice, as with C-x C-r, so not
-	 * one an advisory lock clearing may lift, and C-x C-q still
-	 * makes a buffer writable.  The initial *scratch* buffer was not
-	 * opened from the command line and stays writable. */
 	if (read_only) {
 		for (struct buffer *b = E.headbuf; b != NULL; b = b->next) {
 			if (b == scratch)
@@ -451,10 +404,7 @@ int main(int argc, char *argv[]) {
 	E.edbuf = E.buf;
 	computeDisplayNames();
 
-	/* Report a terminal that did not accept raw mode.  Issued last so
-	 * it is the message on screen at the first frame: a terminal that
-	 * eats C-s or C-c changes what the user can do, which outranks the
-	 * load message it displaces. */
+	/* Report a terminal that did not accept raw mode.*/
 	{
 		char why[256];
 		if (rawModeDivergence(why, sizeof(why)))
@@ -468,10 +418,7 @@ int main(int argc, char *argv[]) {
 		handlePendingSignals();
 #ifdef EMIL_DEBUG_FOCUS
 		{
-			/* See E.buf in emil.h.  Checked here, between
-			 * commands, because that is where the invariant
-			 * is claimed: the modal loops break it on purpose
-			 * while they run. */
+			/* See E.buf in emil.h: it holds between commands. */
 			const char *breach = focusInvariantBreach();
 			if (breach) {
 				disableRawMode();
@@ -511,8 +458,7 @@ int main(int argc, char *argv[]) {
 
 			/* Bytes were already waiting: this key and the
 			 * next arrived together rather than being typed
-			 * one at a time.  That is the only signal emil
-			 * has that it is being pasted into (§3.5). */
+			 * one at a time.*/
 			E.input_burst = 1;
 
 			key = readKey();

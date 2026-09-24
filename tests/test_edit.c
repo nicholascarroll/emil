@@ -5,6 +5,7 @@
 #include "test_harness.h"
 #include "edit.h"
 #include "keymap.h"
+#include "motion.h"
 #include <stdint.h>
 
 /* ---- Character insertion ---- */
@@ -352,6 +353,47 @@ void test_kill_sexp_word(void) {
 	E.buf = buf;
 	killSexp(1);
 	TEST_ASSERT_EQUAL_STRING(" world", row_str(buf, 0));
+}
+
+/* A delimiter inside a "..." string does not count, as in Emacs:
+ * chat files hold replies such as "1) a point :)". */
+void test_kill_sexp_paren_in_string(void) {
+	struct buffer *buf = make_test_buffer("(user \"1) yes :)\") rest");
+	killSexp(1);
+	TEST_ASSERT_EQUAL_STRING(" rest", row_str(buf, 0));
+}
+
+void test_kill_sexp_escaped_quote_in_string(void) {
+	struct buffer *buf = make_test_buffer("(a \"say \\\"(\\\" now\" \\\\) rest");
+	killSexp(1);
+	TEST_ASSERT_EQUAL_STRING(" rest", row_str(buf, 0));
+}
+
+void test_kill_sexp_string_across_lines(void) {
+	const char *lines[] = { "(assistant :model \"m\"", "  \"1) one", "2) two\")", "(next)" };
+	struct buffer *buf = make_test_buffer_lines(lines, 4);
+	killSexp(1);
+	TEST_ASSERT_EQUAL_STRING("", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_STRING("(next)", row_str(buf, 1));
+}
+
+void test_kill_sexp_string_with_escaped_quote(void) {
+	struct buffer *buf = make_test_buffer("\"a \\\" b\" rest");
+	killSexp(1);
+	TEST_ASSERT_EQUAL_STRING(" rest", row_str(buf, 0));
+}
+
+void test_kill_sexp_unterminated_string(void) {
+	struct buffer *buf = make_test_buffer("(a \"b) c");
+	killSexp(1);
+	TEST_ASSERT_EQUAL_STRING("(a \"b) c", row_str(buf, 0));
+}
+
+void test_backward_sexp_paren_in_string(void) {
+	struct buffer *buf = make_test_buffer("x (user \"(1) yes :)\\\"\")");
+	buf->cx = buf->row[0].size;
+	backwardSexp(1);
+	TEST_ASSERT_EQUAL_INT(2, buf->cx);
 }
 
 void test_kill_sexp_readonly(void) {
@@ -790,6 +832,12 @@ int main(void) {
 	RUN_TEST(test_kill_sexp_parens);
 	RUN_TEST(test_kill_sexp_word);
 	RUN_TEST(test_kill_sexp_readonly);
+	RUN_TEST(test_kill_sexp_paren_in_string);
+	RUN_TEST(test_kill_sexp_escaped_quote_in_string);
+	RUN_TEST(test_kill_sexp_string_across_lines);
+	RUN_TEST(test_kill_sexp_string_with_escaped_quote);
+	RUN_TEST(test_kill_sexp_unterminated_string);
+	RUN_TEST(test_backward_sexp_paren_in_string);
 
 	/* Kill paragraph */
 	RUN_TEST(test_kill_paragraph);

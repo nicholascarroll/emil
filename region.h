@@ -11,7 +11,6 @@
 
 int markInvalid(void);
 int markInvalidBuf(const struct buffer *buf);
-int markInvalidSilent(void);
 
 void setMark(void);
 void setMarkSilent(void);

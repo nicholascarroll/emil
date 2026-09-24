@@ -45,6 +45,12 @@ static int search_origin_cy = 0;
 /* Set when a pass found nothing. */
 static int search_failing = 0;
 
+/* Row of the current search's last match, or -1 before its first.  A
+ * C-s / C-r repeat resumes from here.  It belongs to one search only:
+ * searchInteractive resets it, because a row carried over from an
+ * earlier search may not exist in this buffer. */
+static int search_last_match = -1;
+
 /* Compiled-pattern cache for regexSearch. The one live regex_t is 
  * intentionally left allocated at exit. */
 static char *re_cache_pat = NULL;
@@ -224,7 +230,6 @@ static void placeMatch(struct buffer *bufr, int rowidx, uint8_t *match,
 }
 
 void findCallback(struct buffer *bufr, uint8_t *query, int key) {
-	static int last_match = -1;
 	static int direction = 1;
 
 	if (bufr->query != query) {
@@ -239,13 +244,9 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 	 * of the buffer. */
 	int allow_wrap = 0;
 
-	if (key == CTRL('g') || key == CTRL('c') || key == '\r') {
-		last_match = -1;
-		direction = 1;
-		regex_mode = 0;
-		search_failing = 0;
-		return;
-	} else if (key == CTRL('s')) {
+	/* editorPrompt handles C-g, C-c and RET itself and never passes
+	 * them here; searchInteractive resets the per-search state. */
+	if (key == CTRL('s')) {
 		direction = 1;
 		allow_wrap = search_failing;
 	} else if (key == CTRL('r')) {
@@ -254,7 +255,7 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 	} else {
 		/* The pattern changed: re-search from the origin, and
 		 * without wrapping, however the previous pass ended. */
-		last_match = -1;
+		search_last_match = -1;
 		direction = initial_direction;
 		search_failing = 0;
 	}
@@ -274,10 +275,10 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 		return;
 	}
 
-	/* "Fresh" means the pattern just changed -- the first character
-	 * typed, or any subsequent edit to it -- as opposed to a C-s / C-r
+	/* "Fresh" means the pattern just changed (the first character
+	 * typed, or any subsequent edit to it) as opposed to a C-s / C-r
 	 * repeat, which keeps the pattern and steps to the next match. */
-	int fresh = (last_match == -1);
+	int fresh = (search_last_match == -1);
 
 	/* A fresh search runs from the search origin; a repeat resumes from
 	 * the cursor, which is sitting on the previous match, and that is
@@ -288,7 +289,7 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 	int from_cy = fresh ? search_origin_cy : bufr->cy;
 	int from_cx = fresh ? search_origin_cx : bufr->cx;
 
-	int current = last_match;
+	int current = search_last_match;
 	if (current < 0) {
 		/* Seeded from the cursor's row for both directions: -1
 		 * here restarts the row-stepping loop below at row 0, so
@@ -326,19 +327,21 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 			}
 		}
 		if (match) {
-			last_match = current;
+			search_last_match = current;
 			placeMatch(bufr, current, match, mlen);
 		}
 	}
 
 	for (int i = 0; !bufr->match && i < bufr->numrows; i++) {
 		current += direction;
-		if (current == -1) {
+		/* Range tests, not equality: a seed row that is not in
+		 * this buffer must stop or wrap here, never index it. */
+		if (current < 0) {
 			/* Ran off the top. */
 			if (!allow_wrap)
 				break;
 			current = bufr->numrows - 1;
-		} else if (current == bufr->numrows) {
+		} else if (current >= bufr->numrows) {
 			/* Ran off the bottom. */
 			if (!allow_wrap)
 				break;
@@ -350,10 +353,7 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 		int mlen = 0;
 		if (direction == -1) {
 			/* Stepping backward, so the nearest match on an
-			 * earlier row is its *last* one.  Taking the first
-			 * would skip every other match on that row: the
-			 * same-row block above then finds nothing before
-			 * it and steps back another row. */
+			 * earlier row is its *last* one. */
 			match = searchRowBackward(row, query, row->size,
 						  regex_mode, &mlen);
 		} else if (regex_mode) {
@@ -367,7 +367,7 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 				mlen = (int)strlen((const char *)query);
 		}
 		if (match) {
-			last_match = current;
+			search_last_match = current;
 			placeMatch(bufr, current, match, mlen);
 		}
 	}
@@ -393,10 +393,24 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 
 static void searchInteractive(int direction, int regex,
 			      const char *prompt_fmt) {
+	/* One search at a time.  editorPrompt refuses a nested prompt,
+	 * but only after the assignments below would already have
+	 * overwritten the running search's state with the minibuffer's.
+	 * Inside a search prompt C-M-s / C-M-r are repeats (prompt.c),
+	 * so this is reached only by other routes, such as a keyboard
+	 * macro run from inside the prompt. */
+	if (E.buf == E.minibuf) {
+		setStatusMessage(
+			"Command attempted to use minibuffer while in minibuffer");
+		E.minibuf->completionState.preserve_message = 1;
+		return;
+	}
+
 	setMarkSilent();
 	regex_mode = regex;
 	initial_direction = direction;
 	search_failing = 0;
+	search_last_match = -1;
 	int saved_cx = E.buf->cx;
 	int saved_cy = E.buf->cy;
 	search_origin_cx = saved_cx;
@@ -497,12 +511,10 @@ void replaceString(void) {
 		return;
 	}
 
-	/* Prompt is a plain prefix (see editorPrompt), so no percent
-	 * escaping, but a literal newline in the pattern must be
-	 * shown as ^J, not fed raw to the terminal. */
-	char *esc = caretEscapeNewlines(replace_orig);
-	size_t psz = strlen(esc) + 20;
-	char *prompt = xmalloc(psz);
+	/* The prompt reaches the terminal raw: sanitise the pattern. */
+	size_t olen = strlen((const char *)replace_orig), psz = 3 * olen + 20;
+	char *esc = xmalloc(psz), *prompt = xmalloc(psz);
+	utf8SanitizeLine(replace_orig, olen, esc, psz);
 	snprintf(prompt, psz, "Replace %s with: ", esc);
 	free(esc);
 	replace_repl = editorPrompt(prompt, PROMPT_REPLACE, NULL);
@@ -523,17 +535,17 @@ void replaceString(void) {
 	replace_repl = saved_repl;
 }
 
-/* Build the "Query replacing X with Y:" status line shown during the
- * y/n loop.  The pattern is newline-free (rejected up front), but the
- * replacement may contain one and must be shown as ^J.  Returns a
- * malloc'd string; caller frees. */
+/* The y/n loop's "Query replacing X with Y:", sanitised.  Caller frees. */
 static char *qrStatusPrompt(void) {
-	char *esc_repl = caretEscapeNewlines(replace_repl);
-	size_t sz = strlen((const char *)replace_orig) + strlen(esc_repl) + 32;
-	char *prompt = xmalloc(sz);
-	snprintf(prompt, sz, "Query replacing %s with %s:", replace_orig,
-		 esc_repl);
-	free(esc_repl);
+	size_t olen = strlen((const char *)replace_orig);
+	size_t rlen = strlen((const char *)replace_repl);
+	size_t sz = 3 * (olen + rlen) + 32;
+	char *o = xmalloc(sz), *r = xmalloc(sz), *prompt = xmalloc(sz);
+	utf8SanitizeLine(replace_orig, olen, o, sz);
+	utf8SanitizeLine(replace_repl, rlen, r, sz);
+	snprintf(prompt, sz, "Query replacing %s with %s:", o, r);
+	free(o);
+	free(r);
 	return prompt;
 }
 

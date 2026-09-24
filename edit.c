@@ -44,12 +44,7 @@ void insertChar(struct buffer *bufr, int c, int count) {
 }
 
 /* Insert 'len' bytes of 'text' 'times' times at point, recording undo,
- * and leave point after the insertion.
- *
- * A single repetition may join the run at the head of the undo list —
- * that's what makes typing a word one undo step.  An explicit prefix
- * argument is one command, so it produces one record however many
- * copies it asks for, rather than a run the cap would then chop up. */
+ * and leave point after the insertion. */
 static void insertRepeat(struct buffer *buf, const uint8_t *text, int len,
 			 int times) {
 	int ex, ey;
@@ -215,7 +210,7 @@ void backSpace(int count) {
 	if (rejectIfReadOnly(E.buf))
 		return;
 
-	if (E.buf->mark_active && !markInvalidSilent()) {
+	if (E.buf->mark_active && !markInvalidBuf(E.buf)) {
 		if (E.buf->rectangle_mode) {
 			killRectangle();
 			E.buf->rectangle_mode = 0;
@@ -273,10 +268,7 @@ void wordTransform(int times, uint8_t *(*transformer)(uint8_t *)) {
 	transformRegion(transformer);
 }
 
-/* M-- variant: transform the word before point, leaving point where
- * it is.  The case transformers are byte-length preserving, so
- * transformRange's "point at end of replacement" lands back on the
- * original position. */
+/* M-- variant: transform the word before point.*/
 static void wordTransformBackward(uint8_t *(*transformer)(uint8_t *)) {
 	int icx = E.buf->cx;
 	int icy = E.buf->cy;
@@ -342,9 +334,7 @@ void backspaceWord(int count) {
 
 /* Character/word transposition */
 
-/* M-- M-t: drag the word before point backward past the word before
- * it, point following the dragged word (Emacs transpose-words with a
- * negative argument). */
+/* M-- M-t */
 static void transposeWordsBackward(void) {
 	/* Checked here, not just in transformRange: the point
 	 * repositioning below must not run against a refused edit. */
@@ -423,9 +413,7 @@ void transposeWords(int uarg) {
 		       transformerTransposeWords);
 }
 
-/* M-- C-t: drag the character before point backward past the
- * character before it, point following the dragged character.  Like
- * the forward version, this stays within the current line. */
+/* M-- C-t */
 static void transposeCharsBackward(void) {
 	/* Checked here, not just in transformRange: the point
 	 * repositioning below must not run against a refused edit. */
@@ -666,10 +654,7 @@ void markParagraph(void) {
 	setStatusMessage("Mark set.");
 }
 
-/* M-- C-x C-t: drag the sentence ending at or before point backward
- * past the sentence before it, point landing after the dragged
- * sentence.  Mirrors the forward version's segmentation: the gap
- * between the two sentences travels with the second segment. */
+/* M-- C-x C-t */
 static void transposeSentencesBackward(void) {
 	if (rejectIfReadOnly(E.buf))
 		return;

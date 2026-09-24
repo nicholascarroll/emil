@@ -235,9 +235,7 @@ static int resolveMetaBinding(int ch) {
 int resolveBinding(int key) {
 	static enum PrefixState prefix = PREFIX_NONE;
 	/* Set when the previous key was C-u itself: the next digit then
-	 * REPLACES the default/multiplied seed instead of accumulating.
-	 * This is how "C-u 4 2" yields 42 rather than replacing twice,
-	 * without conflating the seed value 4 with a typed digit 4. */
+	 * REPLACES the default/multiplied seed instead of accumulating.*/
 	static int uarg_fresh = 0;
 	int was_fresh = uarg_fresh;
 	uarg_fresh = 0;
@@ -324,10 +322,7 @@ int resolveBinding(int key) {
 		case '=':
 			return CMD_WHAT_CURSOR;
 		case 'x':
-			/* C-x x sub-prefix: read another key.  The key
-			 * must be recorded: the main loop only records
-			 * keys it read itself, and a macro missing this
-			 * key would desynchronize on playback. */
+			/* C-x x sub-prefix: read another key.*/
 			{
 				int nextkey = readKey();
 				if (nextkey == -1)
@@ -442,10 +437,7 @@ int resolveBinding(int key) {
 		if (cmd != CMD_NONE)
 			return cmd;
 		/* No binding for this Meta character: ignore it
-		 * silently.  (Unrecognized escape *sequences* never
-		 * reach here: the decoder reports them via
-		 * unknownEscape() in terminal.c and delivers a bare
-		 * ESC token, handled above.) */
+		 * silently. */
 		return CMD_NONE;
 	}
 
@@ -568,25 +560,6 @@ int resolveBinding(int key) {
 	return CMD_NONE;
 }
 
-/* Commands refused while a prompt is reading the minibuffer.
- *
- * Every other command runs in the minibuffer exactly as it does in a
- * file: that is how C-a, M-f, C-k, C-y and the rest work in a prompt
- * without being written twice.  These cannot, because the minibuffer is
- * in no window and not in the buffer list, and editorPrompt() needs
- * E.buf to stay E.minibuf until it returns:
- *
- *   - the window commands would move focus under the prompt;
- *   - next-buffer and kill-buffer search the buffer list for E.buf and
- *     dereference NULL when it is not there;
- *   - previous-buffer, jump-to-register, the ctags jumps and the
- *     header/body toggle move E.buf to a file, so the keys typed next
- *     edit that file behind a prompt that still looks open;
- *   - toggle-read-only would stick to the minibuffer, which outlives
- *     the prompt, and silently refuse typing in every later prompt.
- *
- * A command that opens a prompt of its own needs no entry here:
- * editorPrompt() refuses to nest. */
 static int refusedInMinibuffer(int c) {
 	switch (c) {
 	case CMD_OTHER_WINDOW:
@@ -724,9 +697,6 @@ static int dispatchEdit(int c, int uarg) {
 		return 1;
 	case CMD_QUOTED_INSERT: {
 		int key = readKey();
-		/* The quoted key is consumed here, so the outer loop never
-		 * sees it.  Record it or a macro replays C-q swallowing
-		 * whatever key follows on playback (cf. CMD_PREFIX_CX). */
 		recordKey(key);
 		if (key == KEY_UNICODE) {
 			int count = UARG_COUNT(uarg);
@@ -734,35 +704,15 @@ static int dispatchEdit(int c, int uarg) {
 		} else if (key == '\n' && E.buf == E.minibuf &&
 			   E.prompt_type != PROMPT_REPLACE &&
 			   E.prompt_type != PROMPT_SHELL) {
-			/* A quoted newline is honoured only in prompts whose
-			 * value path preserves it: the replace prompts (the
-			 * feature) and the shell prompt (sh takes multi-line
-			 * commands).  Elsewhere it would be silently wrong:
-			 * isearch matches row-by-row and its callback sees
-			 * only row 0; string-rectangle would multiply rows
-			 * mid-rectangle; the completion prompts assume one
-			 * row.  Refuse with a reason instead of accepting
-			 * input that cannot work. */
 			setStatusMessage(
 				E.prompt_type == PROMPT_SEARCH ?
 					"Search cannot cross lines" :
 					"Cannot use a newline in this prompt");
 			E.minibuf->completionState.preserve_message = 1;
 		} else if (key == '\n') {
-			/* '\n' is emil's row separator, never a byte stored
-			 * inside a row: insertChar would write 0x0A into the
-			 * row while undoAppendChar records a row split, and
-			 * the two would then disagree.  Split instead.
-			 *
-			 * Note this behaves like RET, not like unquoted C-j:
-			 * quoting strips the command and leaves the character,
-			 * and the character is a plain newline.  emil binds
-			 * RET -> CMD_NEWLINE and C-j -> CMD_NEWLINE_INDENT,
-			 * so the auto-indent is deliberately not applied.
-			 *
-			 * insertNewline does its own read-only rejection and
-			 * its own UARG_COUNT. */
 			insertNewline(uarg);
+		} else if (key == 0) {
+			setStatusMessage("Cannot insert NUL");
 		} else if (key < KEY_ARROW_LEFT) {
 			if (rejectIfReadOnly(E.buf))
 				return 1;
@@ -791,7 +741,7 @@ static int dispatchEdit(int c, int uarg) {
 		transposeWords(uarg);
 		return 1;
 	case CMD_TRANSPOSE_CHARS:
-		if (E.buf->rectangle_mode && !markInvalidSilent())
+		if (E.buf->rectangle_mode && !markInvalidBuf(E.buf))
 			stringRectangle();
 		else
 			transposeChars(uarg);
@@ -822,8 +772,7 @@ static int dispatchEdit(int c, int uarg) {
 	}
 }
 
-/* Window management.  Refused in the minibuffer; see
- * refusedInMinibuffer(). */
+/* Window management */
 static int dispatchWindow(int c) {
 	switch (c) {
 	case CMD_OTHER_WINDOW:
@@ -881,9 +830,6 @@ static int dispatchBuffer(int c, int uarg) {
 		return 1;
 	case CMD_TOGGLE_READ_ONLY:
 		E.buf->read_only = !E.buf->read_only;
-		/* Whichever way it went, the state is now the user's
-		 * choice rather than one we imposed for an advisory
-		 * lock, so releasing that lock must not override it. */
 		E.buf->read_only_by_lock = 0;
 		setStatusMessage(E.buf->read_only ? "Buffer is read-only" :
 						    "Buffer set to writable");
@@ -928,7 +874,6 @@ static int dispatchRegion(int c, int uarg) {
 		else
 			killRegion();
 		E.buf->mark_active = 0;
-		;
 		return 1;
 	case CMD_COPY:
 		if (E.buf->rectangle_mode)
@@ -936,13 +881,11 @@ static int dispatchRegion(int c, int uarg) {
 		else
 			copyRegion();
 		E.buf->mark_active = 0;
-		;
 		return 1;
 	case CMD_COPY_CLIPBOARD:
 		if (!E.buf->rectangle_mode) {
 			copyRegion();
 			E.buf->mark_active = 0;
-			;
 			copyToClipboard(E.kill.str);
 		} else {
 			setStatusMessage(
@@ -950,9 +893,6 @@ static int dispatchRegion(int c, int uarg) {
 		}
 		return 1;
 	case CMD_YANK:
-		/* uarg semantics: any C-u prefix = reverse yank (point
-		 * stays before the text, mark set after); M-- = no-op.
-		 * yank() owns the rectangle decision internally. */
 		yank(uarg);
 		return 1;
 	case CMD_YANK_POP:
@@ -967,7 +907,6 @@ static int dispatchRegion(int c, int uarg) {
 			killRectangle();
 		}
 		E.buf->mark_active = 0;
-		;
 		return 1;
 	case CMD_UPCASE_REGION:
 		transformRegion(transformerUpcase);
@@ -984,7 +923,6 @@ static int dispatchRegion(int c, int uarg) {
 	case CMD_REGION_REGISTER:
 		regionToRegister();
 		E.buf->mark_active = 0;
-		;
 		return 1;
 	case CMD_INC_REGISTER:
 		incrementRegister();
@@ -1001,12 +939,10 @@ static int dispatchRegion(int c, int uarg) {
 	case CMD_COPY_RECT:
 		copyRectangle();
 		E.buf->mark_active = 0;
-		;
 		return 1;
 	case CMD_KILL_RECT:
 		killRectangle();
 		E.buf->mark_active = 0;
-		;
 		return 1;
 	case CMD_YANK_RECT:
 		yankRectangle();
@@ -1047,8 +983,6 @@ static int dispatchMacro(int c, int uarg) {
 	switch (c) {
 	case CMD_MACRO_RECORD:
 		if (E.playback) {
-			/* A replayed C-x ( would clobber E.macro.keys:
-			 * the very array being played back. */
 			setStatusMessage("Not available during macro");
 			return 1;
 		}
@@ -1080,11 +1014,6 @@ static int dispatchMacro(int c, int uarg) {
 		return 1;
 	case CMD_MACRO_EXEC:
 		if (E.recording || E.playback) {
-			/* No self-referential macros: executing the
-			 * macro while recording it would embed a C-x e
-			 * that replays the (by then different) macro,
-			 * and nested playback re-enters execMacro on
-			 * the same E.playback cursor. */
 			setStatusMessage("Not available during macro");
 			return 1;
 		}
@@ -1107,20 +1036,6 @@ static int dispatchMisc(int c, int uarg) {
 	case CMD_UNDO:
 		doUndo(E.buf, uarg);
 		return 1;
-	/* No job control under WASI.  Both suspend paths hand the
-	 * terminal to a parent shell and wait to be resumed (§3.1.1,
-	 * §3.18); wasmer honours the stop and terminates instead, exit
-	 * 127, taking the unsaved buffer with it and leaving the
-	 * alternate screen and a DECSTBM region set.
-	 *
-	 * There is no feature to test for.  wasix-libc defines
-	 * SIGTSTP, declares tcsetpgrp() and sets _POSIX_JOB_CONTROL to
-	 * 1, so the header claims support the runtime does not have --
-	 * unlike the locking case, where the absent F_GETLK is honest
-	 * about it (fileio.c).  Hence __wasi__, as for __sun elsewhere.
-	 *
-	 * The keys stay bound and answer, rather than going quiet:
-	 * a C-z that does nothing at all reads as a hang. */
 	case CMD_SUSPEND:
 #ifdef __wasi__
 		setStatusMessage("Suspend not available on this platform");
@@ -1185,7 +1100,6 @@ static int dispatchMisc(int c, int uarg) {
 		return 1;
 	case CMD_CANCEL:
 		E.buf->mark_active = 0;
-		;
 		setStatusMessage("Quit");
 		return 1;
 	case CMD_UNIVERSAL_ARG:
@@ -1214,9 +1128,7 @@ void processKeypress(int c) {
 
 	/* Redo chain: after C-/ leaves more to redo, a following C-_ or
 	 * C-/ continues redoing rather than undoing.  The chain must end
-	 * as soon as the redo stack empties -- otherwise every later undo
-	 * keystroke is swallowed as a redo of nothing, and undo looks
-	 * dead to the user until some unrelated key is pressed. */
+	 * as soon as the redo stack empties. */
 	if (E.micro == CMD_REDO && c == CMD_UNDO && E.buf->redo != NULL) {
 		doRedo(E.buf, 1);
 		if (E.buf->redo == NULL)
@@ -1248,9 +1160,7 @@ void processKeypress(int c) {
 		return;
 	}
 
-	/* Handle M-- (reverse modifier).  Not a numeric argument: it
-	 * flips direction for the commands that understand it (yank-pop,
-	 * transpose, word case) and is ignored by everything else. */
+	/* Any negative only means reverse */
 	if (c == CMD_NEGATIVE_ARG) {
 		E.uarg = UARG_REVERSE;
 		setStatusMessage("M--");
@@ -1273,7 +1183,6 @@ void processKeypress(int c) {
 
 	if (E.buf == E.minibuf && refusedInMinibuffer(c)) {
 		setStatusMessage("Not available in the minibuffer");
-		/* Or the prompt redraws over it before it is seen. */
 		E.minibuf->completionState.preserve_message = 1;
 		goto done;
 	}
@@ -1313,14 +1222,7 @@ done:
 
 /*** init ***/
 
-/* Replay a recorded macro through the normal dispatch path.
- *
- * There is no recursion to guard against: CMD_MACRO_EXEC refuses while
- * E.recording || E.playback (see dispatchMacro), which is the "No
- * Self-Referential Execution" invariant of 4.2, so this function can
- * never be entered from within itself.  'macro' is always &E.macro for
- * the same reason, and is a parameter only to keep the call site
- * explicit about what is being played. */
+/* Replay a recorded macro through the normal dispatch path.*/
 void execMacro(struct macro *macro) {
 	E.playback = 0;
 	while (E.playback < macro->nkeys) {

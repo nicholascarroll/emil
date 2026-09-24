@@ -92,25 +92,6 @@ int subprocess_create(const char *const command_line[], int options,
 	posix_spawnattr_t *attrp = NULL;
 	int attr_inited = 0;
 	int grouped = 0;
-	/* "Accepted" is not "effective".  wasmer accepts
-	 * POSIX_SPAWN_SETPGROUP, implements no process groups, and then
-	 * *also* returns 0 from kill(-pid) while delivering nothing --
-	 * measured: a `sleep 20 | cat` signalled that way runs its full
-	 * 20 s.  Since both the request and the delivery report success,
-	 * subprocess_signal's fallback never fires and a cancelled
-	 * pipeline cannot be stopped at all.
-	 *
-	 * There is no honest feature to test for: wasix-libc defines
-	 * POSIX_SPAWN_SETPGROUP and sets _POSIX_JOB_CONTROL to 1.  This
-	 * is the locking case inverted -- fileio.c can detect absent
-	 * locking because the header omits F_GETLK and says so.  Hence
-	 * __wasi__, as for __sun elsewhere and as for the job-control
-	 * paths in keymap.c.
-	 *
-	 * getpgid(child) would detect it at run time and would be the
-	 * better check, but it is XSI in POSIX.1-2001 and only moved to
-	 * the base in POSIX.1-2008; this file pins itself to 200112L
-	 * (§1.2), so it is not available to us here. */
 #ifndef __wasi__
 	if (posix_spawnattr_init(&attr) == 0) {
 		attr_inited = 1;
@@ -261,13 +242,7 @@ int subprocess_tryjoin(struct subprocess_s *const process,
 	if (r != process->child)
 		return -1;
 	process->child = 0;
-	/* Only WIFEXITED is consulted.  That is deliberate and it is
-	 * also what keeps this working on WASI: wasmer never sets
-	 * WIFSIGNALED -- a child killed by a signal is reported as a
-	 * normal exit, status 79 -- so a caller keying on WTERMSIG
-	 * there would never see a signalled child.  Measured against
-	 * wasmer 7.2.1; signals do reach and kill the child, only the
-	 * reporting of how it died is lost. */
+
 	if (WIFEXITED(status))
 		process->return_status = WEXITSTATUS(status);
 	else
@@ -280,25 +255,6 @@ int subprocess_tryjoin(struct subprocess_s *const process,
 int subprocess_signal(struct subprocess_s *const process, int sig) {
 	if (process->child == 0)
 		return 0;
-	/* The group signal and the child signal are not alternatives.
-	 * The child is a member of its own group, so signalling it
-	 * directly is never wrong, and making it unconditional removes
-	 * the assumption that a successful kill(-pid) implies delivery
-	 * -- an assumption wasmer breaks by returning 0 and doing
-	 * nothing.  §3.17 states the degradation clause in terms of the
-	 * platform *rejecting* group assignment; a platform that accepts
-	 * it and stubs it lands here instead.
-	 *
-	 * This also covers the narrow ESRCH window the group kill has
-	 * always had: glibc's posix_spawn normally vfork-blocks until
-	 * the child has run its setpgid, but under QEMU user-mode vfork
-	 * degrades to fork and posix_spawn can return before the group
-	 * exists.
-	 *
-	 * The order has one consequence: the group signal may already have
-	 * killed the child, and on Cygwin/MSYS2 an exited child is then
-	 * reported as ESRCH rather than accepted as a zombie, as POSIX
-	 * systems do.  The signal did its job, so that is success. */
 	int group_rc = process->grouped ? kill(-process->child, sig) : -1;
 	int rc = kill(process->child, sig);
 	if (rc != 0 && errno == ESRCH && group_rc == 0)

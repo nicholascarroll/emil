@@ -4,7 +4,6 @@
 #include <string.h>
 #include <limits.h>
 #include <unistd.h>
-#include <sys/stat.h>
 #include "ctags.h"
 #include "emil.h"
 
@@ -50,8 +49,7 @@ static void pushLocation(void) {
  * quotes, dashes, ellipsis, and the zero-width characters), CJK
  * punctuation, and ZERO WIDTH NO-BREAK SPACE.  No script is named.
  * Where a script is written without spaces, the text marks its own
- * word boundaries with U+200B ZERO WIDTH SPACE; deciding where they go
- * is the job of whatever inserted them, not of the editor. */
+ * word boundaries with U+200B ZERO WIDTH SPACE.*/
 static int isSeparatorCP(uint32_t cp) {
 	return (cp >= 0x00A0 && cp <= 0x00BF) ||
 	       (cp >= 0x2000 && cp <= 0x206F) ||
@@ -83,9 +81,7 @@ static int prevCPStart(const erow *row, int i) {
 	return i;
 }
 
-/* Byte offset of the codepoint after the one at 'i'.  Counts the
- * continuation bytes actually present rather than trusting the lead
- * byte, so a truncated sequence cannot swallow the bytes after it. */
+/* Byte offset of the codepoint after the one at 'i'. */
 static int nextCPStart(const erow *row, int i) {
 	int want = utf8_nBytes(row->chars[i]);
 	int n = 1;
@@ -97,12 +93,6 @@ static int nextCPStart(const erow *row, int i) {
 char *ctagsWordAtPoint(void) {
 	erow *row = &E.buf->row[E.buf->cy];
 	int cx = E.buf->cx;
-
-	/* A zero-width separator takes a byte offset but no screen cell,
-	 * so the cursor is drawn on the character after it.  Look up
-	 * that character's word, if it has one; otherwise fall back from
-	 * where the cursor really is, so a separator at the end of a
-	 * word still finds the word. */
 	int orig = cx;
 	while (cx < row->size && row->chars[cx] >= 0x80 &&
 	       isZeroWidth(utf8Decode(row->chars, cx)))
@@ -131,8 +121,7 @@ char *ctagsWordAtPoint(void) {
 
 /* ---- tags file lookup ---- */
 
-/* Walk from the current working directory up toward filesystem root.
- *  The depth bound keeps a pathological filesystem from spinning forever. */
+/* Walk from the current working directory up toward filesystem root.*/
 int findTagsDir(char *out_dir, size_t dirsz) {
 	char dir[PATH_MAX];
 	if (getcwd(dir, sizeof(dir)) == NULL)
@@ -307,25 +296,14 @@ static void freeMatches(struct tagMatch *v, int n) {
 
 /* Move the entries in the file being read to the front, keeping the
  * order within each group: the definition next to the reader is the
- * likeliest one.  Files are compared by device and inode, as
- * findBufferForFile() does, so a tags path and a buffer path that name
- * one file by different routes still match. */
+ * likeliest one.  findBufferForFile() matches a path that names the
+ * file by another route, such as a symlink. */
 static void currentFileFirst(struct tagMatch *v, int n) {
 	if (!E.buf->filename || E.buf->special_buffer)
 		return;
-	struct stat here, st;
-	char *p = expandTilde(E.buf->filename);
-	int ok = stat(p, &here) == 0 && here.st_ino != 0;
-	free(p);
-	if (!ok)
-		return;
 	int front = 0;
 	for (int i = 0; i < n; i++) {
-		p = expandTilde(v[i].path);
-		int same = stat(p, &st) == 0 && st.st_dev == here.st_dev &&
-			   st.st_ino == here.st_ino;
-		free(p);
-		if (same) {
+		if (findBufferForFile(v[i].path, NULL) == E.buf) {
 			struct tagMatch t = v[i];
 			memmove(&v[front + 1], &v[front],
 				(size_t)(i - front) * sizeof(*v));
@@ -337,7 +315,7 @@ static void currentFileFirst(struct tagMatch *v, int n) {
 /* Every entry for sym in the project's tags file, those in the current
  * buffer's file first and the rest in tags-file order.  Returns the
  * count and sets *out (NULL when there are none), or -1 if there is no
- * tags file.  Lines are read whole, however long. */
+ * tags file.*/
 static int collectMatches(const char *sym, struct tagMatch **out) {
 	char dir[PATH_MAX];
 	*out = NULL;
@@ -380,8 +358,7 @@ static int collectMatches(const char *sym, struct tagMatch **out) {
 #define TAGS_SCOPE_COLS_MAX 30
 
 /* One row: the scope padded to a column, the file and line, then the
- * definition's own text.  The name is the same on every row, so it is
- * in the status line instead. */
+ * definition's own text.*/
 static void menuRow(struct dbuf *d, const struct tagMatch *m, int scope_cols) {
 	if (scope_cols > 0) {
 		const char *s = m->scope ? m->scope : "";
@@ -405,9 +382,8 @@ static void menuRow(struct dbuf *d, const struct tagMatch *m, int scope_cols) {
 }
 
 /* Let the reader choose one of n matches.  The list opens in a popup
- * while focus stays on the window being read, as the completion list
- * does during a prompt, and the popup's region marks the selection, so
- * nothing here moves E.buf.  Returns the chosen index, or -1 on C-g. */
+ * while focus stays on the window being read. Returns the chosen index,
+ * or -1 on C-g. */
 static int pickMatch(const char *sym, const struct tagMatch *v, int n) {
 	int scope_cols = 0;
 	for (int i = 0; i < n; i++) {
@@ -454,8 +430,11 @@ static int pickMatch(const char *sym, const struct tagMatch *v, int n) {
 		refreshScreen();
 
 		int key = readKey();
-		if (key == -1)
-			continue;
+		if (key == -1) {
+			if (!E.playback)
+				continue;
+			key = CTRL('g');
+		}
 		recordKey(key);
 		if (key == '\r' || key == CTRL('j'))
 			break;

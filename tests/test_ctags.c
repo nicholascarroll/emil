@@ -595,6 +595,26 @@ void test_menu_lists_current_file_first(void) {
 	leave_menu_project();
 }
 
+void test_menu_cancels_when_macro_runs_out(void) {
+	if (enter_menu_project() != 0) {
+		TEST_ASSERT(0 && "could not create temp project");
+		return;
+	}
+	struct buffer *buf = make_test_buffer("x.close()");
+	buf->cx = 2;
+	E.macro.keys = xmalloc(sizeof(int));
+	E.macro.keys[0] = KEY_META('.');
+	E.macro.nkeys = 1;
+	E.macro.skeys = 1;
+	muteStdout();
+	execMacro(&E.macro);
+	unmuteStdout();
+	TEST_ASSERT_NULL(E.buf->filename);
+	TEST_ASSERT_EQUAL_STRING("Canceled.", E.statusmsg);
+	TEST_ASSERT_NULL(findBufferByName("*Tags*"));
+	leave_menu_project();
+}
+
 int main(void) {
 	TEST_BEGIN();
 
@@ -644,6 +664,7 @@ int main(void) {
 	RUN_TEST(test_menu_end_of_list_and_clamping);
 	RUN_TEST(test_menu_cancel_leaves_reader_in_place);
 	RUN_TEST(test_menu_lists_current_file_first);
+	RUN_TEST(test_menu_cancels_when_macro_runs_out);
 
 	return TEST_END();
 }

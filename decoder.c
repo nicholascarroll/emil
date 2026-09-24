@@ -7,19 +7,13 @@
  *   ESC --'['--> CSI    body bytes 0x20..0x3F, one final 0x40..0x7E
  *   ESC --'O'--> SS3    exactly one final byte
  *   ESC --ESC--> ESC    a lone ESC keypress followed by the start of
- *                       a new sequence; the lone ESC is discarded so
- *                       the new sequence decodes normally instead of
- *                       leaking its body into the buffer as text
+ *                       a new sequence; the lone ESC is discarded.
  *   ESC --0-9--> emit KEY_ALT_<digit>
  *   ESC --else-> emit KEY_META(byte)
  *
- * The wait class passed to the byte source (see decoder.h) says what
- * a signal means, not how long to wait: both classes block, so a
- * sequence split across a slow link still decodes.  If the source
- * reports that no byte will come (abandoned wait, or end of input):
- *     CSI, nothing accumulated  -> KEY_META('[')
- *     SS3, nothing accumulated  -> KEY_META('O')
- *     mid-sequence              -> 033, bytes reported via seen[]
+ *   CSI, nothing accumulated  -> KEY_META('[')
+ *   SS3, nothing accumulated  -> KEY_META('O')
+ *   mid-sequence              -> 033, bytes reported via seen[]
  *
  * Two invariants the machine maintains by construction:
  * 1. A sequence's bytes are consumed exactly once.
@@ -71,9 +65,7 @@ static int decodeSS3(escByteSourceFn next, uint8_t *seen, int *n_seen) {
  * byte, per the ECMA-48 grammar
  *     CSI  P..P  I..I  F
  * with parameter bytes 0x30..0x3F, intermediate bytes 0x20..0x2F,
- * and one final byte 0x40..0x7E.  The accumulate loop is also the
- * drain: an unmapped sequence has already been consumed in full by
- * the time it is reported, so nothing is left to leak. */
+ * and one final byte 0x40..0x7E. */
 static int decodeCSI(escByteSourceFn next, uint8_t *seen, int *n_seen) {
 	int body = 0; /* bytes accumulated after the '[' */
 	note(seen, n_seen, '[');

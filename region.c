@@ -199,9 +199,7 @@ void markBuffer(void) {
 	}
 }
 
-/* Validity of a specific buffer's mark.  Callers that render or edit a
- * buffer other than the focused one must use this form: the no-arg
- * wrapper below consults the global E.buf.*/
+/* Validity of a buffer's mark. */
 int markInvalidBuf(const struct buffer *buf) {
 	return (buf->markx < 0 || buf->marky < 0 ||
 		buf->marky >= buf->numrows ||
@@ -209,12 +207,8 @@ int markInvalidBuf(const struct buffer *buf) {
 		(buf->markx == buf->cx && buf->cy == buf->marky));
 }
 
-int markInvalidSilent(void) {
-	return markInvalidBuf(E.buf);
-}
-
 int markInvalid(void) {
-	int ret = markInvalidSilent();
+	int ret = markInvalidBuf(E.buf);
 
 	if (ret) {
 		setStatusMessage("Mark invalid.");
@@ -310,16 +304,21 @@ static void normalizeRectCols(struct buffer *buf, int *topx, int *topy,
 	buf->markx = rectSnapBack(&buf->row[*boty], *botx);
 }
 
+/* Swap (startx,starty) and (endx,endy) if needed so start comes before
+ * end in buffer order. */
+static void orderPoints(int *sx, int *sy, int *ex, int *ey) {
+	if (*sy > *ey || (*sy == *ey && *sx > *ex)) {
+		int tx = *sx, ty = *sy;
+		*sx = *ex;
+		*sy = *ey;
+		*ex = tx;
+		*ey = ty;
+	}
+}
+
 void deleteRange(struct buffer *buf, int startx, int starty, int endx, int endy,
 		 int add_to_kill_ring) {
-	/* Normalise: ensure start comes before end */
-	if (starty > endy || (starty == endy && startx > endx)) {
-		int tx = startx, ty = starty;
-		startx = endx;
-		starty = endy;
-		endx = tx;
-		endy = ty;
-	}
+	orderPoints(&startx, &starty, &endx, &endy);
 
 	/* Clamp end position within buffer */
 	if (endy >= buf->numrows) {
@@ -504,14 +503,7 @@ void transformRange(struct buffer *buf, int startx, int starty, int endx,
 	if (rejectIfReadOnly(buf))
 		return;
 
-	/* Normalize: put start before end */
-	if (starty > endy || (starty == endy && startx > endx)) {
-		int tx = startx, ty = starty;
-		startx = endx;
-		starty = endy;
-		endx = tx;
-		endy = ty;
-	}
+	orderPoints(&startx, &starty, &endx, &endy);
 
 	int old_len;
 	uint8_t *old_text =
@@ -721,20 +713,12 @@ int regexSubstituteAll(const regex_t *re, const uint8_t *subject, int len,
 
 /* Map a byte offset within region text back to buffer coordinates.
  * The region string joins rows with '\n' (see collectRegionText), so
- * walking it reproduces the row/column the offset came from. */
+ * walking it reproduces the row/column the offset came from -- which is
+ * exactly computeInsertEnd's newline-counting walk over the first 'off'
+ * bytes, seeded at (startx, starty). */
 static void offsetToCoords(int startx, int starty, const uint8_t *s, int off,
 			   int *x, int *y) {
-	int cx = startx, cy = starty;
-	for (int i = 0; i < off; i++) {
-		if (s[i] == '\n') {
-			cy++;
-			cx = 0;
-		} else {
-			cx++;
-		}
-	}
-	*x = cx;
-	*y = cy;
+	computeInsertEnd(s, off, startx, starty, x, y);
 }
 
 void replaceRegex(void) {
@@ -749,7 +733,7 @@ void replaceRegex(void) {
 
 	/* Emacs scoping: the region when it is active, otherwise from
 	 * point to end of buffer. */
-	int use_region = buf->mark_active && !markInvalidSilent();
+	int use_region = buf->mark_active && !markInvalidBuf(buf);
 	if (use_region)
 		normalizeRegion();
 
@@ -775,15 +759,11 @@ void replaceRegex(void) {
 		return;
 	}
 
-	/* Cap the displayed pattern to 35 chars.  The prompt is a plain
-	 * prefix (see editorPrompt), so no percent escaping is needed
-	 * and %.35s truncation is safe.  A literal newline in the
-	 * pattern is shown as ^J; embedded raw it would reach the
-	 * terminal as a line feed and split the minibuffer. */
-	char *esc = caretEscapeNewlines(regex);
-	char prompt[128];
-	snprintf(prompt, sizeof(prompt), "Regex replace %.35s with: ", esc);
-	free(esc);
+	/* At most 35 bytes of the pattern, sanitised: the prompt is one
+	 * line and reaches the terminal raw. */
+	char esc[36], prompt[64];
+	utf8SanitizeLine(regex, strlen((const char *)regex), esc, sizeof(esc));
+	snprintf(prompt, sizeof(prompt), "Regex replace %s with: ", esc);
 	uint8_t *repl = editorPrompt(prompt, PROMPT_REPLACE, NULL);
 	if (repl == NULL) {
 		free(regex);
@@ -940,7 +920,6 @@ void stringRectangleWithText(uint8_t *string) {
 	free(old_text);
 	free(out);
 	E.buf->mark_active = 0;
-	;
 	restoreKill(okill);
 }
 
@@ -986,7 +965,6 @@ void copyRectangle(void) {
 
 	addToKillRing((char *)E.kill.str, 1, rw, rh);
 	E.buf->mark_active = 0;
-	;
 }
 
 void killRectangle(void) {
@@ -1070,7 +1048,6 @@ void killRectangle(void) {
 	free(old_text);
 	free(out);
 	E.buf->mark_active = 0;
-	;
 	clearText(&saved);
 }
 
@@ -1170,7 +1147,6 @@ void yankRectangle(void) {
 	free(old_text);
 	free(out);
 	E.buf->mark_active = 0;
-	;
 	clearText(&E.kill);
 	E.kill = saved;
 }

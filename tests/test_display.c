@@ -43,16 +43,9 @@ static char *render_rows(struct window *win, int *len_out) {
 	return out;
 }
 
-/* B6 — wrong-buffer mark check
- *
- * computeRowHighlightBounds(buf, ...) reads everything from its `buf`
- * parameter except one call: markInvalidSilent(), which takes no
- * argument and consults the global E.buf.  So an unfocused window's
- * selection is drawn or not drawn according to whether the *focused*
- * buffer happens to have a valid mark.
- *
- * Buffer B carries a valid, active selection throughout; the focused
- * buffer A carries none.  B must still be highlighted. */
+/* B6: an unfocused window's selection is drawn from its own buffer's
+ * mark.  Buffer B carries a valid, active selection throughout; the
+ * focused buffer A carries none.  B must still be highlighted. */
 
 static void b6_setup(struct buffer **a_out, struct buffer **b_out) {
 	initTestEditor();

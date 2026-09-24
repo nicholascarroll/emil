@@ -21,6 +21,7 @@
 #include "unicode.h"
 #include "keymap.h"
 #include "display.h"
+#include "window.h"
 
 void installHandler(int signum, void (*handler)(int), int flags) {
 	struct sigaction sa;
@@ -49,28 +50,13 @@ void die(const char *s) {
 	exit(1);
 }
 
-/* Registered with atexit(); also called directly before printing
- * fatal errors.  Best-effort by design: this runs during exit
- * processing, where routing a failure through die() would call
- * exit() inside exit() (undefined behavior).  If tcsetattr fails
- * here the terminal is beyond saving anyway.
- *
- * Also called from the fatal-signal handler in main.c, so it must
- * stay async-signal-safe: tcsetattr() and write() are on POSIX's
- * list, and nothing else may be added here without checking that it
- * is too.  A printf() here would be invisible on the exit path and
- * undefined on the crash path. */
 void disableRawMode(void) {
 	IGNORE_RETURN(tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_termios));
 	IGNORE_RETURN(write(STDOUT_FILENO, CSI "?1049l", 8));
 }
 
 /*
- * Restore cooked terminal mode without leaving the alternate screen
- * buffer.  Used by the shell drawer so that the editor content painted
- * in the upper portion of the alt screen stays visible while the shell
- * runs in the bottom portion.
- */
+ * Restore cooked terminal mode without leaving the alternate screen */
 void disableRawModeKeepScreen(void) {
 	if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_termios) == -1)
 		die("disableRawModeKeepScreen tcsetattr");
@@ -108,9 +94,8 @@ void openShellDrawer(void) {
 	int rows = ws.ws_row - drawerHeight;
 	E.screenrows = rows;
 
-	/* Force all windows to recalculate heights for the smaller space */
-	for (int i = 0; i < E.nwindows; i++)
-		E.windows[i]->height = 0;
+	/* Lay the windows out again in the smaller space */
+	resetWindowHeights();
 
 	/* Save cursor position */
 	if (write(STDOUT_FILENO, ESC "7", 2) != 2)
@@ -154,26 +139,7 @@ void openShellDrawer(void) {
 #endif /* __wasi__ */
 
 /*
- * Apply raw-mode terminal settings without saving orig_termios.
- * Used on resume (SIGCONT) where the original state is already saved.
- */
-
-/* What a readback said we did not get.  APUE §18.4: tcsetattr reports
- * success if it applied ANY of the requested changes, so a return of 0
- * does not mean the terminal is in the mode we asked for.  Nothing in
- * POSIX obliges the implementation to say which parts it dropped, so
- * the only way to find out is to read the settings back and compare.
- *
- * Recorded rather than reported here because applyRawMode() runs
- * before initEditor() on the startup path, so there is no status line
- * to write to yet.  main() reports it once there is.
- *
- * A readback is only as honest as the layer answering it: a terminal
- * emulated by a sandbox runtime may report flags that match neither
- * the request nor the host tty, in which case a clean readback is not
- * evidence that the mode took.  This check catches the layer that
- * drops flags and admits it, which is the common case and the one
- * POSIX warns about. */
+ * Apply raw-mode terminal settings without saving orig_termios.*/
 static struct {
 	tcflag_t iflag, oflag, lflag;
 	int vmin, vtime;
@@ -195,8 +161,6 @@ void applyRawMode(void) {
 	if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1)
 		die("applyRawMode tcsetattr");
 
-	/* Verify.  A failed readback is not itself an error: it tells us
-	 * nothing either way, so leave the record as it stands. */
 	struct termios got;
 	if (tcgetattr(STDIN_FILENO, &got) == -1)
 		return;
@@ -210,23 +174,6 @@ void applyRawMode(void) {
 				  raw_divergence.oflag ||
 				  raw_divergence.lflag || raw_divergence.vmin ||
 				  raw_divergence.vtime;
-
-	/* Do not refine this by consulting c_cc.  ISIG matters only if
-	 * some byte is still designated INTR, SUSP or QUIT, so
-	 * suppressing the ISIG report when those slots hold
-	 * _POSIX_VDISABLE looks like an accuracy improvement -- it is
-	 * what tests/wasix/emil-wasix arranges, and the flag then eats
-	 * nothing (§3.28.2).
-	 *
-	 * It is unreliable by construction.  A divergence exists here
-	 * only on a layer that misreports termios, and such a layer
-	 * cannot be trusted about c_cc either: under wasmer the guest
-	 * reads VINTR, VSUSP, VQUIT, VSTOP and VSTART as 0 -- which is
-	 * _POSIX_VDISABLE -- while the host has 3, 26, 28, 19 and 17.
-	 * The refinement therefore concludes "disarmed" on every WASIX
-	 * run and suppresses the warning exactly where the launcher is
-	 * absent and the keys really are being eaten.  Measured, and
-	 * reverted for it. */
 }
 
 /* Name the raw-mode settings that did not take, into buf.  Returns 1
@@ -252,6 +199,10 @@ int rawModeDivergence(char *buf, size_t n) {
 	if (!raw_divergence.diverged || n == 0)
 		return 0;
 
+#ifdef __wasi__
+	emil_strlcpy(buf, "Raw mode unverified on WASIX", n);
+	return 1;
+#endif
 	buf[0] = '\0';
 	emil_strlcat(buf, "Terminal did not accept raw mode: ", n);
 	for (i = 0; i < sizeof(interesting) / sizeof(interesting[0]); i++) {
@@ -328,11 +279,6 @@ void copyToClipboard(const uint8_t *text) {
 	memcpy(buf + 7, encoded, elen);
 	memcpy(buf + 7 + elen, "\033\\", 2);
 
-	/* Looped.  This payload reaches ~100000 bytes, an order of
-	 * magnitude past a pty's buffer, so a short write here is the
-	 * likeliest of them all -- and the least benign: it would put a
-	 * truncated base64 payload on the clipboard and leave the
-	 * terminal waiting for an ST that never arrives. */
 	IGNORE_RETURN(writeAll(STDOUT_FILENO, buf, total));
 
 	free(buf);
@@ -340,10 +286,6 @@ void copyToClipboard(const uint8_t *text) {
 }
 
 void deserializeUnicode(void) {
-	/* Guard every read: a truncated macro must not index past
-	 * nkeys into uninitialized key slots.  On truncation fall
-	 * back to a replacement character so callers still see a
-	 * valid (if wrong) UTF-8 sequence. */
 	if (E.playback >= E.macro.nkeys) {
 		E.unicode[0] = '?';
 		E.nunicode = 1;
@@ -361,29 +303,6 @@ void deserializeUnicode(void) {
 	}
 }
 
-/*
- * Escape-sequence input: the grammar and key mapping live in the
- * pure state machine in decoder.c; this file supplies only the byte
- * source (the clock and signal policy) and the reporting of
- * unrecognized sequences.
- */
-/* Byte source for the decoder (see decoder.h for the contract).
- *
- * Both wait classes block.  They differ only in what a signal means.
- *
- * wait_indefinitely: the byte after a raw ESC.  ESC is the Meta
- * prefix, so block until the user continues.  A signal (EINTR)
- * abandons the wait so the main loop regains control to handle
- * resize/suspend flags; the pending ESC then decodes as a silent
- * bare ESC token.
- *
- * Otherwise: a byte inside a terminal-generated sequence.  Block,
- * retrying on EINTR, until it arrives.  */
-/* Read one UTF-8 continuation byte, retrying on EINTR.
- *
- * Same rule as terminalEscByte: never abandon a sequence in flight.  A
- * bare read() here drops the whole character when a SIGWINCH or
- * SIGCONT arrives mid-sequence. */
 static int terminalContByte(uint8_t *out) {
 	for (;;) {
 		ssize_t n = read(STDIN_FILENO, out, 1);
@@ -424,19 +343,12 @@ static int unknownEscape(const uint8_t *bytes, int n) {
 	return 033;
 }
 
-/* Raw reading a keypress - terminal layer only handles raw byte
- * reading, escape sequence decoding, and UTF-8 assembly.
- * Returns key tokens only: no binding policy. */
+/* Raw reading a keypress. */
 int readKey(void) {
 	/* Repair terminal/screen state after an asynchronous signal. */
 	handlePendingSignals();
 
 	if (E.playback) {
-		/* A nested readKey (prefix sub-key, confirmation
-		 * prompt) can be reached with the macro already
-		 * exhausted if the recording missed a key.  Reading
-		 * past nkeys returns uninitialized ints from the
-		 * keys array; fail the read instead. */
 		if (E.playback >= E.macro.nkeys)
 			return -1;
 		int ret = E.macro.keys[E.playback++];
@@ -449,10 +361,6 @@ int readKey(void) {
 	uint8_t c;
 	while ((nread = read(STDIN_FILENO, &c, 1)) != 1) {
 		if (nread == -1 && errno == EINTR) {
-			/* Repair before yielding to the caller: every
-			 * read loop treats -1 as "retry", and a retry
-			 * into a cooked-mode terminal is what produced
-			 * the literal ^G after C-z / fg. */
 			handlePendingSignals();
 			return -1;
 		}
@@ -465,10 +373,7 @@ int readKey(void) {
 		int key = decodeEscapeSequence(terminalEscByte, seen, &n_seen);
 		if (key == 033)
 			/* n_seen == 0 means the Meta-prefix wait was
-			 * abandoned by a signal, not that a sequence was
-			 * unrecognized: return the bare token silently
-			 * rather than posting "Unknown command M-" with
-			 * nothing after it. */
+			 * abandoned by a signal. */
 			return n_seen ? unknownEscape(seen, n_seen) : 033;
 		return key;
 	} else if (utf8_is2Char(c)) {
@@ -501,6 +406,10 @@ int readKey(void) {
 		if (!utf8_validate(E.unicode, 4))
 			return KEY_UNICODE_ERROR;
 		return KEY_UNICODE;
+	} else if (c >= 0x80) {
+		E.nunicode = 1;
+		E.unicode[0] = c;
+		return KEY_UNICODE_ERROR;
 	}
 	return c;
 }

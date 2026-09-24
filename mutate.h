@@ -7,7 +7,8 @@
 
 /* WHEN TO USE mutate.h:
  * Use mutate.h for:
- *  - user-initiated range edits to a user-editable buffer that should be undoable and dirty the buffer
+ *  - user-initiated range edits to a user-editable buffer that should be 
+      undoable  and dirty the buffer
  * Use buffer.c primitives directly for:
  *  - file loading 
  *  - minibuffer/special/popup buffer population
@@ -33,17 +34,13 @@ uint8_t *collectRegionText(struct buffer *buf, int startx, int starty, int endx,
  * 'repl' / 'repl_len' is the replacement text.  May be NULL/0 for
  * a pure delete.
  *
- * 'chain_to_prev' — when non-zero, the first record pushed by this
+ * 'chain_to_prev': when non-zero, the first record pushed by this
  * call gets paired=1, chaining it to whatever mutation was pushed
- * immediately before.  This is how yankRectangle gets a rectangle
- * paste with row-extension to undo atomically.  Default usage is 0.
+ * immediately before.
  *
  * Refuses read-only buffers before any side effect (including
  * clearRedos): this is the authoritative check for the mutation
- * layer.  On refusal, *out_endx and *out_endy are NOT written —
- * callers must not consume the out-params when the buffer is
- * read-only.  (All current callers are guarded upstream; this is
- * belt-and-braces.)
+ * layer.  On refusal, *out_endx and *out_endy are NOT written.
  *
  * Calls clearRedos, records undo, performs mutation via
  * bulkInsert/bulkDelete, calls adjustAllPoints (inside bulk ops),

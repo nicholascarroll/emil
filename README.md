@@ -52,6 +52,14 @@ pacman -S msys2-devel msys2-runtime-devel
 make && make install
 ```
 
+**WASIX**
+- Piping stdin does not work on WASIX.
+- Run `tests/wasix/setup.sh` to install the toolchain, then build:
+
+```bash
+make wasix WASIX_PREFIX=<prefix>
+```
+
 
 ## Getting Started
 
