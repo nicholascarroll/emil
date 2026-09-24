@@ -6,64 +6,17 @@
 - #129 In palette with 2 windows cursor display fixed
 - #128 Opening the same file by two paths fixed
 - `M-.` looks up Thai word at cursor delimited by U+200B ZERO WIDTH  SPACE
+- `M-.` finds words in any script
+- Fixed `M-.` finding nothing when the cursor sat on a zero-width space
+- #130 `M-.` lists every definition when a word has more than one.
+- `M-.` goes to an entry's line number when the tags file gives one
+  Build tags with `ctags --excmd=combine`.
 - `C-g` for pipe to shell improved to not clash with GPG password prompt
-- A shell command's stderr now goes to the status line instead of being
-  discarded, led by the exit status when that is nonzero (#132).  It is
-  sanitised first: control characters are shown in caret notation (`^[`,
-  `^J`), C1 controls as `?`, and bytes that are not valid UTF-8 as U+FFFD,
-  so nothing the command writes can drive the terminal.  Too long for the
-  status line, it is cut on a character boundary and ends in `...`.
-- A command with nothing on stdout or stderr now says so, in Emacs's
-  words: "(Shell command succeeded with no output)" or "(Shell command
-  failed with code N and no output)".
-- `M-!` and `M-|` no longer open *Shell Output* when the command wrote
-  nothing to stdout, so a command run for its effect or its error does
-  not replace the buffer in the window.
-- Opening a file already open under another path -- a symlink and its
-  target, or two hard links -- now reuses its buffer instead of opening a
-  second one on the same file (#128), and says "X and Y are the same
-  file".  Files named on the command line are deduplicated the same way,
-  including two spellings of one path (`emil foo.c ./foo.c`), which used
-  to open it twice.
-- The focus invariant -- between commands, exactly one window is focused
-  and `E.buf` is the buffer it shows -- is now written down next to
-  `E.buf` in `emil.h` and checked by `focusInvariantBreach()`.  Building
-  with `-DEMIL_DEBUG_FOCUS`, which `make sanitize` now does, runs the check
-  on every pass of the main loop and aborts on a breach.
-- Fixed a completion list or register popup moving focus to the top window.
-  From the lower window of a split, `C-g` on a completion list left the
-  cursor in the upper window while typing went to the lower one's buffer,
-  and choosing a completion opened the file in the upper window.  `C-x r v`
-  did the same outside any prompt.
-- Fixed the palette (`M-/`) drawing the cursor in the upper window when
-  opened from the lower window of a split (#129): two windows claimed
-  focus, and the first one won.  Fixed the palette also returning focus to
-  the upper window when both windows of a split show the same buffer.
-- `C-x` commands now work in a prompt.  The prompt loop resolved each key
-  twice, so `C-x` arrived as `C-x C-x` (exchange point and mark) and no
-  `C-x` chord reached the minibuffer; `C-x h` then `C-w`, for instance,
-  now clears what was typed.
+- `C-x` commands now work in a prompt.  
 - Commands that switch or kill buffers, change windows or toggle
   read-only are refused in a prompt with "Not available in the
-  minibuffer".  `M-.` could already reach the minibuffer: on a symbol in
-  a prompt it jumped to the tag and sent the next keystrokes into that
-  file behind the still-open prompt.  With `C-x` chords reaching it as
-  well, `C-x <right>` and `C-x k` would have crashed the editor,
-  `C-x <left>` and `C-x r j` would have sent typing into a file, and
-  `C-x C-q` would have left every later prompt refusing input.  The
-  window commands were already refused, with a message the prompt redrew
-  over before it could be read.
-- Functions that take buffer positions now take the buffer the positions
-  index: the word, paragraph, sentence and sexp scanners in `motion.c`,
-  and `deleteRange`, `transformRange` and `normalizeRectCols` in
-  `region.c`.  The two word scanners also start from the position they
-  are given; they used to start from point and treat their arguments as
-  outputs, unlike their siblings with the same signature, which is why
-  `transposeWords` had to move point to ask about a word elsewhere.  No
-  change in behaviour: every caller passed point.
-- `editorPrompt` no longer takes a buffer.  Every caller passed `E.buf`,
-  which the prompt already saves as `E.edbuf`, and the argument was only
-  handed on to the search callback, which now receives `E.edbuf`.
+  minibuffer".
+
 
 ## [0.9.9]
 - Added page up/down to prompt completion windows

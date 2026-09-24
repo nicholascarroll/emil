@@ -29,9 +29,30 @@ int findTagsDir(char *out_dir, size_t dirsz);
 int resolveTagPath(const char *tagsdir, const char *tagpath, char *out,
 		   size_t outsz);
 
-/* The symbol at point for a tags lookup, or NULL if there is none:
- * an ASCII identifier, or a Thai word bounded by U+200B ZERO WIDTH
- * SPACE or non-word characters.  Caller frees.  Exposed for testing. */
+/* One tags-file entry.  file is the path as the tags file writes it,
+ * path the same joined onto the tags directory.  line is 0 when the
+ * entry gives no line number (neither a numeric address nor a line:
+ * field); pat is the search pattern without delimiters or anchors, ""
+ * when there is none.  scope is the enclosing class, struct, namespace
+ * or the like, NULL if the entry names none. */
+struct tagMatch {
+	char *file;
+	char *path;
+	char *pat;
+	char *scope;
+	int line;
+};
+
+/* Parse one line of a tags file.  Returns 0 if it is an entry for sym
+ * and fills m with pointers into line, which is modified; path is left
+ * NULL.  Returns -1 for any other line.  Exposed for testing. */
+int ctagsParseLine(char *line, const char *sym, struct tagMatch *m);
+
+/* The word at point for a tags lookup, or NULL if there is none: a run
+ * of ASCII identifier characters and non-ASCII letters, ended by
+ * anything else -- including punctuation and U+200B ZERO WIDTH SPACE,
+ * which marks word boundaries in scripts written without spaces.
+ * Caller frees.  Exposed for testing. */
 char *ctagsWordAtPoint(void);
 
 #endif /* EMIL_CTAGS_H */

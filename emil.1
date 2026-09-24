@@ -451,9 +451,42 @@ inserts a literal tab.
 .Bl -tag -width Ds
 .It Cm M-.
 Jump to symbol definition (Ctags).
-The symbol is the identifier at point or, in Thai text, the word at
-point, delimited by U+200B ZERO WIDTH SPACE or by any character that
-is not part of a Thai word.
+The symbol is the word at point: a run of ASCII letters, digits and
+underscores together with any non-ASCII characters other than
+punctuation.
+In scripts written without spaces, such as Thai, separate words with
+U+200B ZERO WIDTH SPACE.
+With the cursor drawn on the character after a zero-width space, that
+character's word is looked up.
+The
+.Pa tags
+file is found in the current directory or the nearest one above it.
+When the word has several definitions they are listed, those in the
+current file first, each with its enclosing class or other scope, its
+file and line, and the definition's text.
+.Cm C-n
+and
+.Cm C-p
+(or
+.Cm M-n
+and
+.Cm M-p ) ,
+.Cm C-v ,
+.Cm M-v ,
+.Cm M-<
+and
+.Cm M->
+move the selection,
+.Cm RET
+visits it and
+.Cm C-g
+cancels.
+Build the file with
+.Ic ctags --excmd=combine
+so that each entry carries a line number: without one, definitions
+whose lines read the same, such as two classes'
+.Ql def close(self):\& ,
+lead to the same place.
 .It Cm M-,
 Jump back from symbol definition.
 .It Cm M-`

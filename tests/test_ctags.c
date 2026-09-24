@@ -6,6 +6,8 @@
 #include "test.h"
 #include "test_harness.h"
 #include "ctags.h"
+#include "fileio.h"
+#include "keymap.h"
 #include "util.h" /* emil_strlcpy prototype — without it the call at
 		    * make_project() is an implicit declaration (assumed
 		    * int return), which is invalid C99 and trips
@@ -193,7 +195,7 @@ void test_find_tags_absent(void) {
 	rm_project(dir);
 }
 
-/* ---- ctagsWordAtPoint: ASCII identifiers and Thai words ---- */
+/* ---- ctagsWordAtPoint: ASCII identifiers and non-ASCII words ---- */
 
 /* "ภาษา" ZWSP "ไทย" ZWSP "ง่าย" -- three words, 12 + 3 + 9 + 3 + 12
  * bytes.  Offsets below are byte offsets into this row. */
@@ -237,8 +239,24 @@ void test_word_thai_middle_word_bounded_by_zwsp(void) {
 	free(w);
 }
 
-void test_word_thai_on_zwsp_takes_word_before(void) {
+/* The ZWSP has no screen cell, so the cursor is drawn on the ไ after
+ * it: that is the word the user is pointing at. */
+void test_word_thai_on_zwsp_takes_word_after(void) {
 	char *w = word_at(thai_row, 12); /* on the first ZWSP */
+	TEST_ASSERT_EQUAL_STRING("ไทย", w);
+	free(w);
+}
+
+/* ...but with no word after the separator, fall back to the one
+ * before it, as for any cursor just past the end of a word. */
+void test_word_zwsp_at_end_of_row_takes_word_before(void) {
+	char *w = word_at("ภาษา" ZW, 12);
+	TEST_ASSERT_EQUAL_STRING("ภาษา", w);
+	free(w);
+}
+
+void test_word_zwsp_before_space_takes_word_before(void) {
+	char *w = word_at("ภาษา" ZW " x", 12);
 	TEST_ASSERT_EQUAL_STRING("ภาษา", w);
 	free(w);
 }
@@ -250,8 +268,16 @@ void test_word_thai_with_tone_mark_at_end_of_row(void) {
 	free(w);
 }
 
-void test_word_thai_mai_yamok_is_a_boundary(void) {
+/* The editor knows no Thai: MAI YAMOK is part of the word unless the
+ * text marks a boundary before it with a ZWSP. */
+void test_word_thai_mai_yamok_is_part_of_word(void) {
 	char *w = word_at("ต่างๆ", 0);
+	TEST_ASSERT_EQUAL_STRING("ต่างๆ", w);
+	free(w);
+}
+
+void test_word_thai_zwsp_before_mai_yamok_is_a_boundary(void) {
+	char *w = word_at("ต่าง" ZW "ๆ", 0);
 	TEST_ASSERT_EQUAL_STRING("ต่าง", w);
 	free(w);
 }
@@ -262,9 +288,9 @@ void test_word_thai_paiyannoi_is_part_of_word(void) {
 	free(w);
 }
 
-void test_word_thai_digits_are_a_boundary(void) {
+void test_word_non_ascii_digits_are_word_characters(void) {
 	char *w = word_at("ปี๒๕๖๙", 0);
-	TEST_ASSERT_EQUAL_STRING("ปี", w);
+	TEST_ASSERT_EQUAL_STRING("ปี๒๕๖๙", w);
 	free(w);
 }
 
@@ -272,6 +298,301 @@ void test_word_thai_next_to_ascii(void) {
 	char *w = word_at("(ภาษา)", 1);
 	TEST_ASSERT_EQUAL_STRING("ภาษา", w);
 	free(w);
+}
+
+void test_word_accented_latin_from_ascii_letter(void) {
+	char *w = word_at("caf\xc3\xa9 au lait", 1); /* on the a */
+	TEST_ASSERT_EQUAL_STRING("caf\xc3\xa9", w);
+	free(w);
+}
+
+void test_word_accented_latin_from_accented_letter(void) {
+	char *w = word_at("caf\xc3\xa9 au lait", 3); /* on the e-acute */
+	TEST_ASSERT_EQUAL_STRING("caf\xc3\xa9", w);
+	free(w);
+}
+
+void test_word_greek(void) {
+	/* "Ελλάδα x", cursor on the second letter */
+#define GREECE "\xce\x95\xce\xbb\xce\xbb\xce\xac\xce\xb4\xce\xb1"
+	char *w = word_at(GREECE " x", 2);
+	TEST_ASSERT_EQUAL_STRING(GREECE, w);
+#undef GREECE
+	free(w);
+}
+
+/* Curly quotes and dashes are General Punctuation, so they end a word
+ * rather than becoming part of it. */
+void test_word_curly_quotes_are_separators(void) {
+	char *w = word_at("\xe2\x80\x9c" "caf\xc3\xa9" "\xe2\x80\x9d", 4);
+	TEST_ASSERT_EQUAL_STRING("caf\xc3\xa9", w);
+	free(w);
+}
+
+void test_word_em_dash_is_a_separator(void) {
+	char *w = word_at("HOT\xe2\x80\x94" "DOG", 0);
+	TEST_ASSERT_EQUAL_STRING("HOT", w);
+	free(w);
+}
+
+void test_word_guillemets_are_separators(void) {
+	char *w = word_at("\xc2\xab" "na\xc3\xafve" "\xc2\xbb", 2);
+	TEST_ASSERT_EQUAL_STRING("na\xc3\xafve", w);
+	free(w);
+}
+
+/* A lead byte with its continuation bytes missing (reachable through
+ * byte-column rectangle edits) is one codepoint, not a licence to skip
+ * the bytes that follow it. */
+void test_word_truncated_sequence_does_not_swallow_following_bytes(void) {
+	char *w = word_at("\xe0 x", 0);
+	TEST_ASSERT_EQUAL_STRING("\xe0", w);
+	free(w);
+}
+
+/* ---- ctagsParseLine ---- */
+
+static int parse(const char *text, const char *sym, struct tagMatch *m,
+		 char *line, size_t linesz) {
+	emil_strlcpy(line, text, linesz);
+	return ctagsParseLine(line, sym, m);
+}
+
+void test_parse_pattern_address_and_scope(void) {
+	char line[256];
+	struct tagMatch m;
+	int rc = parse("close\tasyncio/streams.py\t/^    def close(self):$/;\""
+		       "\tm\tclass:StreamWriter\n",
+		       "close", &m, line, sizeof(line));
+	TEST_ASSERT_EQUAL_INT(0, rc);
+	TEST_ASSERT_EQUAL_STRING("asyncio/streams.py", m.file);
+	TEST_ASSERT_EQUAL_STRING("    def close(self):", m.pat);
+	TEST_ASSERT_EQUAL_STRING("StreamWriter", m.scope);
+	TEST_ASSERT_EQUAL_INT(0, m.line);
+}
+
+void test_parse_number_address(void) {
+	char line[256];
+	struct tagMatch m;
+	TEST_ASSERT_EQUAL_INT(0, parse("foo\tfoo.c\t42;\"\tf\n", "foo", &m,
+				       line, sizeof(line)));
+	TEST_ASSERT_EQUAL_INT(42, m.line);
+	TEST_ASSERT_EQUAL_STRING("", m.pat);
+	TEST_ASSERT_NULL(m.scope);
+}
+
+/* ctags --excmd=combine: the number is what tells apart two methods
+ * whose definition lines are identical. */
+void test_parse_combined_address(void) {
+	char line[256];
+	struct tagMatch m;
+	TEST_ASSERT_EQUAL_INT(0, parse("foo\tfoo.c\t357;/^int foo(void)$/;\"\tf",
+				       "foo", &m, line, sizeof(line)));
+	TEST_ASSERT_EQUAL_INT(357, m.line);
+	TEST_ASSERT_EQUAL_STRING("int foo(void)", m.pat);
+}
+
+void test_parse_line_field(void) {
+	char line[256];
+	struct tagMatch m;
+	TEST_ASSERT_EQUAL_INT(0, parse("x\ta.py\t/^x = 1$/;\"\tv\tline:12\n",
+				       "x", &m, line, sizeof(line)));
+	TEST_ASSERT_EQUAL_INT(12, m.line);
+	TEST_ASSERT_EQUAL_STRING("x = 1", m.pat);
+}
+
+void test_parse_scope_field_form(void) {
+	char line[256];
+	struct tagMatch m;
+	TEST_ASSERT_EQUAL_INT(0, parse("run\ta.py\t9;\"\tm\tscope:class:Task\n",
+				       "run", &m, line, sizeof(line)));
+	TEST_ASSERT_EQUAL_STRING("Task", m.scope);
+}
+
+void test_parse_typeref_is_not_a_scope(void) {
+	char line[256];
+	struct tagMatch m;
+	TEST_ASSERT_EQUAL_INT(0, parse("n\ta.c\t3;\"\tv\ttyperef:typename:int\n",
+				       "n", &m, line, sizeof(line)));
+	TEST_ASSERT_NULL(m.scope);
+}
+
+void test_parse_escaped_delimiter_and_crlf(void) {
+	char line[256];
+	struct tagMatch m;
+	TEST_ASSERT_EQUAL_INT(0, parse("d\td.c\t/^a\\/b \\\\ c$/;\"\tf\r\n", "d",
+				       &m, line, sizeof(line)));
+	TEST_ASSERT_EQUAL_STRING("a/b \\ c", m.pat);
+}
+
+/* Format 1, as a Thai vocabulary tags file writes it: no fields. */
+void test_parse_format1_dictionary_line(void) {
+	char line[256];
+	struct tagMatch m;
+	TEST_ASSERT_EQUAL_INT(0, parse("กรรม\tdict.tsv\t1\n", "กรรม", &m, line,
+				       sizeof(line)));
+	TEST_ASSERT_EQUAL_STRING("dict.tsv", m.file);
+	TEST_ASSERT_EQUAL_INT(1, m.line);
+}
+
+void test_parse_rejects_other_names_and_pseudotags(void) {
+	char line[256];
+	struct tagMatch m;
+	TEST_ASSERT_EQUAL_INT(-1, parse("closed\ta.py\t1\n", "close", &m, line,
+					sizeof(line)));
+	TEST_ASSERT_EQUAL_INT(-1, parse("!_TAG_FILE_SORTED\t1\t//\n", "!_TAG",
+					&m, line, sizeof(line)));
+}
+
+/* ---- ctagsJump: one match jumps, several open the menu ---- */
+
+static void write_file(const char *dir, const char *name, const char *text) {
+	char path[PATH_MAX + 32];
+	snprintf(path, sizeof(path), "%s/%s", dir, name);
+	FILE *fp = fopen(path, "w");
+	if (fp) {
+		fputs(text, fp);
+		fclose(fp);
+	}
+}
+
+/* 'close' three times: twice in a.py with identical definition lines,
+ * so only the line numbers tell classes A and B apart, and once in
+ * b.py.  'helper' once. */
+static char menu_root[PATH_MAX];
+static char menu_saved_cwd[PATH_MAX];
+
+static int enter_menu_project(void) {
+	char tmpl[] = "/tmp/emil_tagmenu_XXXXXX";
+	char *made = mkdtemp(tmpl);
+	if (!made || emil_strlcpy(menu_root, made, sizeof(menu_root)) >=
+			     sizeof(menu_root))
+		return -1;
+	write_file(menu_root, "a.py",
+		   "class A:\n    def close(self):\n        pass\n"
+		   "class B:\n    def close(self):\n        pass\n");
+	write_file(menu_root, "b.py",
+		   "class C:\n    def close(self):\n        pass\n"
+		   "def helper():\n    pass\n");
+	write_file(menu_root, "tags",
+		   "!_TAG_FILE_FORMAT\t2\t//\n"
+		   "!_TAG_FILE_SORTED\t1\t//\n"
+		   "close\ta.py\t2;/^    def close(self):$/;\"\tm\tclass:A\n"
+		   "close\ta.py\t5;/^    def close(self):$/;\"\tm\tclass:B\n"
+		   "close\tb.py\t2;/^    def close(self):$/;\"\tm\tclass:C\n"
+		   "helper\tb.py\t/^def helper():$/;\"\tf\n");
+	if (!getcwd(menu_saved_cwd, sizeof(menu_saved_cwd)) ||
+	    chdir(menu_root) != 0)
+		return -1;
+	return 0;
+}
+
+static void leave_menu_project(void) {
+	TEST_ASSERT_EQUAL_INT(0, chdir(menu_saved_cwd));
+	rm_project(menu_root);
+}
+
+/* Press M-. on 'close' in "x.close()" with the given keys queued. */
+static void jump_with_keys(const char *line, int cx, const int *keys, int n) {
+	struct buffer *buf = make_test_buffer(line);
+	buf->cx = cx;
+	scriptKeys(keys, n);
+	muteStdout();
+	ctagsJump();
+	unmuteStdout();
+}
+
+static int ends_with(const char *s, const char *suffix) {
+	size_t a = strlen(s), b = strlen(suffix);
+	return a >= b && strcmp(s + a - b, suffix) == 0;
+}
+
+void test_menu_single_match_jumps_directly(void) {
+	if (enter_menu_project() != 0) {
+		TEST_ASSERT(0 && "could not create temp project");
+		return;
+	}
+	int keys[] = { CTRL('g') }; /* would cancel a menu, if one opened */
+	jump_with_keys("helper()", 0, keys, 1);
+	TEST_ASSERT_EQUAL_INT(0, test_key_pos);
+	TEST_ASSERT(E.buf->filename && ends_with(E.buf->filename, "b.py"));
+	TEST_ASSERT_EQUAL_INT(3, E.buf->cy);
+	leave_menu_project();
+}
+
+void test_menu_return_visits_first_match(void) {
+	if (enter_menu_project() != 0) {
+		TEST_ASSERT(0 && "could not create temp project");
+		return;
+	}
+	int keys[] = { '\r' };
+	jump_with_keys("x.close()", 2, keys, 1);
+	TEST_ASSERT(E.buf->filename && ends_with(E.buf->filename, "a.py"));
+	TEST_ASSERT_EQUAL_INT(1, E.buf->cy);
+	TEST_ASSERT_NULL(findBufferByName("*Tags*"));
+	TEST_ASSERT_EQUAL_INT(1, E.nwindows);
+	leave_menu_project();
+}
+
+/* B.close has the same definition line as A.close: a jump by pattern
+ * alone would land on A's. */
+void test_menu_second_row_reaches_identical_definition(void) {
+	if (enter_menu_project() != 0) {
+		TEST_ASSERT(0 && "could not create temp project");
+		return;
+	}
+	int keys[] = { CTRL('n'), '\r' };
+	jump_with_keys("x.close()", 2, keys, 2);
+	TEST_ASSERT(E.buf->filename && ends_with(E.buf->filename, "a.py"));
+	TEST_ASSERT_EQUAL_INT(4, E.buf->cy);
+	leave_menu_project();
+}
+
+void test_menu_end_of_list_and_clamping(void) {
+	if (enter_menu_project() != 0) {
+		TEST_ASSERT(0 && "could not create temp project");
+		return;
+	}
+	int keys[] = { KEY_META('>'), CTRL('n'), CTRL('n'), '\r' };
+	jump_with_keys("x.close()", 2, keys, 4);
+	TEST_ASSERT(E.buf->filename && ends_with(E.buf->filename, "b.py"));
+	TEST_ASSERT_EQUAL_INT(1, E.buf->cy);
+	leave_menu_project();
+}
+
+void test_menu_cancel_leaves_reader_in_place(void) {
+	if (enter_menu_project() != 0) {
+		TEST_ASSERT(0 && "could not create temp project");
+		return;
+	}
+	int keys[] = { CTRL('n'), CTRL('g') };
+	jump_with_keys("x.close()", 2, keys, 2);
+	TEST_ASSERT_NULL(E.buf->filename);
+	TEST_ASSERT_EQUAL_INT(2, E.buf->cx);
+	TEST_ASSERT_EQUAL_STRING("Canceled.", E.statusmsg);
+	TEST_ASSERT_NULL(findBufferByName("*Tags*"));
+	TEST_ASSERT_EQUAL_INT(1, E.nwindows);
+	leave_menu_project();
+}
+
+/* Reading b.py, its own close is listed first. */
+void test_menu_lists_current_file_first(void) {
+	if (enter_menu_project() != 0) {
+		TEST_ASSERT(0 && "could not create temp project");
+		return;
+	}
+	struct buffer *b = switchToFile("b.py");
+	TEST_ASSERT_NOT_NULL(b);
+	b->cy = 1;
+	b->cx = 8; /* on "close" in "    def close(self):" */
+	int keys[] = { '\r' };
+	scriptKeys(keys, 1);
+	muteStdout();
+	ctagsJump();
+	unmuteStdout();
+	TEST_ASSERT(E.buf->filename && ends_with(E.buf->filename, "b.py"));
+	TEST_ASSERT_EQUAL_INT(1, E.buf->cy);
+	leave_menu_project();
 }
 
 int main(void) {
@@ -292,12 +613,37 @@ int main(void) {
 	RUN_TEST(test_word_none_on_punctuation);
 	RUN_TEST(test_word_thai_first_word);
 	RUN_TEST(test_word_thai_middle_word_bounded_by_zwsp);
-	RUN_TEST(test_word_thai_on_zwsp_takes_word_before);
+	RUN_TEST(test_word_thai_on_zwsp_takes_word_after);
+	RUN_TEST(test_word_zwsp_at_end_of_row_takes_word_before);
+	RUN_TEST(test_word_zwsp_before_space_takes_word_before);
 	RUN_TEST(test_word_thai_with_tone_mark_at_end_of_row);
-	RUN_TEST(test_word_thai_mai_yamok_is_a_boundary);
+	RUN_TEST(test_word_thai_mai_yamok_is_part_of_word);
+	RUN_TEST(test_word_thai_zwsp_before_mai_yamok_is_a_boundary);
 	RUN_TEST(test_word_thai_paiyannoi_is_part_of_word);
-	RUN_TEST(test_word_thai_digits_are_a_boundary);
+	RUN_TEST(test_word_non_ascii_digits_are_word_characters);
 	RUN_TEST(test_word_thai_next_to_ascii);
+	RUN_TEST(test_word_accented_latin_from_ascii_letter);
+	RUN_TEST(test_word_accented_latin_from_accented_letter);
+	RUN_TEST(test_word_greek);
+	RUN_TEST(test_word_curly_quotes_are_separators);
+	RUN_TEST(test_word_em_dash_is_a_separator);
+	RUN_TEST(test_word_guillemets_are_separators);
+	RUN_TEST(test_word_truncated_sequence_does_not_swallow_following_bytes);
+	RUN_TEST(test_parse_pattern_address_and_scope);
+	RUN_TEST(test_parse_number_address);
+	RUN_TEST(test_parse_combined_address);
+	RUN_TEST(test_parse_line_field);
+	RUN_TEST(test_parse_scope_field_form);
+	RUN_TEST(test_parse_typeref_is_not_a_scope);
+	RUN_TEST(test_parse_escaped_delimiter_and_crlf);
+	RUN_TEST(test_parse_format1_dictionary_line);
+	RUN_TEST(test_parse_rejects_other_names_and_pseudotags);
+	RUN_TEST(test_menu_single_match_jumps_directly);
+	RUN_TEST(test_menu_return_visits_first_match);
+	RUN_TEST(test_menu_second_row_reaches_identical_definition);
+	RUN_TEST(test_menu_end_of_list_and_clamping);
+	RUN_TEST(test_menu_cancel_leaves_reader_in_place);
+	RUN_TEST(test_menu_lists_current_file_first);
 
 	return TEST_END();
 }
