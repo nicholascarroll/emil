@@ -24,6 +24,9 @@
 #include <string.h>
 #include <termios.h>
 #include <sys/select.h>
+#ifdef __wasi__
+#include <sys/stat.h>
+#endif
 #include <unistd.h>
 #include "unicode.h"
 
@@ -273,6 +276,62 @@ int main(int argc, char *argv[]) {
 	 * assert and what the editor does cannot drift apart. */
 	(void)selectUtf8Locale();
 
+#ifdef __wasi__
+	/* Under WASIX isatty() is 1 for every fd, and the keys reach only
+	 * the fd 0 inherited from the terminal: /dev/tty and dups of it
+	 * read nothing, so a piped emil can never be typed in.  fstat
+	 * tells the pipe (no S_IFCHR); with EMIL_STDIN_FILE set, the piped
+	 * emil saves its command line and the pipe there and exits, and
+	 * the shell runs emil at its next prompt, from the terminal.  That
+	 * emil takes the saved directory and arguments as its own, so
+	 * they mean what they would have on Linux, and the pipe as its
+	 * stdin.  The file's strings stay allocated: argv points into it. */
+	char *handed = NULL;
+	size_t handed_len = 0;
+	const char *hand = getenv("EMIL_STDIN_FILE");
+	struct stat stdin_st;
+	int stdin_piped = fstat(STDIN_FILENO, &stdin_st) == 0 &&
+			  !S_ISCHR(stdin_st.st_mode);
+	if (hand != NULL && !stdin_piped) {
+		int fd = open(hand, O_RDONLY);
+		if (fd >= 0) {
+			size_t n;
+			char *d = readAllFromFd(fd, &n);
+			char *end = d + n, *p = d, *nul;
+			close(fd);
+			unlink(hand);
+			int nargs = (nul = memchr(p, '\0', end - p)) ? atoi(p) :
+								       -1;
+			char **av = xmalloc(((nargs > 0 ? nargs : 0) + 2) *
+					    sizeof *av);
+			char *cwd = NULL;
+			int k = -1;
+			av[0] = argv[0];
+			while (nul != NULL && k < nargs) {
+				p = nul + 1;
+				if ((nul = memchr(p, '\0', end - p)) == NULL)
+					break;
+				if (k < 0)
+					cwd = p;
+				else
+					av[k + 1] = p;
+				k++;
+			}
+			if (nargs >= 0 && k == nargs) {
+				p = nul + 1;
+				av[nargs + 1] = NULL;
+				argc = nargs + 1;
+				argv = av;
+				IGNORE_RETURN(chdir(cwd));
+				handed_len = end - p;
+				handed = xmalloc(handed_len + 1);
+				memcpy(handed, p, handed_len);
+			}
+		}
+		unsetenv("EMIL_STDIN_FILE");
+	}
+#endif
+
 	/* Options come before the files, as the synopsis says.  "--"
 	 * ends them, so a file whose name starts with '-' can still be
 	 * named; "-" alone is a file operand meaning stdin. */
@@ -326,6 +385,37 @@ int main(int argc, char *argv[]) {
 	char *stdin_data = NULL;
 	size_t stdin_len = 0;
 	int stdin_buf_used = 0;
+#ifdef __wasi__
+	/* The piped emil: save the argument count, the directory, the
+	 * arguments and the pipe, in that order, and let the shell's
+	 * prompt run emil again on the terminal (see the top of main). */
+	if (stdin_piped) {
+		if (hand == NULL) {
+			fprintf(stderr,
+				"emil: standard input is not a terminal\n");
+			return 1;
+		}
+		stdin_data = readAllFromFd(STDIN_FILENO, &stdin_len);
+		char cwd[4096];
+		FILE *f = fopen(hand, "wb");
+		int ok = f != NULL && getcwd(cwd, sizeof cwd) != NULL &&
+			 fprintf(f, "%d%c%s%c", argc - 1, '\0', cwd, '\0') > 0;
+		for (int i = 1; ok && i < argc; i++)
+			ok = fwrite(argv[i], 1, strlen(argv[i]) + 1, f) ==
+			     strlen(argv[i]) + 1;
+		ok = ok && fwrite(stdin_data, 1, stdin_len, f) == stdin_len;
+		if (f != NULL && fclose(f) != 0)
+			ok = 0;
+		if (!ok) {
+			fprintf(stderr, "emil: %s: %s\n", hand,
+				strerror(errno));
+			return 1;
+		}
+		return 0;
+	}
+	stdin_data = handed;
+	stdin_len = handed_len;
+#endif
 	if (!isatty(STDIN_FILENO)) {
 		stdin_data = readAllFromFd(STDIN_FILENO, &stdin_len);
 
