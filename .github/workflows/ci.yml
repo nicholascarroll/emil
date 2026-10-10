@@ -116,7 +116,7 @@ jobs:
           with:
             run: |
               make CC=cc
-              EMIL_PTY_TIME_SCALE=3 make test
+              make test
 
   haiku:
       runs-on: ubuntu-latest
