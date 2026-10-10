@@ -527,6 +527,7 @@ rm -f tests/stubs.o tests/backup_faked.c
 PTY_TESTS="pty_input_test"
 case "$(uname -s)" in
 Linux|Darwin) PTY_TESTS="$PTY_TESTS pty_signals_test" ;;
+NetBSD) PTY_TESTS="" ;;
 esac
 
 if [ -z "$RUNNER" ] && [ -x ./emil ]; then
