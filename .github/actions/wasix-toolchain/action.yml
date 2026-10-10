@@ -28,6 +28,9 @@ runs:
       shell: bash
       run: ./tests/wasix/setup.sh "${{ inputs.prefix }}"
 
-    - name: Add wasmer to PATH
+    - name: Add wasmer and binaryen to PATH
       shell: bash
-      run: echo "$HOME/.wasmer/bin" >> "$GITHUB_PATH"
+      run: |
+        echo "$HOME/.wasmer/bin" >> "$GITHUB_PATH"
+        echo "${{ inputs.prefix }}/binaryen/bin" >> "$GITHUB_PATH"
+
