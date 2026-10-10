@@ -18,7 +18,7 @@
   minibuffer".
 
 
-## [0.9.9] - 2026-08-05
+## [0.9.9] - 2026-08-27
 - Added page up/down to prompt completion windows
 - Palette no shows the Unicode name for the selected symbol
 - Added `M-x insert-char` to insert a character by Unicode codepoint hex
@@ -46,7 +46,7 @@
 - Fixed #112
 - Added WASIX target. 
 
-## [0.9.3]
+## [0.9.3] - 2026-08-05
 - query-replace better error handling
 - Fixed #103: After failing search, cursor position wrong
 - Fixed heap corruption when undoing inside a prompt. 
