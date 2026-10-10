@@ -23,7 +23,7 @@
      pipe      test_writeall calls pipe().  Genode's libc routes that
                through a VFS plugin rather than the kernel, and
                Vfs_plugin::pipe() returns EACCES with "pipe fs not
-               mounted" when the <libc pipe=".."/> attribute is unset.
+               mounted" when the libc pipe attribute attribute is unset.
                Needs the vfs_pipe archive as well as the mount point;
                see genodelabs/src/vfs_pipe in test-archives. -->
 

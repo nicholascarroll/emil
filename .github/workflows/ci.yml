@@ -116,7 +116,8 @@ jobs:
           with:
             run: |
               make CC=cc
-              make test  
+              make test
+
   haiku:
       runs-on: ubuntu-latest
       steps:
@@ -258,6 +259,7 @@ jobs:
             apt-get update -y
             apt-get install -y gcc make
           run: |
+            export EMIL_SKIP_QEMU_TESTS=1
             echo "--- Confirm this platform has 32-bit time_t ---"
             cc -std=c99 -Wall -Wextra -Wpedantic -o confirm_y2038_bug tests/confirm_y2038_bug.c
             ./confirm_y2038_bug

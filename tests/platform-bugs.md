@@ -15,7 +15,7 @@ emil's behaviour given that host.
 
 **Component:** wasmer 7.2.1 (WASIX), filesystem layer
 **Severity:** silent data-integrity-adjacent — succeeds while ignoring the request
-**Status:** not reported yet
+**Status:** reported upstream; not expected to be fixed soon
 
 ### Summary
 
