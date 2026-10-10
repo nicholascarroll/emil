@@ -291,7 +291,9 @@ void test_shell_tab_completes_command(void) {
 	shellCompletionSetUp();
 
 	SHELL_CASE("zqa", TAB_ONCE, "zqalpha ");
+#ifndef __wasi__ /* WASI has no exec bit, so access(X_OK) always succeeds */
 	SHELL_CASE("zqd", TAB_ONCE, "zqd"); /* not executable */
+#endif
 	SHELL_CASE("notes", TAB_ONCE, "notes"); /* files are not commands */
 	SHELL_CASE("  zqb", TAB_ONCE, "  zqbeta ");
 
