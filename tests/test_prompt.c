@@ -291,9 +291,14 @@ void test_shell_tab_completes_command(void) {
 	shellCompletionSetUp();
 
 	SHELL_CASE("zqa", TAB_ONCE, "zqalpha ");
-#ifndef __wasi__ /* WASI has no exec bit, so access(X_OK) always succeeds */
-	SHELL_CASE("zqd", TAB_ONCE, "zqd"); /* not executable */
-#endif
+	/* A platform with no exec bit (WASI, Genode: chmod is not
+	 * implemented) reports every file executable, so the 0644 file
+	 * still completes there.  Probe for that instead of listing
+	 * platforms. */
+	char probe[512];
+	snprintf(probe, sizeof(probe), "%s/bin/zqdata", sh_root);
+	if (access(probe, X_OK) != 0)
+		SHELL_CASE("zqd", TAB_ONCE, "zqd"); /* not executable */
 	SHELL_CASE("notes", TAB_ONCE, "notes"); /* files are not commands */
 	SHELL_CASE("  zqb", TAB_ONCE, "  zqbeta ");
 

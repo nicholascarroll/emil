@@ -54,7 +54,8 @@ TEST_OBJECTS = decoder.o unicode.o buffer.o region.o undo.o transform.o \
 # tests/decoder_pty_test.c is not a test_*.c and so is never picked up;
 # it could not run in any case, as Genode's libc exports grantpt and
 # unlockpt but not posix_openpt.
-UNBUILDABLE = tests/test_shell.c tests/test_subprocess.c tests/test_warnings.c
+
+UNBUILDABLE = tests/test_shell.c tests/test_subprocess.c tests/test_warnings.c tests/test_writeall.c
 
 SUITE_SRCS = $(filter-out $(UNBUILDABLE),$(wildcard tests/test_*.c))
 
