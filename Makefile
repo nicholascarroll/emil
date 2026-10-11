@@ -58,7 +58,7 @@ all: $(PROGNAME)
 # before anything is compiled.  The recipe writes the file only when the
 # tag actually changes, so its mtime -- and therefore any rebuild it
 # forces -- stays put across ordinary repeat builds.
-BUILD_TAG ?= native
+BUILD_TAG = native
 
 .build-tag: FORCE
 	@if [ ! -f $@ ] || [ "`cat $@`" != "$(BUILD_TAG)" ]; then \
@@ -484,8 +484,8 @@ wasix-test: wasix
 # place.  The wasm mismatch at least announces itself.  This one is
 # silent, and a job that trusted the exit status would report Redox as
 # building fine having never invoked the cross compiler.
-REDOX_TARGET ?= x86_64-unknown-redox
-REDOX_TOOLCHAIN ?= $(HOME)/opt/redox-toolchain
+REDOX_TARGET = x86_64-unknown-redox
+REDOX_TOOLCHAIN = $(HOME)/opt/redox-toolchain
 REDOX_CC = $(REDOX_TOOLCHAIN)/bin/$(REDOX_TARGET)-gcc
 REDOX_NM = $(REDOX_TOOLCHAIN)/bin/$(REDOX_TARGET)-nm
 
@@ -499,7 +499,7 @@ redox: redox-toolchain-check
 # RUNNER_CONSOLE is not optional here: redoxer does not reliably carry
 # the child's exit status back out of the VM.  See the block that
 # defines it in tests/run_tests.sh.
-REDOXER ?= redoxer
+REDOXER = redoxer
 
 redox-run: redox
 	@echo "Makefile: running the suites inside Redox via $(REDOXER)"
