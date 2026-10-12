@@ -1,4 +1,5 @@
-## [Unreleased]
+## [1.0.0] - 2026-10-12
+- `emil --help` added.
 - #131 TAB completes in the shell prompt (`M-!`, `M-|`) now.
 - #133 `emil -R file ...` opens the files read-only.
 - #127 `emil myfile | emil` no longer hangs the terminal.  

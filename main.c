@@ -238,6 +238,12 @@ static void initEditor(void) {
 	getWindowSize(&E.screenrows, &E.screencols);
 }
 
+static void usage(FILE *out) {
+	fputs("usage: emil [-R] [+N] [--] [file ...]\n"
+	      "       emil --version\n",
+	      out);
+}
+
 int main(int argc, char *argv[]) {
 	/* Set up a UTF-8 locale so that system wcwidth() works.  The
 	 * same call the width-dependent suites make, so what they
@@ -260,6 +266,10 @@ int main(int argc, char *argv[]) {
 			printf("emil %s\n", EMIL_VERSION);
 			return 0;
 		}
+		if (strcmp(a, "--help") == 0) {
+			usage(stdout);
+			return 0;
+		}
 		if (strcmp(a, "-R") == 0) {
 			read_only = 1;
 			continue;
@@ -272,6 +282,7 @@ int main(int argc, char *argv[]) {
 		}
 		if (a[0] == '-' && a[1] != '\0') {
 			fprintf(stderr, "emil: unrecognised option '%s'\n", a);
+			usage(stderr);
 			return 1;
 		}
 		break;

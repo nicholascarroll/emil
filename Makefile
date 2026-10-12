@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 # Remember to keep the version number up to date
-VERSION = 0.9.9
+VERSION = 1.0.0
 
 PROGNAME = emil
 PREFIX = /usr/local
