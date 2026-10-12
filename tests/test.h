@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
-/* Test framework for emil */
+/* Test framework for emil. API styled on a well known one for compatibility. */
 #ifndef TEST_H
 #define TEST_H
 
@@ -122,14 +122,7 @@ static const char *_current_test_name = NULL;
  * truncated to 8 bits and exactly 256 failures would be reported as
  * success.
  *
- * A run of zero tests is a failure.  It means the binary linked and
- * started and then asserted nothing -- every case removed, or a main()
- * that stopped calling RUN_TEST -- which is not a state any suite should
- * reach quietly.  The check lives here rather than in the harness that
- * launches suites because this is the only place that knows the count
- * without parsing it back out of the output, and because it then holds
- * identically on every target: inside a Genode component and inside an
- * Asterinas initramfs there is no launcher to do the checking. */
+ * A run of zero tests is a failure.*/
 #define TEST_END()                                                    \
 	(printf("%d Tests %d Failures\n", _tests_run,                 \
 		_tests_failed),                                       \

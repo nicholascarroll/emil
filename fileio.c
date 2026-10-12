@@ -1717,11 +1717,8 @@ struct buffer *loadStdinBuffer(const char *data, size_t len) {
 	buf->filename = xstrdup("*stdin*");
 	bufferResetRows(buf); /* rebuilt from scratch below */
 
-	/* BLOB_CRLF: DOS line endings are converted on ingestion,
-	 * consistent with §3.21.1.  BLOB_FINAL_NL terminates
-	 * unconditionally, as editorOpen does: piped input without a
-	 * final newline would otherwise leave the last row non-empty,
-	 * breaking the invariant in buffer.h. */
+	/* BLOB_CRLF: DOS line endings are converted on ingestion.
+	 * BLOB_FINAL_NL terminates unconditionally, as editorOpen does.*/
 	bufferLoadBlob(buf, (const uint8_t *)data, len,
 		       BLOB_CRLF | BLOB_FINAL_NL);
 

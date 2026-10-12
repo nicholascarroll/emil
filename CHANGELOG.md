@@ -16,6 +16,7 @@
 - Commands that switch or kill buffers, change windows or toggle
   read-only are refused in a prompt with "Not available in the
   minibuffer".
+- #116, #117 Refactor of display system.
 
 
 ## [0.9.9] - 2026-08-27

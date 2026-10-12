@@ -796,13 +796,6 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
 				struct rowHighlight hl;
 				computeRowHighlightBounds(buf, filerow, end_col,
 							  &hl);
-				/* Pad remainder of screen line so \x1b[K
-				 * is not needed (it would erase the last
-				 * column due to pending-wrap state).  The
-				 * renderer has just emitted this content and
-				 * knows the column it stopped at; asking the
-				 * row for its full width instead was an
-				 * O(row length) walk per frame (§C2). */
 				int emitted = renderLineWithHighlighting(
 					row, ab, win->coloff, end_col, &hl, -1);
 				int rx = emitted - win->coloff;
@@ -915,17 +908,6 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
 			abAppend(ab, "\r\n", 2);
 		}
 	}
-
-	/* Is the last buffer line visible?  The loop above just answered
-	 * that by running out of rows (or not) while filling the window;
-	 * asking again afterwards walked the same span a second time
-	 * (#116).
-	 *
-	 * One expression for both modes.  The two formulas this replaced
-	 * disagreed by one line: without wrap the flag demanded a blank
-	 * line past the last row, so the bar reported a percentage where
-	 * wrap reported `Bot` for the identical picture.  §5.1.2 says
-	 * `Bot` when the end of the buffer is visible, which is this. */
 	buf->end = (filerow >= buf->numrows && !truncated);
 }
 
@@ -935,10 +917,7 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
  *
  * Returns the number of display columns written.  The output may be
  * shorter than max_cols if the next character would straddle the
- * boundary (e.g. a 2-column CJK glyph with only 1 column left).
- *
- * Column accounting is utf8ColsToBytes, THE shared walk (#117 R1);
- * only the output-capacity clamp is local. */
+ * boundary (e.g. a 2-column CJK glyph with only 1 column left).*/
 static int truncateToCols(char *out, size_t out_cap, const char *in,
 			  int max_cols) {
 	const uint8_t *p = (const uint8_t *)in;
@@ -1000,11 +979,7 @@ static int statusLeft(const struct buffer *bufr, char *out, int cap,
 
 	/* Left-truncate name with "..." to fit name_width, which is a
 	 * budget in COLUMNS.  Drop leading whole characters until what
-	 * remains fits the budget "..." leaves: indexing by bytes
-	 * instead would land inside a multi-byte sequence and emit
-	 * invalid UTF-8 (B12).  Widths come from charAdvance, the one
-	 * rule (#117 R1) — this walk and leftTruncate in buffer.c both
-	 * truncate display_name, so they must price it the same way. */
+	 * remains fits the budget.*/
 	const char *show_name = dname;
 	char trunc[256];
 	const uint8_t *u = (const uint8_t *)dname;
@@ -1040,14 +1015,7 @@ static int statusMid(const struct window *win, char *out, char fc,
 	/* The column is a DISPLAY column, not a byte offset.  
 	 *
 	 * Line stays one-based and column zero-based, matching Emacs
-	 * including its asymmetry.
-	 *
-	 * Cost: the walk is O(the cursor's distance from its line start),
-	 * which on a long line is the frame's whole budget.  The focused
-	 * window does not pay it: scroll() computed this exact column for
-	 * this exact position earlier in the frame and passes it in as
-	 * cursor_col.  A non-focused window reports its own saved cursor,
-	 * which nothing else in the frame asks about, so it computes. */
+	 * including its asymmetry. */
 	int ry = win->focused ? bufr->cy + 1 : win->cy + 1;
 	int cur_y = win->focused ? bufr->cy : win->cy;
 	int cur_x = win->focused ? bufr->cx : win->cx;
@@ -1262,29 +1230,7 @@ void drawStatusBar(struct window *win, struct abuf *ab, int line,
 
 	abAppend(ab, "\x1b[m" CRLF, 5);
 }
-/* THE minibuffer layout model (#117 R3).
- *
- * The minibuffer is a wrapped text surface, and three places used to
- * model its geometry independently: refreshScreen sized it by
- * division, drawMinibuffer filled it character by character, and
- * cursorBottomLine divided again while ignoring both the prefix and
- * character width.  The division models under-counted by up to one
- * column per line, accumulating, so any odd terminal width plus a
- * message containing CJK or emoji silently lost its last line
- * (DEF-2): a CJK filename in a save message, C-x = output, the
- * palette's Unicode-name line.
- *
- * All three now run this.  It breaks msg into at most max_lines
- * screen lines, splitting only at character boundaries, with a wide
- * character that straddles the boundary pushed to the next line (that
- * line comes up one column short — the behaviour drawMinibuffer
- * always had and the sizing never knew about).  Line 0 shares its
- * width with prefix_display.
- *
- * Widths come from charAdvance via utf8ColsToBytes (#117 R1).
- *
- * Deliberately NOT routed through wordWrapBreak: this wraps a C
- * string, not an erow, and wants no word-boundary breaks. */
+/* THE minibuffer layout model.*/
 int minibufLayout(const char *msg, int prefix_cols, int screencols,
 		  struct minibufLine *out, int max_lines) {
 	int msglen = msg ? (int)strlen(msg) : 0;
@@ -1324,12 +1270,7 @@ int minibufLayout(const char *msg, int prefix_cols, int screencols,
 }
 
 /* Screen lines the current status message needs, capped at
- * MINIBUF_MAX_LINES (§5.5).
- *
- * A named function rather than inline arithmetic in refreshScreen so
- * that a test can assert it against what drawMinibuffer actually
- * emits — the two disagreeing is DEF-2, and inline code left the
- * disagreement unobservable. */
+ * MINIBUF_MAX_LINES.*/
 int minibufHeightNeeded(void) {
 	if (!(E.statusmsg_show && E.statusmsg[0] && E.screencols > 0))
 		return 1;
@@ -1403,14 +1344,7 @@ void refreshScreen(void) {
 
 	int focusedIdx = windowFocusedIdx();
 
-	/* Auto-size the minibuffer to fit the current status message,
-	 * by running the same layout drawMinibuffer will (#117 R3).
-	 * The previous division — 1 + ceil((msg_cols - first_line) /
-	 * screencols) — assumed every line is filled to exactly
-	 * screencols columns, which is false whenever a wide character
-	 * straddles the boundary and is pushed to the next line.  The
-	 * error was up to one column per line and accumulated, so the
-	 * message's last line was silently dropped (DEF-2). */
+	/* Auto-size the minibuffer to fit the current status message.*/
 	int needed_mb = minibufHeightNeeded();
 	if (needed_mb != minibuffer_height) {
 		minibuffer_height = needed_mb;
@@ -1488,10 +1422,6 @@ void refreshScreen(void) {
 	abAppend(ab, "\x1b[?7h", 5);  // Enable auto-wrap
 	abAppend(ab, "\x1b[?25h", 6); // Show cursor
 
-	/* Looped: a signal landing mid-write returns a short count and
-	 * would drop the frame's tail (CSI ?7h, CSI ?25h), leaving
-	 * auto-wrap off and the cursor hidden until the next full frame.
-	 * Reachable at ordinary terminal sizes -- see writeAll(). */
 	IGNORE_RETURN(writeAll(STDOUT_FILENO, ab->b, ab->len));
 }
 
@@ -1504,17 +1434,7 @@ void cursorBottomLine(int curs) {
 	}
 	minibuf_row++; /* minibuffer starts after all windows/status bars */
 
-	/* Which screen line the cursor falls on, and where within it.
-	 *
-	 * `curs` is a 1-based display column into the message stream:
-	 * callers add the width of the prompt text (which lives inside
-	 * E.statusmsg) to the columns of input before point.  Walking
-	 * the same layout drawMinibuffer used is the only way to land
-	 * on the character the user is editing — the previous code
-	 * divided by screencols, ignoring both prefix_display and the
-	 * short-by-one lines a straddling wide character produces, so
-	 * the cursor drifted left of its character on a wrapped prompt
-	 * (#117 R3). */
+	/* Which screen line the cursor falls on, and where within it.*/
 	if (minibuffer_height > 1 && E.screencols > 0) {
 		struct minibufLine lines[MINIBUF_MAX_LINES];
 		int prefix_cols =
@@ -1600,11 +1520,6 @@ void describeChar(void) {
 
 	uint32_t cp = utf8Decode(row->chars, cx);
 
-	/* Width comes from charAdvance, the one display-width rule (SPEC
-	 * 3.12.5).  A tab occupies the distance to the next tab stop, so its
-	 * width depends on the column it starts at; charInStringWidth() prices
-	 * every byte below 0x20 at 2 and is wrong for a tab at seven columns
-	 * in eight. */
 	int adv_bytes;
 	int sw = charAdvance(row->chars, cx, charsToDisplayColumn(row, cx),
 			     &adv_bytes);

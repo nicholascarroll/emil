@@ -2,16 +2,7 @@
 /* pty_input_test.c: escape-sequence and input handling, driven through
  * a real pseudo-terminal.
  *
- * Covers what the unit tests in test_decoder.c cannot: real timing (the
- * Meta-prefix indefinite wait versus the in-flight sequence timeout),
- * interaction with the main loop's key batching and status-message
- * lifecycle, burst detection and undo granularity, and the historical
- * leaked-bytes regressions (F12 panic key, SS3 finals typed into the
- * buffer, lone-ESC-then-sequence leaking its body).
- *
- * Needs a pty and nothing else, so it runs on every target that has
- * one.  Assertions about who owns the terminal live in
- * pty_signals_test.c, which needs more than a pty.
+ * Needs only a pty. 
  *
  * Usage: pty_input_test <path-to-emil>
  */
@@ -199,14 +190,7 @@ static void scenarioUtf8Typing(void) {
 
 
 /* A multi-line paste undoes in one step, and its CRs become real
- * newlines with no stray ^M.
- *
- * The CR half of this is the regression that matters: an earlier
- * attempt at this feature inserted the payload as raw bytes, bypassing
- * the dispatch layer that maps CR to CMD_NEWLINE, so every pasted line
- * break arrived as a literal ^M.  Burst detection keeps every byte on
- * the normal dispatch path, so the mapping still applies -- but only a
- * test that sends CR can show that. */
+ * newlines with no stray ^M.*/
 static void scenarioBurstPasteUndoesInOneStep(void) {
 	struct child c;
 	begin("burst: multi-line paste, one undo, no ^M");

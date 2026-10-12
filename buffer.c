@@ -606,22 +606,7 @@ static const char *baseName(const char *path) {
 
 /* Left-truncate a string to fit in max_width display COLUMNS,
  * prepending "..." when there is room for it.  Returns a newly
- * allocated string.
- *
- * DEF-1 (#117): every caller passes a column budget, but this
- * function measured in bytes — `s + (len - tail)` indexed by byte
- * count and landed inside multi-byte sequences, leaking invalid
- * UTF-8 into display_name, the status bar, completion lists and
- * save/open/kill messages (the 0.9.3 CHANGELOG fix for this repaired
- * only the other copy of the loop, in statusLeft).  Per §5.1.1 the
- * truncation walks forward over whole characters.
- *
- * Widths come from charAdvance, the single rule (#117 R1); the total
- * and the drop-walk share one accumulation so the function agrees
- * with itself.  A tab is priced by tab stop here where stringWidth's
- * legacy vocabulary prices it 2; a name containing a tab may
- * therefore be re-truncated by statusLeft's own budget check.  The
- * output is whole characters either way. */
+ * allocated string. */
 char *leftTruncate(const char *s, int max_width) {
 	if (max_width < 1)
 		max_width = 1;
@@ -646,8 +631,8 @@ char *leftTruncate(const char *s, int max_width) {
 	return r;
 }
 
-/* How many display columns are available for a filename in a
- * status message?
+/* Says how many display columns are available for a filename in a
+ * status message.
  */
 int nameFit(const char *name, int formatted_len) {
 	int chrome = formatted_len - (int)strlen(name);
