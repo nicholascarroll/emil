@@ -21,6 +21,13 @@ int utf8_is4Char(uint8_t ch);
 
 int utf8_nBytes(uint8_t ch);
 
+/* Bytes the character at str[idx] occupies: utf8_nBytes() of its lead
+ * byte, or 1 when that many continuation bytes do not follow (a
+ * truncated or malformed sequence).  Reads only up to the first
+ * non-continuation byte, so it never looks past a NUL terminator.
+ * Every walk that steps character by character uses this. */
+int utf8_charLen(const uint8_t *str, int idx);
+
 int utf8_isCont(uint8_t ch);
 
 uint32_t utf8Decode(const uint8_t *str, int idx);

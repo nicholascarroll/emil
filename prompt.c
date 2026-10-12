@@ -95,6 +95,40 @@ static int minibufCursorCols(struct buffer *mb) {
 	return cols;
 }
 
+/* Columns of blank space between the typed text and a hint. */
+#define PROMPT_HINT_GAP 2
+
+/* Append a one-shot hint to the prompt line that setStatusMessage()
+ * has just filled with the prompt and the typed text.  The hint
+ * follows PROMPT_HINT_GAP blank columns.  If it does not fit in what
+ * is left of the last line, the line is padded out so that the whole
+ * hint starts the next one. */
+static void appendPromptHint(const char *hint) {
+	if (!hint || !*hint || E.screencols <= 0)
+		return;
+
+	size_t len = strlen(E.statusmsg);
+	int prefix_cols = stringWidth((const uint8_t *)E.prefix_display);
+	struct minibufLine lines[MINIBUF_MAX_LINES];
+	int n = minibufLayout(E.statusmsg, prefix_cols, E.screencols, lines,
+			      MINIBUF_MAX_LINES);
+
+	/* Typed text already fills every line the minibuffer may use:
+	 * there is nowhere to put the hint. */
+	if (n < 1 || (size_t)lines[n - 1].end < len)
+		return;
+
+	int avail =
+		E.screencols - (n == 1 ? prefix_cols : 0) - lines[n - 1].cols;
+	if (avail < 0)
+		avail = 0;
+	int need = PROMPT_HINT_GAP + stringWidth((const uint8_t *)hint);
+	int pad = avail >= need ? PROMPT_HINT_GAP : avail;
+
+	snprintf(E.statusmsg + len, sizeof(E.statusmsg) - len, "%*s%s", pad, "",
+		 hint);
+}
+
 uint8_t *editorPrompt(const char *prompt, enum promptType t,
 		      void (*callback)(struct buffer *, uint8_t *, int)) {
 	if (E.buf == E.minibuf) {
@@ -130,6 +164,7 @@ uint8_t *editorPrompt(const char *prompt, enum promptType t,
 		if (!E.minibuf->completionState.preserve_message) {
 			setStatusMessage("%s%s", prompt, shown);
 			prefix_width = stringWidth((const uint8_t *)prompt);
+			appendPromptHint(E.minibuf->completionState.hint);
 		} else {
 			prefix_width =
 				stringWidth((const uint8_t *)E.statusmsg) -
@@ -139,6 +174,7 @@ uint8_t *editorPrompt(const char *prompt, enum promptType t,
 		}
 		free(shown);
 		E.minibuf->completionState.preserve_message = 0;
+		E.minibuf->completionState.hint = NULL; /* shown once */
 
 		refreshScreen();
 
@@ -230,6 +266,16 @@ uint8_t *editorPrompt(const char *prompt, enum promptType t,
 				    cs->selected < cs->n_matches) {
 					effective_path =
 						cs->matches[cs->selected];
+				}
+
+				/* If the buffer name is shared by several
+				 *  buffers: list them and keep
+				 * the user in the prompt to pick one. */
+				if (t == PROMPT_BUFFER &&
+				    effective_path == current_text &&
+				    listAmbiguousBufferName(E.minibuf)) {
+					free(current_text);
+					break;
 				}
 
 				/* Check if this is a file prompt and the path is a directory */
@@ -437,6 +483,7 @@ uint8_t *editorPrompt(const char *prompt, enum promptType t,
 
 done:
 	free(pending_input);
+	E.minibuf->completionState.hint = NULL;
 
 	if (result && strlen((char *)result) > 0) {
 		struct history *hist = histFor(t);

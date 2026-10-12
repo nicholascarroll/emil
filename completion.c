@@ -30,6 +30,7 @@ void resetCompletionState(struct completionState *state) {
 	state->successive_tabs = 0;
 	state->last_completion_count = 0;
 	state->preserve_message = 0;
+	state->hint = NULL;
 	if (state->matches) {
 		for (int i = 0; i < state->n_matches; i++)
 			free(state->matches[i]);
@@ -409,8 +410,8 @@ static void tabEnd(struct buffer *mb) {
 
 /* What every prompt's TAB does with the matches for a word of 'typed'
  * bytes: report no match; or, when the common prefix adds nothing and
- * the match is not unique, say so, and list the matches on a second
- * TAB.  Returns 1 when the caller should extend the word to
+ * the match is not unique, list the matches on a second TAB.
+ * Returns 1 when the caller should extend the word to
  * r->common_prefix, which for a unique match is the whole match. */
 static int tabOutcome(struct buffer *mb, struct completionResult *r,
 		      size_t typed, enum promptType type) {
@@ -420,15 +421,15 @@ static int tabOutcome(struct buffer *mb, struct completionResult *r,
 	if (r->n_matches == 1 ||
 	    (r->n_matches > 1 && strlen(r->common_prefix) > typed)) {
 		closeCompletionsBuffer();
+		if (r->n_matches == 1 && strlen(r->common_prefix) == typed)
+			cs->hint = "[Sole completion]";
 		return 1;
 	}
 	if (r->n_matches > 1 && cs->successive_tabs > 0) {
 		showCompletionsBuffer(r->matches, r->n_matches, type);
 		return 0;
 	}
-	setStatusMessage(r->n_matches ? "[complete, but not unique]" :
-					"[No match]");
-	cs->preserve_message = 1;
+	cs->hint = r->n_matches ? "" : "[No match]";
 	return 0;
 }
 
@@ -463,6 +464,42 @@ void handleMinibufferCompletion(struct buffer *minibuf, enum promptType type) {
 	tabEnd(minibuf);
 	freeCompletionResult(&result);
 	free(text);
+}
+
+int listAmbiguousBufferName(struct buffer *minibuf) {
+	int point;
+	char *text = tabBegin(minibuf, &point);
+	int exact = 0;
+	int same_base = 0;
+
+	if (text[0] != '\0') {
+		for (struct buffer *b = E.headbuf; b != NULL; b = b->next) {
+			if (b == E.edbuf ||
+			    (b->filename &&
+			     strcmp(b->filename, "*Completions*") == 0))
+				continue;
+			const char *name = b->filename ? b->filename :
+							 "*scratch*";
+			const char *slash = strrchr(name, '/');
+			const char *base = slash ? slash + 1 : name;
+			if (strcmp(text, name) == 0)
+				exact = 1;
+			if (strcmp(text, base) == 0)
+				same_base++;
+		}
+	}
+
+	int ambiguous = !exact && same_base > 1;
+	if (ambiguous) {
+		struct completionResult result = { 0 };
+		getBufferCompletions(text, E.edbuf, &result);
+		showCompletionsBuffer(result.matches, result.n_matches,
+				      PROMPT_BUFFER);
+		tabEnd(minibuf);
+		freeCompletionResult(&result);
+	}
+	free(text);
+	return ambiguous;
 }
 
 void cycleCompletion(struct buffer *minibuf, int direction) {

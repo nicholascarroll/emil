@@ -7,6 +7,7 @@
 void resetCompletionState(struct completionState *state);
 void handleMinibufferCompletion(struct buffer *minibuf, enum promptType type);
 void cycleCompletion(struct buffer *minibuf, int direction);
+int listAmbiguousBufferName(struct buffer *minibuf);
 
 /* TAB completion in the shell prompt. */
 void handleShellCompletion(struct buffer *minibuf);

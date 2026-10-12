@@ -326,6 +326,13 @@ void deleteRange(struct buffer *buf, int startx, int starty, int endx, int endy,
 		endx = buf->row[endy].size;
 	}
 
+	if (starty >= 0 && starty < buf->numrows)
+		startx = utf8_snapToBoundary(buf->row[starty].chars,
+					     buf->row[starty].size, startx, -1);
+	if (endy >= 0 && endy < buf->numrows)
+		endx = utf8_snapToBoundary(buf->row[endy].chars,
+					   buf->row[endy].size, endx, +1);
+
 	/* Nothing to delete if start == end */
 	if (startx == endx && starty == endy)
 		return;

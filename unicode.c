@@ -292,7 +292,7 @@ int stringWidth(const uint8_t *str) {
 
 	while (str[idx] != 0) {
 		width += charInStringWidth(str, idx);
-		idx += utf8_nBytes(str[idx]);
+		idx += utf8_charLen(str, idx);
 	}
 
 	return width;
@@ -337,6 +337,15 @@ int utf8_nBytes(uint8_t ch) {
 	} else {
 		return 1;
 	}
+}
+
+int utf8_charLen(const uint8_t *str, int idx) {
+	int n = utf8_nBytes(str[idx]);
+	for (int k = 1; k < n; k++) {
+		if (!utf8_isCont(str[idx + k]))
+			return 1;
+	}
+	return n;
 }
 
 int utf8_isCont(uint8_t ch) {
@@ -560,7 +569,7 @@ int charAdvance(const uint8_t *str, int idx, int x, int *nbytes) {
 	}
 
 	if (nbytes) {
-		int nb = utf8_nBytes(ch);
+		int nb = utf8_charLen(str, idx);
 		*nbytes = nb > 0 ? nb : 1;
 	}
 	return width;
