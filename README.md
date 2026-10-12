@@ -105,7 +105,6 @@ Entries in `~/.inputrc` are usually also needed for the copy and kill keybinding
 # retain system-wide defaults
 $include /etc/inputrc
 set bind-tty-special-chars off
-
 "\C-w": kill-region
 "\ew": copy-region-as-kill
 ```

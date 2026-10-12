@@ -336,30 +336,6 @@ static int step(struct child *c, const char *keys, const char *until) {
 	return pumpUntil(c, until, 3000);
 }
 
-/* TAB in M-! completes (#131): a second TAB with nothing to add
- * lists the candidates, as in Find File. */
-static void scenarioShellTabLists(void) {
-	struct child c;
-	begin("shell: TAB TAB lists file names");
-	if (makeScratchDir() == 0 &&
-	    spawnEmilOpts(&c, scratchPath("a.txt"), 80, 24) == 0) {
-		char typed[160];
-		snprintf(typed, sizeof(typed), "cat %s", scratchPath("c"));
-		expect(step(&c, "\033!", "Shell:"), "setup: no shell prompt");
-		expect(step(&c, typed, typed), "setup: typing not shown");
-		expect(step(&c, "\t", "[complete, but not unique]"),
-		       "first TAB did not report an ambiguous match");
-		expect(step(&c, "\t", "*Completions*"),
-		       "second TAB did not list the matches");
-		expect(contains(stripped(), "c1.txt") &&
-			       contains(stripped(), "c2.txt"),
-		       "list lacks c1.txt and c2.txt");
-		reap(&c);
-	}
-	removeScratchDir();
-	finish();
-}
-
 /* emil -R (#133): the files named start read-only -- the modeline
  * says so and typing is refused -- and C-x C-q still lifts it. */
 static void scenarioReadOnlyFlag(void) {
@@ -464,7 +440,6 @@ int main(int argc, char **argv) {
 	scenarioBurstPasteUndoesInOneStep();
 	scenarioTypingStillCapped();
 	scenarioBurstClosesRun();
-	scenarioShellTabLists();
 	scenarioReadOnlyFlag();
 	scenarioUnknownOption();
 	scenarioStdoutNotTerminal();

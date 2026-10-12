@@ -205,6 +205,7 @@ struct buffer *newBuffer(void) {
 	ret->completionState.successive_tabs = 0;
 	ret->completionState.last_completion_count = 0;
 	ret->completionState.preserve_message = 0;
+	ret->completionState.hint = NULL;
 	ret->completionState.selected = -1;
 	ret->completionState.matches = NULL;
 	ret->completionState.n_matches = 0;
@@ -466,7 +467,8 @@ void switchToNamedBuffer(void) {
 			if (match_count == 1) {
 				targetBuffer = basename_match;
 			} else if (match_count > 1) {
-				setStatusMessage("[Complete, but not unique]");
+				setStatusMessage(
+					"Multiple matches; press TAB to select");
 				free(buffer_name);
 				return;
 			}

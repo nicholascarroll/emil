@@ -98,9 +98,10 @@ struct completionState {
 	int successive_tabs;
 	int last_completion_count;
 	int preserve_message;
-	int selected;	/* Currently highlighted match index, -1 = none */
-	char **matches; /* Copy of match list for M-n/M-p navigation */
-	int n_matches;	/* Number of matches in the list */
+	const char *hint; /* One-shot note shown after the prompt text */
+	int selected;	  /* Currently highlighted match index, -1 = none */
+	char **matches;	  /* Copy of match list for M-n/M-p navigation */
+	int n_matches;	  /* Number of matches in the list */
 };
 
 struct completionResult {

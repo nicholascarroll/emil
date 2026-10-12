@@ -30,6 +30,7 @@ void resetCompletionState(struct completionState *state) {
 	state->successive_tabs = 0;
 	state->last_completion_count = 0;
 	state->preserve_message = 0;
+	state->hint = NULL;
 	if (state->matches) {
 		for (int i = 0; i < state->n_matches; i++)
 			free(state->matches[i]);
@@ -409,8 +410,8 @@ static void tabEnd(struct buffer *mb) {
 
 /* What every prompt's TAB does with the matches for a word of 'typed'
  * bytes: report no match; or, when the common prefix adds nothing and
- * the match is not unique, say so, and list the matches on a second
- * TAB.  Returns 1 when the caller should extend the word to
+ * the match is not unique, list the matches on a second TAB.
+ * Returns 1 when the caller should extend the word to
  * r->common_prefix, which for a unique match is the whole match. */
 static int tabOutcome(struct buffer *mb, struct completionResult *r,
 		      size_t typed, enum promptType type) {
@@ -420,15 +421,15 @@ static int tabOutcome(struct buffer *mb, struct completionResult *r,
 	if (r->n_matches == 1 ||
 	    (r->n_matches > 1 && strlen(r->common_prefix) > typed)) {
 		closeCompletionsBuffer();
+		if (r->n_matches == 1 && strlen(r->common_prefix) == typed)
+			cs->hint = "[Sole completion]";
 		return 1;
 	}
 	if (r->n_matches > 1 && cs->successive_tabs > 0) {
 		showCompletionsBuffer(r->matches, r->n_matches, type);
 		return 0;
 	}
-	setStatusMessage(r->n_matches ? "[complete, but not unique]" :
-					"[No match]");
-	cs->preserve_message = 1;
+	cs->hint = r->n_matches ? "" : "[No match]";
 	return 0;
 }
 
