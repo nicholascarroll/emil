@@ -1,6 +1,7 @@
 /* Copyright (c) 2021 chameleon, 2026 Nicholas Carroll.
  * SPDX-License-Identifier: MIT */
 #include "edit.h"
+#include "adjust.h"
 #include "buffer.h"
 #include "display.h"
 #include "emil.h"
@@ -37,8 +38,9 @@ void insertChar(struct buffer *bufr, int c, int count) {
 		count = 1;
 
 	for (int i = 0; i < count; i++) {
-		/* No virtual row to materialise: cy < numrows (#105). */
-		rowInsertChar(bufr, &bufr->row[bufr->cy], bufr->cx, c);
+		int at = bufr->cx;
+		rowInsertChar(bufr, &bufr->row[bufr->cy], at, c);
+		adjustAllPoints(bufr, at, bufr->cy, at + 1, bufr->cy, 0);
 		bufr->cx++;
 	}
 }
@@ -260,12 +262,15 @@ void wordTransform(int times, uint8_t *(*transformer)(uint8_t *)) {
 	times = UARG_COUNT(times);
 	int icx = E.buf->cx;
 	int icy = E.buf->cy;
+	int ex = icx;
+	int ey = icy;
 	for (int i = 0; i < times; i++) {
-		forwardWordEnd(E.buf, &E.buf->cx, &E.buf->cy);
+		forwardWordEnd(E.buf, &ex, &ey);
 	}
-	E.buf->markx = icx;
-	E.buf->marky = icy;
-	transformRegion(transformer);
+	/* No word ahead: nothing to transform. */
+	if (ex == icx && ey == icy)
+		return;
+	transformRange(E.buf, icx, icy, ex, ey, transformer);
 }
 
 /* M-- variant: transform the word before point.*/
