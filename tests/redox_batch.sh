@@ -12,8 +12,8 @@
 #   @@END <suite> <exit status>
 #
 # A suite that hangs gets killed after SECS seconds if the guest has
-# timeout(1); without it the suite is simply left to hang, and the host
-# side times the whole batch out and reruns whatever has no verdict.
+# timeout(1).
+
 
 secs=$1
 shift

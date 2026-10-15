@@ -350,15 +350,6 @@ SUITES="decoder unicode wcwidth buffer undo coalesce edit fileio relpath offset
     warnings ctags find display prompt regex_semantics writeall backup
     fuzz search_nested search_stale register_preview"
 
-
-# The y2038 CI job (armv7 under QEMU user-mode) sets EMIL_SKIP_QEMU_TESTS.
-# Shell completion fails there and the cause is not established.  That
-# job exists to show time_t is handled, which these tests do not cover.
-if [ -n "${EMIL_SKIP_QEMU_TESTS:-}" ]; then
-    SUITES=$(echo "$SUITES" | tr ' ' '\n' | grep -v '^prompt$' | tr '\n' ' ')
-    echo "‣ Skipping 'prompt' suite and pty_input_test (EMIL_SKIP_QEMU_TESTS)"
-fi
-
 # Derive rc from $output.  With a console runner the exit status cannot be
 # trusted, so the verdict is what the suite printed at TEST_END.
 judge() {
@@ -505,10 +496,6 @@ case "$(uname -s)" in
 Linux|Darwin) PTY_TESTS="$PTY_TESTS pty_signals_test" ;;
 NetBSD) PTY_TESTS="" ;;
 esac
-
-if [ -n "${EMIL_SKIP_QEMU_TESTS:-}" ]; then
-    PTY_TESTS=$(echo "$PTY_TESTS" | sed 's/pty_input_test//')
-fi
 
 if [ -z "$RUNNER" ] && [ -x ./emil ]; then
     for t in $PTY_TESTS; do

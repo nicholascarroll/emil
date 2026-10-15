@@ -4,18 +4,10 @@
 # Usage:  ./tests/redox_setup.sh [prefix] [target]
 # Then:   make redox REDOX_TOOLCHAIN=<prefix>/redox-toolchain
 #
-# Two archives are needed and they are not interchangeable: gcc-install
-# carries the cross compiler and binutils, relibc-install carries the
-# sysroot (headers plus libc) that compiler links against.  Both unpack
-# into the same prefix.
+# Two archives are needed: gcc-install carries the cross compiler and
+# binutils, relibc-install carries the sysroot (headers plus libc) that
+# compiler links against.  Both unpack into the same prefix.
 #
-# Nothing here is version-pinned, because upstream publishes nothing to
-# pin to.  The archives live at a fixed URL, carry no version in their
-# name, and are rebuilt nightly; the only identifier available is the
-# SHA256SUM file sitting next to them, which is what this script
-# records.  That is worth knowing before reading the retry loop below:
-# it is not defensive programming for its own sake, it is the direct
-# consequence of an unversioned nightly artifact served from a cache.
 set -eu
 
 PREFIX=${1:-$HOME/opt}
@@ -52,10 +44,7 @@ cd "$PREFIX"
 # separately, seconds apart, unversioned, from behind a cache.  A run
 # that starts either side of a nightly rebuild can therefore hold a
 # stale checksum against a fresh archive (or the reverse) and see a
-# mismatch on a download that is perfectly intact.  Observed directly:
-# relibc-install.tar.gz and SHA256SUM two seconds apart in Last-Modified,
-# a complete archive whose size matched Content-Length exactly, and a
-# hash that did not match until SHA256SUM was fetched again.
+# mismatch on a download that is perfectly intact.
 #
 # So a mismatch is not treated as corruption on the first pass.  The
 # integrity of the download is established independently, by gzip -t,
@@ -82,9 +71,6 @@ while [ "$attempt" -le 3 ]; do
         fi
     done
 
-    # Integrity first, and on its own terms.  A truncated archive is a
-    # real failure at any attempt count, so it is never retried against
-    # a fresh checksum -- it is re-downloaded.
     truncated=""
     for a in $ARCHIVES; do
         if ! gzip -t "$a" 2>/dev/null; then
@@ -128,12 +114,7 @@ while [ "$attempt" -le 3 ]; do
     fi
 
     # Out of attempts.  Both archives are complete gzip streams (checked
-    # above), so the download is intact; what is unproven is only that
-    # the two came from the same nightly.  The checksum shares an origin
-    # and a transport with the archives, so it never offered
-    # authenticity, only consistency, and a stuck upstream publish is
-    # not a reason to fail every build.  Proceed, but say so loudly and
-    # keep the evidence: SHA256SUM.provenance is copied below.
+    # above), so the download is intact.
     if [ "$attempt" -ge 3 ]; then
         echo "::warning::Redox toolchain checksum still disagrees after 3 fetches; using the intact archives anyway"
         echo "  ! proceeding UNVERIFIED: archives are complete but do not"

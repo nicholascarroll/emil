@@ -73,9 +73,7 @@ static void scenarioUnknownReported(const char *label,
 
 /* Alt+[ has no binding and there is no sequence timeout, so the
  * following keystroke completes the CSI and is consumed and reported
- * rather than typed.  This is the original CSI behavior, restored
- * deliberately: correctness on split sequences is worth more than the
- * ergonomics of an unbound key. */
+ * rather than typed. */
 static void scenarioAltBracketConsumesNext(void) {
 	struct child c;
 	begin("Alt+[ consumes the next keystroke");
@@ -100,12 +98,8 @@ static void scenarioAltBracketConsumesNext(void) {
 	finish();
 }
 
-/* THE guarantee bought by having no sequence timeout: a sequence
- * split by a slow transport (laggy link, slow serial line, TCP
- * retransmit) still decodes correctly no matter how long the gap.
- * Under any finite budget the tail of this arrow key would have been
- * typed into the buffer as the letter A.  This test fails under any
- * timed policy and passes only while sequence bytes block. */
+/* A sequence split by a slow transport (laggy link, slow serial line,
+ * TCP retransmit) still decodes correctly no matter how long the gap.*/
 static void scenarioSlowSplitSequence(void) {
 	struct child c;
 	struct timespec gap;

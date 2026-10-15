@@ -3,19 +3,12 @@
  *
  * Drives the real emil binary under a pseudo-terminal: allocate a pty,
  * spawn the editor on the slave, write bytes to the master, read the
- * frames back.  C only, no dependencies beyond POSIX (_XOPEN_SOURCE 600
- * for posix_openpt and friends).
- *
- * There are two tests because there are two different requirements:
+ * frames back. There are two tests:
  *
  *   pty_input_test    needs a pty.  Runs wherever posix_openpt works.
  *   pty_signals_test  needs a pty whose master reports the slave's
  *                     termios, and real job control.  Linux and macOS.
  *
- * That split is the whole of the platform handling.  A scenario either
- * runs here or it is not in this binary; there is no skip, no advisory
- * mode and no environment variable that turns assertions off.  Which
- * binaries get built is decided once, in tests/run_tests.sh.
  *
  * Both are driven by run_tests.sh at the end of `make test`.  Exit
  * status is the number of failing assertions.
@@ -59,18 +52,12 @@ static inline void capReset(void) {
 	cap_len = 0;
 }
 
-/* Multiplier applied to every settle window (see pump).  Every wait in
- * this file is "give the editor time to produce its output", so
- * stretching them can only reduce flakiness, never change what is
- * asserted.  Needed where the editor is slower to respond than a
- * native build on an idle machine: under a Wasm runtime, under an
- * emulator, or on a loaded CI runner.  Set EMIL_PTY_TIME_SCALE=4 (or
- * whatever) rather than editing the constants, so the native timings
- * stay honest about how fast the editor actually is.
+/* Applies EMIL_PTY_TIME_SCALE to every settle window (see pump). Needed 
+ * when the editor is slowed, eg a Wasm runtime, under an emulator, or
+ * on a loaded CI runner. 
  *
- * Note this deliberately does NOT scale the deliberate *input* gaps
- * (the 400ms split-sequence pause), which are part of what those
- * scenarios assert rather than slack for the editor to use. */
+ * This does not scale the specific *input* gaps in tests which 
+ * are part of what those scenarios assert. */
 static inline int timeScale(void) {
 	static int scale = 0;
 	if (scale == 0) {
@@ -248,12 +235,6 @@ static inline int spawnEmil(struct child *c) {
 	return spawnEmilOpts(c, NULL, 80, 24);
 }
 
-/* Named sendBytes, not send: send(2) is a POSIX socket function, and
- * a static shadowing it compiles only for as long as no header in the
- * include chain happens to declare it.  That held here by luck until a
- * feature-test macro pulled in <sys/socket.h> on Darwin and the
- * collision became a hard error.  Kept renamed now that the macro is
- * gone, because the hazard was always latent. */
 static inline void sendBytes(struct child *c, const char *bytes, size_t n,
 		      int settle_ms) {
 	ssize_t w = write(c->mfd, bytes, n);
@@ -268,14 +249,7 @@ static inline void sendStr(struct child *c, const char *s, int settle_ms) {
 
 /* Send text the way a terminal delivers a paste: one write, so the
  * bytes are already buffered when the drain loop looks, and CR as the
- * line separator.
- *
- * CR is not a detail.  A terminal sends \r for a line break -- that is
- * what the Enter key transmits in raw mode -- and keymap.c maps it to
- * CMD_NEWLINE.  A harness that sends \n instead is testing input no
- * terminal produces, and will pass while multi-line paste is visibly
- * broken.  Every paste scenario below uses this helper for that
- * reason. */
+ * line separator. */
 static inline void sendPaste(struct child *c, const char *text, int settle_ms) {
 	sendBytes(c, text, strlen(text), settle_ms);
 }
@@ -286,10 +260,8 @@ static inline int childAlive(struct child *c) {
 
 /* Running, stopped, or gone.
  *
- * childAlive() cannot tell the first two apart -- waitpid() without
- * WUNTRACED reports a stopped child as simply not exited -- and for the
- * suspend scenarios that difference is the whole question: a stopped
- * editor is *supposed* to have handed the terminal back. */
+ * childAlive() cannot tell the first two apart: waitpid() without
+ * WUNTRACED reports a stopped child as simply not exited.*/
 enum childState { CHILD_RUNNING, CHILD_STOPPED, CHILD_GONE };
 
 static inline enum childState childState(struct child *c) {
@@ -337,8 +309,8 @@ static inline void finish(void) {
  ----------------------------------- */
 
 /* Resolve the editor path and confirm the platform can host the test.
- * Returns 0 when it cannot, having said why; the caller returns 0 and
- * run_tests.sh reports a run of zero scenarios as a failure. */
+ * Returns 0 when it cannot, the caller returns 0 and  run_tests.sh 
+ * reports a run of zero scenarios as a failure. */
 static inline int ptyBegin(const char *prog, int argc, char **argv) {
 	emil_path = (argc > 1) ? argv[1] : "./emil";
 	signal(SIGPIPE, SIG_IGN);

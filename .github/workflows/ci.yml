@@ -52,6 +52,21 @@ jobs:
     - name: Build and test with sanitizers
       run: make sanitize
 
+  # 32-bit x86 on a native runner: 4-byte pointers, size_t, long, off_t
+  # and time_t.
+  i386:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install 32-bit toolchain
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-multilib
+    - name: Build (32-bit)
+      run: make CC="gcc -m32"
+    - name: Run unit tests (32-bit)
+      run: make CC="gcc -m32" test
+
   security:
     runs-on: ubuntu-latest
     
@@ -238,31 +253,6 @@ jobs:
             gmake CC=$CC CFLAGS="$CFLAGS"
             echo "--- Running Tests ---"
             gmake CC=$CC CFLAGS="$CFLAGS" test
-
-  y2038:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Y2038 — build and test on 32-bit ARM (armv7 Debian Bullseye)
-        uses: uraimo/run-on-arch-action@v3
-        with:
-          arch: armv7
-          distro: bullseye
-          githubToken: ${{ github.token }}
-          install: |
-            apt-get update -y
-            apt-get install -y gcc make
-          run: |
-            export EMIL_SKIP_QEMU_TESTS=1
-            echo "--- Confirm this platform has 32-bit time_t ---"
-            cc -std=c99 -Wall -Wextra -Wpedantic -o confirm_y2038_bug tests/confirm_y2038_bug.c
-            ./confirm_y2038_bug
-
-            echo ""
-            echo "--- Building Emil ---"
-            make CC=gcc
-            echo "--- Running Tests ---"
-            make test
 
   # Builds emil.wasm, runs the unit suites under wasmer, then the
   # end-to-end smoke test.
