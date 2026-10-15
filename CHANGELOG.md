@@ -1,3 +1,6 @@
+## [Unreleased]
+- #146 `M-.` looks up a hyphenated symbol first, then the part under the cursor.
+
 ## [1.0.0] - 2026-10-12
 - `emil --help` added.
 - #131 TAB completes in the shell prompt (`M-!`, `M-|`) now.

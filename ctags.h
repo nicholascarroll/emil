@@ -55,4 +55,9 @@ int ctagsParseLine(char *line, const char *sym, struct tagMatch *m);
  * Caller frees.  Exposed for testing. */
 char *ctagsWordAtPoint(void);
 
+/* The word at point widened across hyphens that join word characters,
+ * such as "foo-bar-baz" in Lisp.  NULL if there is no word or it has
+ * no hyphen.  Caller frees.  Exposed for testing. */
+char *ctagsHyphenatedWordAtPoint(void);
+
 #endif /* EMIL_CTAGS_H */

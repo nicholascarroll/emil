@@ -90,7 +90,9 @@ static int nextCPStart(const erow *row, int i) {
 	return i + n;
 }
 
-char *ctagsWordAtPoint(void) {
+/* Copy of the word at point, widened across hyphens between word
+ * characters when hyphens is set.  NULL if there is no word. */
+static char *wordAtPoint(int hyphens) {
 	erow *row = &E.buf->row[E.buf->cy];
 	int cx = E.buf->cx;
 	int orig = cx;
@@ -113,9 +115,37 @@ char *ctagsWordAtPoint(void) {
 	while (end < row->size && isWordAt(row, end))
 		end = nextCPStart(row, end);
 
+	while (hyphens && start > 0 && row->chars[start - 1] == '-' &&
+	       isWordAt(row, prevCPStart(row, start - 1))) {
+		start = prevCPStart(row, start - 1);
+		while (start > 0 && isWordAt(row, prevCPStart(row, start)))
+			start = prevCPStart(row, start);
+	}
+	while (hyphens && end + 1 < row->size && row->chars[end] == '-' &&
+	       isWordAt(row, end + 1)) {
+		end++;
+		while (end < row->size && isWordAt(row, end))
+			end = nextCPStart(row, end);
+	}
+
 	char *w = xmalloc(end - start + 1);
 	memcpy(w, &row->chars[start], end - start);
 	w[end - start] = '\0';
+	return w;
+}
+
+char *ctagsWordAtPoint(void) {
+	return wordAtPoint(0);
+}
+
+char *ctagsHyphenatedWordAtPoint(void) {
+	char *plain = wordAtPoint(0);
+	char *w = wordAtPoint(1);
+	if (w && plain && strcmp(w, plain) == 0) {
+		free(w);
+		w = NULL;
+	}
+	free(plain);
 	return w;
 }
 
@@ -508,8 +538,20 @@ void ctagsJump(void) {
 		setStatusMessage("No symbol at point");
 		return;
 	}
-	struct tagMatch *v;
-	int n = collectMatches(sym, &v);
+	struct tagMatch *v = NULL;
+	int n = -1;
+	char *hyphenated = ctagsHyphenatedWordAtPoint();
+	if (hyphenated) {
+		n = collectMatches(hyphenated, &v);
+		if (n > 0) {
+			free(sym);
+			sym = hyphenated;
+		} else {
+			free(hyphenated);
+		}
+	}
+	if (n <= 0)
+		n = collectMatches(sym, &v);
 	int pick = n > 1 ? pickMatch(sym, v, n) : 0;
 	if (n <= 0)
 		setStatusMessage("Tag not found: %s", sym);
