@@ -353,8 +353,7 @@ void test_subprocess_signal_kills_pipeline(void) {
 	}
 #ifdef __redox__
 	/* Known Redox/relibc bug, not an emil bug: the group signal does
-	 * not reach the rest of the pipeline (tests/platform-bugs.md), so
-	 * cat can outlive the shell.  The shell itself must still die,
+	 * not reach the rest of the pipeline, so cat can outlive the shell.  The shell itself must still die,
 	 * which the join below proves.  emil copes: pipe.c abandons an
 	 * unkillable child on the third C-g. */
 	if (!got_eof)

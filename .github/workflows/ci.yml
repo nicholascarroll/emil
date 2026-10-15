@@ -152,13 +152,7 @@ jobs:
             #
             # This pin restores a known-good image; it does not fix
             # the harness.  The real fix is to stop doing work
-            # between fork and exec -- posix_spawn with file actions,
-            # which is what the editor itself uses for subprocesses
-            # (design §3.17) and what the harness should have used.
-            # Left undone deliberately: replacing the spawn path of
-            # the one test that cannot run outside CI, without being
-            # able to run it on the platform that is broken, risks
-            # the targets that currently pass.
+            # between fork and exec.
             release: r1beta5
             prepare: pkgman install -y gcc make
             run: |
@@ -271,10 +265,7 @@ jobs:
             make test
 
   # Builds emil.wasm, runs the unit suites under wasmer, then the
-  # end-to-end smoke test.  The smoke test is what makes this worth
-  # gating on: a wasi-sdk/wasix-libc version mismatch links cleanly and
-  # only shows up as a trap on the first open(), so a build-only job
-  # would go green on a binary that cannot read a file.
+  # end-to-end smoke test.
   wasix:
     runs-on: ubuntu-latest
     env:
@@ -286,12 +277,6 @@ jobs:
         with:
           prefix: ${{ github.workspace }}/.wasix-toolchain
 
-      # A WASIX sandbox starts empty: wasmer will exec a wasm module out
-      # of the mapped filesystem, but nothing puts a shell there.  Not a
-      # missing syscall, a missing file -- and without it test_shell and
-      # test_subprocess both die at exit 45 with no /bin/sh to spawn.
-      # This script builds dash and a handful of sbase utilities for the
-      # target; make picks it up through $(wildcard ...) and mounts it.
       - name: Build the WASIX sandbox (/bin/sh and friends)
         run: |
           ./tests/wasix/sandbox.sh "$WASIX_PREFIX" ./wasix-sandbox
@@ -314,36 +299,13 @@ jobs:
   # depot.genode.org, then runs it on base-linux -- a whole Genode
   # system as ordinary Linux processes, so no QEMU, hardware or display.
   #
-  # The signal is portability of a kind no other target here provides.
-  # Genode is not a Unix: a component has no ambient filesystem and no
-  # shell, and sees only the VFS its runtime configuration grants it.
-  # It does have fork() -- its libc clones the address space into a
-  # fresh component -- but the editor spawns through posix_spawn and
-  # never takes that path.  What is absent is a /bin/sh to spawn, so
-  # EMIL_DISABLE_SHELL compiles those paths out exactly as the Android
-  # target does; this is the only job that compiles that configuration.
-  # What is actually checked is that the rest holds up against a
-  # FreeBSD-derived libc (goa compiles with -D__FreeBSD__=12
-  # -D__BSD_VISIBLE -nostdinc) under a capability-based component model.
-  #
   # Scope: the editor is built, linked, and run -- `emil --version` on
   # base-linux, then the unit suites.  Three suites are not built (see
   # UNBUILDABLE in tests/genode/emil/Makefile.in) because the code they
   # test is compiled out here or needs a host compiler.  The other 31
   # run, each scored by its own exit status as on every other target.
   # Five of them fail: Genode ships only the C locale, so
-  # wcwidth does not report 2 for CJK.  They are reported as failures,
-  # not excused -- the editor decodes UTF-8 itself and only display
-  # width is affected, but a red suite is the honest signal.  The pty
-  # test does not run here; it is Linux and macOS only.
-  #
-  # Not gating, for reasons outside this repository: it depends on
-  # codeberg.org for goa and the toolchain, on depot.genode.org for the
-  # API archives, and on unprivileged user namespaces for goa's
-  # bubblewrap sandbox.  Any of the three can fail without the editor
-  # being implicated.  goa is tracked at main rather than pinned, so
-  # upstream can change under us; last verified against goa cd34da5
-  # (2026-08-24) with genode-toolchain-25.05 and api/libc 2026-03-11.
+  # wcwidth does not report 2 for CJK.  They are reported as failures.
   #
   # Two compiler warnings are expected and are not regressions; see
   # tests/genode/README.md.  Genode's <termios.h> pulls in
@@ -381,43 +343,12 @@ jobs:
           git clone --depth 1 https://codeberg.org/genodelabs/goa.git "$GOA_DIR"
           echo "$GOA_DIR/bin" >> "$GITHUB_PATH"
 
-      # var/ is ~680M, nearly all of it the toolchain: a 230M tarball
-      # plus the squashfs made from it.  Both must be kept -- goa's
-      # install rule makes the squashfs from the tarball with no
-      # .SECONDARY, so deleting the tarball to halve the cache only
-      # makes the next run download it again.
-      #
-      # Keyed on used_apis and on the two goa files that decide what
-      # gets downloaded: install_tool.mk holds the toolchain version and
-      # its SHA, goarc the depot pins.  Hashing goa's whole tree would
-      # miss the cache on every unrelated upstream commit.
       - name: Cache Genode depot and toolchain
         uses: actions/cache@v4
         with:
           path: tests/genode/emil/var
           key: genode-${{ hashFiles('tests/genode/emil/used_apis') }}-${{ hashFiles('.goa/share/goa/lib/install_tool.mk', '.goa/share/goa/goarc') }}
 
-      # Fetch the toolchain ourselves rather than letting goa do it.
-      #
-      # goa's install_tool.mk sets `ECHO := echo -e` but, unlike its
-      # sibling sync_http.mk, never sets `SHELL := bash`.  make therefore
-      # runs the rule under /bin/sh, which on Ubuntu is dash, whose echo
-      # has no -e and prints it literally.  The SHA line handed to
-      # `sha256sum -c` comes out as "-e <sha>  <file>", which cannot be
-      # parsed, so the check fails, the rule deletes the freshly
-      # downloaded 230M tarball, and the build aborts.  This is not
-      # intermittent: it fails on any host where /bin/sh is dash, which
-      # includes ubuntu-latest.  Verified directly -- a byte-perfect
-      # tarball with the correct hash fails under dash and passes under
-      # bash.
-      #
-      # Nothing here can fix goa's makefile: make deliberately ignores
-      # SHELL from the environment, so it cannot be overridden from
-      # outside.  Instead we place a verified tarball where the rule
-      # expects one; make then sees its target up to date and never runs
-      # the broken recipe.  The pins are read out of install_tool.mk so
-      # this cannot drift from whatever goa revision was cloned above.
-      #
       # Remove this step once goa adds `SHELL := bash` to
       # install_tool.mk.
       - name: Pre-seed the Genode toolchain
@@ -434,19 +365,7 @@ jobs:
           dest="tests/genode/emil/var/install/download/$(basename "$url")"
 
           # A cancelled or timed-out run can leave a half-written
-          # .squashfs behind, and goa will never rebuild it: the file
-          # exists and is newer than the tarball, so make considers it
-          # up to date.  Every later build then fails with "Installation
-          # of tool chain ... failed", which names neither the file nor
-          # the cause.  The image is derived, so checking it and
-          # deleting a bad one costs nothing and stops one cancelled job
-          # from poisoning the cache for every run afterwards.
-          #
-          # Both halves of the check are needed.  A squash killed early
-          # has no valid superblock, so `unsquashfs -s` fails outright.
-          # One killed late has a good superblock over a truncated body,
-          # which `unsquashfs -s` happily accepts -- so the size it
-          # declares is compared against the size on disk.
+          # .squashfs behind.
           sqfs="tests/genode/emil/var/install/download/${tool}.squashfs"
           if [ -f "$sqfs" ]; then
             declared=$( { unsquashfs -s "$sqfs" 2>/dev/null \
@@ -468,8 +387,7 @@ jobs:
           echo "$sha  $dest" | sha256sum -c -
 
       # Sources live at the repository root; goa requires them under
-      # <project>/src.  See tests/genode/stage.sh for why they are
-      # copied rather than linked.
+      # <project>/src. 
       - name: Stage sources into the goa project
         run: ./tests/genode/stage.sh
 
@@ -494,10 +412,6 @@ jobs:
           file "$bin" | grep -q "interpreter ld.lib.so" \
             || { echo "not linked against Genode's ld.lib.so"; exit 1; }
 
-      # Actually run the editor, rather than only linking it.  `emil
-      # --version` prints and exits from main() before raw mode and
-      # before the event loop, so it needs no terminal -- which is what
-      # makes it the one editor path that can run headless today.
       - name: Run emil --version on Genode
         shell: bash
         run: |
@@ -514,21 +428,13 @@ jobs:
           set -e
           echo "emil said: $out (exit $status)"
 
-          # The version is defined once, in the top-level Makefile.  If
-          # the editor reported "unknown" here, -DEMIL_VERSION failed to
-          # reach the cross build and the binary would be lying about
-          # itself -- which links and runs, so only a check like this
-          # catches it.
           version=$(sed -n 's/^VERSION[[:space:]]*=[[:space:]]*\(.*\)/\1/p' Makefile | head -1)
           test "$out" = "emil $version" \
             || { echo "expected \"emil $version\""; exit 1; }
           test "$status" -eq 0 || { echo "non-zero exit"; exit 1; }
 
       # The editor's own suites, cross-built by the same toolchain and
-      # run on a real Genode system.  Not a duplicate of the FreeBSD job
-      # even though Genode's libc is FreeBSD-derived: here the
-      # file-based suites exercise fileio.c against Genode's VFS, with
-      # no Unix kernel underneath at all.
+      # run on a real Genode system.
       - name: Run unit suites on Genode
         shell: bash
         run: |
@@ -544,81 +450,29 @@ jobs:
           path: tests/genode/emil/var/build/x86_64/emil
           if-no-files-found: error
 
-  # Runs the unit suites inside a real Redox system.
+  # Runs the unit suites on Redox.
   #
-  # redoxer boots Redox under QEMU and execs a binary in it, which is the
-  # only way to run a Redox binary short of hardware.  One VM boot per
-  # suite, so this is minutes, not seconds.
+  # redoxer boots Redox under QEMU and execs a command in it. The suites
+  # run in ONE boot (RUNNER_BATCH in tests/run_tests.sh, with the guest
+  # side in tests/redox_batch.sh). Each invocation is bounded 
+  # (REDOX_SUITE_TIMEOUT in the  # Makefile).
   #
-  # Developed against a working local setup: 34 suites cross-compiled,
-  # 31 passing inside the VM, on QEMU without KVM.  The three that do
-  # not pass are left failing rather than skipped, so this job is
-  # expected to be red until they are resolved -- the per-suite lines in
-  # the log are the point, not the tick.
+  # Known Redox/relibc differences are skipped inside the tests under
+  # __redox__ and print a "known Redox bug" note instead of failing.
   #
-  #   subprocess  test_subprocess_signal_kills_pipeline: got_eof is
-  #               false.  Killing a pipeline with a signal does not
-  #               surface EOF to the read side on Redox.  Genuine, and
-  #               not yet diagnosed to either side of the boundary.
-  #
-  #   warnings    Two failures, only one of them about Redox.
-  #               test_no_duplicate_buffer_for_symlink_to_open_file is
-  #               the standing #128 reminder and fails everywhere by
-  #               design.  test_relock_reports_conflict_when_rival_-
-  #               takes_the_lock is a real difference: three assertions
-  #               about fcntl locks across fork fail here and pass on
-  #               glibc.
-  #
-  #   regex_semantics  test_chunk_stays_within_cancel_budget asserts a
-  #               64 KiB chunk matches within 250 ms.  Measured without
-  #               KVM, where every instruction is emulated, so the
-  #               number means nothing about Redox.  The step below
-  #               reports which case applies so the result can be read.
-  #
-  # Three things learned the hard way, all load-bearing:
-  #
-  #   rsync must be installed.  redoxer copies the folder into the guest
-  #   with it and fails with a bare "No such file or directory" if it is
-  #   missing, which reads like a missing binary rather than a missing
-  #   tool.
-  #
-  #   --folder copies the whole directory into a fixed-size disk image.
-  #   The source tree is about 5 MB and fits; a tree with large
-  #   artifacts in it does not, and the failure is a RedoxFS "No space
-  #   left on device" during the copy, not an obvious size complaint.
-  #
-  #   redoxer does not reliably report the child's exit status: measured
-  #   at 4 wrong in 10 on one suite, while that suite printed correct
-  #   output and a clean summary 10 times out of 10.  RUNNER_CONSOLE in
-  #   tests/run_tests.sh exists for this and takes the verdict from the
-  #   suite's own summary instead.  Do not "simplify" it back to $?.
+  # regex_semantics asserts that a 64 KiB regex chunk matches within
+  # 250 ms; the KVM step below reports which case applies.
   redox:
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    env:
-      REDOX_PREFIX: ${{ github.workspace }}/.redox
     steps:
       - uses: actions/checkout@v4
 
-      # redoxer 0.2.63 decides whether to pass -accel kvm with
-      # Path::new("/dev/kvm").exists() -- presence, not access.  A GitHub
-      # runner has the device node but does not grant the runner user
-      # access to it, so the check says yes, QEMU is asked for KVM, and
-      # it dies with "Could not access KVM kernel module: Permission
-      # denied" before the guest ever boots.  Upstream has since replaced
-      # that check with a real open(), but the fix is in no release, and
-      # 0.2.63 has no REDOXER_USE_KVM override either.  The only lever
-      # from out here is /dev/kvm itself.
-      #
-      # So: grant access, which is what we want anyway (KVM is faster and
-      # is the only way the regex_semantics timing assertion means
-      # anything).  Failing that, take the node out of redoxer's way so
-      # its existence check comes back false and it picks TCG, which is
-      # the path that works.
-      #
-      # Note that `test -e` is the same wrong question redoxer asks.
+      - name: Choose the toolchain location
+        run: echo "REDOX_PREFIX=$RUNNER_TEMP/redox" >> "$GITHUB_ENV"
+
       # Access is established by opening the device and issuing
-      # KVM_GET_API_VERSION, which is what QEMU will do moments later.
+      # KVM_GET_API_VERSION.
       - name: Runner capabilities and KVM access
         run: |
           # The runner invokes this with bash -e; every branch below is a
@@ -675,7 +529,7 @@ jobs:
 
       - uses: ./.github/actions/redox-toolchain
         with:
-          prefix: ${{ github.workspace }}/.redox
+          prefix: ${{ env.REDOX_PREFIX }}
 
       - name: Cache redoxer
         uses: actions/cache@v4
@@ -698,10 +552,6 @@ jobs:
           fi
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
-      # The smallest question first: does anything run at all?  `emil
-      # --version` returns from main() before raw mode and before the
-      # event loop, so it needs no terminal.  If this fails, every suite
-      # below fails for the same reason and this is where to look.
       - name: Toolchain provenance
         run: |
           tc="$REDOX_PREFIX/redox-toolchain"
@@ -730,10 +580,6 @@ jobs:
           n=$(grep -c 'warning:' /tmp/redox-build.log || true)
           echo "total: $n (2 expected: setitimer deprecated, x2)"
 
-      # A Redox binary and a host Linux binary are both x86-64 ELF, so
-      # `make` producing output proves nothing about which compiler made
-      # it.  The interpreter separates them: Redox links against
-      # /lib/ld64.so.1, glibc against /lib64/ld-linux-x86-64.so.2.
       - name: Confirm this is a Redox binary and not a host one
         run: |
           set -euo pipefail
@@ -750,24 +596,11 @@ jobs:
           fi
           echo "OK: Redox ELF, interpreter /lib/ld64.so.1"
 
-      - name: Smoke test - emil --version inside Redox
-        run: |
-          set -euo pipefail
-          version=$(sed -n 's/^VERSION[[:space:]]*=[[:space:]]*\(.*\)/\1/p' Makefile | head -1)
-          mkdir -p /tmp/redox-smoke && cp emil /tmp/redox-smoke/
-          cd /tmp/redox-smoke
-          redoxer exec --folder . -- ./emil --version 2>&1 | tee /tmp/smoke.log
-          # Verdict from output, not exit status; see the note above.
-          grep -q "emil $version" /tmp/smoke.log
-          echo "OK: emil $version ran on Redox"
-
       - name: Run the unit suites inside Redox
         run: make redox-run REDOX_TOOLCHAIN="$REDOX_PREFIX/redox-toolchain"
 
       - name: Upload the Redox binary
-        # Unconditional: this step used to live in a build-only job
-        # where nothing before it could fail.  It now follows the suite
-        # run, so without this a red suite means no artifact at all.
+        # Unconditional, so a red suite run still leaves the binary.
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -778,8 +611,6 @@ jobs:
       - name: Diagnostics on failure
         if: failure()
         run: |
-          echo "=== smoke log ==="
-          cat /tmp/smoke.log 2>/dev/null || echo "(none)"
           echo "=== redoxer ==="
           which redoxer && redoxer --help | head -3 || echo "(not installed)"
           du -sh ~/.redoxer 2>/dev/null || echo "(no ~/.redoxer)"
@@ -794,28 +625,6 @@ jobs:
 
   # Advisory only.  Runs the editor's unit suites on Asterinas, a Linux
   # ABI-compatible OS kernel written in Rust, booted under QEMU.
-  #
-  # The signal is different in kind from every other target.  Nothing is
-  # cross-compiled: Asterinas implements the Linux syscall ABI on x86-64
-  # and the dev container is x86-64 Linux, so these are ordinary Linux
-  # ELF binaries -- the same shape the ubuntu-latest job builds.  What is
-  # under test is the kernel, not the libc.  Genode asks whether the
-  # editor survives an unfamiliar libc; this asks whether it survives an
-  # unfamiliar kernel underneath a familiar one.
-  #
-  # Not gating, for three reasons.  Asterinas is pre-production by its
-  # own account (x86-64 is Tier 1 with full CI and 230+ syscalls, but
-  # their stated 2026 goal is still advancing *toward* production), so a
-  # syscall gap is a plausible red that is not the editor's to fix.  The
-  # initramfs injection is layout-dependent -- see
-  # tests/asterinas/inject.sh, and note the --old-file flag below, which
-  # is load-bearing.  And the dev image is pulled from Docker Hub rather
-  # than built here.
-  #
-  # Scope: the unit suites run for real, in one boot.  The pty scenarios
-  # are built and run but are advisory even within this advisory job;
-  # their result is printed after the verdict and never affects it.  See
-  # tests/asterinas/README.md.
   asterinas:
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -841,9 +650,6 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      # Built first, and on its own step, so that a plain compile
-      # failure is reported as one rather than surfacing twenty minutes
-      # later as an empty initramfs.
       - name: Build emil and the unit suites (static, x86-64 Linux)
         run: ./tests/asterinas/build_payload.sh /tmp/payload
 
@@ -852,11 +658,6 @@ jobs:
           git clone --depth 1 --branch "$ASTER_REF" \
             https://github.com/asterinas/asterinas "$ASTER_DIR"
 
-      # Nix builds the initramfs; the image ships the prebuilt packages
-      # this resolves against, so it is mostly a cache hit.  KVM is used
-      # when the runner exposes /dev/kvm and TCG emulation otherwise --
-      # correctness is identical, only speed differs, and the timeout
-      # above is sized for the slow path.
       - name: Build the Asterinas initramfs
         working-directory: /tmp/asterinas
         run: |
@@ -868,23 +669,12 @@ jobs:
       - name: Inject emil into the initramfs
         run: ./tests/asterinas/inject.sh "$ASTER_DIR" /tmp/payload
 
-      # --old-file=initramfs is the load-bearing flag.  Asterinas
-      # declares the initramfs image target .PHONY, so without it this
-      # step re-runs nix-build, restores the read-only store symlink,
-      # and boots a system with no emil in it -- silently, and green.
       - name: Run the unit suites on Asterinas
         working-directory: /tmp/asterinas
         run: |
           make --old-file=initramfs run_kernel \
             AUTO_TEST=boot ENABLE_KVM="$ENABLE_KVM" || true
 
-      # The verdict is read from the serial log rather than from make's
-      # exit status: make's AUTO_TEST=boot check greps for its own
-      # marker and would report "Boot test failed", which names the
-      # wrong thing.  A run that never reaches the runner produces no
-      # EMIL_RESULT line, and that is failed distinctly -- a boot that
-      # dies before init is a platform problem, not a test failure, and
-      # the two should not look alike.
       - name: Report
         working-directory: /tmp/asterinas
         run: |

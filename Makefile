@@ -308,6 +308,8 @@ redox: redox-toolchain-check
 # Runs the unit suites inside a real Redox system, via redoxer, which
 # boots Redox under QEMU and execs a binary in it.  
 REDOXER = redoxer
+REDOX_SUITE_TIMEOUT = 120
+REDOX_SUITE_RETRIES = 2
 
 redox-run: redox
 	@echo "Makefile: running the suites inside Redox via $(REDOXER)"
@@ -316,11 +318,12 @@ redox-run: redox
 	LDFLAGS="$(LDFLAGS)" \
 	NM="$(REDOX_NM)" \
 	RUNNER="$(REDOXER) exec --folder . --" \
-	RUNNER_CONSOLE=1 \
 	RUNNER_MARKER="## running redoxer ##" \
+	RUNNER_BATCH=1 \
+	RUNNER_TIMEOUT=$(REDOX_SUITE_TIMEOUT) \
+	RUNNER_RETRIES=$(REDOX_SUITE_RETRIES) \
 	./tests/run_tests.sh
 
-.PHONY: redox-toolchain-check
 redox-toolchain-check:
 	@fail=0; \
 	[ -x "$(REDOX_CC)" ] || { \

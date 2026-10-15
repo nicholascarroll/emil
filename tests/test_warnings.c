@@ -846,8 +846,8 @@ void test_close_of_unrelated_descriptor_releases_lock(void) {
 #ifdef __redox__
 	/* Known Redox/relibc bug, not an emil bug: closing an unrelated
 	 * descriptor on the file does not drop the process's record locks
-	 * (tests/platform-bugs.md).  This test asserts the POSIX rule, so
-	 * it cannot hold there; report and pass. */
+	 * (gitlab.redox-os.org issue #1880).  This test asserts the POSIX
+	 * rule, so it cannot hold there; report and pass. */
 	printf("  note: %s: known Redox bug, not emil (relibc keeps record "
 	       "locks on close); not asserted\n", __func__);
 	return;
@@ -880,14 +880,6 @@ void test_close_of_unrelated_descriptor_releases_lock(void) {
 }
 #endif /* !EMIL_NO_FILE_LOCKING */
 
-/* C-x C-f on a symlink to the open, dirty file.
- *
- * Same mechanism through a different door: editorOpen on a second
- * buffer opens and closes the same inode.  The symlink is what stops
- * the find-file path recognising it as a file already open, but the
- * inode is what the kernel cares about, so the first buffer's lock
- * goes.  The second buffer is chained onto E.headbuf because the fix
- * walks the buffer list. */
 /* The window between the close and the re-assert is real, and this is
  * what happens when a rival wins it.
  *
@@ -906,8 +898,8 @@ void test_relock_reports_conflict_when_rival_takes_the_lock(void) {
 #ifdef __redox__
 	/* Known Redox/relibc bug, not an emil bug: closing an unrelated
 	 * descriptor on the file does not drop the process's record locks
-	 * (tests/platform-bugs.md).  This test asserts the POSIX rule, so
-	 * it cannot hold there; report and pass. */
+	 * (gitlab.redox-os.org issue #1880).  This test asserts the POSIX
+	 * rule, so it cannot hold there; report and pass. */
 	printf("  note: %s: known Redox bug, not emil (relibc keeps record "
 	       "locks on close); not asserted\n", __func__);
 	return;

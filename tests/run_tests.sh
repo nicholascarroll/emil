@@ -46,6 +46,32 @@ KEEP_BUILT=${KEEP_BUILT:-}
 RUNNER_CONSOLE=${RUNNER_CONSOLE:-}
 RUNNER_MARKER=${RUNNER_MARKER:-}
 
+# A VM boot can stall.  redoxer has no timeout, so we add one.
+#   RUNNER_TIMEOUT  seconds per runner invocation (--version check).
+#   RUNNER_RETRIES  extra attempts if one stalls.
+RUNNER_TIMEOUT=${RUNNER_TIMEOUT:-}
+RUNNER_RETRIES=${RUNNER_RETRIES:-0}
+
+# RUNNER_BATCH: run all suites in one VM boot via tests/redox_batch.sh.
+#   RUNNER_BATCH_TIMEOUT        seconds per attempt at the whole batch.
+#   RUNNER_BATCH_SUITE_TIMEOUT  seconds per suite in the guest, if it has timeout(1).
+RUNNER_BATCH=${RUNNER_BATCH:-}
+RUNNER_BATCH_TIMEOUT=${RUNNER_BATCH_TIMEOUT:-300}
+RUNNER_BATCH_SUITE_TIMEOUT=${RUNNER_BATCH_SUITE_TIMEOUT:-180}
+[ -n "$RUNNER_BATCH" ] && RUNNER_CONSOLE=1
+
+# Run "$@" for at most $1 seconds when $1 is non-empty.  timeout signals
+# its whole process group, so a QEMU the runner spawned goes with it
+# instead of holding the output pipe open and hanging the caller.
+run_bounded() {
+    secs=$1; shift
+    if [ -n "$secs" ]; then
+        timeout -k 10 "$secs" "$@"
+    else
+        "$@"
+    fi
+}
+
 # Strip a VM console's CRLF, and drop everything the runner printed
 # before the child started.
 normalize_output() {
@@ -96,17 +122,25 @@ if [ ! -f "./$PROGNAME" ]; then
 fi
 
 # Can it run? Also note the version
-VERSION_OUTPUT=$($RUNNER "./$PROGNAME" $RUNNER_SEP --version 2>&1)
-rc=$?
-VERSION_OUTPUT=$(printf '%s\n' "$VERSION_OUTPUT" | normalize_output)
+attempt=0
+while :; do
+    VERSION_OUTPUT=$(run_bounded "$RUNNER_TIMEOUT" $RUNNER "./$PROGNAME" $RUNNER_SEP --version 2>&1)
+    rc=$?
+    VERSION_OUTPUT=$(printf '%s\n' "$VERSION_OUTPUT" | normalize_output)
 
-if [ -n "$RUNNER_CONSOLE" ]; then
-    if echo "$VERSION_OUTPUT" | grep -q '^emil '; then
-        rc=0
-    else
-        rc=1
+    if [ -n "$RUNNER_CONSOLE" ]; then
+        if echo "$VERSION_OUTPUT" | grep -q '^emil '; then
+            rc=0
+        else
+            rc=1
+        fi
     fi
-fi
+
+    [ $rc -ne 0 ] && [ -n "$RUNNER_CONSOLE" ] &&
+        [ "$attempt" -lt "$RUNNER_RETRIES" ] || break
+    attempt=$((attempt + 1))
+    echo "  --version produced no output; retry $attempt of $RUNNER_RETRIES"
+done
 
 if [ $rc -ne 0 ]; then
     echo "✗ Binary failed to run (Exit Code $rc)"
@@ -325,6 +359,56 @@ if [ -n "${EMIL_SKIP_QEMU_TESTS:-}" ]; then
     echo "‣ Skipping 'prompt' suite and pty_input_test (EMIL_SKIP_QEMU_TESTS)"
 fi
 
+# Derive rc from $output.  With a console runner the exit status cannot be
+# trusted, so the verdict is what the suite printed at TEST_END.
+judge() {
+    [ -n "$RUNNER_CONSOLE" ] || return 0
+    if printf '%s\n' "$output" | grep -q '^OK$'; then
+        rc=0
+    elif printf '%s\n' "$output" | grep -q '^FAIL$'; then
+        rc=1
+    else
+        rc=125   # never reached TEST_END
+    fi
+}
+
+# Run one suite binary ($1, relative to the cwd) through the runner,
+# bounded.  Sets $output and $rc.
+run_one() {
+    output=$(run_bounded "$RUNNER_TIMEOUT" $RUNNER "$1" 2>&1)
+    rc=$?
+    output=$(printf '%s\n' "$output" | normalize_output)
+    judge
+}
+
+# Print the PASS/FAIL line for the suite whose $output and $rc are set.
+report() {
+    if [ "$rc" -eq 0 ]; then
+        echo "PASS ($(printf '%s\n' "$output" \
+            | awk '/Tests/{print $1; exit}') tests)"
+    else
+        if [ "$rc" -eq 125 ] && [ -n "$RUNNER_CONSOLE" ]; then
+            echo "FAIL (did not reach TEST_END)"
+        elif [ "$rc" -eq 124 ] && [ -n "$RUNNER_TIMEOUT" ]; then
+            echo "FAIL (timed out after ${RUNNER_TIMEOUT}s)"
+        elif [ "$rc" -gt 128 ]; then
+            echo "FAIL (killed by signal $((rc - 128)))"
+        else
+            echo "FAIL (exit $rc)"
+        fi
+        printf '%s\n' "$output" | head -n "$FAIL_CONTEXT" | sed 's/^/    /'
+        ANY_FAIL=1
+    fi
+}
+
+BATCH_SUITES=""
+BATCH_STAGE=""
+if [ -n "$RUNNER_BATCH" ] && [ -z "$BUILD_ONLY" ]; then
+    BATCH_STAGE=$(mktemp -d) || exit 1
+    trap 'rm -f "$BUILD_LOG"; rm -rf "$BATCH_STAGE"' EXIT
+    cp tests/redox_batch.sh "$BATCH_STAGE/"
+fi
+
 for suite in $SUITES; do
     src="tests/test_${suite}.c"
     bin="tests/test_${suite}"
@@ -352,38 +436,60 @@ for suite in $SUITES; do
         continue
     fi
 
-    # Capture first so rc is the suite's exit status, then normalize.
-    output=$($RUNNER "./$bin" 2>&1)
-    rc=$?
-    output=$(printf '%s\n' "$output" | normalize_output)
-
-    if [ -n "$RUNNER_CONSOLE" ]; then
-        if printf '%s\n' "$output" | grep -q '^OK$'; then
-            rc=0
-        elif printf '%s\n' "$output" | grep -q '^FAIL$'; then
-            rc=1
-        else
-            rc=125   # never reached TEST_END
-        fi
+    if [ -n "$BATCH_STAGE" ]; then
+        # Run later, all in one boot.
+        mv "$bin" "$BATCH_STAGE/"
+        BATCH_SUITES="$BATCH_SUITES $suite"
+        echo "built"
+        continue
     fi
 
-    if [ "$rc" -eq 0 ]; then
-        echo "PASS ($(printf '%s\n' "$output" \
-            | awk '/Tests/{print $1; exit}') tests)"
-    else
-        if [ "$rc" -eq 125 ] && [ -n "$RUNNER_CONSOLE" ]; then
-            echo "FAIL (did not reach TEST_END)"
-        elif [ "$rc" -gt 128 ]; then
-            echo "FAIL (killed by signal $((rc - 128)))"
-        else
-            echo "FAIL (exit $rc)"
-        fi
-        printf '%s\n' "$output" | head -n "$FAIL_CONTEXT" | sed 's/^/    /'
-        ANY_FAIL=1
-    fi
+    run_one "./$bin"
+    report
 
     rm -f "$bin"
 done
+
+# ===== One VM boot for every suite =====
+if [ -n "$BATCH_SUITES" ]; then
+    nsuites=$(echo $BATCH_SUITES | wc -w | tr -d ' ')
+    echo ""
+    echo "Running $nsuites suites in one runner invocation" \
+         "(timeout ${RUNNER_BATCH_TIMEOUT}s per attempt):"
+    here=$(pwd)
+    cd "$BATCH_STAGE" || exit 1
+
+    # Done when every suite printed @@END; otherwise the VM stalled, so rerun.
+    attempt=1
+    while :; do
+        batch_out=$(run_bounded "$RUNNER_BATCH_TIMEOUT" $RUNNER \
+            bash ./redox_batch.sh "$RUNNER_BATCH_SUITE_TIMEOUT" \
+            $BATCH_SUITES 2>&1)
+        batch_out=$(printf '%s\n' "$batch_out" | normalize_output)
+        ended=$(printf '%s\n' "$batch_out" | sed -n 's/^@@END \([^ ]*\) .*/\1/p' \
+            | sort -u | wc -l | tr -d ' ')
+        [ "$ended" -ge "$nsuites" ] && break
+        echo "  attempt $attempt: only $ended of $nsuites suites finished"
+        echo "  --- last output of that attempt ---"
+        printf '%s\n' "$batch_out" | tail -n 15 | sed 's/^/    /'
+        [ "$attempt" -gt "$RUNNER_RETRIES" ] && break
+        attempt=$((attempt + 1))
+        echo "  running the batch again (attempt $attempt)"
+    done
+
+    for suite in $BATCH_SUITES; do
+        printf "  %-16s " "$suite"
+        output=$(printf '%s\n' "$batch_out" | awk -v s="$suite" '
+            $0 == "@@BEGIN " s { buf = ""; on = 1; next }
+            on && index($0, "@@END " s " ") == 1 { res = buf; on = 0; next }
+            on { buf = buf $0 "\n" }
+            END { printf "%s", res }')
+        rc=0
+        judge
+        report
+    done
+    cd "$here" || exit 1
+fi
 
 rm -f tests/stubs.o tests/backup_faked.c
 
