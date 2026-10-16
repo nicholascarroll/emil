@@ -842,16 +842,6 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
 								break_byte;
 							continue;
 						}
-						/* The skip names a sub-line
-						 * this row does not have: the
-						 * row shrank, or the terminal
-						 * widened, under a stored top.
-						 * Nothing clamps it on write
-						 * so clamp it here and draw
-						 * the row's last sub-line.
-						 * Breaking out instead left
-						 * the window's top line blank.
-						 */
 						skip = sub_line_idx;
 					}
 
@@ -861,16 +851,21 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
 						break_col, &hl,
 						line_start_byte);
 
-					/* --- Fill trailing space with
-					 *     correct highlighting --- */
 					int fill_col = break_col;
 					int fill_hl = 0;
+					int pad_hl =
+						more &&
+						isHighlighted(&hl,
+							      break_col - 1) &&
+						isHighlighted(&hl, break_col);
 					while (fill_col - line_start_col <
 					       screencols) {
 						updateHighlight(
 							ab, &fill_hl,
-							isHighlighted(
-								&hl, fill_col) ?
+							(more ? pad_hl :
+								isHighlighted(
+									&hl,
+									fill_col)) ?
 								1 :
 								0);
 						abAppend(ab, " ", 1);
