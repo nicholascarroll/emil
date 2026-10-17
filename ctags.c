@@ -46,11 +46,18 @@ static void pushLocation(void) {
 
 /* Non-ASCII characters that end a word: the Latin-1 punctuation block
  * (NBSP, guillemets, inverted marks), General Punctuation (curly
- * quotes, dashes, ellipsis, and the zero-width characters), CJK
+ * quotes, dashes, ellipsis, and the zero-width space), CJK
  * punctuation, and ZERO WIDTH NO-BREAK SPACE.  No script is named.
  * Where a script is written without spaces, the text marks its own
- * word boundaries with U+200B ZERO WIDTH SPACE.*/
+ * word boundaries with U+200B ZERO WIDTH SPACE.
+ *
+ * U+200C ZERO WIDTH NON-JOINER and U+200D ZERO WIDTH JOINER are the
+ * exception inside General Punctuation: they control how the letters
+ * around them join and sit inside words (Persian "می‌خواهم", Indic
+ * conjuncts), so they do not end a word. */
 static int isSeparatorCP(uint32_t cp) {
+	if (cp == 0x200C || cp == 0x200D)
+		return 0;
 	return (cp >= 0x00A0 && cp <= 0x00BF) ||
 	       (cp >= 0x2000 && cp <= 0x206F) ||
 	       (cp >= 0x3000 && cp <= 0x303F) || cp == 0xFEFF;

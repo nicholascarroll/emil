@@ -282,6 +282,45 @@ void test_word_thai_zwsp_before_mai_yamok_is_a_boundary(void) {
 	free(w);
 }
 
+/* ZERO WIDTH NON-JOINER sits inside words, so unlike ZWSP it must not
+ * end one.  "می" ZWNJ "خواهم" is a single Persian word (17 bytes). */
+#define ZWNJ "\xe2\x80\x8c"
+#define ZWJ "\xe2\x80\x8d"
+static const char *persian_row = "می" ZWNJ "خواهم";
+
+void test_word_zwnj_does_not_end_word_from_start(void) {
+	char *w = word_at(persian_row, 0);
+	TEST_ASSERT_EQUAL_STRING(persian_row, w);
+	free(w);
+}
+
+void test_word_zwnj_does_not_end_word_from_after_it(void) {
+	char *w = word_at(persian_row, 7); /* on خ, just after the ZWNJ */
+	TEST_ASSERT_EQUAL_STRING(persian_row, w);
+	free(w);
+}
+
+void test_word_on_zwnj_takes_whole_word(void) {
+	char *w = word_at(persian_row, 4); /* on the ZWNJ itself */
+	TEST_ASSERT_EQUAL_STRING(persian_row, w);
+	free(w);
+}
+
+void test_word_zwj_does_not_end_word(void) {
+	/* Devanagari क + VIRAMA + ZWJ + ष: one conjunct, one word. */
+	const char *row = "क्" ZWJ "ष";
+	char *w = word_at(row, 0);
+	TEST_ASSERT_EQUAL_STRING(row, w);
+	free(w);
+}
+
+void test_word_zwsp_still_ends_word_next_to_zwnj(void) {
+	/* The carve-out is for ZWNJ/ZWJ only: ZWSP still separates. */
+	char *w = word_at("می" ZWNJ "خواهم" ZW "ab", 0);
+	TEST_ASSERT_EQUAL_STRING(persian_row, w);
+	free(w);
+}
+
 void test_word_thai_paiyannoi_is_part_of_word(void) {
 	char *w = word_at("กรุงเทพฯ", 0);
 	TEST_ASSERT_EQUAL_STRING("กรุงเทพฯ", w);
@@ -639,6 +678,11 @@ int main(void) {
 	RUN_TEST(test_word_thai_with_tone_mark_at_end_of_row);
 	RUN_TEST(test_word_thai_mai_yamok_is_part_of_word);
 	RUN_TEST(test_word_thai_zwsp_before_mai_yamok_is_a_boundary);
+	RUN_TEST(test_word_zwnj_does_not_end_word_from_start);
+	RUN_TEST(test_word_zwnj_does_not_end_word_from_after_it);
+	RUN_TEST(test_word_on_zwnj_takes_whole_word);
+	RUN_TEST(test_word_zwj_does_not_end_word);
+	RUN_TEST(test_word_zwsp_still_ends_word_next_to_zwnj);
 	RUN_TEST(test_word_thai_paiyannoi_is_part_of_word);
 	RUN_TEST(test_word_non_ascii_digits_are_word_characters);
 	RUN_TEST(test_word_thai_next_to_ascii);
