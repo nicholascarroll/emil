@@ -645,23 +645,22 @@ void queryReplace(void) {
 		case 'u':
 			/* Only undo replacements made in THIS session */
 			if (E.buf->undo != first) {
+				/* Undo returns the cursor to where the
+				 * replacement was made: the match's start.
+				 * Mark its end, as findNextMatch does. */
 				doUndo(E.buf, 1);
-				E.buf->markx = E.buf->cx;
+				E.buf->markx = E.buf->cx +
+					       strlen((const char *)replace_orig);
 				E.buf->marky = E.buf->cy;
-				E.buf->cx -= strlen((const char *)replace_orig);
-				if (E.buf->cx < 0)
-					E.buf->cx = 0;
 			}
 			break;
 		case 'U':
 			if (E.buf->undo != first) {
 				while (E.buf->undo != first)
 					doUndo(E.buf, 1);
-				E.buf->markx = E.buf->cx;
+				E.buf->markx = E.buf->cx +
+					       strlen((const char *)replace_orig);
 				E.buf->marky = E.buf->cy;
-				E.buf->cx -= strlen((const char *)replace_orig);
-				if (E.buf->cx < 0)
-					E.buf->cx = 0;
 			}
 			break;
 		case CTRL('r'): {

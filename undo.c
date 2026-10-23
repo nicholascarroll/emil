@@ -226,6 +226,15 @@ static void undoStep(struct buffer *buf, int redo) {
 		buf->cy = node->endy;
 	}
 
+	/* Undo puts the cursor back where it was before the change, as
+	 * Emacs does.  A group is undone newest record first, so its
+	 * oldest record, undone last, has the final say, and by then
+	 * the text is as it was when that point was recorded. */
+	if (!redo && node->pointy >= 0) {
+		buf->cx = node->pointx;
+		buf->cy = node->pointy;
+	}
+
 	updateBuffer(buf);
 
 	/* Move node from src-list head to dst-list head */
@@ -277,12 +286,22 @@ void doRedo(struct buffer *buf, int count) {
 			setStatusMessage("No further redo information.");
 			return;
 		}
+		/* Redo leaves the cursor at the start of the change it
+		 * redoes, as Emacs does: the start of the group's first
+		 * record, carried through the rest of the group like any
+		 * other point. */
+		int px = buf->redo->startx, py = buf->redo->starty;
 		undoStep(buf, 1);
 		setStatusMessage("Redo.");
 
-		if (buf->redo != NULL && buf->redo->paired) {
-			doRedo(buf, 1);
+		while (buf->redo != NULL && buf->redo->paired) {
+			struct undo *n = buf->redo;
+			adjustPoint(&px, &py, n->startx, n->starty, n->endx,
+				    n->endy, n->delete);
+			undoStep(buf, 1);
 		}
+		buf->cx = px;
+		buf->cy = py;
 	}
 }
 
@@ -298,6 +317,8 @@ struct undo *newUndo(void) {
 	ret->nmerges = 0;
 	ret->uncapped = 0;
 	ret->delete = 0;
+	ret->pointx = 0;
+	ret->pointy = -1; /* not recorded */
 	ret->datalen = 0;
 	ret->datasize = 22;
 	ret->data = xmalloc(ret->datasize);

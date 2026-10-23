@@ -32,8 +32,10 @@ int adjustPoint(int *px, int *py, int startx, int starty, int endx, int endy,
 	} else {
 		/* Insertion */
 
-		/* Point is strictly before the insertion — no change */
-		if (*py < starty || (*py == starty && *px < startx))
+		/* Point is before the insertion, or exactly at it: no
+		 * change.  Like an Emacs marker (default insertion type),
+		 * a point stays before text inserted at it. */
+		if (*py < starty || (*py == starty && *px <= startx))
 			return 0;
 
 		/* Point is on the insertion line */

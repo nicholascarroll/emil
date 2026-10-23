@@ -89,6 +89,10 @@ struct undo {
 	int datasize;
 	int delete;
 	int paired;
+	/* The cursor just before this change, where undo puts it back
+	 * (as Emacs does); pointy is -1 when not recorded. */
+	int pointx;
+	int pointy;
 	uint8_t *data;
 };
 

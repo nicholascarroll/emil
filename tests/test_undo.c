@@ -8,6 +8,7 @@
 #include "edit.h"
 #include "mutate.h"
 #include "undo.h"
+#include "keymap.h"
 #include <stdint.h>
 
 /* ---- Basic undo/redo ---- */
@@ -768,6 +769,146 @@ void test_bulk_delete_clamps_out_of_range_end(void) {
 
 }
 
+/* ---- Spec 05 P5: where undo and redo leave the cursor ----
+ *
+ * As in Emacs: undo puts the cursor back where it was just before the
+ * command being undone; redo puts it at the start of the change it
+ * redoes.  Checked against GNU Emacs 29.3 (emacs -Q) in
+ * proof/spec05/emacs/ of the Proof project. */
+
+static void put(struct buffer *buf, int cx, int cy) {
+	buf->cx = cx;
+	buf->cy = cy;
+}
+
+void test_undo_forward_delete_returns_cursor_to_start(void) {
+	const char *lines[] = { "abc" };
+	struct buffer *buf = make_test_buffer_lines(lines, 1);
+	put(buf, 0, 0);
+	processKeypress(CMD_DELETE);
+	processKeypress(CMD_DELETE);
+	TEST_ASSERT_EQUAL_STRING("c", row_str(buf, 0));
+	put(buf, 1, 0); /* move away first */
+	processKeypress(CMD_UNDO);
+	TEST_ASSERT_EQUAL_STRING("abc", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(0, buf->cx);
+	TEST_ASSERT_EQUAL_INT(0, buf->cy);
+}
+
+void test_undo_backspace_returns_cursor_to_end(void) {
+	const char *lines[] = { "abc" };
+	struct buffer *buf = make_test_buffer_lines(lines, 1);
+	put(buf, 3, 0);
+	processKeypress(CMD_BACKSPACE);
+	processKeypress(CMD_BACKSPACE);
+	TEST_ASSERT_EQUAL_STRING("a", row_str(buf, 0));
+	processKeypress(CMD_UNDO);
+	TEST_ASSERT_EQUAL_STRING("abc", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(3, buf->cx);
+	TEST_ASSERT_EQUAL_INT(0, buf->cy);
+}
+
+void test_undo_kill_line_returns_cursor_to_start(void) {
+	const char *lines[] = { "abc", "de" };
+	struct buffer *buf = make_test_buffer_lines(lines, 2);
+	put(buf, 1, 0);
+	processKeypress(CMD_KILL_LINE);
+	TEST_ASSERT_EQUAL_STRING("a", row_str(buf, 0));
+	processKeypress(CMD_UNDO);
+	TEST_ASSERT_EQUAL_STRING("abc", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(1, buf->cx);
+	TEST_ASSERT_EQUAL_INT(0, buf->cy);
+	clearText(&E.kill);
+}
+
+void test_undo_kill_region_returns_cursor_where_it_was(void) {
+	const char *lines[] = { "abcd" };
+	struct buffer *buf = make_test_buffer_lines(lines, 1);
+	/* point before the mark */
+	buf->markx = 3;
+	buf->marky = 0;
+	put(buf, 1, 0);
+	processKeypress(CMD_KILL_REGION);
+	TEST_ASSERT_EQUAL_STRING("ad", row_str(buf, 0));
+	processKeypress(CMD_UNDO);
+	TEST_ASSERT_EQUAL_STRING("abcd", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(1, buf->cx);
+	/* point after the mark */
+	buf->markx = 1;
+	buf->marky = 0;
+	put(buf, 3, 0);
+	processKeypress(CMD_KILL_REGION);
+	TEST_ASSERT_EQUAL_STRING("ad", row_str(buf, 0));
+	processKeypress(CMD_UNDO);
+	TEST_ASSERT_EQUAL_STRING("abcd", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(3, buf->cx);
+	clearText(&E.kill);
+}
+
+void test_redo_typing_puts_cursor_at_start(void) {
+	const char *lines[] = { "xy" };
+	struct buffer *buf = make_test_buffer_lines(lines, 1);
+	put(buf, 1, 0);
+	E.self_insert_key = 'a';
+	processKeypress(CMD_SELF_INSERT);
+	E.self_insert_key = 'b';
+	processKeypress(CMD_SELF_INSERT);
+	processKeypress(CMD_UNDO);
+	TEST_ASSERT_EQUAL_STRING("xy", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(1, buf->cx);
+	processKeypress(CMD_REDO);
+	TEST_ASSERT_EQUAL_STRING("xaby", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(1, buf->cx);
+	TEST_ASSERT_EQUAL_INT(0, buf->cy);
+}
+
+void test_redo_yank_puts_cursor_at_start(void) {
+	const char *lines[] = { "xy" };
+	struct buffer *buf = make_test_buffer_lines(lines, 1);
+	put(buf, 1, 0);
+	setKillText("p\nq");
+	processKeypress(CMD_YANK);
+	TEST_ASSERT_EQUAL_STRING("xp", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_STRING("qy", row_str(buf, 1));
+	processKeypress(CMD_UNDO);
+	TEST_ASSERT_EQUAL_INT(1, buf->cx);
+	processKeypress(CMD_REDO);
+	TEST_ASSERT_EQUAL_STRING("qy", row_str(buf, 1));
+	TEST_ASSERT_EQUAL_INT(1, buf->cx);
+	TEST_ASSERT_EQUAL_INT(0, buf->cy);
+	clearText(&E.kill);
+}
+
+/* query-replace's u and U undo the last (all) replacements and offer
+ * the match again: the next y must replace that same match. */
+static void queryReplaceKeys(const int *keys, int n) {
+	makeMinibuffer();
+	scriptKeys(keys, n);
+	muteStdout();
+	processKeypress(CMD_QUERY_REPLACE);
+	unmuteStdout();
+	clearKeys();
+	freeMinibuffer();
+}
+
+void test_query_replace_u_offers_the_same_match_again(void) {
+	const char *lines[] = { "ab ab" };
+	struct buffer *buf = make_test_buffer_lines(lines, 1);
+	put(buf, 0, 0);
+	int keys[] = { 'a', 'b', '\r', 'X', '\r', 'y', 'u', 'y', 'q' };
+	queryReplaceKeys(keys, 9);
+	TEST_ASSERT_EQUAL_STRING("X ab", row_str(buf, 0));
+}
+
+void test_query_replace_U_offers_the_first_match_again(void) {
+	const char *lines[] = { "ab ab ab" };
+	struct buffer *buf = make_test_buffer_lines(lines, 1);
+	put(buf, 0, 0);
+	int keys[] = { 'a', 'b', '\r', 'X', '\r', 'y', 'y', 'U', 'y', 'q' };
+	queryReplaceKeys(keys, 10);
+	TEST_ASSERT_EQUAL_STRING("X ab ab", row_str(buf, 0));
+}
+
 int main(void) {
 	TEST_BEGIN();
 
@@ -811,5 +952,15 @@ int main(void) {
 	RUN_TEST(test_redo_chain_releases_undo);
 	RUN_TEST(test_minibuffer_reset_drops_stale_undo_records);
 	RUN_TEST(test_bulk_delete_clamps_out_of_range_end);
+
+	/* Spec 05 P5 */
+	RUN_TEST(test_undo_forward_delete_returns_cursor_to_start);
+	RUN_TEST(test_undo_backspace_returns_cursor_to_end);
+	RUN_TEST(test_undo_kill_line_returns_cursor_to_start);
+	RUN_TEST(test_undo_kill_region_returns_cursor_where_it_was);
+	RUN_TEST(test_redo_typing_puts_cursor_at_start);
+	RUN_TEST(test_redo_yank_puts_cursor_at_start);
+	RUN_TEST(test_query_replace_u_offers_the_same_match_again);
+	RUN_TEST(test_query_replace_U_offers_the_first_match_again);
 	return TEST_END();
 }

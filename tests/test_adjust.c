@@ -128,11 +128,21 @@ void test_ins_point_before_earlier_line(void) {
 /* ---- Insertion: point at insertion point (same-line) ---- */
 
 void test_ins_point_at_start_same_line(void) {
-	/* Insert 5 chars at (5,3), ending at (10,3), point at (5,3) */
+	/* Insert 5 chars at (5,3), ending at (10,3), point at (5,3):
+	 * like an Emacs marker, the point stays before the new text. */
 	int px = 5, py = 3;
 	int ret = adjustPoint(&px, &py, 5, 3, 10, 3, 0);
 	TEST_ASSERT_EQUAL_INT(0, ret);
-	TEST_ASSERT_EQUAL_INT(10, px); /* shifted right by 5 */
+	TEST_ASSERT_EQUAL_INT(5, px);
+	TEST_ASSERT_EQUAL_INT(3, py);
+}
+
+void test_ins_point_at_start_multiline(void) {
+	/* Insert at (5,3) ending at (8,5), point at (5,3): stays. */
+	int px = 5, py = 3;
+	int ret = adjustPoint(&px, &py, 5, 3, 8, 5, 0);
+	TEST_ASSERT_EQUAL_INT(0, ret);
+	TEST_ASSERT_EQUAL_INT(5, px);
 	TEST_ASSERT_EQUAL_INT(3, py);
 }
 
@@ -443,6 +453,68 @@ void test_rowoff_adjusted_for_focused_window_too(void) {
 	TEST_ASSERT_EQUAL_STRING("L10", row_str(buf, E.windows[1]->rowoff));
 }
 
+/* Spec 05 P2, at the command level: C-SPC then typing.  In Emacs the
+ * mark stays before the typed text, so the region is what was typed
+ * and C-w kills it.  The mark used to move along with the insertion,
+ * leaving an empty region. */
+void test_mark_stays_before_typed_text(void) {
+	const char *lines[] = { "xy", "" };
+	struct buffer *buf = make_test_buffer_lines(lines, 2);
+	buf->cx = 1;
+	buf->cy = 0;
+	processKeypress(CMD_SET_MARK);
+	E.self_insert_key = 'a';
+	processKeypress(CMD_SELF_INSERT);
+	E.self_insert_key = 'b';
+	processKeypress(CMD_SELF_INSERT);
+	TEST_ASSERT_EQUAL_STRING("xaby", (char *)buf->row[0].chars);
+	TEST_ASSERT_EQUAL_INT(1, buf->markx);
+	TEST_ASSERT_EQUAL_INT(0, buf->marky);
+	TEST_ASSERT_EQUAL_INT(3, buf->cx);
+	processKeypress(CMD_KILL_REGION);
+	TEST_ASSERT_EQUAL_STRING("xy", (char *)buf->row[0].chars);
+	TEST_ASSERT_EQUAL_STRING("ab", (char *)E.kill.str);
+	clearText(&E.kill);
+}
+
+/* Spec 05 P2: another window's cursor, a register point and a ring
+ * entry at the place where text is inserted all stay before it, as in
+ * Emacs (window-point, point-to-register and the mark ring are all
+ * markers there). */
+void test_other_points_stay_before_inserted_text(void) {
+	const char *lines[] = { "xy", "" };
+	struct buffer *buf = make_test_buffer_lines(lines, 2);
+	buf->cx = 1;
+	buf->cy = 0;
+	processKeypress(CMD_CREATE_WINDOW); /* window 1 saves (1,0) */
+	push_mark_at(buf, 1, 0);
+	push_mark_at(buf, 0, 0); /* ring gets (1,0) */
+	buf->cx = 1;
+	buf->cy = 0;
+	E.registers['q'].rtype = REGISTER_POINT;
+	E.registers['q'].data.point.buf = buf;
+	E.registers['q'].data.point.cx = 1;
+	E.registers['q'].data.point.cy = 0;
+	E.self_insert_key = 'a';
+	processKeypress(CMD_SELF_INSERT);
+	clearText(&E.kill);
+	E.kill.str = (uint8_t *)xstrdup("b\nc");
+	processKeypress(CMD_YANK);
+	TEST_ASSERT_EQUAL_STRING("xab", (char *)buf->row[0].chars);
+	TEST_ASSERT_EQUAL_STRING("cy", (char *)buf->row[1].chars);
+	TEST_ASSERT_EQUAL_INT(1, E.windows[1]->cx);
+	TEST_ASSERT_EQUAL_INT(0, E.windows[1]->cy);
+	TEST_ASSERT_EQUAL_INT(1, buf->mark_ring[0].cx);
+	TEST_ASSERT_EQUAL_INT(0, buf->mark_ring[0].cy);
+	TEST_ASSERT_EQUAL_INT(1, E.registers['q'].data.point.cx);
+	TEST_ASSERT_EQUAL_INT(0, E.registers['q'].data.point.cy);
+	/* The typing cursor itself is moved by the command. */
+	TEST_ASSERT_EQUAL_INT(1, buf->cx);
+	TEST_ASSERT_EQUAL_INT(1, buf->cy);
+	E.registers['q'].rtype = REGISTER_NULL;
+	clearText(&E.kill);
+}
+
 int main(void) {
 	TEST_BEGIN();
 
@@ -461,6 +533,7 @@ int main(void) {
 	RUN_TEST(test_ins_point_before_same_line);
 	RUN_TEST(test_ins_point_before_earlier_line);
 	RUN_TEST(test_ins_point_at_start_same_line);
+	RUN_TEST(test_ins_point_at_start_multiline);
 	RUN_TEST(test_ins_point_after_on_same_line);
 	RUN_TEST(test_ins_multiline_point_on_start_line);
 	RUN_TEST(test_ins_point_after_later_line);
@@ -480,6 +553,10 @@ int main(void) {
 	RUN_TEST(test_rowoff_inside_deleted_span_collapses_to_first_row);
 	RUN_TEST(test_rowoff_unchanged_by_edit_below_viewport_top);
 	RUN_TEST(test_rowoff_adjusted_for_focused_window_too);
+
+	/* Spec 05 P2: points stay before text inserted at them */
+	RUN_TEST(test_mark_stays_before_typed_text);
+	RUN_TEST(test_other_points_stay_before_inserted_text);
 
 	return TEST_END();
 }

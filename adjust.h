@@ -7,7 +7,9 @@
 /* Adjust a tracked point (px, py) after a buffer mutation.
  *
  * For insertions (is_delete == 0):
- *   The region [startx,starty] to [endx,endy] was inserted.
+ *   The region [startx,starty] to [endx,endy] was inserted.  A point
+ *   exactly at (startx,starty) stays there, before the new text, as an
+ *   Emacs marker does; a point after it moves with the text after it.
  * For deletions  (is_delete == 1):
  *   The region [startx,starty] to [endx,endy] was deleted.
  *

@@ -109,6 +109,11 @@ static void mutateReplaceEx(struct buffer *buf, int startx, int starty,
 	if (is_replace || chain_to_prev)
 		coalesce = 0;
 
+	/* The cursor before the change, for undo to return to.  Callers
+	 * move the cursor after mutating, so it is still where the
+	 * command started. */
+	int pointx = buf->cx, pointy = buf->cy;
+
 	clearRedos(buf);
 
 	/* With chain_to_prev, the first record pushed pairs to the
@@ -125,6 +130,8 @@ static void mutateReplaceEx(struct buffer *buf, int startx, int starty,
 		del->append = coalesce;
 		del->uncapped = coalesce && E.input_burst;
 		del->paired = chain_to_prev ? 1 : 0;
+		del->pointx = pointx;
+		del->pointy = pointy;
 		undoReplaceData(del, old_len + 1);
 		memcpy(del->data, old_text, old_len);
 		del->data[old_len] = 0;
@@ -155,6 +162,8 @@ static void mutateReplaceEx(struct buffer *buf, int startx, int starty,
 		ins->append = coalesce;
 		ins->uncapped = coalesce && E.input_burst;
 		ins->paired = is_replace ? 1 : (chain_to_prev ? 1 : 0);
+		ins->pointx = pointx;
+		ins->pointy = pointy;
 		undoReplaceData(ins, adata.len + 1);
 		memcpy(ins->data, adata.buf, adata.len);
 		ins->data[adata.len] = 0;
