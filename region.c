@@ -438,6 +438,11 @@ void yank(int uarg) {
 	 * the reverse style: point stays before the yanked text, mark
 	 * is set after it. */
 	yank_style_reverse = uarg > 0;
+	/* As in Emacs, yank pushes the mark and sets it where the text
+	 * goes in (not active), so C-w right after C-y kills what was
+	 * yanked. */
+	setMarkSilent();
+	E.buf->mark_active = 0;
 	yankInsert(yank_style_reverse);
 
 	/* Set kill ring position so M-y continues from here */
@@ -499,6 +504,10 @@ void yankPop(int uarg) {
 		E.kill.is_rectangle = entry->is_rectangle;
 		E.kill.rect_width = entry->rect_width;
 		E.kill.rect_height = entry->rect_height;
+		/* yank-pop moves the mark to the new text's start
+		 * without pushing it again, as Emacs does. */
+		E.buf->markx = E.buf->cx;
+		E.buf->marky = E.buf->cy;
 		yankInsert(yank_style_reverse);
 	} else {
 		setStatusMessage("No more kill ring entries to yank!");

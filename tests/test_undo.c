@@ -571,9 +571,40 @@ void test_mark_unmoved_by_yank_at_virtual_eof(void) {
 	setKillText("\n");
 	processKeypress(CMD_YANK);
 
-	TEST_ASSERT_EQUAL(markx, buf->markx);
-	TEST_ASSERT_EQUAL(marky, buf->marky);
+	/* Yank pushes the old mark onto the ring (as Emacs's push-mark
+	 * does) and sets the mark where the text went in; the pushed
+	 * entry is the point this guard watches. */
+	int newest = (buf->mark_ring_idx - 1 + MARK_RING_SIZE) % MARK_RING_SIZE;
+	TEST_ASSERT_EQUAL(1, buf->mark_ring_len);
+	TEST_ASSERT_EQUAL(markx, buf->mark_ring[newest].cx);
+	TEST_ASSERT_EQUAL(marky, buf->mark_ring[newest].cy);
 
+	clearText(&E.kill);
+}
+
+/* Spec 05 observation O1: as in Emacs, C-y sets the mark at the start
+ * of the yanked text (pushing the old one), so C-w right after C-y
+ * kills exactly what was yanked; M-y moves that mark to the new text
+ * without pushing again. */
+void test_yank_sets_mark_at_start_of_yanked_text(void) {
+	const char *lines[] = { "xy" };
+	struct buffer *buf = make_test_buffer_lines(lines, 1);
+	buf->markx = 2;
+	buf->marky = 0;
+	buf->cx = 1;
+	buf->cy = 0;
+	setKillText("p\nq");
+	processKeypress(CMD_YANK);
+	TEST_ASSERT_EQUAL_STRING("xp", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_STRING("qy", row_str(buf, 1));
+	TEST_ASSERT_EQUAL_INT(1, buf->markx);
+	TEST_ASSERT_EQUAL_INT(0, buf->marky);
+	TEST_ASSERT_EQUAL_INT(0, buf->mark_active);
+	TEST_ASSERT_EQUAL_INT(1, buf->mark_ring_len);
+	TEST_ASSERT_EQUAL_INT(2, buf->mark_ring[0].cx);
+	processKeypress(CMD_KILL_REGION);
+	TEST_ASSERT_EQUAL_STRING("xy", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_STRING("p\nq", (char *)E.kill.str);
 	clearText(&E.kill);
 }
 
@@ -945,6 +976,7 @@ int main(void) {
 	RUN_TEST(test_eof_payload_trailing_newline_adds_no_extra_row);
 	RUN_TEST(test_mark_unmoved_by_newline_at_virtual_eof);
 	RUN_TEST(test_mark_unmoved_by_yank_at_virtual_eof);
+	RUN_TEST(test_yank_sets_mark_at_start_of_yanked_text);
 	RUN_TEST(test_newline_and_indent_at_virtual_eof);
 	RUN_TEST(test_repeat_count_self_insert_at_virtual_eof);
 	RUN_TEST(test_repeat_count_newline_at_virtual_eof);
