@@ -143,9 +143,10 @@ static int breakForbiddenAfter(erow *row, int bidx) {
  * and *break_byte hold the position just past the last character that
  * fits on this screen line.
  *
- * Returns 1 if more content follows the break (i.e. the row continues
- * onto another screen line), or 0 if the rest of the row fits on this
- * screen line (meaning this is the last sub-line). */
+ * Returns 1 if the row continues onto another screen line: more content
+ * follows the break, or this line is at least as wide as the window and
+ * the row ends here, so an empty screen line follows.  Returns 0 if
+ * this is the last sub-line. */
 int wordWrapBreak(erow *row, int screencols, int line_start_col,
 		  int line_start_byte, int *break_col, int *break_byte) {
 	int col = line_start_col;
@@ -174,6 +175,10 @@ int wordWrapBreak(erow *row, int screencols, int line_start_col,
 		if (col + cwidth - line_start_col > screencols)
 			break;
 
+		/* A zero-width mark stays with the character before a break. */
+		if (cwidth == 0 && wb_byte == bidx)
+			wb_byte = bidx + nb;
+
 		int this_preposed = 0;
 		if (isWordBoundary(c)) {
 			if (!breakForbiddenAfter(row, bidx) &&
@@ -198,10 +203,13 @@ int wordWrapBreak(erow *row, int screencols, int line_start_col,
 	}
 
 	if (bidx >= row->size) {
-		/* Rest of row fits on this screen line. */
+		/* Rest of row fits on this screen line.  A line that fills
+		 * the window wraps once more, like any other: the end of the
+		 * row then starts an empty screen line. */
 		*break_col = col;
 		*break_byte = row->size;
-		return 0;
+		return line_start_byte < row->size &&
+		       col - line_start_col >= screencols;
 	} else if (wb_col > line_start_col) {
 		/* Break at the last word boundary. */
 		*break_col = wb_col;
@@ -211,14 +219,22 @@ int wordWrapBreak(erow *row, int screencols, int line_start_col,
 		*break_byte = hard_byte;
 	} else {
 		/* Nothing fit: the segment's first character is wider
-		 * than the window.  Emit it anyway.*/
-		if (bidx == line_start_byte && bidx < row->size) {
+		 * than the window.  Emit it anyway.  Zero-width characters
+		 * before it (a row that starts with a mark) do not count as
+		 * fitting: a line of no width could never hold the cursor. */
+		if (col == line_start_col && bidx < row->size) {
 			int nb;
 			col += charAdvance(row->chars, bidx, col, &nb);
 			bidx += nb;
+			/* Its zero-width marks go with it (#148). */
+			while (bidx < row->size &&
+			       charAdvance(row->chars, bidx, col, &nb) == 0)
+				bidx += nb;
 		}
 		*break_col = col;
 		*break_byte = bidx;
+		/* Even if forcing it used up the row: the line is wider
+		 * than the window, so it wraps like a full one. */
 	}
 	return 1;
 }
@@ -242,7 +258,7 @@ int countScreenLines(erow *row, int screencols) {
 			break;
 		line_start_col = break_col;
 		line_start_byte = break_byte;
-	} while (line_start_byte < row->size);
+	} while (1); /* a full last line is followed by an empty one */
 
 	return lines;
 }
@@ -401,6 +417,7 @@ int displayColumnToByteOffset(erow *row, int screencols, int target_subline,
 	/* Phase 2: walk the sub-line to find the target column */
 	int col = 0; /* column relative to sub-line start */
 	int bidx = ls_byte;
+	int last = ls_byte; /* start of the last character with width */
 
 	while (bidx < subline_end_byte) {
 		int nb;
@@ -409,9 +426,15 @@ int displayColumnToByteOffset(erow *row, int screencols, int target_subline,
 		if (col + cwidth > target_col)
 			break;
 
+		if (cwidth > 0)
+			last = bidx;
 		col += cwidth;
 		bidx += nb;
 	}
 
+	/* The wrap column of a line that continues shows on the next
+	 * line (cursorScreenLine): stay on this line's last character. */
+	if (more && ls_col + col >= end_col)
+		bidx = last;
 	return bidx;
 }

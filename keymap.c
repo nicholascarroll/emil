@@ -7,9 +7,9 @@
 #include "display.h"
 #include "edit.h"
 #include "emil.h"
+#include "message.h"
 #include "fileio.h"
 #include "find.h"
-
 #include "palette.h"
 #include "pipe.h"
 #include "prompt.h"
@@ -55,7 +55,6 @@ static int uargScale(int uarg) {
 
 void setupCommands(void) {
 	static struct command commands[] = {
-		{ "capitalize-region", capitalizeRegion },
 		{ "insert-char", insertCharHex },
 		{ "insert-file", insertFile },
 		{ "cd", changeDirectory },
@@ -66,6 +65,7 @@ void setupCommands(void) {
 		{ "replace-string", replaceString },
 		{ "revert-buffer", revert },
 		{ "visual-line-mode", toggleVisualLineMode },
+		{ "whitespace-mode", toggleWhitespaceMode },
 		{ "version", editorVersion },
 		{ "view-register", viewRegister },
 	};
@@ -178,6 +178,9 @@ static int resolveMetaBinding(int ch) {
 		return CMD_SCROLL_UP;
 	case 'z':
 		return CMD_ZAP_TO_CHAR;
+	case 'Z':
+		return CMD_ZAP_UP_TO_CHAR;
+
 	/* Punctuation and symbols */
 	case '-':
 		return CMD_NEGATIVE_ARG;
@@ -210,15 +213,15 @@ static int resolveMetaBinding(int ch) {
 	case 127:
 		return CMD_BACKSPACE_WORD;
 	/* C-M- (control+meta) combinations: ESC followed by a control char */
-	case CTRL('f'):
+	case KEY_CTRL('f'):
 		return CMD_FORWARD_SEXP;
-	case CTRL('b'):
+	case KEY_CTRL('b'):
 		return CMD_BACKWARD_SEXP;
-	case CTRL('k'):
+	case KEY_CTRL('k'):
 		return CMD_KILL_SEXP;
-	case CTRL('s'):
+	case KEY_CTRL('s'):
 		return CMD_REGEX_SEARCH_FORWARD;
-	case CTRL('r'):
+	case KEY_CTRL('r'):
 		return CMD_REGEX_SEARCH_BACKWARD;
 	default:
 		return CMD_NONE;
@@ -241,13 +244,13 @@ int resolveBinding(int key) {
 	uarg_fresh = 0;
 
 	/* Handle prefix state transitions */
-	if (key == CTRL('x') && prefix == PREFIX_NONE) {
+	if (key == KEY_CTRL('x') && prefix == PREFIX_NONE) {
 		prefix = PREFIX_CTRL_X;
 		showPrefix("C-x ");
 		return CMD_NONE;
 	}
 
-	if (key == CTRL('g') && prefix != PREFIX_NONE) {
+	if (key == KEY_CTRL('g') && prefix != PREFIX_NONE) {
 		prefix = PREFIX_NONE;
 		clearStatusMessage();
 		return CMD_NONE;
@@ -258,27 +261,27 @@ int resolveBinding(int key) {
 		prefix = PREFIX_NONE;
 
 		switch (key) {
-		case CTRL('c'):
+		case KEY_CTRL('c'):
 			return CMD_QUIT;
-		case CTRL('s'):
+		case KEY_CTRL('s'):
 			return CMD_SAVE;
-		case CTRL('w'):
+		case KEY_CTRL('w'):
 			return CMD_SAVE_AS;
-		case CTRL('q'):
+		case KEY_CTRL('q'):
 			return CMD_TOGGLE_READ_ONLY;
-		case CTRL('f'):
+		case KEY_CTRL('f'):
 			return CMD_FIND_FILE;
-		case CTRL('r'):
+		case KEY_CTRL('r'):
 			return CMD_FIND_FILE_READ_ONLY;
-		case CTRL('_'):
+		case KEY_CTRL('_'):
 			return CMD_REDO;
-		case CTRL('x'):
+		case KEY_CTRL('x'):
 			return CMD_SWAP_MARK;
-		case CTRL('t'):
+		case KEY_CTRL('t'):
 			return CMD_TRANSPOSE_SENTENCES;
 		case 'b':
 		case 'B':
-		case CTRL('b'):
+		case KEY_CTRL('b'):
 			return CMD_SWITCH_BUFFER;
 		case 'h':
 			return CMD_MARK_BUFFER;
@@ -307,15 +310,15 @@ int resolveBinding(int key) {
 		case 'z':
 		case 'Z':
 			return CMD_SUSPEND;
-		case CTRL('z'):
+		case KEY_CTRL('z'):
 			return CMD_SHELL_DRAWER;
 		case 'u':
 		case 'U':
-		case CTRL('u'):
+		case KEY_CTRL('u'):
 			return CMD_UPCASE_REGION;
 		case 'l':
 		case 'L':
-		case CTRL('l'):
+		case KEY_CTRL('l'):
 			return CMD_DOWNCASE_REGION;
 		case KEY_BACKSPACE:
 			return CMD_KILL_LINE_BACKWARDS;
@@ -330,6 +333,8 @@ int resolveBinding(int key) {
 				recordKey(nextkey);
 				if (nextkey == 't') {
 					return CMD_VISUAL_LINE_MODE;
+				} else if (nextkey == 'w') {
+					return CMD_WHITESPACE_MODE;
 				} else {
 					setStatusMessage(
 						"Unknown command C-x x %c",
@@ -409,7 +414,7 @@ int resolveBinding(int key) {
 			return CMD_INSERT_REGISTER;
 		case 'k':
 		case 'K':
-		case CTRL('W'):
+		case KEY_CTRL('W'):
 			return CMD_KILL_RECT;
 		case 'v':
 		case 'V':
@@ -477,56 +482,56 @@ int resolveBinding(int key) {
 
 	/* Ctrl key combinations */
 	switch (key) {
-	case CTRL('a'):
+	case KEY_CTRL('a'):
 		return CMD_HOME;
-	case CTRL('b'):
+	case KEY_CTRL('b'):
 		return CMD_BACKWARD_CHAR;
-	case CTRL('d'):
+	case KEY_CTRL('d'):
 		return CMD_DELETE;
-	case CTRL('e'):
+	case KEY_CTRL('e'):
 		return CMD_END;
-	case CTRL('f'):
+	case KEY_CTRL('f'):
 		return CMD_FORWARD_CHAR;
-	case CTRL('g'):
+	case KEY_CTRL('g'):
 		return CMD_CANCEL;
-	case CTRL('h'):
+	case KEY_CTRL('h'):
 		return CMD_HELP;
-	case CTRL('j'):
+	case KEY_CTRL('j'):
 		return CMD_NEWLINE_INDENT;
-	case CTRL('k'):
+	case KEY_CTRL('k'):
 		return CMD_KILL_LINE;
-	case CTRL('l'):
+	case KEY_CTRL('l'):
 		return CMD_RECENTER;
-	case CTRL('n'):
+	case KEY_CTRL('n'):
 		return CMD_NEXT_LINE;
-	case CTRL('o'):
+	case KEY_CTRL('o'):
 		return CMD_OPEN_LINE;
-	case CTRL('p'):
+	case KEY_CTRL('p'):
 		return CMD_PREV_LINE;
-	case CTRL('q'):
+	case KEY_CTRL('q'):
 		return CMD_QUOTED_INSERT;
-	case CTRL('r'):
+	case KEY_CTRL('r'):
 		return CMD_REVERSE_ISEARCH;
-	case CTRL('s'):
+	case KEY_CTRL('s'):
 		return CMD_ISEARCH;
-	case CTRL('t'):
+	case KEY_CTRL('t'):
 		return CMD_TRANSPOSE_CHARS;
-	case CTRL('u'):
+	case KEY_CTRL('u'):
 		uarg_fresh = 1;
 		return CMD_UNIVERSAL_ARG;
-	case CTRL('v'):
+	case KEY_CTRL('v'):
 		return CMD_PAGE_DOWN;
-	case CTRL('w'):
+	case KEY_CTRL('w'):
 		return CMD_KILL_REGION;
-	case CTRL('y'):
+	case KEY_CTRL('y'):
 		return CMD_YANK;
-	case CTRL('z'):
+	case KEY_CTRL('z'):
 		return CMD_SUSPEND;
-	case CTRL('_'):
+	case KEY_CTRL('_'):
 		return CMD_UNDO;
-	case CTRL('@'):
+	case KEY_CTRL('@'):
 		return CMD_SET_MARK;
-	case CTRL('C'):
+	case KEY_CTRL('C'):
 		return CMD_COPY_CLIPBOARD;
 	case '\r':
 		return CMD_NEWLINE;
@@ -588,6 +593,16 @@ static int refusedInMinibuffer(int c) {
  */
 
 /* Movement */
+/* The undo and redo commands' status message. */
+static void reportUndo(enum undoResult r, const char *done,
+		       const char *exhausted) {
+	if (r == UNDO_DONE)
+		setStatusMessage("%s", done);
+	else if (r == UNDO_EXHAUSTED)
+		setStatusMessage("%s", exhausted);
+	/* UNDO_REFUSED and UNDO_MISMATCH report themselves. */
+}
+
 static int dispatchMove(int c, int uarg, struct window *win) {
 	switch (c) {
 	case CMD_BACKWARD_CHAR:
@@ -696,7 +711,17 @@ static int dispatchEdit(int c, int uarg) {
 		openLine(uarg);
 		return 1;
 	case CMD_QUOTED_INSERT: {
-		int key = readKey();
+		/* readKey() returns -1 when a signal (a resize, a resume)
+		 * interrupts the wait, and in a macro that ends here.
+		 * Neither is a key: the first waits again, the second
+		 * inserts nothing.  Falling through would insert 0xFF,
+		 * which is not UTF-8 and leaves the buffer unsaveable. */
+		int key;
+		do {
+			key = readKey();
+		} while (key == -1 && !E.playback);
+		if (key == -1)
+			return 1;
 		recordKey(key);
 		if (key == KEY_UNICODE) {
 			int count = UARG_COUNT(uarg);
@@ -750,7 +775,10 @@ static int dispatchEdit(int c, int uarg) {
 		transposeSentences(uarg);
 		return 1;
 	case CMD_ZAP_TO_CHAR:
-		zapToChar();
+		zapToChar(uarg);
+		return 1;
+	case CMD_ZAP_UP_TO_CHAR:
+		zapUpToChar(uarg);
 		return 1;
 	case CMD_INSERT_CHAR_HEX:
 		insertCharHex();
@@ -834,13 +862,15 @@ static int dispatchBuffer(int c, int uarg) {
 		setStatusMessage(E.buf->read_only ? "Buffer is read-only" :
 						    "Buffer set to writable");
 		return 1;
-	case CMD_REDO:
-		doRedo(E.buf, uarg);
-		if (E.buf->redo != NULL) {
+	case CMD_REDO: {
+		enum undoResult r = doRedo(E.buf, uarg);
+		reportUndo(r, "Redo.", "No further redo information.");
+		if (r != UNDO_MISMATCH && E.buf->redo != NULL) {
 			setStatusMessage("Press C-_ or C-/ to redo again");
 			E.micro = CMD_REDO;
 		}
 		return 1;
+	}
 	default:
 		return 0;
 	}
@@ -1034,7 +1064,8 @@ static int dispatchMacro(int c, int uarg) {
 static int dispatchMisc(int c, int uarg) {
 	switch (c) {
 	case CMD_UNDO:
-		doUndo(E.buf, uarg);
+		reportUndo(doUndo(E.buf, uarg), "Undo.",
+			   "No further undo information.");
 		return 1;
 	case CMD_SUSPEND:
 #ifdef __wasi__
@@ -1061,6 +1092,9 @@ static int dispatchMisc(int c, int uarg) {
 		return 1;
 	case CMD_VISUAL_LINE_MODE:
 		toggleVisualLineMode();
+		return 1;
+	case CMD_WHITESPACE_MODE:
+		toggleWhitespaceMode();
 		return 1;
 	case CMD_WHAT_CURSOR:
 		describeChar();
@@ -1130,7 +1164,8 @@ void processKeypress(int c) {
 	 * C-/ continues redoing rather than undoing.  The chain must end
 	 * as soon as the redo stack empties. */
 	if (E.micro == CMD_REDO && c == CMD_UNDO && E.buf->redo != NULL) {
-		doRedo(E.buf, 1);
+		reportUndo(doRedo(E.buf, 1), "Redo.",
+			   "No further redo information.");
 		if (E.buf->redo == NULL)
 			E.micro = 0;
 		return;

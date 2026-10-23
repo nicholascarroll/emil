@@ -5,6 +5,7 @@
 #endif
 
 #include <sys/types.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -171,9 +172,11 @@ const char *unicodeCharName(uint32_t cp) {
 		return "CARRIAGE RETURN";
 	if (cp == 0x7F)
 		return "DELETE";
-	if (cp < 0x20) {
+	/* C0 and C1 controls */
+	if (cp < 0x20 || (cp >= 0x80 && cp <= 0x9F)) {
 		static char ctrl_name[16];
-		snprintf(ctrl_name, sizeof(ctrl_name), "CONTROL-%04X", cp);
+		snprintf(ctrl_name, sizeof(ctrl_name), "CONTROL-%04X",
+			 (unsigned)cp);
 		return ctrl_name;
 	}
 
@@ -212,6 +215,22 @@ const char *unicodeCharName(uint32_t cp) {
 		return "MEDIUM MATHEMATICAL SPACE";
 	if (cp == 0x3000)
 		return "IDEOGRAPHIC SPACE";
+
+	/* Line and paragraph separators */
+	if (cp == 0x2028)
+		return "LINE SEPARATOR";
+	if (cp == 0x2029)
+		return "PARAGRAPH SEPARATOR";
+
+	/* Blank characters that are not spaces */
+	if (cp == 0x115F)
+		return "HANGUL CHOSEONG FILLER";
+	if (cp == 0x2800)
+		return "BRAILLE PATTERN BLANK";
+	if (cp == 0x3164)
+		return "HANGUL FILLER";
+	if (cp == 0xFFA0)
+		return "HALFWIDTH HANGUL FILLER";
 
 	/* Zero-width characters */
 	if (cp == 0x200B)
@@ -308,6 +327,11 @@ int charInStringWidth(const uint8_t *str, int idx) {
 		return 2;
 	} else {
 		int rune = utf8Decode(str, idx);
+		/* A C1 control (U+0080..U+009F) is never sent to the
+		 * terminal: one '?' is drawn in its place, whatever the
+		 * platform's wcwidth makes of it. */
+		if (rune >= 0x80 && rune <= 0x9F)
+			return 1;
 		int w = wcwidth((wchar_t)rune);
 		return w < 0 ? 1 : w;
 	}
@@ -553,6 +577,8 @@ size_t utf8SanitizeLine(const uint8_t *in, size_t len, char *out,
  * Every walk that accumulates display columns over row or message
  * bytes must get its per-character widths from here.*/
 int charAdvance(const uint8_t *str, int idx, int x, int *nbytes) {
+	if (x > INT_MAX / 4 * 3)
+		abort();
 	uint8_t ch = str[idx];
 	int width;
 

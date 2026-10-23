@@ -29,18 +29,18 @@ DOCDIR  = $(PREFIX)/share/doc/emil
 LICDIR  = $(PREFIX)/share/licenses/emil
 
 # Source files
-OBJECTS = main.o unicode.o decoder.o buffer.o region.o undo.o transform.o \
-          backup.o \
+OBJECTS = main.o unicode.o decoder.o buffer.o region.o undo.o undorecord.o \
+          transform.o backup.o \
           find.o pipe.o register.o fileio.o terminal.o display.o  \
           keymap.o edit.o prompt.o util.o completion.o history.o base64.o \
           abuf.o window.o ctags.o adjust.o mutate.o wrap.o motion.o dbuf.o \
-          emil_subprocess.o palette.o
+          emil_subprocess.o palette.o message.o
 
 HEADERS = abuf.h adjust.h backup.h base64.h buffer.h completion.h ctags.h \
           dbuf.h decoder.h display.h edit.h emil.h emil_subprocess.h \
-          fileio.h find.h history.h keymap.h motion.h mutate.h \
+          fileio.h find.h history.h keymap.h message.h motion.h mutate.h \
           palette.h pipe.h prompt.h region.h register.h terminal.h \
-          transform.h undo.h unicode.h util.h window.h \
+          transform.h undo.h undorecord.h unicode.h util.h window.h \
           wrap.h
 
 # Default target
@@ -120,7 +120,7 @@ check: test
 
 sanitize:
 	$(MAKE) clean
-	$(MAKE) CFLAGS="-g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -fPIE -DEMIL_DEBUG_ROW_CACHE -DEMIL_DEBUG_FOCUS" \
+	$(MAKE) CFLAGS="-g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -fPIE -DEMIL_DEBUG_ROW_CACHE -DEMIL_DEBUG_FOCUS -DEMIL_DEBUG_ROW_BYTES" \
 	        LDFLAGS="-fsanitize=address,undefined -pie" test
 
 # Sorry Dave
@@ -280,7 +280,7 @@ wasix-test: wasix
 	WASM_OPT="$(WASM_OPT)" \
 	WASIX_ASYNCIFY="$(WASIX_ASYNCIFY)" \
 	PROGNAME=emil.wasm \
-	RUNNER="wasmer run --volume $(PWD):$(PWD) --cwd $(PWD) $(if $(wildcard $(WASIX_SANDBOX)/bin/sh),--volume $(WASIX_SANDBOX)/bin:/bin --env PATH=/bin --env TMPDIR=/tmp,)" \
+	RUNNER="wasmer run --volume $(PWD):$(PWD) --cwd $(PWD) --env TMPDIR=$(PWD)/tests/tmp $(if $(wildcard $(WASIX_SANDBOX)/bin/sh),--volume $(WASIX_SANDBOX)/bin:/bin --env PATH=/bin,)" \
 	RUNNER_SEP="--" \
 	NM="$(WASI_SDK)/bin/llvm-nm" \
 	./tests/run_tests.sh

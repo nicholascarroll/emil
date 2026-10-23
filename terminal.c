@@ -4,7 +4,7 @@
 #include "terminal.h"
 #include "decoder.h"
 #include "emil.h"
-
+#include "message.h"
 #include "base64.h"
 #include <errno.h>
 #include <stdio.h>

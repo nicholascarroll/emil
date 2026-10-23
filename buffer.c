@@ -11,9 +11,8 @@
 #include "unicode.h"
 #include "undo.h"
 #include "prompt.h"
-#include "display.h"
+#include "message.h"
 #include "util.h"
-#include "terminal.h"
 #include "window.h"
 #include "wrap.h"
 #include <limits.h>
@@ -92,11 +91,13 @@ void rowEnsureCap(erow *row, int needed) {
 static void bufEnsureRowCap(struct buffer *bufr) {
 	if (bufr->numrows < bufr->rowcap)
 		return;
-	/* The row count is bounded at INT_MAX / 2 by the load path, so the
-	 * cap below is reached before the multiplication can overflow.*/
+
 	int new_cap = !bufr->rowcap		 ? 16 :
 		      bufr->rowcap > INT_MAX / 2 ? INT_MAX :
 						   bufr->rowcap * 2;
+	if (bufr->rowcap == INT_MAX ||
+	    (size_t)new_cap > SIZE_MAX / sizeof(erow))
+		abort();
 	bufr->row = xrealloc(bufr->row, sizeof(erow) * new_cap);
 	memset(&bufr->row[bufr->rowcap], 0,
 	       sizeof(erow) * (new_cap - bufr->rowcap));
@@ -104,8 +105,12 @@ static void bufEnsureRowCap(struct buffer *bufr) {
 }
 
 void insertRow(struct buffer *bufr, int at, const uint8_t *s, size_t len) {
+	debugCheckRowBytes(s, len);
 	if (at < 0 || at > bufr->numrows)
 		return;
+
+	if (len > (size_t)INT_MAX - 1)
+		abort();
 
 	bufEnsureRowCap(bufr);
 
@@ -130,6 +135,10 @@ void insertRow(struct buffer *bufr, int at, const uint8_t *s, size_t len) {
  * buffer is being populated from disk.
  */
 void appendRowRaw(struct buffer *bufr, const uint8_t *s, size_t len) {
+	debugCheckRowBytes(s, len);
+	if (len > (size_t)INT_MAX - 1)
+		abort();
+
 	bufEnsureRowCap(bufr);
 
 	int at = bufr->numrows;
@@ -160,19 +169,6 @@ void delRow(struct buffer *bufr, int at) {
 		bufr->numrows--;
 	}
 	markBufferDirty(bufr);
-}
-
-void rowInsertChar(struct buffer *bufr, erow *row, int at, int c) {
-	if (at < 0 || at > row->size)
-		at = row->size;
-
-	int needed = row->size + 2;
-	rowEnsureCap(row, needed);
-	memmove(&row->chars[at + 1], &row->chars[at], row->size - at + 1);
-	row->size++;
-	row->chars[at] = c;
-	markBufferDirty(bufr);
-	row->cached_width = -1;
 }
 
 struct buffer *newBuffer(void) {
@@ -539,15 +535,12 @@ void killBuffer(void) {
 				 "Buffer %s modified; kill anyway? (y or n)",
 				 fname);
 		char *killName = leftTruncate(fname, nameFit(fname, n));
-		setStatusMessage("Buffer %s modified; kill anyway? (y or n)",
-				 killName);
+		char msg[sizeof(E.statusmsg)];
+		snprintf(msg, sizeof(msg),
+			 "Buffer %s modified; kill anyway? (y or n)", killName);
 		free(killName);
-		refreshScreen();
-		int c = readKey();
-		clearStatusMessage();
-		if (c != 'y' && c != 'Y') {
+		if (!confirmYN(msg))
 			return;
-		}
 	}
 
 	// Find the previous buffer (if any)

@@ -17,9 +17,10 @@
      rng       mkstemp needs entropy.  jitterentropy is used rather
                than pointing rng at /dev/zero, which appears to work
                but hands out a constant.
-     /tmp      test_fileio and friends create files under /tmp with
-               mkstemp and mkdtemp.  A ram filesystem is enough; none
-               of the suites expect anything to persist.
+     /emil-tmp the suites' scratch directory: ours, a ram filesystem,
+               passed in TMPDIR.  None of the suites expect anything to
+               persist.  /tmp stays for tmpfile(), which the C library
+               places there.
      pipe      test_writeall calls pipe().  Genode's libc routes that
                through a VFS plugin rather than the kernel, and
                Vfs_plugin::pipe() returns EACCES with "pipe fs not
@@ -44,9 +45,11 @@
 				<dir name="pipe"> <pipe/> </dir>
 			</dir>
 			<dir name="tmp"> <ram/> </dir>
+			<dir name="emil-tmp"> <ram/> </dir>
 		</vfs>
 
 		<arg value="test_abuf"/>
+		<env key="TMPDIR" value="/emil-tmp"/>
 	</config>
 
 	<content>

@@ -55,7 +55,6 @@
 /* ---- the terminal and main.c boundary ------------------------------- */
 
 struct config E;
-const int page_overlap = 2;
 
 void die(const char *s) {
 	fprintf(stderr, "die: %s\n", s);
@@ -169,13 +168,16 @@ static const char PRINTABLE[] =
 	"ABCXYZbcdfghjkmpqvwxyz";
 
 static const int CONTROLS[] = {
-	'\r', '\r', '\r', '\t', '\t', CTRL('g'), CTRL('g'), CTRL('a'),
-	CTRL('b'), CTRL('c'), CTRL('d'), CTRL('e'), CTRL('f'), CTRL('h'),
-	CTRL('j'), CTRL('k'), CTRL('k'), CTRL('l'), CTRL('n'), CTRL('o'),
-	CTRL('p'), CTRL('q'), CTRL('r'), CTRL('s'), CTRL('s'), CTRL('t'),
-	CTRL('u'), CTRL('u'), CTRL('v'), CTRL('w'), CTRL('w'), CTRL('y'),
-	CTRL('y'), CTRL('z'), CTRL('_'), CTRL('_'), 0, 0, 033, 127, 127,
-	CTRL('x'), CTRL('x'), CTRL('i'), CTRL('m'), 0x1c, 0x1d, 0x1e,
+	'\r', '\r', '\r', '\t', '\t', KEY_CTRL('g'), KEY_CTRL('g'),
+	KEY_CTRL('a'), KEY_CTRL('b'), KEY_CTRL('c'), KEY_CTRL('d'),
+	KEY_CTRL('e'), KEY_CTRL('f'), KEY_CTRL('h'), KEY_CTRL('j'),
+	KEY_CTRL('k'), KEY_CTRL('k'), KEY_CTRL('l'), KEY_CTRL('n'),
+	KEY_CTRL('o'), KEY_CTRL('p'), KEY_CTRL('q'), KEY_CTRL('r'),
+	KEY_CTRL('s'), KEY_CTRL('s'), KEY_CTRL('t'), KEY_CTRL('u'),
+	KEY_CTRL('u'), KEY_CTRL('v'), KEY_CTRL('w'), KEY_CTRL('w'),
+	KEY_CTRL('y'), KEY_CTRL('y'), KEY_CTRL('z'), KEY_CTRL('_'),
+	KEY_CTRL('_'), 0, 0, 033, 127, 127, KEY_CTRL('x'), KEY_CTRL('x'),
+	KEY_CTRL('i'), KEY_CTRL('m'), 0x1c, 0x1d, 0x1e,
 };
 #define NCONTROLS ((int)(sizeof(CONTROLS) / sizeof(CONTROLS[0])))
 
@@ -233,10 +235,10 @@ static void genKey(struct fkey *out, int *n, int cap) {
 	} else if (r < 900) {
 		PUSH(KEY_ALT_0 + pick(10));
 	} else if (r < 950) {
-		PUSH(CTRL('x'));
+		PUSH(KEY_CTRL('x'));
 		PUSH((unsigned char)CX_SUB[pick((int)sizeof(CX_SUB) - 1)]);
 	} else if (r < 990) {
-		PUSH(CTRL('x'));
+		PUSH(KEY_CTRL('x'));
 		PUSH('r');
 		PUSH((unsigned char)CXR_SUB[pick((int)sizeof(CXR_SUB) - 1)]);
 		PUSH((unsigned char)REGNAMES[pick((int)sizeof(REGNAMES) - 1)]);
@@ -380,7 +382,7 @@ int readKey(void) {
 						"after 5000 C-g\n");
 				_exit(3);
 			}
-			return CTRL('g');
+			return KEY_CTRL('g');
 		}
 		if (fk.key == FK_RESIZE) {
 			win_rows = fk.rows;
@@ -560,6 +562,20 @@ static void showKeys(void) {
 
 /* ---- forking driver --------------------------------------------------- */
 
+/* Did the child write a lead?  C-x C-c ends a sequence through exit(),
+ * with status 0, so the status alone can't say. */
+static int childWroteLead(const char *errpath) {
+	FILE *f = fopen(errpath, "r");
+	char line[1024];
+	int found = 0;
+	if (!f)
+		return 0;
+	while (!found && fgets(line, sizeof(line), f))
+		found = strncmp(line, "LEAD at key", 11) == 0;
+	fclose(f);
+	return found;
+}
+
 /* Run one sequence in a child.  Returns the child's status class:
  * 0 clean, 1 sanitizer/crash, 2 hang, 3 lead only.  The child's stderr
  * goes to errpath. */
@@ -582,7 +598,7 @@ static int runChild(uint32_t seed, const char *errpath, int timeout_s) {
 			if (WIFEXITED(status)) {
 				int code = WEXITSTATUS(status);
 				if (code == 0)
-					return 0;
+					return childWroteLead(errpath) ? 3 : 0;
 				if (code == 4)
 					return 3;
 				if (code == 3)

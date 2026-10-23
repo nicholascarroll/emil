@@ -3,17 +3,15 @@
 #include "edit.h"
 #include "adjust.h"
 #include "buffer.h"
-#include "display.h"
+#include "message.h"
 #include "emil.h"
 #include "history.h"
 #include "keymap.h"
-
 #include "motion.h"
 #include "dbuf.h"
 #include "mutate.h"
 #include "prompt.h"
 #include "region.h"
-#include "terminal.h"
 #include "transform.h"
 #include "undo.h"
 #include "unicode.h"
@@ -24,26 +22,6 @@
 #include <ctype.h>
 
 /* Character insertion */
-
-/* Raw insertion with no undo record.  Used for minibuffer text, which
- * is not part of any undo history.  Editing a user buffer goes through
- * selfInsert below, or the mutation layer directly. */
-void insertChar(struct buffer *bufr, int c, int count) {
-	if (rejectIfReadOnly(bufr))
-		return;
-
-	bufr->mark_active = 0;
-
-	if (count <= 0)
-		count = 1;
-
-	for (int i = 0; i < count; i++) {
-		int at = bufr->cx;
-		rowInsertChar(bufr, &bufr->row[bufr->cy], at, c);
-		adjustAllPoints(bufr, at, bufr->cy, at + 1, bufr->cy, 0);
-		bufr->cx++;
-	}
-}
 
 /* Insert 'len' bytes of 'text' 'times' times at point, recording undo,
  * and leave point after the insertion. */
@@ -73,8 +51,7 @@ void insertUnicode(int count) {
 }
 
 /* Insert 'c' 'count' times at point, recording undo.  This is the
- * undoable typing path; insertChar above is the raw primitive, used
- * for minibuffer text that is not part of the undo history. */
+ * undoable typing path. */
 void selfInsert(struct buffer *bufr, int c, int count) {
 	if (rejectIfReadOnly(bufr))
 		return;
@@ -124,8 +101,8 @@ void insertNewlineAndIndent(int count) {
 		insertNewline(1);
 		erow *prev = &E.buf->row[E.buf->cy - 1];
 		int i = 0;
-		while (i < prev->size &&
-		       (prev->chars[i] == ' ' || prev->chars[i] == CTRL('i'))) {
+		while (i < prev->size && (prev->chars[i] == ' ' ||
+					  prev->chars[i] == KEY_CTRL('i'))) {
 			uint8_t c = prev->chars[i];
 			int ex, ey;
 			mutateInsertChar(E.buf, E.buf->cx, E.buf->cy, &c, 1,
@@ -162,13 +139,7 @@ void unindent(int rept) {
 	if (trunc == 0)
 		return;
 
-	/* Build old_text for mutateDelete */
-	uint8_t *old_text = xmalloc(trunc + 1);
-	memset(old_text, '\t', trunc);
-	old_text[trunc] = 0;
-
-	mutateDelete(E.buf, 0, E.buf->cy, trunc, E.buf->cy, old_text, trunc);
-	free(old_text);
+	mutateDelete(E.buf, 0, E.buf->cy, trunc, E.buf->cy);
 
 	/* If the cursor sat inside the removed indentation (cx < trunc),
 	 * the unconditional subtraction drove cx negative, and any
@@ -196,14 +167,16 @@ void delChar(int count) {
 		if (E.buf->cx == row->size) {
 			/* Deleting the row separator joins the next row
 			 * onto this one. */
-			const uint8_t nl = '\n';
 			mutateDeleteChar(E.buf, E.buf->cx, E.buf->cy, 0,
-					 E.buf->cy + 1, &nl, 1);
+					 E.buf->cy + 1);
 		} else {
+			/* A truncated sequence at the end of the row is only
+			 * as long as what's left of the row. */
 			int n = utf8_nBytes(row->chars[E.buf->cx]);
+			if (n > row->size - E.buf->cx)
+				n = row->size - E.buf->cx;
 			mutateDeleteChar(E.buf, E.buf->cx, E.buf->cy,
-					 E.buf->cx + n, E.buf->cy,
-					 &row->chars[E.buf->cx], n);
+					 E.buf->cx + n, E.buf->cy);
 		}
 	}
 }
@@ -239,17 +212,14 @@ void backSpace(int count) {
 			do {
 				from--;
 			} while (from > 0 && utf8_isCont(row->chars[from]));
-			mutateDeleteChar(E.buf, from, E.buf->cy, to, E.buf->cy,
-					 &row->chars[from], to - from);
+			mutateDeleteChar(E.buf, from, E.buf->cy, to, E.buf->cy);
 			E.buf->cx = from;
 		} else {
 			/* Joining onto the previous row deletes the
 			 * separator between them. */
-			const uint8_t nl = '\n';
 			int prevy = E.buf->cy - 1;
 			int prevx = E.buf->row[prevy].size;
-			mutateDeleteChar(E.buf, prevx, prevy, 0, E.buf->cy, &nl,
-					 1);
+			mutateDeleteChar(E.buf, prevx, prevy, 0, E.buf->cy);
 			E.buf->cx = prevx;
 			E.buf->cy = prevy;
 		}
@@ -502,6 +472,8 @@ void transposeChars(int uarg) {
 
 	/* Find the end of the character after point. */
 	int endx = E.buf->cx + utf8_nBytes(row->chars[E.buf->cx]);
+	if (endx > row->size)
+		endx = row->size; /* truncated sequence at the end of the row */
 
 	transformRange(E.buf, startx, E.buf->cy, endx, E.buf->cy,
 		       transformerTransposeChars);
@@ -580,14 +552,9 @@ void quit(void) {
 	}
 
 	if (hasUnsavedChanges) {
-		setStatusMessage(
-			"There are unsaved changes. Really quit? (y or n)");
-		refreshScreen();
-		int c = readKey();
-		if (c == 'y' || c == 'Y') {
+		if (confirmYN(
+			    "There are unsaved changes. Really quit? (y or n)"))
 			exit(0);
-		}
-		clearStatusMessage();
 	} else {
 		exit(0);
 	}
@@ -703,10 +670,6 @@ static void transposeSentencesBackward(void) {
 	uint8_t *b_text = collectRegionText(E.buf, a_end_x, a_end_y, b_end_x,
 					    b_end_y, &b_len);
 
-	int old_len;
-	uint8_t *old_text = collectRegionText(E.buf, a_start_x, a_start_y,
-					      b_end_x, b_end_y, &old_len);
-
 	/* Build replacement: B + A */
 	int repl_len = b_len + a_len;
 	uint8_t *repl = xmalloc(repl_len + 1);
@@ -715,8 +678,8 @@ static void transposeSentencesBackward(void) {
 	repl[repl_len] = 0;
 
 	int ex, ey;
-	mutateReplace(E.buf, a_start_x, a_start_y, b_end_x, b_end_y, old_text,
-		      old_len, repl, repl_len, 0, &ex, &ey);
+	mutateReplace(E.buf, a_start_x, a_start_y, b_end_x, b_end_y, repl,
+		      repl_len, 0, &ex, &ey);
 
 	/* Point after the dragged sentence, now first in the region. */
 	E.buf->cx = a_start_x;
@@ -725,7 +688,6 @@ static void transposeSentencesBackward(void) {
 
 	free(a_text);
 	free(b_text);
-	free(old_text);
 	free(repl);
 }
 
@@ -789,10 +751,6 @@ void transposeSentences(int uarg) {
 					    b_end_y, &b_len);
 
 	/* Collect old text for entire range */
-	int old_len;
-	uint8_t *old_text = collectRegionText(E.buf, a_start_x, a_start_y,
-					      b_end_x, b_end_y, &old_len);
-
 	/* Build replacement: B + A */
 	int repl_len = b_len + a_len;
 	uint8_t *repl = xmalloc(repl_len + 1);
@@ -801,77 +759,100 @@ void transposeSentences(int uarg) {
 	repl[repl_len] = 0;
 
 	int ex, ey;
-	mutateReplace(E.buf, a_start_x, a_start_y, b_end_x, b_end_y, old_text,
-		      old_len, repl, repl_len, 0, &ex, &ey);
+	mutateReplace(E.buf, a_start_x, a_start_y, b_end_x, b_end_y, repl,
+		      repl_len, 0, &ex, &ey);
 
 	E.buf->cx = ex;
 	E.buf->cy = ey;
 
 	free(a_text);
 	free(b_text);
-	free(old_text);
 	free(repl);
 }
 
-/* Zap to char (M-z): kill from point up to and including the next
- * occurrence of a prompted character. */
-
-void zapToChar(void) {
+/* Greedy means delete up to and including the character entered
+ * at the prompt. Otherwise, only up to. */
+static void zap(int greedy, int uarg) {
 	if (rejectIfReadOnly(E.buf))
 		return;
 
 	E.buf->mark_active = 0;
 
-	setStatusMessage("Zap to char: ");
-	refreshScreen();
+	int reverse = (uarg == UARG_REVERSE);
+	int times = UARG_COUNT(uarg);
 
-	int c = readKey();
-	if (c == CTRL('g')) {
-		setStatusMessage("Canceled.");
-		return;
+	const char *prompt;
+	if (greedy) {
+		prompt = "Zap to char: ";
+	} else {
+		prompt = "Zap up to char: ";
 	}
-	if (c == 033) {
-		setStatusMessage("Canceled.");
-		return;
-	}
+
+	int c = promptKey(prompt);
 
 	/* The target is compared byte-for-byte against buffer content, so
 	 * it has to be a single ASCII byte.*/
 	if (c != '\t' && (c < ' ' || c > '~')) {
-		setStatusMessage("Zap to char: not a character");
+		setStatusMessage("%snot a character", prompt);
 		return;
+	} else {
+		setStatusMessage("%s%c", prompt, c);
 	}
 
-	/* Search forward for the character */
-	int sy = E.buf->cy;
+	int cx = E.buf->cx, cy = E.buf->cy;
+	int found = 0;
 
-	while (sy < E.buf->numrows) {
-		erow *row = &E.buf->row[sy];
-		int start = (sy == E.buf->cy) ? E.buf->cx : 0;
-		for (int x = start; x < row->size; x++) {
-			if (row->chars[x] == (uint8_t)c) {
-				/* Skip past the target if it's not at
-				 * the starting position */
-				if (x == E.buf->cx && sy == E.buf->cy)
+	if (reverse) {
+		/* Scan backward starting at the char just before point. */
+		for (int sy = cy; sy >= 0; sy--) {
+			erow *row = &E.buf->row[sy];
+			int start = (sy == cy) ? cx - 1 : row->size - 1;
+			for (int x = start; x >= 0; x--) {
+				if (row->chars[x] != (uint8_t)c)
 					continue;
-				/* Kill up to and including this char */
-				int endx = x + 1;
-				int endy = sy;
-				deleteRange(E.buf, E.buf->cx, E.buf->cy, endx,
-					    endy, 1);
+				/* Up-to with the target right behind point
+				 * would delete nothing: skip past it. */
+				if (!greedy && sy == cy && x == cx - 1)
+					continue;
+				if (++found < times)
+					continue;
+				int startx = greedy ? x : x + 1;
+				/* deleteRange orders the points and leaves
+				 * the cursor at the start of the range. */
+				deleteRange(E.buf, startx, sy, cx, cy, 1);
 				return;
 			}
 		}
-		sy++;
+	} else {
+		for (int sy = cy; sy < E.buf->numrows; sy++) {
+			erow *row = &E.buf->row[sy];
+			int start = (sy == cy) ? cx : 0;
+			for (int x = start; x < row->size; x++) {
+				if (row->chars[x] != (uint8_t)c)
+					continue;
+				/* Skip past the target if it's at point */
+				if (!greedy && x == cx && sy == cy)
+					continue;
+				if (++found < times)
+					continue;
+				/* Kill up to and/or including this char */
+				deleteRange(E.buf, cx, cy, x + greedy, sy, 1);
+				return;
+			}
+		}
 	}
 
 	setStatusMessage("'%c' not found", c);
 }
 
-#include "prompt.h"
-#include "unicode.h"
-#include "util.h"   // For setStatusMessage
-#include <stdlib.h> // For strtoul, free
+/* Delete up to and INCLUDING the character*/
+void zapToChar(int uarg) {
+	zap(1, uarg);
+}
+/* Delete up to and NOT including the character*/
+void zapUpToChar(int uarg) {
+	zap(0, uarg);
+}
 
 /* Insert Unicode codepoint hex */
 void insertCharHex(void) {

@@ -3,7 +3,7 @@
  *
  * The test binary links every .o file except main.o and terminal.o. 
  * This file provides:
- * - The global E and page_overlap that main.o normally defines.
+ * - The global E that main.o normally defines.
  * - No-op replacements for terminal.o functions (the only functions
  *   that physically touch the terminal: read/write fd 0/1, termios,
  *   ioctl). */
@@ -12,10 +12,10 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include "emil.h"
+#include "test_harness.h"
 
 /* Normally defined in main.c */
 struct config E;
-const int page_overlap = 2;
 
 void die(const char *s) {
 	fprintf(stderr, "die: %s\n", s);
@@ -36,7 +36,7 @@ void disableRawModeKeepScreen(void) {
  * setting test_key_count; readKey() returns each in turn.  With no
  * script loaded the behaviour is the historical one (always 0), so
  * existing suites are unaffected. */
-int test_key_script[64];
+int test_key_script[TEST_KEY_SCRIPT_MAX];
 int test_key_count = 0;
 int test_key_pos = 0;
 

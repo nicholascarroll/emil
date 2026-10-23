@@ -8,17 +8,19 @@
  * UTF-8 safety: rectangle columns are byte offsets, so on interior
  * rows they can land inside a multi-byte sequence.  The operations
  * snap inward to character boundaries; these tests pin the invariant
- * that no rectangle operation ever leaves invalid UTF-8 in a buffer
- * or in the kill ring, and that save() refuses when a buffer somehow
- * contains invalid UTF-8 (which no load path would reopen).
+ * that no rectangle operation ever leaves invalid UTF-8 in a buffer,
+ * and that a killed or copied rectangle yanks back as valid UTF-8.
  *
- * All tests are non-interactive: they set up buffer + mark state
- * programmatically and call the region functions directly. */
+ * The tests set point and mark, issue the command through
+ * processKeypress() and read the buffer text.  A rectangle to yank is
+ * made the way a user makes one, by copying it out of buffer text;
+ * what was killed or copied is checked by yanking it.  The tests do
+ * not call the rectangle functions or read the kill buffer, so both
+ * can be reshaped without touching this file. */
 
 #include "test.h"
 #include "test_harness.h"
-#include "edit.h"
-#include "region.h"
+#include "keymap.h"
 #include "unicode.h"
 #include <stdint.h>
 #include <string.h>
@@ -67,32 +69,48 @@ static void set_mark(struct buffer *buf, int mx, int my) {
 	buf->mark_active = 1;
 }
 
-/* ----------------------------------------------------------------
- * killRectangle tests
- * ---------------------------------------------------------------- */
-
-void test_kill_rect_single_row_undo(void) {
-	const char *lines[] = { "ABCDE" };
-	struct buffer *buf = make_test_buffer_lines(lines, 1);
-
-	int snap_n;
-	char **snap = snapshot_buffer(buf, &snap_n);
-
-	/* Select columns 1-3 on row 0: kill "BCD" */
-	buf->cx = 1;
-	buf->cy = 0;
-	set_mark(buf, 4, 0);
-	killRectangle();
-
-	/* Should now be "AE" */
-	TEST_ASSERT_EQUAL_STRING("AE", row_str(buf, 0));
-
-	/* Undo should restore "ABCDE" */
-	doUndo(buf, 1);
-	assert_buffer_matches(buf, snap, snap_n, "kill_rect_single_undo");
-
-	free_snapshot(snap, snap_n);
+/* Put an h-row rectangle on the kill ring the way a user would: copy
+ * it (C-x r M-w) out of a buffer holding exactly those rows.  The
+ * rows must be equally long.  The scratch buffer is gone on return,
+ * so call this before making the buffer under test. */
+static void copy_rect_of(const char **rows, int h) {
+	struct buffer *src = make_test_buffer_lines(rows, h);
+	src->cx = 0;
+	src->cy = 0;
+	set_mark(src, (int)strlen(rows[0]), h - 1);
+	processKeypress(CMD_COPY_RECT);
+	destroyBuffer(src);
+	E.buf = NULL;
+	E.headbuf = NULL;
+	E.windows[0]->buf = NULL;
 }
+
+/* Run a command that reads from the minibuffer, with `typed` and RET
+ * waiting for it.  Returns how many of those keys were read, so a
+ * test can tell a command that prompted from one that refused first. */
+static int run_typing(int cmd, const char *typed) {
+	int keys[64];
+	int n = 0;
+	while (typed[n] && n < 63) {
+		keys[n] = (unsigned char)typed[n];
+		n++;
+	}
+	keys[n++] = '\r';
+
+	makeMinibuffer();
+	scriptKeys(keys, n);
+	muteStdout();
+	processKeypress(cmd);
+	unmuteStdout();
+	int used = test_key_pos;
+	clearKeys();
+	freeMinibuffer();
+	return used;
+}
+
+/* ----------------------------------------------------------------
+ * Kill rectangle (C-x r k)
+ * ---------------------------------------------------------------- */
 
 void test_kill_rect_multi_row_undo(void) {
 	const char *lines[] = { "ABCDE", "FGHIJ", "KLMNO" };
@@ -105,13 +123,13 @@ void test_kill_rect_multi_row_undo(void) {
 	buf->cx = 1;
 	buf->cy = 0;
 	set_mark(buf, 4, 2);
-	killRectangle();
+	processKeypress(CMD_KILL_RECT);
 
 	TEST_ASSERT_EQUAL_STRING("AE", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_STRING("FJ", row_str(buf, 1));
 	TEST_ASSERT_EQUAL_STRING("KO", row_str(buf, 2));
 
-	doUndo(buf, 1);
+	processKeypress(CMD_UNDO);
 	assert_buffer_matches(buf, snap, snap_n, "kill_rect_multi_undo");
 
 	free_snapshot(snap, snap_n);
@@ -124,14 +142,15 @@ void test_kill_rect_multi_row_redo(void) {
 	buf->cx = 1;
 	buf->cy = 0;
 	set_mark(buf, 4, 2);
-	killRectangle();
+	processKeypress(CMD_KILL_RECT);
 
 	/* Capture post-kill state */
 	int kill_n;
 	char **kill_snap = snapshot_buffer(buf, &kill_n);
 
-	doUndo(buf, 1);
-	doRedo(buf, 1);
+	processKeypress(CMD_UNDO);
+	TEST_ASSERT_EQUAL_STRING("ABCDE", row_str(buf, 0));
+	processKeypress(CMD_REDO);
 
 	assert_buffer_matches(buf, kill_snap, kill_n, "kill_rect_redo");
 
@@ -150,16 +169,24 @@ void test_kill_rect_short_rows_undo(void) {
 	buf->cx = 2;
 	buf->cy = 0;
 	set_mark(buf, 6, 2);
-	killRectangle();
+	processKeypress(CMD_KILL_RECT);
 
-	doUndo(buf, 1);
+	/* The short row ends before the rectangle starts: it loses
+	 * nothing and gains no padding. */
+	TEST_ASSERT_EQUAL_STRING("ABGH", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_STRING("AB", row_str(buf, 1));
+	TEST_ASSERT_EQUAL_STRING("ABGH", row_str(buf, 2));
+
+	processKeypress(CMD_UNDO);
 	assert_buffer_matches(buf, snap, snap_n, "kill_rect_short_rows_undo");
 
 	free_snapshot(snap, snap_n);
 }
 
 void test_kill_rect_swapped_columns_undo(void) {
-	/* Mark column < cursor column — tests normalizeRectCols */
+	/* Point is on the first row but at the right-hand column, mark
+	 * on the last row at the left-hand column: the rectangle is
+	 * still columns 1-3 of both rows. */
 	const char *lines[] = { "ABCDE", "FGHIJ" };
 	struct buffer *buf = make_test_buffer_lines(lines, 2);
 
@@ -169,16 +196,19 @@ void test_kill_rect_swapped_columns_undo(void) {
 	buf->cx = 4;
 	buf->cy = 0;
 	set_mark(buf, 1, 1);
-	killRectangle();
+	processKeypress(CMD_KILL_RECT);
 
-	doUndo(buf, 1);
+	TEST_ASSERT_EQUAL_STRING("AE", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_STRING("FJ", row_str(buf, 1));
+
+	processKeypress(CMD_UNDO);
 	assert_buffer_matches(buf, snap, snap_n, "kill_rect_swapped_cols_undo");
 
 	free_snapshot(snap, snap_n);
 }
 
 /* ----------------------------------------------------------------
- * copyRectangle tests (no undo needed, but verify kill ring)
+ * Copy rectangle (C-x r M-w): buffer untouched, rectangle yankable
  * ---------------------------------------------------------------- */
 
 void test_copy_rect_preserves_buffer(void) {
@@ -191,71 +221,72 @@ void test_copy_rect_preserves_buffer(void) {
 	buf->cx = 1;
 	buf->cy = 0;
 	set_mark(buf, 4, 2);
-	copyRectangle();
+	processKeypress(CMD_COPY_RECT);
 
-	/* Buffer must be unchanged */
+	/* Buffer must be unchanged, and not marked as modified */
 	assert_buffer_matches(buf, snap, snap_n, "copy_rect_preserves");
+	TEST_ASSERT_EQUAL_INT(0, buf->dirty);
 
-	/* Kill ring should have rectangle data */
-	TEST_ASSERT_EQUAL_INT(1, E.kill.is_rectangle);
-	TEST_ASSERT_EQUAL_INT(3, E.kill.rect_width);
-	TEST_ASSERT_EQUAL_INT(3, E.kill.rect_height);
+	/* What was copied is the 3x3 block "BCD" / "GHI" / "LMN":
+	 * yanked at the top-left corner it lands in front of each row. */
+	buf->cx = 0;
+	buf->cy = 0;
+	processKeypress(CMD_YANK_RECT);
+	TEST_ASSERT_EQUAL_STRING("BCDABCDE", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_STRING("GHIFGHIJ", row_str(buf, 1));
+	TEST_ASSERT_EQUAL_STRING("LMNKLMNO", row_str(buf, 2));
+	TEST_ASSERT_EQUAL_INT(4, buf->numrows);
 
 	free_snapshot(snap, snap_n);
 }
 
 /* ----------------------------------------------------------------
- * yankRectangle tests
+ * Yank rectangle (C-x r y)
  * ---------------------------------------------------------------- */
 
 void test_yank_rect_basic_undo(void) {
+	/* A 2-wide, 3-tall rectangle on the kill ring */
+	const char *rect[] = { "XX", "YY", "ZZ" };
+	copy_rect_of(rect, 3);
+
 	const char *lines[] = { "AAAA", "BBBB", "CCCC" };
 	struct buffer *buf = make_test_buffer_lines(lines, 3);
 
 	int snap_n;
 	char **snap = snapshot_buffer(buf, &snap_n);
 
-	/* Set up kill ring with a 2-wide, 3-tall rectangle: "XX" per row */
-	clearText(&E.kill);
-	E.kill.str = (uint8_t *)xstrdup("XXYYZZ");
-	E.kill.is_rectangle = 1;
-	E.kill.rect_width = 2;
-	E.kill.rect_height = 3;
-
 	buf->cx = 1;
 	buf->cy = 0;
-	yankRectangle();
+	processKeypress(CMD_YANK_RECT);
 
-	/* Should have inserted XX into each row at column 1 */
+	/* Each rectangle row is inserted at column 1 of its buffer row */
 	TEST_ASSERT_EQUAL_STRING("AXXAAA", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_STRING("BYYBBB", row_str(buf, 1));
 	TEST_ASSERT_EQUAL_STRING("CZZCCC", row_str(buf, 2));
 
-	doUndo(buf, 1);
+	processKeypress(CMD_UNDO);
 	assert_buffer_matches(buf, snap, snap_n, "yank_rect_basic_undo");
 
 	free_snapshot(snap, snap_n);
 }
 
 void test_yank_rect_redo(void) {
+	const char *rect[] = { "XX", "YY", "ZZ" };
+	copy_rect_of(rect, 3);
+
 	const char *lines[] = { "AAAA", "BBBB", "CCCC" };
 	struct buffer *buf = make_test_buffer_lines(lines, 3);
 
-	clearText(&E.kill);
-	E.kill.str = (uint8_t *)xstrdup("XXYYZZ");
-	E.kill.is_rectangle = 1;
-	E.kill.rect_width = 2;
-	E.kill.rect_height = 3;
-
 	buf->cx = 1;
 	buf->cy = 0;
-	yankRectangle();
+	processKeypress(CMD_YANK_RECT);
 
 	int yank_n;
 	char **yank_snap = snapshot_buffer(buf, &yank_n);
 
-	doUndo(buf, 1);
-	doRedo(buf, 1);
+	processKeypress(CMD_UNDO);
+	TEST_ASSERT_EQUAL_STRING("AAAA", row_str(buf, 0));
+	processKeypress(CMD_REDO);
 	assert_buffer_matches(buf, yank_snap, yank_n, "yank_rect_redo");
 
 	free_snapshot(yank_snap, yank_n);
@@ -263,30 +294,31 @@ void test_yank_rect_redo(void) {
 
 void test_yank_rect_extra_lines_undo(void) {
 	/* Yanking a 4-row rectangle into a 2-row buffer requires
-	 * adding extra lines.  Tests the 3-undo-record sequence. */
+	 * adding extra lines, and one undo must take all of it back. */
+	const char *rect[] = { "XX", "YY", "ZZ", "WW" };
+	copy_rect_of(rect, 4);
+
 	const char *lines[] = { "AA", "BB" };
 	struct buffer *buf = make_test_buffer_lines(lines, 2);
 
 	int snap_n;
 	char **snap = snapshot_buffer(buf, &snap_n);
 
-	clearText(&E.kill);
-	E.kill.str = (uint8_t *)xstrdup("XXYYZZWW");
-	E.kill.is_rectangle = 1;
-	E.kill.rect_width = 2;
-	E.kill.rect_height = 4;
-
 	buf->cx = 0;
 	buf->cy = 0;
-	yankRectangle();
+	processKeypress(CMD_YANK_RECT);
 
 	/* Four rows of rectangle, plus the empty row that terminates
 	 * the last of them: the rectangle's bottom row is now the last
 	 * line of the file and needs its newline like any other. */
 	TEST_ASSERT_EQUAL_INT(5, buf->numrows);
+	TEST_ASSERT_EQUAL_STRING("XXAA", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_STRING("YYBB", row_str(buf, 1));
+	TEST_ASSERT_EQUAL_STRING("ZZ", row_str(buf, 2));
+	TEST_ASSERT_EQUAL_STRING("WW", row_str(buf, 3));
 	TEST_ASSERT_EQUAL_STRING("", row_str(buf, 4));
 
-	doUndo(buf, 1);
+	processKeypress(CMD_UNDO);
 
 	/* Undo should fully restore original buffer */
 	assert_buffer_matches(buf, snap, snap_n, "yank_rect_extra_lines_undo");
@@ -298,24 +330,27 @@ void test_yank_rect_into_short_rows_undo(void) {
 	/* Rows shorter than the insertion column — tests space padding.
 	 * Undo must remove both the inserted rectangle data AND the
 	 * space padding added to reach the insertion column. */
-	const char *lines[] = { "A", "B", "C" };
+	const char *rect[] = { "XX", "YY", "ZZ" };
+	copy_rect_of(rect, 3);
+
+	const char *lines[] = { "AAAAAA", "B", "C" };
 	struct buffer *buf = make_test_buffer_lines(lines, 3);
 
 	int snap_n;
 	char **snap = snapshot_buffer(buf, &snap_n);
 
-	clearText(&E.kill);
-	E.kill.str = (uint8_t *)xstrdup("XXYYZZ");
-	E.kill.is_rectangle = 1;
-	E.kill.rect_width = 2;
-	E.kill.rect_height = 3;
-
-	/* Insert at column 5 — well past end of each 1-char row */
+	/* Insert at column 5 — well past the end of the 1-char rows
+	 * below the one point is on */
 	buf->cx = 5;
 	buf->cy = 0;
-	yankRectangle();
+	processKeypress(CMD_YANK_RECT);
 
-	doUndo(buf, 1);
+	/* The short rows are padded with spaces out to column 5 */
+	TEST_ASSERT_EQUAL_STRING("AAAAAXXA", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_STRING("B    YY", row_str(buf, 1));
+	TEST_ASSERT_EQUAL_STRING("C    ZZ", row_str(buf, 2));
+
+	processKeypress(CMD_UNDO);
 
 	/* Undo should fully restore original buffer */
 	assert_buffer_matches(buf, snap, snap_n, "yank_rect_short_rows_undo");
@@ -324,42 +359,7 @@ void test_yank_rect_into_short_rows_undo(void) {
 }
 
 /* ----------------------------------------------------------------
- * deleteRange tests (linear region, for comparison)
- * ---------------------------------------------------------------- */
-
-void test_delete_range_single_line_undo(void) {
-	struct buffer *buf = make_test_buffer("Hello World");
-
-	int snap_n;
-	char **snap = snapshot_buffer(buf, &snap_n);
-
-	deleteRange(buf, 5, 0, 11, 0, 1);
-	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
-
-	doUndo(buf, 1);
-	assert_buffer_matches(buf, snap, snap_n, "delete_range_single_undo");
-
-	free_snapshot(snap, snap_n);
-}
-
-void test_delete_range_multi_line_undo(void) {
-	const char *lines[] = { "Hello", "Beautiful", "World" };
-	struct buffer *buf = make_test_buffer_lines(lines, 3);
-
-	int snap_n;
-	char **snap = snapshot_buffer(buf, &snap_n);
-
-	/* Delete from (3,0) to (2,2): "lo\nBeautiful\nWo" */
-	deleteRange(buf, 3, 0, 2, 2, 1);
-
-	doUndo(buf, 1);
-	assert_buffer_matches(buf, snap, snap_n, "delete_range_multi_undo");
-
-	free_snapshot(snap, snap_n);
-}
-
-/* ----------------------------------------------------------------
- * killRegion (linear) undo — baseline for comparison
+ * Linear kill (C-w) undo — baseline for comparison
  * ---------------------------------------------------------------- */
 
 void test_kill_region_undo(void) {
@@ -369,41 +369,16 @@ void test_kill_region_undo(void) {
 	int snap_n;
 	char **snap = snapshot_buffer(buf, &snap_n);
 
+	/* From (2,0) to (3,1): "llo\nWor" */
 	buf->cx = 2;
 	buf->cy = 0;
 	set_mark(buf, 3, 1);
-	killRegion();
+	processKeypress(CMD_KILL_REGION);
+	TEST_ASSERT_EQUAL_STRING("Held", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 
-	doUndo(buf, 1);
+	processKeypress(CMD_UNDO);
 	assert_buffer_matches(buf, snap, snap_n, "kill_region_undo");
-
-	free_snapshot(snap, snap_n);
-}
-
-/* ----------------------------------------------------------------
- * Round-trip: kill rectangle then yank it back
- * ---------------------------------------------------------------- */
-
-void test_kill_then_yank_rect_round_trip(void) {
-	const char *lines[] = { "ABCDE", "FGHIJ", "KLMNO" };
-	struct buffer *buf = make_test_buffer_lines(lines, 3);
-
-	int snap_n;
-	char **snap = snapshot_buffer(buf, &snap_n);
-
-	/* Kill columns 1-4 */
-	buf->cx = 1;
-	buf->cy = 0;
-	set_mark(buf, 4, 2);
-	killRectangle();
-
-	/* Now yank it back at the same position */
-	buf->cx = 1;
-	buf->cy = 0;
-	yankRectangle();
-
-	/* Should be back to original content */
-	assert_buffer_matches(buf, snap, snap_n, "kill_yank_round_trip");
 
 	free_snapshot(snap, snap_n);
 }
@@ -413,7 +388,7 @@ void test_kill_then_yank_rect_round_trip(void) {
  * ---------------------------------------------------------------- */
 
 void test_multiple_rect_ops_undo_all(void) {
-	const char *lines[] = { "AAAA", "BBBB", "CCCC" };
+	const char *lines[] = { "ABCD", "EFGH", "IJKL" };
 	struct buffer *buf = make_test_buffer_lines(lines, 3);
 
 	int snap_n;
@@ -423,23 +398,26 @@ void test_multiple_rect_ops_undo_all(void) {
 	buf->cx = 0;
 	buf->cy = 0;
 	set_mark(buf, 2, 2);
-	buf->mark_active = 1;
-	killRectangle();
+	processKeypress(CMD_KILL_RECT);
+	TEST_ASSERT_EQUAL_STRING("CD", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_STRING("GH", row_str(buf, 1));
+	TEST_ASSERT_EQUAL_STRING("KL", row_str(buf, 2));
 
-	/* Second: yank some rectangle */
-	clearText(&E.kill);
-	E.kill.str = (uint8_t *)xstrdup("XXYYZZ");
-	E.kill.is_rectangle = 1;
-	E.kill.rect_width = 2;
-	E.kill.rect_height = 3;
-	buf->cx = 0;
+	/* Second: yank it back, but at the other end of the rows */
+	buf->cx = 2;
 	buf->cy = 0;
-	yankRectangle();
+	processKeypress(CMD_YANK_RECT);
+	TEST_ASSERT_EQUAL_STRING("CDAB", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_STRING("GHEF", row_str(buf, 1));
+	TEST_ASSERT_EQUAL_STRING("KLIJ", row_str(buf, 2));
 
 	/* Undo yank */
-	doUndo(buf, 1);
+	processKeypress(CMD_UNDO);
+	TEST_ASSERT_EQUAL_STRING("CD", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_STRING("GH", row_str(buf, 1));
+	TEST_ASSERT_EQUAL_STRING("KL", row_str(buf, 2));
 	/* Undo kill */
-	doUndo(buf, 1);
+	processKeypress(CMD_UNDO);
 
 	assert_buffer_matches(buf, snap, snap_n, "multiple_rect_ops_undo");
 
@@ -460,21 +438,23 @@ void test_kill_rect_zero_width(void) {
 	buf->cx = 2;
 	buf->cy = 0;
 	set_mark(buf, 2, 0);
-	/* markInvalid will catch this (same point), so buffer stays intact */
-	killRectangle();
+	/* Mark and point are the same place, so there is no rectangle
+	 * and the buffer stays intact */
+	processKeypress(CMD_KILL_RECT);
 
 	assert_buffer_matches(buf, snap, snap_n, "kill_rect_zero_width");
+	TEST_ASSERT_EQUAL_INT(0, buf->dirty);
 
 	free_snapshot(snap, snap_n);
 }
 
 /* ----------------------------------------------------------------
- * Edge case: yank rectangle into an empty (rowless) buffer
+ * Edge case: yank rectangle into an empty buffer
  * ---------------------------------------------------------------- */
 
 void test_yank_rect_into_empty_buffer(void) {
-	/* Regression: kill a rectangle in one buffer, then yank into a
-	 * buffer with numrows == 0 (e.g. a freshly opened empty file).
+	/* Regression: kill a rectangle in one buffer, then yank into an
+	 * empty buffer (e.g. a freshly opened empty file).
 	 */
 	const char *lines[] = { "ABCDE", "FGHIJ" };
 	struct buffer *src = make_test_buffer_lines(lines, 2);
@@ -483,15 +463,15 @@ void test_yank_rect_into_empty_buffer(void) {
 	src->cx = 1;
 	src->cy = 0;
 	set_mark(src, 4, 1);
-	killRectangle();
+	processKeypress(CMD_KILL_RECT);
 
-	/* Fresh empty buffer: make_test_buffer("") inserts no rows.
+	/* Fresh empty buffer: one empty row.
 	 * Wiring it into E orphans src, so destroy src explicitly. */
 	struct buffer *dst = make_test_buffer("");
 	destroyBuffer(src);
 	TEST_ASSERT_EQUAL_INT(1, dst->numrows);
 
-	yankRectangle();
+	processKeypress(CMD_YANK_RECT);
 
 	/* Two rows of rectangle plus the terminating empty row. */
 	TEST_ASSERT_EQUAL_INT(3, dst->numrows);
@@ -501,14 +481,13 @@ void test_yank_rect_into_empty_buffer(void) {
 	TEST_ASSERT_EQUAL_INT(0, dst->cx);
 	TEST_ASSERT_EQUAL_INT(0, dst->cy);
 
-	/* Undo the whole chain: the closest representable state to a
-	 * rowless buffer is a single empty row. */
-	doUndo(dst, 1);
+	/* Undo the whole chain: back to the single empty row. */
+	processKeypress(CMD_UNDO);
 	TEST_ASSERT_EQUAL_INT(1, dst->numrows);
 	TEST_ASSERT_EQUAL_STRING("", row_str(dst, 0));
 
 	/* Redo restores the yanked rectangle. */
-	doRedo(dst, 1);
+	processKeypress(CMD_REDO);
 	TEST_ASSERT_EQUAL_INT(3, dst->numrows);
 	TEST_ASSERT_EQUAL_STRING("BCD", row_str(dst, 0));
 	TEST_ASSERT_EQUAL_STRING("GHI", row_str(dst, 1));
@@ -526,7 +505,7 @@ void test_kill_rectangle_readonly(void) {
 	buf->cx = 1;
 	buf->cy = 0;
 	set_mark(buf, 4, 2);
-	killRectangle();
+	processKeypress(CMD_KILL_RECT);
 	TEST_ASSERT_EQUAL_STRING("ABCDE", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_STRING("FGHIJ", row_str(buf, 1));
 	TEST_ASSERT_EQUAL_STRING("KLMNO", row_str(buf, 2));
@@ -541,9 +520,14 @@ void test_string_rectangle_readonly(void) {
 	buf->cx = 1;
 	buf->cy = 0;
 	set_mark(buf, 3, 1);
-	stringRectangle();
+
+	/* C-x r t with "ZZ" RET waiting: refused before the prompt, so
+	 * none of it is read. */
+	int used = run_typing(CMD_STRING_RECT, "ZZ");
+	TEST_ASSERT_EQUAL_INT(0, used);
 	TEST_ASSERT_EQUAL_STRING("ABCDE", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_STRING("FGHIJ", row_str(buf, 1));
+	TEST_ASSERT_EQUAL_INT(0, buf->dirty);
 	buf->read_only = 0;
 }
 
@@ -554,9 +538,38 @@ void test_replace_regex_readonly(void) {
 	buf->cx = 0;
 	buf->cy = 0;
 	set_mark(buf, 10, 1);
-	replaceRegex();
+
+	/* M-x replace-regexp RET, with a pattern and a replacement
+	 * waiting behind it.  The command name and its RET are read;
+	 * the command then refuses before asking for the pattern, so
+	 * nothing after that is. */
+	const char *name = "replace-regexp";
+	int keys[64];
+	int n = 0;
+	for (const char *c = name; *c; c++)
+		keys[n++] = (unsigned char)*c;
+	keys[n++] = '\r';
+	int name_keys = n;
+	for (const char *c = "beta"; *c; c++)
+		keys[n++] = (unsigned char)*c;
+	keys[n++] = '\r';
+	keys[n++] = 'X';
+	keys[n++] = '\r';
+
+	setupCommands();
+	makeMinibuffer();
+	scriptKeys(keys, n);
+	muteStdout();
+	processKeypress(CMD_EXEC_CMD);
+	unmuteStdout();
+	int used = test_key_pos;
+	clearKeys();
+	freeMinibuffer();
+
+	TEST_ASSERT_EQUAL_INT(name_keys, used);
 	TEST_ASSERT_EQUAL_STRING("alpha beta", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_STRING("gamma beta", row_str(buf, 1));
+	TEST_ASSERT_EQUAL_INT(0, buf->dirty);
 	buf->read_only = 0;
 }
 
@@ -582,16 +595,6 @@ static void assert_all_rows_valid(struct buffer *buf, const char *label) {
 	}
 }
 
-static void assert_kill_valid(const char *label) {
-	TEST_ASSERT_NOT_NULL(E.kill.str);
-	if (E.kill.str &&
-	    !utf8_validate(E.kill.str, strlen((char *)E.kill.str))) {
-		printf("  FAIL (%s): kill ring contains invalid UTF-8\n",
-		       label);
-		_current_test_failed = 1;
-	}
-}
-
 void test_kill_rect_utf8_interior_row(void) {
 	const char *lines[] = { "abcd", NIHONGO, "abcd" };
 	struct buffer *buf = make_test_buffer_lines(lines, 3);
@@ -605,10 +608,9 @@ void test_kill_rect_utf8_interior_row(void) {
 	buf->cx = 1;
 	buf->cy = 0;
 	set_mark(buf, 3, 2);
-	killRectangle();
+	processKeypress(CMD_KILL_RECT);
 
 	assert_all_rows_valid(buf, "kill_rect_utf8");
-	assert_kill_valid("kill_rect_utf8");
 	TEST_ASSERT_EQUAL_STRING("ad", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_STRING(NIHONGO, row_str(buf, 1));
 	TEST_ASSERT_EQUAL_STRING("ad", row_str(buf, 2));
@@ -616,8 +618,21 @@ void test_kill_rect_utf8_interior_row(void) {
 	/* Cursor and mark must land on character boundaries */
 	TEST_ASSERT(buf->cx == 0 || !utf8_isCont(buf->row[buf->cy].chars[buf->cx]));
 
-	doUndo(buf, 1);
+	processKeypress(CMD_UNDO);
 	assert_buffer_matches(buf, snap, snap_n, "kill_rect_utf8_undo");
+
+	/* What was killed is "bc" / two spaces / "bc": the middle row
+	 * gave up no bytes, so its slice is padding.  Yanked at the
+	 * top-left corner it shows as such, and every row is still
+	 * valid UTF-8. */
+	buf->cx = 0;
+	buf->cy = 0;
+	processKeypress(CMD_YANK_RECT);
+	assert_all_rows_valid(buf, "kill_rect_utf8_yank");
+	TEST_ASSERT_EQUAL_STRING("bcabcd", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_STRING("  " NIHONGO, row_str(buf, 1));
+	TEST_ASSERT_EQUAL_STRING("bcabcd", row_str(buf, 2));
+
 	free_snapshot(snap, snap_n);
 }
 
@@ -638,19 +653,32 @@ void test_kill_rect_utf8_whole_char_covered(void) {
 	buf->cx = 1;
 	buf->cy = 0;
 	set_mark(buf, 4, 2);
-	killRectangle();
+	processKeypress(CMD_KILL_RECT);
 
 	assert_all_rows_valid(buf, "kill_rect_utf8_whole");
-	assert_kill_valid("kill_rect_utf8_whole");
 	TEST_ASSERT_EQUAL_STRING("aa", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_STRING("a\xE6\x9C\xAC\xE8\xAA\x9E",
 				 row_str(buf, 1));
 	TEST_ASSERT_EQUAL_STRING("aa", row_str(buf, 2));
-	/* Kill ring rows are rect_width bytes each: "aaa", "日", "aaa" */
-	TEST_ASSERT_EQUAL(3, E.kill.rect_width);
-	TEST_ASSERT(memcmp(E.kill.str, "aaa\xE6\x97\xA5"
-					"aaa",
-			   9) == 0);
+
+	/* The killed rows are "aaa", "日", "aaa": yanked into a buffer
+	 * of dots, the character arrives whole. */
+	const char *lines2[] = { "..", "..", ".." };
+	struct buffer *buf2 = make_test_buffer_lines(lines2, 3);
+	buf2->cx = 0;
+	buf2->cy = 0;
+	processKeypress(CMD_YANK_RECT);
+
+	assert_all_rows_valid(buf2, "kill_rect_utf8_whole_yank");
+	TEST_ASSERT_EQUAL_STRING("aaa..", row_str(buf2, 0));
+	TEST_ASSERT_EQUAL_STRING("\xE6\x97\xA5"
+				 "..",
+				 row_str(buf2, 1));
+	TEST_ASSERT_EQUAL_STRING("aaa..", row_str(buf2, 2));
+
+	/* buf was displaced from E.headbuf by make_test_buffer_lines;
+	 * destroy it here so the harness cleanup sees no leak. */
+	destroyBuffer(buf);
 }
 
 void test_copy_rect_utf8_interior_row(void) {
@@ -663,13 +691,24 @@ void test_copy_rect_utf8_interior_row(void) {
 	buf->cx = 1;
 	buf->cy = 0;
 	set_mark(buf, 3, 2);
-	copyRectangle();
+	processKeypress(CMD_COPY_RECT);
 
-	/* Copy must not touch the buffer and must store valid UTF-8:
-	 * the mid-character slice on row 1 becomes space padding. */
+	/* Copy must not touch the buffer. */
 	assert_buffer_matches(buf, snap, snap_n, "copy_rect_utf8");
-	assert_kill_valid("copy_rect_utf8");
-	TEST_ASSERT(memcmp(E.kill.str, "bc  bc", 6) == 0);
+
+	/* What it copied must be valid UTF-8: the mid-character slice
+	 * on row 1 is space padding.  Yanked at the end of the first
+	 * row, column 4, which is inside 本 on the row below: there
+	 * the padding goes in after 本, not through it. */
+	buf->cx = 4;
+	buf->cy = 0;
+	processKeypress(CMD_YANK_RECT);
+	assert_all_rows_valid(buf, "copy_rect_utf8_yank");
+	TEST_ASSERT_EQUAL_STRING("abcdbc", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_STRING("\xE6\x97\xA5\xE6\x9C\xAC"
+				 "  \xE8\xAA\x9E",
+				 row_str(buf, 1));
+	TEST_ASSERT_EQUAL_STRING("abcdbc", row_str(buf, 2));
 
 	free_snapshot(snap, snap_n);
 }
@@ -682,14 +721,14 @@ void test_yank_rect_utf8_into_ascii(void) {
 	buf->cx = 1;
 	buf->cy = 0;
 	set_mark(buf, 3, 2);
-	copyRectangle();
+	processKeypress(CMD_COPY_RECT);
 
 	const char *lines2[] = { "....", "....", "...." };
 	struct buffer *buf2 = make_test_buffer_lines(lines2, 3);
 	E.buf = buf2;
 	buf2->cx = 0;
 	buf2->cy = 0;
-	yankRectangle();
+	processKeypress(CMD_YANK_RECT);
 
 	assert_all_rows_valid(buf2, "yank_rect_utf8");
 	TEST_ASSERT_EQUAL_STRING("bc....", row_str(buf2, 0));
@@ -710,14 +749,14 @@ void test_yank_rect_utf8_destination_midchar(void) {
 	buf->cx = 1;
 	buf->cy = 0;
 	set_mark(buf, 2, 1);
-	copyRectangle(); /* 1x2 rect: "b","b" */
+	processKeypress(CMD_COPY_RECT); /* 1x2 rect: "b","b" */
 
 	const char *lines2[] = { "axxx", NIHONGO };
 	struct buffer *buf2 = make_test_buffer_lines(lines2, 2);
 	E.buf = buf2;
 	buf2->cx = 1; /* boundary in row 0, mid-日 in row 1 */
 	buf2->cy = 0;
-	yankRectangle();
+	processKeypress(CMD_YANK_RECT);
 
 	assert_all_rows_valid(buf2, "yank_rect_utf8_dest");
 	TEST_ASSERT_EQUAL_STRING("abxxx", row_str(buf2, 0));
@@ -735,10 +774,12 @@ void test_string_rect_utf8_interior_row(void) {
 	int snap_n;
 	char **snap = snapshot_buffer(buf, &snap_n);
 
+	/* C-x r t, then "XY" RET at its prompt */
 	buf->cx = 1;
 	buf->cy = 0;
 	set_mark(buf, 3, 2);
-	stringRectangleWithText((uint8_t *)"XY");
+	int used = run_typing(CMD_STRING_RECT, "XY");
+	TEST_ASSERT_EQUAL_INT(3, used);
 
 	assert_all_rows_valid(buf, "string_rect_utf8");
 	TEST_ASSERT_EQUAL_STRING("aXYd", row_str(buf, 0));
@@ -749,26 +790,9 @@ void test_string_rect_utf8_interior_row(void) {
 				 row_str(buf, 1));
 	TEST_ASSERT_EQUAL_STRING("aXYd", row_str(buf, 2));
 
-	doUndo(buf, 1);
+	processKeypress(CMD_UNDO);
 	assert_buffer_matches(buf, snap, snap_n, "string_rect_utf8_undo");
 	free_snapshot(snap, snap_n);
-}
-
-void test_kill_yank_rect_utf8_round_trip(void) {
-	const char *lines[] = { "abcd", NIHONGO, "abcd" };
-	struct buffer *buf = make_test_buffer_lines(lines, 3);
-
-	buf->cx = 1;
-	buf->cy = 0;
-	set_mark(buf, 3, 2);
-	killRectangle();
-
-	buf->cx = 0;
-	buf->cy = 0;
-	yankRectangle();
-
-	assert_all_rows_valid(buf, "kill_yank_rect_utf8");
-	assert_kill_valid("kill_yank_rect_utf8");
 }
 
 /* ----------------------------------------------------------------
@@ -786,7 +810,6 @@ int main(void) {
 	TEST_BEGIN();
 
 	/* Kill rectangle */
-	RUN_TEST(test_kill_rect_single_row_undo);
 	RUN_TEST(test_kill_rect_multi_row_undo);
 	RUN_TEST(test_kill_rect_multi_row_redo);
 	RUN_TEST(test_kill_rect_short_rows_undo);
@@ -806,13 +829,8 @@ int main(void) {
 	RUN_TEST(test_yank_rect_extra_lines_undo);
 	RUN_TEST(test_yank_rect_into_short_rows_undo);
 
-	/* Linear delete/kill (baseline) */
-	RUN_TEST(test_delete_range_single_line_undo);
-	RUN_TEST(test_delete_range_multi_line_undo);
+	/* Linear kill (baseline) */
 	RUN_TEST(test_kill_region_undo);
-
-	/* Round-trip */
-	RUN_TEST(test_kill_then_yank_rect_round_trip);
 
 	/* Multiple operations */
 	RUN_TEST(test_multiple_rect_ops_undo_all);
@@ -828,7 +846,6 @@ int main(void) {
 	RUN_TEST(test_yank_rect_utf8_into_ascii);
 	RUN_TEST(test_yank_rect_utf8_destination_midchar);
 	RUN_TEST(test_string_rect_utf8_interior_row);
-	RUN_TEST(test_kill_yank_rect_utf8_round_trip);
 
 	return TEST_END();
 }

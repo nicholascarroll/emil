@@ -48,6 +48,13 @@ struct tagMatch {
  * NULL.  Returns -1 for any other line.  Exposed for testing. */
 int ctagsParseLine(char *line, const char *sym, struct tagMatch *m);
 
+/* Append m's row of the definitions menu to d, as text a row can hold:
+ * the fields come from the tags file and may not be valid UTF-8.
+ * scope_cols is the scope column's width, 0 for none.  Exposed for
+ * testing. */
+struct dbuf;
+void ctagsMenuRow(struct dbuf *d, const struct tagMatch *m, int scope_cols);
+
 /* The word at point for a tags lookup, or NULL if there is none: a run
  * of ASCII identifier characters and non-ASCII letters, ended by
  * anything else -- including punctuation and U+200B ZERO WIDTH SPACE,

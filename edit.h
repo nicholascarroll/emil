@@ -6,7 +6,6 @@
 #include "motion.h"
 
 /* Character insertion */
-void insertChar(struct buffer *bufr, int c, int count);
 void selfInsert(struct buffer *bufr, int c, int count);
 void insertUnicode(int count);
 
@@ -47,7 +46,8 @@ void markParagraph(void);
 
 void transposeSentences(int uarg);
 
-void zapToChar(void);
+void zapToChar(int uarg);
+void zapUpToChar(int uarg);
 
 void insertCharHex(void);
 

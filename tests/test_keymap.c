@@ -6,7 +6,6 @@
 #include "test_harness.h"
 #include "emil.h"
 #include "keymap.h"
-#include "mutate.h"
 #include "undo.h"
 #include <string.h>
 
@@ -24,17 +23,17 @@ void tearDown(void) {
 void test_ctrl_x_ctrl_s_resolves_to_save(void) {
 	/* First key: C-x.  The prefix state machine enters PREFIX_CTRL_X
 	 * and returns CMD_NONE (waiting for the next key). */
-	int cmd1 = resolveBinding(CTRL('x'));
+	int cmd1 = resolveBinding(KEY_CTRL('x'));
 	TEST_ASSERT_EQUAL_INT(CMD_NONE, cmd1);
 
 	/* Second key: C-s.  With the prefix armed, this resolves to
 	 * CMD_SAVE (not CMD_ISEARCH, which is the unprefixed binding). */
-	int cmd2 = resolveBinding(CTRL('s'));
+	int cmd2 = resolveBinding(KEY_CTRL('s'));
 	TEST_ASSERT_EQUAL_INT(CMD_SAVE, cmd2);
 
 	/* Sanity: after dispatch the prefix has cleared — a fresh C-s
 	 * now resolves to CMD_ISEARCH. */
-	int cmd3 = resolveBinding(CTRL('s'));
+	int cmd3 = resolveBinding(KEY_CTRL('s'));
 	TEST_ASSERT_EQUAL_INT(CMD_ISEARCH, cmd3);
 }
 
@@ -46,7 +45,7 @@ void test_universal_arg_accumulates_then_resets(void) {
 
 	/* C-u: resolveBinding returns CMD_UNIVERSAL_ARG.  processKeypress
 	 * acts on it — sets E.uarg = 4 and returns without clearing it. */
-	int cmd = resolveBinding(CTRL('u'));
+	int cmd = resolveBinding(KEY_CTRL('u'));
 	TEST_ASSERT_EQUAL_INT(CMD_UNIVERSAL_ARG, cmd);
 	processKeypress(cmd);
 	TEST_ASSERT_EQUAL_INT(4, E.uarg);
@@ -85,7 +84,7 @@ void test_universal_arg_four_then_two_is_42(void) {
 	 * not be confused with it.  The first digit after a bare C-u
 	 * replaces the seed, every later digit accumulates — so
 	 * C-u 4 2 is 42, not 2. */
-	int cmd = resolveBinding(CTRL('u'));
+	int cmd = resolveBinding(KEY_CTRL('u'));
 	processKeypress(cmd);
 	TEST_ASSERT_EQUAL_INT(4, E.uarg);
 
@@ -120,7 +119,7 @@ void test_negative_arg_refuses_digits(void) {
 	TEST_ASSERT_EQUAL_INT(UARG_REVERSE, E.uarg);
 
 	/* Last modifier typed wins: C-u overwrites a pending M--. */
-	cmd = resolveBinding(CTRL('u'));
+	cmd = resolveBinding(KEY_CTRL('u'));
 	processKeypress(cmd);
 	TEST_ASSERT_EQUAL_INT(4, E.uarg);
 
@@ -131,32 +130,32 @@ void test_negative_arg_refuses_digits(void) {
 /* --- 3. E.micro: CMD_REDO → following CMD_UNDO invokes doRedo ------ */
 
 void test_redo_micro_reroutes_following_undo_to_redo(void) {
-	/* Set up a buffer with an undo record so doUndo has something
-	 * to pop.  Use mutateInsert, which records undo properly. */
+	/* Two edits, each its own undo step: "!" typed at the end, then
+	 * ">" typed at the start (typing elsewhere starts a new step). */
 	struct buffer *buf = make_test_buffer("hello");
 	buf->cx = 5;
 	buf->cy = 0;
-	mutateInsert(buf, buf->cx, buf->cy, (const uint8_t *)"!", 1, NULL,
-		     NULL);
-	TEST_ASSERT_EQUAL_STRING("hello!", row_str(buf, 0));
-	TEST_ASSERT_NOT_NULL(buf->undo);
+	E.self_insert_key = '!';
+	processKeypress(CMD_SELF_INSERT);
+	processKeypress(CMD_HOME);
+	E.self_insert_key = '>';
+	processKeypress(CMD_SELF_INSERT);
+	TEST_ASSERT_EQUAL_STRING(">hello!", row_str(buf, 0));
 
-	/* Undo: now redo stack has one record. */
-	doUndo(buf, 1);
-	TEST_ASSERT_NOT_NULL(buf->redo);
+	/* Undo both. */
+	processKeypress(CMD_UNDO);
+	processKeypress(CMD_UNDO);
 	TEST_ASSERT_EQUAL_STRING("hello", row_str(buf, 0));
 
-	/* Arm E.micro = CMD_REDO.  In normal flow, dispatchBuffer does
-	 * this after a CMD_REDO step when more redo remains. */
-	E.micro = CMD_REDO;
-
-	/* Now dispatch CMD_UNDO.  With E.micro == CMD_REDO, processKeypress
-	 * routes to doRedo, not doUndo.  The observable consequence: the
-	 * buffer content returns to the post-insert state ("hello!"),
-	 * which is what doRedo would do; doUndo on an empty undo stack
-	 * would do nothing (or re-undo, depending on state). */
-	processKeypress(CMD_UNDO);
+	/* Redo once: the first edit comes back, and one is left. */
+	processKeypress(CMD_REDO);
 	TEST_ASSERT_EQUAL_STRING("hello!", row_str(buf, 0));
+
+	/* Straight after a redo with more to redo, the undo key carries
+	 * on redoing: the second edit comes back.  Were it an ordinary
+	 * undo, the first edit would go again. */
+	processKeypress(CMD_UNDO);
+	TEST_ASSERT_EQUAL_STRING(">hello!", row_str(buf, 0));
 }
 
 void test_quoted_insert_refuses_nul(void) {
@@ -171,6 +170,40 @@ void test_quoted_insert_refuses_nul(void) {
 
 	TEST_ASSERT_EQUAL_INT(2, buf->row[0].size);
 	TEST_ASSERT_EQUAL_STRING("ab", row_str(buf, 0));
+}
+
+/* readKey() answers -1 when a signal -- a terminal resize, a resume --
+ * interrupts its wait.  That is not a key: C-q must wait for the real
+ * one.  Inserting it instead put a raw 0xFF in the buffer, which is not
+ * UTF-8, and every save after that refused. */
+void test_quoted_insert_waits_out_a_signal(void) {
+	struct buffer *buf = make_test_buffer("ab");
+	buf->cx = 1;
+	buf->cy = 0;
+
+	int keys[] = { -1, 'x' };
+	scriptKeys(keys, 2);
+	processKeypress(CMD_QUOTED_INSERT);
+	clearKeys();
+
+	TEST_ASSERT_EQUAL_STRING("axb", row_str(buf, 0));
+	TEST_ASSERT_TRUE(utf8_validate(buf->row[0].chars, buf->row[0].size));
+}
+
+/* A macro that ends on C-q has nothing left to quote: insert nothing. */
+void test_quoted_insert_at_end_of_macro_inserts_nothing(void) {
+	struct buffer *buf = make_test_buffer("ab");
+	buf->cx = 1;
+	buf->cy = 0;
+	E.macro.keys = xmalloc(sizeof(int));
+	E.macro.keys[0] = KEY_CTRL('q');
+	E.macro.nkeys = 1;
+	E.macro.skeys = 1;
+
+	execMacro(&E.macro);
+
+	TEST_ASSERT_EQUAL_STRING("ab", row_str(buf, 0));
+	TEST_ASSERT_TRUE(utf8_validate(buf->row[0].chars, buf->row[0].size));
 }
 
 void test_palette_cancels_when_macro_runs_out(void) {
@@ -197,6 +230,8 @@ int main(void) {
 	RUN_TEST(test_negative_arg_refuses_digits);
 	RUN_TEST(test_redo_micro_reroutes_following_undo_to_redo);
 	RUN_TEST(test_quoted_insert_refuses_nul);
+	RUN_TEST(test_quoted_insert_waits_out_a_signal);
+	RUN_TEST(test_quoted_insert_at_end_of_macro_inserts_nothing);
 	RUN_TEST(test_palette_cancels_when_macro_runs_out);
 	return TEST_END();
 }

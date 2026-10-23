@@ -49,7 +49,7 @@ follows Emacs paradigms.
 .Ss Buffers and Windows
 A
 .Sy buffer
-is the in-memory content of a file or text that has not been saved to any file.
+is the in-memory content of a file, or text that has not been saved to any file.
 A
 .Sy window
 is a viewport onto a buffer.
@@ -113,6 +113,7 @@ With
 saves without creating an ephemeral backup file (risks data loss).
 .It Cm C-x C-w
 Save the current buffer under a new filename (Save As).
+Asks before overwriting a file that already exists.
 .It Cm C-x C-q
 Toggle read-only status of the current buffer.
 .It Cm C-x k
@@ -211,7 +212,12 @@ Kill word forward.
 .It Cm M-DEL
 Kill word backward.
 .It Cm M-z
-Zap to char: Kill up to and including a given character.
+Zap to char: Kill up to and including the specified character.
+With
+.Cm M-- ,
+zap backwards.
+.It Cm S-M-z
+Zap up to char: Kill up to but not including the specified character.
 .It Cm C-t
 Transpose characters.
 With
@@ -303,6 +309,8 @@ Delete other windows: Expand the current window to fill the screen.
 Split window: Divide the current window horizontally.
 .It Cm C-x x t
 Toggle word wrap (visual-line-mode).
+.It Cm C-x x w
+Toggle whitespace-mode in this window.
 .El
 .Ss Registers
 Registers provide session-persistent storage of cursor position and text fragments. Each register is identified by a single character.
@@ -433,8 +441,6 @@ Toggle header and body
 The following commands are available via
 .Cm M-x :
 .Bl -tag -width Ds
-.It Cm capitalize-region
-Capitalize each word in the region.
 .It Cm insert-char
 Insert a character by entering the hex of the Unicode codepoint.
 .It Cm insert-file
@@ -455,6 +461,9 @@ Replace literal strings.
 Revert buffer from file on disk.
 .It Cm visual-line-mode
 Toggle line wrapping.
+.It Cm whitespace-mode
+Toggle display of whitespace characters: TAB ⇥ ; LINE FEED ↵ ; SPACE ⬫ ; NO-BREAK SPACE ⬪ ; other Unicode space ⬗ ; blank character that is not a space ⬖ ; LINE SEPARATOR ⬙ ; PARAGRAPH SEPARATOR ⬘ .
+A character in the text that is itself one of these marks is shown in reverse video.
 .It Cm version
 Show version info.
 .It Cm view-register
@@ -487,6 +496,8 @@ Files are loaded in their entirety into memory.
 adheres to the Unix convention where lines are delimited by a single linefeed (LF) character and files terminate with a linefeed.
 A file opened without a terminating linefeed gains one when it is loaded.
 Validation at file load and inserting text in the buffer disallow  null bytes (0x00) or malformed UTF-8 sequences.
+.Pp
+Filenames that contain control characters or bytes that are not valid UTF-8 are displayed within the editor with substitutions. Such files can be opened by invoking emil from the command line.
 .Ss File Persistence
 When saving,
 .Nm

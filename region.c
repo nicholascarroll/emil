@@ -4,7 +4,7 @@
 #include "adjust.h"
 #include "buffer.h"
 #include "dbuf.h"
-#include "display.h"
+#include "message.h"
 #include "emil.h"
 #include "history.h"
 
@@ -13,6 +13,7 @@
 #include "undo.h"
 #include "unicode.h"
 #include "util.h"
+#include <limits.h>
 #include <regex.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -337,19 +338,18 @@ void deleteRange(struct buffer *buf, int startx, int starty, int endx, int endy,
 	if (startx == endx && starty == endy)
 		return;
 
-	int old_len;
-	uint8_t *old_text =
-		collectRegionText(buf, startx, starty, endx, endy, &old_len);
-
 	/* Kill ring */
 	if (add_to_kill_ring) {
+		int old_len;
+		uint8_t *old_text = collectRegionText(buf, startx, starty, endx,
+						      endy, &old_len);
 		clearText(&E.kill);
 		E.kill.str = (uint8_t *)xstrdup((char *)old_text);
 		addToKillRing((char *)old_text, 0, 0, 0);
+		free(old_text);
 	}
 
-	mutateDelete(buf, startx, starty, endx, endy, old_text, old_len);
-	free(old_text);
+	mutateDelete(buf, startx, starty, endx, endy);
 
 	/* Set cursor to start of deleted range */
 	buf->cx = startx;
@@ -438,6 +438,11 @@ void yank(int uarg) {
 	 * the reverse style: point stays before the yanked text, mark
 	 * is set after it. */
 	yank_style_reverse = uarg > 0;
+	/* As in Emacs, yank pushes the mark and sets it where the text
+	 * goes in (not active), so C-w right after C-y kills what was
+	 * yanked. */
+	setMarkSilent();
+	E.buf->mark_active = 0;
 	yankInsert(yank_style_reverse);
 
 	/* Set kill ring position so M-y continues from here */
@@ -478,7 +483,8 @@ void yankPop(int uarg) {
 		return;
 	}
 
-	doUndo(E.buf, 1);
+	if (doUndo(E.buf, 1) != UNDO_DONE)
+		return;
 
 	if (uarg == UARG_REVERSE) {
 		/* M-- M-y: cycle toward newer kills. */
@@ -499,6 +505,10 @@ void yankPop(int uarg) {
 		E.kill.is_rectangle = entry->is_rectangle;
 		E.kill.rect_width = entry->rect_width;
 		E.kill.rect_height = entry->rect_height;
+		/* yank-pop moves the mark to the new text's start
+		 * without pushing it again, as Emacs does. */
+		E.buf->markx = E.buf->cx;
+		E.buf->marky = E.buf->cy;
 		yankInsert(yank_style_reverse);
 	} else {
 		setStatusMessage("No more kill ring entries to yank!");
@@ -512,9 +522,8 @@ void transformRange(struct buffer *buf, int startx, int starty, int endx,
 
 	orderPoints(&startx, &starty, &endx, &endy);
 
-	int old_len;
 	uint8_t *old_text =
-		collectRegionText(buf, startx, starty, endx, endy, &old_len);
+		collectRegionText(buf, startx, starty, endx, endy, NULL);
 
 	uint8_t *transformed = transformer(old_text);
 	/* A transformer may fail (transformerPipeCmd returns NULL when
@@ -527,8 +536,8 @@ void transformRange(struct buffer *buf, int startx, int starty, int endx,
 	int repl_len = strlen((char *)transformed);
 
 	int ex, ey;
-	mutateReplace(buf, startx, starty, endx, endy, old_text, old_len,
-		      transformed, repl_len, 0, &ex, &ey);
+	mutateReplace(buf, startx, starty, endx, endy, transformed, repl_len, 0,
+		      &ex, &ey);
 
 	buf->cx = ex;
 	buf->cy = ey;
@@ -832,8 +841,7 @@ void replaceRegex(void) {
 	offsetToCoords(startx, starty, old_text, last_off, &lx, &ly);
 
 	int ex, ey;
-	mutateReplace(buf, fx, fy, lx, ly, old_text + first_off,
-		      last_off - first_off, out, out_len, 0, &ex, &ey);
+	mutateReplace(buf, fx, fy, lx, ly, out, out_len, 0, &ex, &ey);
 
 	buf->cx = ex;
 	buf->cy = ey;
@@ -875,10 +883,7 @@ void stringRectangleWithText(uint8_t *string) {
 	normalizeRectCols(E.buf, &topx, &topy, &botx, &boty);
 
 	/* Use full-row region so replacement text captures all content */
-	int old_len;
 	int region_endx = buf->row[boty].size;
-	uint8_t *old_text =
-		collectRegionText(buf, 0, topy, region_endx, boty, &old_len);
 
 	/* Build replacement text: for each row, replace columns [topx..botx)
 	 * with 'string', padding short rows with spaces as needed. */
@@ -919,12 +924,11 @@ void stringRectangleWithText(uint8_t *string) {
 	uint8_t *out = dbuf_detach(&d, &out_len);
 
 	int ex, ey;
-	mutateReplace(buf, 0, topy, region_endx, boty, old_text, old_len, out,
-		      out_len, 0, &ex, &ey);
+	mutateReplace(buf, 0, topy, region_endx, boty, out, out_len, 0, &ex,
+		      &ey);
 
 	rectPlaceCursor(buf, topx, topy);
 
-	free(old_text);
 	free(out);
 	E.buf->mark_active = 0;
 	restoreKill(okill);
@@ -936,10 +940,17 @@ void stringRectangleWithText(uint8_t *string) {
 static uint8_t *extractRectColumns(struct buffer *buf, int topx, int topy,
 				   int rw, int rh) {
 	int botx = topx + rw;
+	/* rw * rh can exceed INT_MAX with ordinary input (a 1 MB line
+	 * and a few thousand short ones), so cell offsets are size_t,
+	 * and on 32-bit hosts the product can exceed SIZE_MAX too. */
+	if (rw < 0 || rh < 0 ||
+	    (rw > 0 && (size_t)rh > (SIZE_MAX - 1) / (size_t)rw))
+		abort();
 	uint8_t *out = xcalloc((size_t)rw * rh + 1, 1);
 	for (int idx = 0; idx < rh; idx++) {
 		erow *row = &buf->row[topy + idx];
-		memset(&out[idx * rw], ' ', rw);
+		size_t cell = (size_t)idx * rw;
+		memset(&out[cell], ' ', rw);
 		/* Snap inward so no multi-byte character is split; the
 		 * slice can only shrink (s >= topx, e <= botx), so it
 		 * always fits in the rw-byte cell, space-padded. */
@@ -949,7 +960,7 @@ static uint8_t *extractRectColumns(struct buffer *buf, int topx, int topy,
 			e = s;
 		if (s >= row->size || e <= s)
 			continue;
-		memcpy(&out[idx * rw], &row->chars[s], e - s);
+		memcpy(&out[cell], &row->chars[s], e - s);
 	}
 	return out;
 }
@@ -991,12 +1002,8 @@ void killRectangle(void) {
 	int rw = botx - topx;
 	int rh = (boty - topy) + 1;
 
-	/* Collect linear region text for undo */
-	int old_len;
 	/* Use full-row region so replacement text includes all content */
 	int region_endx = buf->row[boty].size;
-	uint8_t *old_text =
-		collectRegionText(buf, 0, topy, region_endx, boty, &old_len);
 
 	/* Extract rectangle columns into flat buffer for kill ring */
 	uint8_t *rectBuf = extractRectColumns(buf, topx, topy, rw, rh);
@@ -1039,8 +1046,8 @@ void killRectangle(void) {
 	uint8_t *out = dbuf_detach(&d, &out_len);
 
 	int ex, ey;
-	mutateReplace(buf, 0, topy, region_endx, boty, old_text, old_len, out,
-		      out_len, 0, &ex, &ey);
+	mutateReplace(buf, 0, topy, region_endx, boty, out, out_len, 0, &ex,
+		      &ey);
 
 	rectPlaceCursor(buf, topx, topy);
 
@@ -1052,7 +1059,6 @@ void killRectangle(void) {
 	E.kill.rect_height = rh;
 	addToKillRing((char *)E.kill.str, 1, rw, rh);
 
-	free(old_text);
 	free(out);
 	E.buf->mark_active = 0;
 	clearText(&saved);
@@ -1081,6 +1087,8 @@ void yankRectangle(void) {
 	struct buffer *buf = E.buf;
 	int topx = buf->cx;
 	int topy = buf->cy;
+	if (rh - 1 > INT_MAX - 1 - topy)
+		abort();
 	int boty = topy + rh - 1;
 
 	/* If the rectangle overruns the buffer, extend with blank
@@ -1102,16 +1110,13 @@ void yankRectangle(void) {
 		needs_extension = 1;
 	}
 
-	/* Collect old text for the full-row region [0,topy]..[eol,boty] */
+	/* The full-row region [0,topy]..[eol,boty] */
 	int region_endx = buf->row[boty].size;
-	int old_len;
-	uint8_t *old_text =
-		collectRegionText(buf, 0, topy, region_endx, boty, &old_len);
 
 	/* Build new text: for each row, insert rectangle slice at topx,
 	 * padding with spaces if the row is shorter than topx. */
 	struct dbuf d = DBUF_INIT;
-	char *slice = xcalloc(rw + 1, 1);
+	char *slice = xcalloc((size_t)rw + 1, 1);
 
 	for (int idx = 0; idx < rh; idx++) {
 		int cur = topy + idx;
@@ -1119,7 +1124,8 @@ void yankRectangle(void) {
 		if (idx > 0)
 			dbuf_byte(&d, '\n');
 
-		strncpy(slice, (char *)&saved.str[idx * rw], rw);
+		/* size_t: rw * rh can exceed INT_MAX (see extractRectColumns) */
+		strncpy(slice, (char *)&saved.str[(size_t)idx * rw], rw);
 
 		/* Snap the per-row insertion point forward to a
 		 * character boundary so a destination multi-byte
@@ -1146,12 +1152,11 @@ void yankRectangle(void) {
 	uint8_t *out = dbuf_detach(&d, &out_len);
 	free(slice);
 
-	mutateReplace(buf, 0, topy, region_endx, boty, old_text, old_len, out,
-		      out_len, needs_extension, NULL, NULL);
+	mutateReplace(buf, 0, topy, region_endx, boty, out, out_len,
+		      needs_extension, NULL, NULL);
 
 	rectPlaceCursor(buf, topx, topy);
 
-	free(old_text);
 	free(out);
 	E.buf->mark_active = 0;
 	clearText(&E.kill);

@@ -3,11 +3,10 @@
 
 #include "test.h"
 #include "test_harness.h"
+#include "buffer.h"
 #include "prompt.h"
 #include "keymap.h"
 #include "unicode.h"
-#include "edit.h"
-#include "completion.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,7 +31,8 @@ void test_nested_prompt_preserves_buffer(void) {
 
 	/* Inside the outer prompt: C-x C-f opens a nested Find File
 	 * prompt, C-g cancels it, C-g cancels the outer one. */
-	int keys[] = { CTRL('x'), CTRL('f'), CTRL('g'), CTRL('g') };
+	int keys[] = { KEY_CTRL('x'), KEY_CTRL('f'), KEY_CTRL('g'),
+		       KEY_CTRL('g') };
 	scriptKeys(keys, 4);
 
 	muteStdout();
@@ -55,8 +55,9 @@ void test_double_nested_prompt_preserves_buffer(void) {
 	makeMinibuffer();
 	struct buffer *file = make_test_buffer("real file contents");
 
-	int keys[] = { CTRL('x'), CTRL('f'), CTRL('x'), CTRL('f'),
-		       CTRL('g'), CTRL('g'), CTRL('g') };
+	int keys[] = { KEY_CTRL('x'), KEY_CTRL('f'), KEY_CTRL('x'),
+		       KEY_CTRL('f'), KEY_CTRL('g'), KEY_CTRL('g'),
+		       KEY_CTRL('g') };
 	scriptKeys(keys, 7);
 
 	muteStdout();
@@ -95,7 +96,7 @@ void test_zap_arrow_key_does_not_corrupt_utf8(void) {
 	int keys[] = { KEY_ARROW_LEFT };
 	scriptKeys(keys, 1);
 	muteStdout();
-	zapToChar();
+	processKeypress(CMD_ZAP_TO_CHAR);
 	unmuteStdout();
 	clearKeys();
 
@@ -122,7 +123,7 @@ void test_zap_meta_key_does_not_corrupt_utf8(void) {
 	keys[0] = KEY_META_BASE;	/* 2000 -> 0xD0 exactly */
 	scriptKeys(keys, 1);
 	muteStdout();
-	zapToChar();
+	processKeypress(CMD_ZAP_TO_CHAR);
 	unmuteStdout();
 	clearKeys();
 
@@ -145,7 +146,7 @@ void test_zap_ascii_still_works(void) {
 	int keys[] = { 'o' };
 	scriptKeys(keys, 1);
 	muteStdout();
-	zapToChar();
+	processKeypress(CMD_ZAP_TO_CHAR);
 	unmuteStdout();
 	clearKeys();
 
@@ -196,9 +197,8 @@ static const char *const sh_files[] = {
 };
 
 static int shFixtureUp(void) {
-	const char *tmp = getenv("TMPDIR");
 	snprintf(sh_root, sizeof(sh_root), "%s/emil_shcomp_XXXXXX",
-		 tmp && *tmp ? tmp : "/tmp");
+		 testTmpDir());
 	if (mkdtemp(sh_root) == NULL)
 		return -1;
 	shMkdir("bin");
@@ -395,8 +395,8 @@ void test_shell_tab_mid_line(void) {
 	TEST_ASSERT_EQUAL_INT(0, shFixtureUp());
 	shellCompletionSetUp();
 
-	const int keys[] = { CTRL('b'), CTRL('b'), CTRL('b'), CTRL('b'),
-			     CTRL('b'), '\t', 'X', 0 };
+	const int keys[] = { KEY_CTRL('b'), KEY_CTRL('b'), KEY_CTRL('b'),
+			     KEY_CTRL('b'), KEY_CTRL('b'), '\t', 'X', 0 };
 	SHELL_CASE("cat no | wc", keys, "cat notes.txt X| wc");
 
 	shellCompletionTearDown();
@@ -408,10 +408,10 @@ void test_shell_tab_quoted_insert_and_undo(void) {
 	TEST_ASSERT_EQUAL_INT(0, shFixtureUp());
 	shellCompletionSetUp();
 
-	const int quoted[] = { CTRL('q'), '\t', 0 };
+	const int quoted[] = { KEY_CTRL('q'), '\t', 0 };
 	SHELL_CASE("a", quoted, "a\t");
 
-	const int undo[] = { '\t', CTRL('_'), 0 };
+	const int undo[] = { '\t', KEY_CTRL('_'), 0 };
 	SHELL_CASE("cat no", undo, "cat no");
 
 	shellCompletionTearDown();
@@ -424,7 +424,8 @@ void test_history_up_drops_stale_mark(void) {
 	make_test_buffer("");
 	addHistory(&E.search_history, ")\xE3\x80\x82");
 
-	int keys[] = { 'o', '6', CTRL('@'), KEY_ARROW_UP, CTRL('w'), '\r' };
+	int keys[] = { 'o', '6', KEY_CTRL('@'), KEY_ARROW_UP, KEY_CTRL('w'),
+		       '\r' };
 	scriptKeys(keys, 6);
 	muteStdout();
 	char *got = (char *)editorPrompt("Search: ", PROMPT_SEARCH, NULL);
@@ -448,9 +449,231 @@ void setUp(void) {
 void tearDown(void) {
 }
 
+/* confirmYN's answer is recorded for keyboard macros, so a macro that
+ * answers a y-or-n question replays the same answer. */
+void test_confirm_yn_answer_recorded_in_macro(void) {
+	initTestEditor();
+	make_test_buffer("text"); /* refreshScreen() draws the focused buffer */
+	E.macro.skeys = 32;
+	E.macro.nkeys = 0;
+	E.macro.keys = xmalloc(E.macro.skeys * sizeof(int));
+	E.recording = 1;
+	const int keys[] = { 'y', 'n' };
+	scriptKeys(keys, 2);
+
+	muteStdout();
+	int first = confirmYN("Really? (y or n)");
+	int second = confirmYN("Really? (y or n)");
+	unmuteStdout();
+
+	TEST_ASSERT_EQUAL_INT(1, first);
+	TEST_ASSERT_EQUAL_INT(0, second);
+	TEST_ASSERT_EQUAL_INT(2, E.macro.nkeys);
+	TEST_ASSERT_EQUAL_INT('y', E.macro.keys[0]);
+	TEST_ASSERT_EQUAL_INT('n', E.macro.keys[1]);
+
+	E.recording = 0;
+	free(E.macro.keys);
+	E.macro.keys = NULL;
+	E.macro.nkeys = 0;
+	clearKeys();
+	cleanupTestEditor();
+}
+
+/* ---- Buffer names the minibuffer cannot hold as they are ---- */
+
+/* '\n' is emil's row separator, never a byte in a row, but a filename
+ * can hold one, and an escape or a byte that is not UTF-8 besides.
+ * The buffer prompt completes and lists filenames, so each has a form
+ * the minibuffer and the list can show. */
+static const struct {
+	const char *name, *shown;
+} bad_names[] = {
+	{ "qq\nyy", "qq^Jyy" },
+	{ "qq\x1b[0my", "qq^[[0my" },
+	{ "qq\xffy", "qq\xef\xbf\xbdy" },
+};
+
+/* A second buffer under `cur`, called `name`.  Linked in by hand:
+ * these names cannot be typed at a file prompt. */
+static struct buffer *addBufferNamed(struct buffer *after, const char *name) {
+	struct buffer *b = newBuffer();
+	b->filename = xstrdup(name);
+	b->next = after->next;
+	after->next = b;
+	return b;
+}
+
+/* Answer a buffer prompt with `keys`; returns what it hands back. */
+static char *bufferPrompt(const int *keys, int n) {
+	scriptKeys(keys, n);
+	muteStdout();
+	uint8_t *r = editorPrompt("Buffer: ", PROMPT_BUFFER, NULL);
+	unmuteStdout();
+	TEST_ASSERT_EQUAL_INT(n, test_key_pos);
+	clearKeys();
+	return (char *)r;
+}
+
+static int frameHas(const char *want) {
+	int n = (int)strlen(want);
+	for (int i = 0; i + n <= E.render_buf.len; i++)
+		if (memcmp(E.render_buf.b + i, want, n) == 0)
+			return 1;
+	return 0;
+}
+
+/* TAB on a name with one match puts the name in the minibuffer in
+ * its showable form, and leaves the buffer's own name alone. */
+void test_completion_inserts_stored_name_as_text(void) {
+	for (size_t i = 0; i < sizeof(bad_names) / sizeof(bad_names[0]); i++) {
+		initTestEditor();
+		makeMinibuffer();
+		struct buffer *cur = make_test_buffer("x");
+		struct buffer *b = addBufferNamed(cur, bad_names[i].name);
+
+		/* q q TAB RET: what RET returns is what TAB left. */
+		const int keys[] = { 'q', 'q', '\t', '\r' };
+		char *got = bufferPrompt(keys, 4);
+
+		TEST_ASSERT_NOT_NULL(got);
+		if (got) {
+			TEST_ASSERT_EQUAL_STRING(bad_names[i].shown, got);
+			TEST_ASSERT_TRUE(utf8_validate((const uint8_t *)got,
+						       (int)strlen(got)));
+		}
+		TEST_ASSERT_EQUAL_STRING(bad_names[i].name, b->filename);
+		free(got);
+		freeMinibuffer();
+		cleanupTestEditor();
+	}
+}
+
+/* Choosing from the list does the same.  Two names share the prefix,
+ * so a second TAB lists them; Down twice goes to "qqz" and round to
+ * the first again. */
+void test_completion_cycle_inserts_stored_name_as_text(void) {
+	for (size_t i = 0; i < sizeof(bad_names) / sizeof(bad_names[0]); i++) {
+		initTestEditor();
+		makeMinibuffer();
+		struct buffer *cur = make_test_buffer("x");
+		struct buffer *b = addBufferNamed(cur, bad_names[i].name);
+		addBufferNamed(b, "qqz");
+
+		/* Typing a character after choosing returns the line as
+		 * the minibuffer holds it: the showable form, plus X. */
+		const int keys[] = { 'q', 'q', '\t', '\t', KEY_ARROW_DOWN,
+				     KEY_ARROW_DOWN, 'X', '\r' };
+		char *got = bufferPrompt(keys, 8);
+		char want[32];
+		snprintf(want, sizeof(want), "%sX", bad_names[i].shown);
+		TEST_ASSERT_NOT_NULL(got);
+		if (got) {
+			TEST_ASSERT_EQUAL_STRING(want, got);
+			TEST_ASSERT_TRUE(utf8_validate((const uint8_t *)got,
+						       (int)strlen(got)));
+		}
+		free(got);
+
+		/* And the choice still names the real buffer: C-x b,
+		 * the same keys without the X, switches to it. */
+		const int pick[] = { 'q', 'q', '\t', '\t', KEY_ARROW_DOWN,
+				     KEY_ARROW_DOWN, '\r' };
+		scriptKeys(pick, 7);
+		muteStdout();
+		processKeypress(CMD_SWITCH_BUFFER);
+		unmuteStdout();
+		clearKeys();
+		TEST_ASSERT(E.buf == b);
+		TEST_ASSERT_EQUAL_STRING(bad_names[i].name, b->filename);
+
+		freeMinibuffer();
+		cleanupTestEditor();
+	}
+}
+
+/* What was typed before a file match isn't a stored name: a tab in a
+ * directory stays a tab, or the path would no longer exist. */
+void test_file_completion_keeps_typed_prefix(void) {
+	char dir[PATH_MAX];
+	testTmpPath(dir, sizeof(dir), "emil-prompt-XXXXXX");
+	TEST_ASSERT_NOT_NULL(mkdtemp(dir));
+	char sub[PATH_MAX], file[PATH_MAX], typed[PATH_MAX];
+	int r = snprintf(sub, sizeof(sub), "%s/a\tb", dir);
+	TEST_ASSERT(r >= 0 && (size_t)r < sizeof(sub));
+	TEST_ASSERT_EQUAL_INT(0, mkdir(sub, 0700));
+	r = snprintf(file, sizeof(file), "%s/file", sub);
+	TEST_ASSERT(r >= 0 && (size_t)r < sizeof(file));
+	FILE *f = fopen(file, "w");
+	TEST_ASSERT_NOT_NULL(f);
+	fclose(f);
+
+	initTestEditor();
+	makeMinibuffer();
+	(void)make_test_buffer("x");
+	r = snprintf(typed, sizeof(typed), "%s/fi", sub);
+	TEST_ASSERT(r >= 0 && (size_t)r < sizeof(typed));
+
+	/* Type the path up to "fi", the tab in it as C-q TAB; then TAB
+	 * to complete, and RET. */
+	static int keys[TEST_KEY_SCRIPT_MAX];
+	int n = 0;
+	for (const char *c = typed; *c; c++) {
+		if (*c == '\t')
+			keys[n++] = KEY_CTRL('q');
+		keys[n++] = (unsigned char)*c;
+	}
+	keys[n++] = '\t';
+	keys[n++] = '\r';
+	scriptKeys(keys, n);
+	muteStdout();
+	char *got = (char *)editorPrompt("File: ", PROMPT_FILES, NULL);
+	unmuteStdout();
+	TEST_ASSERT_EQUAL_INT(n, test_key_pos);
+	clearKeys();
+
+	TEST_ASSERT_NOT_NULL(got);
+	if (got)
+		TEST_ASSERT_EQUAL_STRING(file, got);
+	free(got);
+
+	freeMinibuffer();
+	cleanupTestEditor();
+	unlink(file);
+	rmdir(sub);
+	rmdir(dir);
+}
+
+/* A second TAB lists both matches.  The list is drawn while the
+ * prompt waits, so the frame on screen when RET arrives shows it:
+ * the awkward name in its one-line form, beside the plain one. */
+void test_buffer_prompt_lists_newline_name_on_one_row(void) {
+	initTestEditor();
+	makeMinibuffer();
+	struct buffer *cur = make_test_buffer("x");
+	struct buffer *b = addBufferNamed(cur, "qq\nyy");
+	addBufferNamed(b, "qqz");
+
+	const int keys[] = { 'q', 'q', '\t', '\t', '\r' };
+	char *got = bufferPrompt(keys, 5);
+	free(got);
+
+	TEST_ASSERT(E.render_buf.len > 0);
+	TEST_ASSERT(frameHas("qq^Jyy"));
+	TEST_ASSERT(frameHas("qqz"));
+	TEST_ASSERT(memchr(E.render_buf.b, '\0', E.render_buf.len) == NULL);
+
+	freeMinibuffer();
+	cleanupTestEditor();
+}
+
 int main(void) {
 	TEST_BEGIN();
 
+	RUN_TEST(test_completion_inserts_stored_name_as_text);
+	RUN_TEST(test_completion_cycle_inserts_stored_name_as_text);
+	RUN_TEST(test_file_completion_keeps_typed_prefix);
+	RUN_TEST(test_buffer_prompt_lists_newline_name_on_one_row);
 	RUN_TEST(test_nested_prompt_preserves_buffer);
 	RUN_TEST(test_double_nested_prompt_preserves_buffer);
 	RUN_TEST(test_zap_arrow_key_does_not_corrupt_utf8);
@@ -464,6 +687,7 @@ int main(void) {
 	RUN_TEST(test_shell_tab_mid_line);
 	RUN_TEST(test_shell_tab_quoted_insert_and_undo);
 	RUN_TEST(test_history_up_drops_stale_mark);
+	RUN_TEST(test_confirm_yn_answer_recorded_in_macro);
 
 	return TEST_END();
 }

@@ -111,30 +111,18 @@ which is why the CI job retries once.
 
 ## Expected warnings
 
-The build is free of errors but not of warnings, and neither warning is
-a regression:
+The build is free of errors but not of warnings. One warning is
+expected, and it is not a regression:
 
-- **`"CTRL" redefined`**, once per translation unit. Genode's
-  `<termios.h>` includes `sys/ttydefaults.h`, which defines `CTRL`
-  unconditionally. `keymap.h` guards its own definition with
-  `#ifndef CTRL`, but that guard does not help here: `emil.h` includes
-  `keymap.h` before `<termios.h>`, so emil's macro is defined first and
-  the system's redefinition wins for the rest of the unit.
+**`ISO C99 does not support '_Generic'`**, once, from Genode's
+`sys/cdefs.h` by way of `libgen.h`'s `dirname`. Goa passes the depot
+include directories with `-I` rather than `-isystem`, so `-Wpedantic`
+applies to system headers too. Nothing in this repository can fix that
+short of dropping `-Wpedantic` for this target.
 
-  This is currently harmless, and that was checked rather than assumed.
-  All 30 call sites pass a character literal — `a`–`z`, `W`, `C`, `@`,
-  `_` — and emil's `(x) & 0x1f` and the ttydefaults form agree on every
-  one of them. They diverge for arguments emil does not yet use:
-  `CTRL(' ')` is 0 under emil and 96 under ttydefaults, `CTRL('?')` is
-  31 versus 127, and every digit differs. Ctrl-Space is spelled
-  `CTRL('@')`, which is safe. A future `CTRL(' ')` would be wrong on
-  Genode only, and silently.
-
-- **`ISO C99 does not support '_Generic'`**, once, from Genode's
-  `sys/cdefs.h` by way of `libgen.h`'s `dirname`. Goa passes the depot
-  include directories with `-I` rather than `-isystem`, so `-Wpedantic`
-  applies to system headers too. Nothing in this repository can fix that
-  short of dropping `-Wpedantic` for this target.
+Genode's `<termios.h>` also defines a `CTRL` macro, by way of
+`sys/ttydefaults.h`. emil's own is called `KEY_CTRL` so that the two
+never meet; see `keymap.h`.
 
 ## What is and is not covered
 

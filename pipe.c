@@ -31,8 +31,10 @@
 
 #include "buffer.h"
 #include "dbuf.h"
-#include "display.h"
 #include "emil.h"
+#include "mutate.h"
+#include "display.h"
+#include "message.h"
 #include "fileio.h"
 #include "pipe.h"
 #include "prompt.h"
@@ -484,7 +486,7 @@ uint8_t *editorPipe(int useRegion) {
 static void showOutputBuffer(const char *name, const uint8_t *data, size_t len,
 			     int read_only) {
 	struct buffer *buf = findOrCreateSpecialBuffer(name);
-	bufferResetRows(buf);
+	struct mutateRebuild rebuild = mutateRebuildBegin(buf);
 	buf->cx = 0;
 	buf->cy = 0;
 	buf->markx = -1;
@@ -494,6 +496,7 @@ static void showOutputBuffer(const char *name, const uint8_t *data, size_t len,
 		buf->read_only = 1;
 
 	bufferLoadBlob(buf, data, len, 0);
+	mutateRebuildEnd(buf, &rebuild);
 	if (len > 0)
 		markBufferDirty(buf);
 	updateBuffer(buf);
@@ -519,11 +522,6 @@ static void showOutputBuffer(const char *name, const uint8_t *data, size_t len,
 }
 
 void pipeCmd(int useRegion) {
-	/* Not allowed during macro record/playback */
-	if (E.recording || E.playback) {
-		setStatusMessage("Not available during macro");
-		return;
-	}
 	uint8_t *pipeOutput = editorPipe(useRegion);
 	if (pipeOutput != NULL && pipeOutput[0] == '\0') {
 		/* Nothing on stdout: leave the windows alone. */
@@ -652,8 +650,8 @@ void diffBufferWithFile(void) {
 
 #else /* EMIL_DISABLE_SHELL */
 
-#include "display.h"
 #include "emil.h"
+#include "message.h"
 
 void pipeCmd(int useRegion) {
 	(void)useRegion; /* unused parameter */

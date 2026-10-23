@@ -1,0 +1,30 @@
+# GCC for the AIX CI job, from IBM's AIX Toolbox for Open Source Software:
+#   https://public.dhe.ibm.com/aix/freeSoftware/aixtoolbox/RPMS/<path>
+#
+# The AIX image ships no C compiler, only the bos.adt headers, libraries,
+# as and ld.  This is the smallest set that gives a working gcc: the
+# compiler itself, the libraries cc1 links against, and the unversioned
+# gcc/cpp/libgcc wrappers that put plain `gcc` on PATH.
+#
+# guest.sh installs these with --nodeps.  The full dependency closure
+# is about 28 packages, and what the rest adds is bash, info and GNU sed
+# for the post-install scripts, plus libstdc++ (64 MB), which gmp
+# declares only for its C++ binding.  None of it is on the path from a
+# .c file to an executable.  Of the post-install work, only the info
+# pages are lost (install-info is absent and its failure is ignored);
+# GCC's fixed headers are regenerated with the system sed standing in
+# for GNU sed, see guest.sh.
+#
+# Each line: sha256, then the path under RPMS/.  The hashes come from
+# the Toolbox repodata (primary.xml.gz); fetch.sh refuses a mismatch,
+# and guest.sh checks IBM's signature on each one as well.
+e73097b4c95be7b81c7cfebaaea697658b6880401d20e38cd0958b621d0fee82  ppc-7.2/gcc13/gcc13-13.3.0-1.aix7.2.ppc.rpm
+f465ae05c3a023412faaea8324f5caaa943f210d16bf74b93686c1f847a94f5b  ppc-7.2/gcc13/gcc13-cpp-13.3.0-1.aix7.2.ppc.rpm
+b6c33c6fd87700e9da2bb813a34507197a4420173a3bea88e00972101822ae41  ppc-7.2/gcc13/libgcc13-13.3.0-1.aix7.2.ppc.rpm
+0f25501fc4400a53967806898b5b1e364e88a674984094e61b22e7f858d0d8cb  ppc-7.2/gcc/gcc-13-2.aix7.2.ppc.rpm
+8790cf35819c511b01176ea7fe6451e78ef29084c4f41f84a73794c8fa2cf232  ppc-7.2/gcc/gcc-cpp-13-2.aix7.2.ppc.rpm
+4f69a10dd0d6222e7263098e56ff3331b72498e91e538a28064f0a9489f8a7a2  ppc-7.2/gcc/libgcc-13-2.aix7.2.ppc.rpm
+c1200f30043db0155bc55796448a907c5ca665061c654a138336164916c510d2  ppc/gmp/gmp-6.3.0-2.aix7.1.ppc.rpm
+1ee1688bcc5db8bd9b48ecadc49629c5ed835946c74151cc6f7ff483292e1e13  ppc/mpfr/mpfr-4.2.2-1.aix7.1.ppc.rpm
+790afd6c53255c5862e5fc471f433c040f9bed0e7e2406a5e739e9aa2497c6af  ppc/libmpc/libmpc-1.4.1-1.aix7.1.ppc.rpm
+4f5b993168162f929fe7579d52e768262a776e5b33de73f2e7e4ec17abe88b88  ppc/zstd/libzstd-1.5.7-100.aix7.1.ppc.rpm

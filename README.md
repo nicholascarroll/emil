@@ -164,7 +164,7 @@ Selections larger than  74,993 bytes are not sent to the clipboard and a status 
 
 ## Editing Large Files
 
-`emil` is not designed for editing very large files. Files larger than 1 GiB cannot be opened. A very large file filled with only very short lines will consume a large amount of memory. On extremely long lines typing will be slow (but mitigated by keyboard bursting).
+`emil` is not designed for editing files larger than 1 GiB and will refuse to open them. A very large file filled with only very short lines will consume a large amount of memory. On extremely long lines typing will be slow (but mitigated by keyboard bursting). 
 
 
 ## Internals

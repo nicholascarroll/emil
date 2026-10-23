@@ -455,16 +455,17 @@ void test_sentence_khmer_khan(void) {
 		"\xE1\x9E\x80\xE1\x9E\x81\xE1\x9F\x94"
 		"\xE1\x9E\x82\xE1\x9E\x83");
 
-	int cx = 0, cy = 0;
-	TEST_ASSERT_EQUAL_INT(0, forwardSentenceEnd(buf, &cx, &cy));
-	TEST_ASSERT_EQUAL_INT(9, cx); /* just past ។ */
-	TEST_ASSERT_EQUAL_INT(0, cy);
+	buf->cx = 0;
+	buf->cy = 0;
+	processKeypress(CMD_SENTENCE_FORWARD);
+	TEST_ASSERT_EQUAL_INT(9, buf->cx); /* just past ។ */
+	TEST_ASSERT_EQUAL_INT(0, buf->cy);
 
-	cx = 15;
-	cy = 0;
-	TEST_ASSERT_EQUAL_INT(0, backwardSentenceStart(buf, &cx, &cy));
-	TEST_ASSERT_EQUAL_INT(9, cx); /* sentence starts after ។ */
-	TEST_ASSERT_EQUAL_INT(0, cy);
+	buf->cx = 15;
+	buf->cy = 0;
+	processKeypress(CMD_SENTENCE_BACKWARD);
+	TEST_ASSERT_EQUAL_INT(9, buf->cx); /* sentence starts after ។ */
+	TEST_ASSERT_EQUAL_INT(0, buf->cy);
 }
 
 /* ZERO WIDTH SPACE is the explicit word separator of digital
@@ -499,16 +500,17 @@ void test_word_motion_zwsp(void) {
 		"\xE2\x80\x8B"
 		"\xE0\xB8\x87\xE0\xB8\x88");
 
-	int dx = 0, dy = 0;
-	forwardWordEnd(buf, &dx, &dy);
-	TEST_ASSERT_EQUAL_INT(6, dx); /* stops at the ZWSP */
-	TEST_ASSERT_EQUAL_INT(0, dy);
+	buf->cx = 0;
+	buf->cy = 0;
+	processKeypress(CMD_FORWARD_WORD);
+	TEST_ASSERT_EQUAL_INT(6, buf->cx); /* stops at the ZWSP */
+	TEST_ASSERT_EQUAL_INT(0, buf->cy);
 
-	dx = 15;
-	dy = 0;
-	backwardWordEnd(buf, &dx, &dy);
-	TEST_ASSERT_EQUAL_INT(9, dx); /* stops just after the ZWSP */
-	TEST_ASSERT_EQUAL_INT(0, dy);
+	buf->cx = 15;
+	buf->cy = 0;
+	processKeypress(CMD_BACKWARD_WORD);
+	TEST_ASSERT_EQUAL_INT(9, buf->cx); /* stops just after the ZWSP */
+	TEST_ASSERT_EQUAL_INT(0, buf->cy);
 }
 
 /* Preposed vowels (เ แ โ ใ ไ) are written before their consonant; the
@@ -556,6 +558,64 @@ void test_wordwrap_combining_cluster_intact(void) {
 	TEST_ASSERT_TRUE(more);
 	TEST_ASSERT_EQUAL(end, break_col);
 	TEST_ASSERT_EQUAL(12, break_byte); /* after กิ, before ค */
+}
+
+/* #148: a character wider than the window is forced onto a line of its
+ * own, and its zero-width marks go with it.  A tab (8 columns) in a
+ * 4-column window is wider under any locale; the mark after it costs
+ * nothing only under a UTF-8 one. */
+void test_wordwrap_forced_char_keeps_marks(void) {
+	uint8_t text[] = "\t\xCC\x81"
+			 "b";
+	erow row = { 0 };
+	row.chars = text;
+	row.size = 4;
+	row.cached_width = -1;
+
+	int break_col, break_byte;
+	int more = wordWrapBreak(&row, 4, 0, 0, &break_col, &break_byte);
+
+	TEST_ASSERT_TRUE(more);
+	TEST_ASSERT_EQUAL(8, break_col);
+	TEST_ASSERT_EQUAL(combiningCols() ? 1 : 3, break_byte);
+}
+
+/* A forced character that ends the row is wider than the window, so
+ * its line wraps like a full one: an empty screen line follows, and
+ * the cursor at the end of the row is on it.  The line count and the
+ * cursor's line agree. */
+void test_wordwrap_forced_last_char_wraps(void) {
+	uint8_t tab[] = "\t";
+	uint8_t marked[] = "\t\xCC\x81";
+	struct {
+		uint8_t *chars;
+		int size;
+	} rows[] = { { tab, 1 }, { marked, 3 } };
+
+	for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) {
+		erow row = { 0 };
+		row.chars = rows[i].chars;
+		row.size = rows[i].size;
+		row.cached_width = -1;
+
+		int break_col, break_byte;
+		int more = wordWrapBreak(&row, 4, 0, 0, &break_col,
+					 &break_byte);
+		int lines = countScreenLines(&row, 4);
+		int line, col;
+		cursorScreenLine(&row, utf8WidthN(row.chars, row.size), 4,
+				 &line, &col);
+
+		TEST_ASSERT_TRUE(line < lines);
+		if (i == 0 || !combiningCols()) {
+			/* The tab alone, or tab + mark under UTF-8. */
+			TEST_ASSERT_TRUE(more);
+			TEST_ASSERT_EQUAL(row.size, break_byte);
+			TEST_ASSERT_EQUAL(2, lines);
+			TEST_ASSERT_EQUAL(1, line);
+			TEST_ASSERT_EQUAL(0, col);
+		}
+	}
 }
 
 int main(void) {
@@ -611,6 +671,8 @@ int main(void) {
 	RUN_TEST(test_word_motion_zwsp);
 	RUN_TEST(test_wordwrap_no_split_after_preposed);
 	RUN_TEST(test_wordwrap_combining_cluster_intact);
+	RUN_TEST(test_wordwrap_forced_char_keeps_marks);
+	RUN_TEST(test_wordwrap_forced_last_char_wraps);
 	RUN_TEST(test_wordwrap_ascii_unchanged);
 
 	return TEST_END();

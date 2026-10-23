@@ -4,9 +4,9 @@
 #include "abuf.h"
 #include "buffer.h"
 #include "emil.h"
+#include "message.h"
 #include "fileio.h"
 #include "history.h"
-
 #include "region.h"
 #include "wrap.h"
 #include "terminal.h"
@@ -23,9 +23,6 @@
 #ifdef __sun
 #include <termios.h>
 #endif
-
-int minibuffer_height = 1;
-const int statusbar_height = 1;
 
 /* Pre-computed highlight bounds for a single row.  Computed once per row
  * then checked with simple integer comparisons.
@@ -483,14 +480,123 @@ void clampCursorToViewport(struct window *win, struct buffer *buf) {
  *             or -1 to scan from the beginning.  The word-wrap caller
  *             already knows the byte offset; passing it in avoids an
  *             O(line-length) skip loop for every wrapped sub-line.
+ * end_byte: no byte at or past it is drawn (the word-wrap break).
  *
  * Returns the display column rendering stopped at -- end_col if the row
  * ran past the right edge, otherwise the row's width.  The caller pads
  * from it rather than asking the row how wide it is. */
+/* whitespace-mode marks.  All are East Asian Width Neutral, so one
+ * column wide in every terminal, CJK ones included. */
+#define TAB_MARK "⇥" /* U+21E5, in a tab's first cell */
+#define LF_MARK "↵"  /* U+21B5, in the cell after a row's text */
+#define SPACE_MARK "⬫" /* U+2B2B, for a space */
+#define NBSP_MARK "⬪"  /* U+2B2A, for the no-break spaces */
+#define OTHER_SPACE_MARK "⬗" /* U+2B17, for the other Unicode spaces */
+#define BLANK_MARK "⬖" /* U+2B16, for blank characters that are not spaces */
+#define LSEP_MARK "⬙" /* U+2B19, for LINE SEPARATOR (U+2028) */
+#define PSEP_MARK "⬘" /* U+2B18, for PARAGRAPH SEPARATOR (U+2029) */
+
+/* The mark whitespace-mode draws in place of the character at idx, or
+ * NULL to draw the character itself.  Tabs and line feeds are marked
+ * by the callers. */
+static const char *whitespaceMark(const uint8_t *s, int idx) {
+	if (s[idx] == ' ')
+		return SPACE_MARK;
+	if (s[idx] < 0x80)
+		return NULL;
+	uint32_t cp = utf8Decode(s, idx);
+	if (cp == 0x00A0 || cp == 0x2007 || cp == 0x202F)
+		return NBSP_MARK;
+	if (cp == 0x2028)
+		return LSEP_MARK;
+	if (cp == 0x2029)
+		return PSEP_MARK;
+	if ((cp >= 0x2000 && cp <= 0x200A) || cp == 0x205F || cp == 0x3000)
+		return OTHER_SPACE_MARK;
+	/* Not spaces, but drawn as blank: BRAILLE PATTERN BLANK and the
+	 * Hangul fillers. */
+	if (cp == 0x2800 || cp == 0x3164 || cp == 0xFFA0 || cp == 0x115F)
+		return BLANK_MARK;
+	return NULL;
+}
+
+/* Whether the character at idx is itself one of the marks above.
+ * whitespace-mode draws such a character in reverse video, so a ⬫ in
+ * the text cannot pass for a marked space. */
+static int isLiteralMark(const uint8_t *s, int idx) {
+	if (s[idx] < 0x80)
+		return 0;
+	switch (utf8Decode(s, idx)) {
+	case 0x21E5: /* TAB_MARK */
+	case 0x21B5: /* LF_MARK */
+	case 0x2B2B: /* SPACE_MARK */
+	case 0x2B2A: /* NBSP_MARK */
+	case 0x2B17: /* OTHER_SPACE_MARK */
+	case 0x2B16: /* BLANK_MARK */
+	case 0x2B19: /* LSEP_MARK */
+	case 0x2B18: /* PSEP_MARK */
+		return 1;
+	default:
+		return 0;
+	}
+}
+
+/* Whether s[idx..idx+avail) starts with a C1 control, U+0080..U+009F.
+ * Valid UTF-8, so it reaches the buffer, but a UTF-8 terminal reads it
+ * as a control: U+009B is CSI and U+009D is OSC in xterm and VTE, and a
+ * file could rewrite or hide what is drawn around it.  Never sent raw.
+ * charAdvance() prices it at one column, the '?' drawn in its place. */
+static int isC1At(const uint8_t *s, int idx, int avail) {
+	return avail >= 2 && s[idx] == 0xC2 && s[idx + 1] >= 0x80 &&
+	       s[idx + 1] <= 0x9F;
+}
+
+/* Append s[0..len) for the terminal with nothing in it the terminal
+ * would act on.  For text that is not a buffer row: file names, status
+ * messages, and the minibuffer echo of whatever was typed or yanked.
+ *
+ *   C0 control, DEL   ^X, as rows draw them   (two columns)
+ *   C1 control        ?                         (one column)
+ *   invalid UTF-8     ?, per byte              (one column)
+ *   TAB, the rest     as is
+ *
+ * Each width is the one charAdvance() gives the original, so layouts
+ * measured on the raw text (minibufLayout, the status bar's name
+ * budget) still describe what is drawn.  A TAB only moves the cursor,
+ * and its width depends on position, so it is left alone. */
+static void abAppendSafe(struct abuf *ab, const char *s, int len) {
+	const uint8_t *u = (const uint8_t *)s;
+	int i = 0;
+	while (i < len) {
+		uint8_t c = u[i];
+		if ((c < 0x20 && c != '\t') || c == 0x7f) {
+			char caret[2] = { '^', (char)(c ^ 0x40) };
+			abAppend(ab, caret, 2);
+			i++;
+		} else if (c < 0x80) {
+			abAppend(ab, s + i, 1);
+			i++;
+		} else {
+			int n = utf8_nBytes(c);
+			if (n < 2 || n > len - i || !utf8_validate(u + i, n)) {
+				abAppend(ab, "?", 1);
+				i++;
+			} else if (isC1At(u, i, len - i)) {
+				abAppend(ab, "?", 1);
+				i += n;
+			} else {
+				abAppend(ab, s + i, n);
+				i += n;
+			}
+		}
+	}
+}
+
 static int renderLineWithHighlighting(erow *row, struct abuf *ab, int start_col,
 				      int end_col,
 				      const struct rowHighlight *hl,
-				      int start_byte) {
+				      int start_byte, int end_byte,
+				      int whitespace) {
 	int render_x = 0;
 	int char_idx = 0;
 	int current_highlight = 0;
@@ -501,7 +607,11 @@ static int renderLineWithHighlighting(erow *row, struct abuf *ab, int start_col,
 		char_idx = start_byte;
 		render_x = start_col;
 	} else {
-		while (char_idx < row->size && render_x < start_col) {
+		/* Marks trailing a skipped character go with it. */
+		while (char_idx < row->size &&
+		       (render_x < start_col ||
+			(char_idx > 0 && charAdvance(row->chars, char_idx,
+						     render_x, NULL) == 0))) {
 			if (row->chars[char_idx] < 0x80 &&
 			    !ISCTRL(row->chars[char_idx])) {
 				render_x += 1;
@@ -541,29 +651,56 @@ static int renderLineWithHighlighting(erow *row, struct abuf *ab, int start_col,
 	 * loop would mis-pad, and the cursor would leave its
 	 * character; sharing the rule removes the possibility rather
 	 * than the instances. */
-	while (char_idx < row->size && render_x < end_col) {
+	int edge_wrap = 0; /* auto-wrap switched on for #148 */
+	while (char_idx < end_byte) {
 		uint8_t c = row->chars[char_idx];
-
-		updateHighlight(ab, &current_highlight,
-				isHighlighted(hl, render_x) ? 1 : 0);
-
 		int nb;
 		int width = charAdvance(row->chars, char_idx, render_x, &nb);
+		/* Drawn only if it fits, the rule utf8ColsToBytes and
+		 * wordWrapBreak apply: a zero-width mark at end_col still
+		 * belongs to the last cell (#148); a character straddling
+		 * end_col is blanked like a tab rather than overflowing. */
+		if (render_x >= end_col && width > 0)
+			break;
+
+		/* A C1 control is drawn as an inverted '?' so that it can
+		 * be neither obeyed by the terminal nor mistaken for a
+		 * real question mark. */
+		int c1 = isC1At(row->chars, char_idx, row->size - char_idx);
+
+		/* A literal mark in whitespace-mode is inverted, against
+		 * the region or search highlight when it falls inside one. */
+		int literal = c1 || (whitespace &&
+				     isLiteralMark(row->chars, char_idx));
+		updateHighlight(ab, &current_highlight,
+				(isHighlighted(hl, render_x) ? 1 : 0) ^
+					literal);
+
 		/* nb is the length the lead byte announces.  A row that
 		 * ends in an incomplete sequence has fewer bytes left than
 		 * that, and the raw copy below must not read past it. */
 		if (nb > row->size - char_idx)
 			nb = row->size - char_idx;
 
-		if (c == '\t') {
-			/* width is the distance to the next tab stop. */
-			int next_tab_stop = render_x + width;
-			while (render_x < next_tab_stop && render_x < end_col) {
+		if (c == '\t' || render_x + width > end_col) {
+			/* Drawn as spaces: a tab, whose width is the
+			 * distance to the next tab stop, or a character
+			 * straddling end_col, blanked up to it. */
+			int blank_end = render_x + width;
+			int mark = whitespace && c == '\t';
+			while (render_x < blank_end && render_x < end_col) {
 				if (render_x >= start_col) {
-					abAppend(ab, " ", 1);
+					if (mark)
+						abAppend(ab, TAB_MARK,
+							 sizeof(TAB_MARK) - 1);
+					else
+						abAppend(ab, " ", 1);
 				}
+				mark = 0;
 				render_x++;
 			}
+			if (blank_end > end_col)
+				break; /* its marks go with it */
 		} else if (ISCTRL(c)) {
 			if (render_x >= start_col) {
 				abAppend(ab, "^", 1);
@@ -577,7 +714,48 @@ static int renderLineWithHighlighting(erow *row, struct abuf *ab, int start_col,
 			render_x += width; /* == 2 */
 		} else {
 			if (render_x >= start_col) {
-				abAppend(ab, (char *)&row->chars[char_idx], nb);
+				/* A mark fills the first cell; a second
+				 * cell (U+3000) stays blank, as a tab's do. */
+				const char *mark =
+					whitespace && width > 0 ?
+						whitespaceMark(row->chars,
+							       char_idx) :
+						NULL;
+				if (c1) {
+					abAppend(ab, "?", 1);
+				} else if (mark) {
+					abAppend(ab, mark, strlen(mark));
+					for (int i = 1; i < width; i++)
+						abAppend(ab, " ", 1);
+				} else {
+					/* A character in the last column with
+					 * zero-width marks after it (#148): with
+					 * auto-wrap off the cursor cannot advance
+					 * past it, so the terminal attaches the
+					 * marks to the cell before.  Auto-wrap on
+					 * leaves the cursor in the pending-wrap
+					 * state instead, where the marks join this
+					 * cell.  Nothing printable follows on this
+					 * row, so the pending wrap never fires; it
+					 * is switched back off after the loop. */
+					if (!edge_wrap && width > 0 &&
+					    render_x + width == end_col &&
+					    char_idx + nb < end_byte) {
+						int next_nb;
+						if (charAdvance(row->chars,
+								char_idx + nb,
+								end_col,
+								&next_nb) ==
+						    0) {
+							abAppend(ab, "\x1b[?7h",
+								 5);
+							edge_wrap = 1;
+						}
+					}
+					abAppend(ab,
+						 (char *)&row->chars[char_idx],
+						 nb);
+				}
 			}
 			render_x += width;
 		}
@@ -586,6 +764,8 @@ static int renderLineWithHighlighting(erow *row, struct abuf *ab, int start_col,
 	}
 
 	updateHighlight(ab, &current_highlight, 0);
+	if (edge_wrap)
+		abAppend(ab, "\x1b[?7l", 5);
 	return render_x;
 }
 
@@ -722,10 +902,19 @@ int scrollFocused(struct cursorHint *hint) {
 	scrollVertical(win, buf, cursor_col, &scy, &sub_col);
 
 	if (!buf->word_wrap) {
+		/* Scroll so the character under the cursor fits, not just
+		 * its first column: drawRows blanks one straddling the edge. */
+		erow *row = &buf->row[buf->cy];
+		int w = buf->cx < row->size && row->chars[buf->cx] != '\t' ?
+				charAdvance(row->chars, buf->cx, cursor_col,
+					    NULL) :
+				1;
+		if (w < 1 || w > E.screencols)
+			w = 1;
 		if (cursor_col < win->coloff) {
 			win->coloff = cursor_col;
-		} else if (cursor_col >= win->coloff + E.screencols) {
-			win->coloff = cursor_col - E.screencols + 1;
+		} else if (cursor_col + w > win->coloff + E.screencols) {
+			win->coloff = cursor_col + w - E.screencols;
 		}
 	} else {
 		win->coloff = 0;
@@ -782,6 +971,7 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
 	int filerow = win->rowoff;
 	int skip = win->skip_sublines; /* sub-lines to skip on first row */
 	int truncated = 0; /* a row was cut off by the window's bottom */
+	int ws = win->whitespace;
 
 	for (y = 0; y < screenrows; y++) {
 		int filled =
@@ -797,10 +987,21 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
 				computeRowHighlightBounds(buf, filerow, end_col,
 							  &hl);
 				int emitted = renderLineWithHighlighting(
-					row, ab, win->coloff, end_col, &hl, -1);
+					row, ab, win->coloff, end_col, &hl, -1,
+					row->size, ws);
 				int rx = emitted - win->coloff;
 				if (rx < 0)
 					rx = 0;
+				/* Every row but the last ends in a line feed
+				 * (the final-newline invariant); mark it if
+				 * its cell is in view. */
+				if (ws && filerow < buf->numrows - 1 &&
+				    emitted >= win->coloff &&
+				    emitted < end_col) {
+					abAppend(ab, LF_MARK,
+						 sizeof(LF_MARK) - 1);
+					rx++;
+				}
 				while (rx < screencols) {
 					abAppend(ab, " ", 1);
 					rx++;
@@ -822,7 +1023,10 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
 				computeRowHighlightBounds(buf, filerow, INT_MAX,
 							  &hl);
 
-				while (line_start_byte < row->size &&
+				/* sub_line_idx > 0: the empty line after a
+				 * full last line is drawn too. */
+				while ((line_start_byte < row->size ||
+					sub_line_idx > 0) &&
 				       y < screenrows) {
 					int break_col, break_byte;
 					int more = wordWrapBreak(
@@ -848,11 +1052,16 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
 					/* --- Render the span --- */
 					renderLineWithHighlighting(
 						row, ab, line_start_col,
-						break_col, &hl,
-						line_start_byte);
+						break_col, &hl, line_start_byte,
+						break_byte, ws);
 
 					int fill_col = break_col;
 					int fill_hl = 0;
+					/* The row's line feed takes the first
+					 * fill cell of its last sub-line. */
+					int lf_mark = ws && !more &&
+						      filerow <
+							      buf->numrows - 1;
 					int pad_hl =
 						more &&
 						isHighlighted(&hl,
@@ -868,7 +1077,14 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
 									fill_col)) ?
 								1 :
 								0);
-						abAppend(ab, " ", 1);
+						if (lf_mark)
+							abAppend(
+								ab, LF_MARK,
+								sizeof(LF_MARK) -
+									1);
+						else
+							abAppend(ab, " ", 1);
+						lf_mark = 0;
 						fill_col++;
 					}
 					updateHighlight(ab, &fill_hl, 0);
@@ -892,6 +1108,14 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
 					line_start_byte = break_byte;
 					sub_line_idx++;
 				}
+
+				/* An empty row draws no sub-line, so its
+				 * line feed goes here; \x1b[K below clears
+				 * the rest. */
+				if (ws && row->size == 0 &&
+				    filerow < buf->numrows - 1)
+					abAppend(ab, LF_MARK,
+						 sizeof(LF_MARK) - 1);
 
 				filerow++;
 				skip = 0; /* Only skip on the first row */
@@ -988,15 +1212,20 @@ static int statusLeft(const struct buffer *bufr, char *out, int cap,
 		show_name = trunc;
 	}
 
-	/* snprintf returns the length it WOULD have written.  The caller
-	 * hands this straight to abAppend against a fixed-size stack
-	 * buffer, so an over-long name made it read past the end.  Clamp
-	 * to what actually fits. */
-	int n = snprintf(out, cap, "%s %s", show_name, flags);
+	/* A file name is whatever bytes the file system allowed, so it
+	 * goes out through abAppendSafe like any other untrusted text.
+	 * The caller hands the result straight to abAppend against a
+	 * fixed-size stack buffer: clamp to what actually fits. */
+	struct abuf safe = ABUF_INIT;
+	abAppendSafe(&safe, show_name, (int)strlen(show_name));
+	abAppend(&safe, " ", 1);
+	abAppend(&safe, flags, 2);
+	int n = safe.len < cap ? safe.len : cap - 1;
 	if (n < 0)
-		return 0;
-	if (n >= cap)
-		n = cap - 1;
+		n = 0;
+	memcpy(out, safe.b, n);
+	out[n] = '\0';
+	abFree(&safe);
 	return n;
 }
 
@@ -1309,8 +1538,10 @@ void drawMinibuffer(struct abuf *ab) {
 		if (line < nlines) {
 			int start = lines[line].start;
 			int len = lines[line].end - start;
+			/* File names, shell stderr and anything typed or
+			 * yanked into a prompt all pass through here. */
 			if (len > 0)
-				abAppend(ab, msg + start, len);
+				abAppendSafe(ab, msg + start, len);
 			abAppend(ab, "\x1b[0m", 4);
 		}
 
@@ -1490,7 +1721,7 @@ void describeChar(void) {
 	int cx = E.buf->cx;
 
 	/* Calculate absolute byte offset from the start of the file/buffer */
-	long abs_offset = cx;
+	long long abs_offset = cx; /* long is 32-bit on wasm32 */
 	for (int i = 0; i < E.buf->cy; i++) {
 		abs_offset += E.buf->row[i].size;
 		abs_offset +=
@@ -1500,7 +1731,7 @@ void describeChar(void) {
 	if (cx >= row->size) {
 		snprintf(info, sizeof(info),
 			 "Character: LINE FEED | Line Byte Offset: %d | "
-			 "Absolute Byte Offset: %ld",
+			 "Absolute Byte Offset: %lld",
 			 cx, abs_offset);
 		setStatusMessage("%s", info);
 		return;
@@ -1537,7 +1768,7 @@ void describeChar(void) {
 		snprintf(info, sizeof(info),
 			 "Character: %s | Unicode Codepoint: U+%04lX | "
 			 "Display Width: %d | Line Byte Offset: %d | "
-			 "Absolute Byte Offset: %ld | Hex Bytes: %s",
+			 "Absolute Byte Offset: %lld | Hex Bytes: %s",
 			 name, (unsigned long)cp, sw, cx, abs_offset, raw);
 	} else {
 		/* Printable character: show the glyph */
@@ -1556,7 +1787,7 @@ void describeChar(void) {
 
 		snprintf(
 			info, sizeof(info),
-			"Character: %s%s | Unicode Codepoint: U+%04lX | Display Width: %d | Line Byte Offset: %d | Absolute Byte Offset: %ld | Raw Hex Bytes: %s",
+			"Character: %s%s | Unicode Codepoint: U+%04lX | Display Width: %d | Line Byte Offset: %d | Absolute Byte Offset: %lld | Raw Hex Bytes: %s",
 			glyph, scriptpart, (unsigned long)cp, sw, cx,
 			abs_offset, raw);
 	}
@@ -1588,6 +1819,13 @@ void toggleVisualLineMode(void) {
 					    "Visual line mode disabled");
 }
 
+void toggleWhitespaceMode(void) {
+	struct window *win = E.windows[windowFocusedIdx()];
+	win->whitespace = !win->whitespace;
+	setStatusMessage(win->whitespace ? "Whitespace mode enabled" :
+					   "Whitespace mode disabled");
+}
+
 void editorVersion(void) {
 	setStatusMessage("emil " EMIL_VERSION);
 }
@@ -1599,17 +1837,4 @@ void help(void) {
 		"Undo:C-_   Search:C-s   Cancel:C-g   "
 		"where C- denotes the Control key, M- denotes the Meta (Alt) key.  "
 		"For the complete command reference, see the man page.");
-}
-
-void setStatusMessage(const char *fmt, ...) {
-	va_list ap;
-	va_start(ap, fmt);
-	vsnprintf(E.statusmsg, sizeof(E.statusmsg), fmt, ap);
-	va_end(ap);
-	E.statusmsg_show = 1;
-}
-
-void clearStatusMessage(void) {
-	E.statusmsg[0] = '\0';
-	E.statusmsg_show = 0;
 }

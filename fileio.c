@@ -6,11 +6,10 @@
 #include "dbuf.h"
 #include "display.h"
 #include "emil.h"
+#include "message.h"
 #include "keymap.h"
-
 #include "mutate.h"
 #include "prompt.h"
-#include "terminal.h"
 #include "undo.h"
 #include "unicode.h"
 #include "util.h"
@@ -151,6 +150,11 @@ int lockFile(struct buffer *bufr, const char *filename) {
 			return errno == EINTR ? LOCK_RETRY : LOCK_UNAVAILABLE;
 		use_rdlck = 1;
 	}
+
+	/* The descriptor lives as long as the buffer stays modified, so
+	 * keep it out of every shell command spawned meanwhile: a child
+	 * has no business holding the user's file open read-write. */
+	(void)fcntl(fd, F_SETFD, FD_CLOEXEC);
 
 	struct flock fl;
 	memset(&fl, 0, sizeof(fl));
@@ -525,8 +529,11 @@ static int editorOpenBody(struct buffer *bufr, const char *filename) {
 	 * the file does not quietly change at save. */
 	int dos_endings = 0;
 	int no_final_newline = 0;
+	long consumed = 0; /* bytes that reached a row, counted by strlen */
 
 	while ((linelen = emil_getline(&line, &linecap, fp)) != -1) {
+		consumed += linelen;
+
 		/* Sampled before stripping and overwritten each pass, so
 		 * after the loop it describes the final line. */
 		no_final_newline = (linelen == 0 || line[linelen - 1] != '\n');
@@ -542,6 +549,19 @@ static int editorOpenBody(struct buffer *bufr, const char *filename) {
 			linelen--;
 		appendRowRaw(bufr, (const uint8_t *)line, linelen);
 	}
+
+	/* emil_getline returns -1 at end of file, on a read error and on
+	 * an allocation failure alike, and its fgets/strlen stop at a NUL
+	 * the pre-scan missed (the pre-scan's own read failed, or the file
+	 * changed between the two passes).  Any of those would present
+	 * part of the file as all of it, and a save would then write the
+	 * part over the whole.  So the open succeeds only if the stream
+	 * reached end of file without error and every byte it read is
+	 * accounted for in a row.  A stream that cannot report its
+	 * position (not a regular file) skips the last check. */
+	long read_pos = ftell(fp);
+	int read_whole = !ferror(fp) && feof(fp) &&
+			 (read_pos < 0 || read_pos == consumed);
 
 	/* The file is the rows joined by '\n', so a trailing newline is
 	 * one more (empty) row.  Appended unconditionally: emil's buffers
@@ -563,6 +583,17 @@ static int editorOpenBody(struct buffer *bufr, const char *filename) {
 
 	free(line);
 	fclose(fp);
+
+	if (!read_whole) {
+		bufferResetRows(bufr);
+		appendRowRaw(bufr, (const uint8_t *)"", 0);
+		free(bufr->filename);
+		bufr->filename = NULL;
+		setStatusMessage("Can't open file: it could not be read "
+				 "completely");
+		free(iopath);
+		return -1;
+	}
 
 	/* Guard against pathological files with billions of tiny lines. */
 	if (bufr->numrows > INT_MAX / 2) {
@@ -722,32 +753,6 @@ void revert(void) {
 }
 
 /*
- * Write all bytes to fd, retrying on EINTR and handling short writes.
- */
-static int writeToFile(int fd, const char *buf, size_t len) {
-	size_t total = 0;
-
-	while (total < len) {
-		ssize_t n = write(fd, buf + total, len - total);
-
-		if (n < 0) {
-			if (errno == EINTR)
-				continue;
-			return -1;
-		}
-
-		if (n == 0) {
-			errno = EIO;
-			return -1;
-		}
-
-		total += (size_t)n;
-	}
-
-	return 0;
-}
-
-/*
  * Open the target file, truncate it, write the new contents, fsync it,
  * and close it.
  *
@@ -784,7 +789,7 @@ static int writeInPlace(const char *path, const char *buf, size_t len,
 		goto fail;
 	}
 
-	if (writeToFile(fd, buf, len) == -1)
+	if (writeAll(fd, buf, len) == -1)
 		goto fail;
 
 	if (is_reg && !skip_fsync) {
@@ -809,15 +814,6 @@ fail:
 	close(fd);
 	errno = saved_errno;
 	return -1;
-}
-
-/* Ask a y/N question in the minibuffer.  Returns 1 for yes. */
-static int confirmYN(const char *msg) {
-	setStatusMessage("%s", msg);
-	refreshScreen();
-	int c = readKey();
-	clearStatusMessage();
-	return (c == 'y' || c == 'Y');
 }
 
 /* The authoritative external-modification check, run immediately
@@ -847,6 +843,29 @@ static int preSaveCheck(struct buffer *buf) {
 			"File has changed on disk since it was read. Save anyway? (y or n)");
 }
 
+/* Writing to a file the buffer holds no record of -- a Save As target,
+ * the first save of a buffer that has no file, or a "(New file)" that
+ * something else has since created -- would destroy contents the user
+ * has never seen.  Ask first, as Emacs's write-file does.  Returns 1
+ * to proceed with the save, 0 to abandon it. */
+static int confirmOverwrite(const char *filename) {
+	char *iopath = expandTilde(filename);
+	struct stat st;
+	int exists = (stat(iopath, &st) == 0 && !S_ISDIR(st.st_mode));
+	free(iopath);
+	if (!exists)
+		return 1;
+
+	int n = snprintf(NULL, 0, "File %s exists; overwrite? (y or n)",
+			 filename);
+	char *shown = leftTruncate(filename, nameFit(filename, n));
+	char msg[sizeof(E.statusmsg)];
+	snprintf(msg, sizeof(msg), "File %s exists; overwrite? (y or n)",
+		 shown);
+	free(shown);
+	return confirmYN(msg);
+}
+
 /*
  * Save the current buffer.
  *
@@ -856,8 +875,11 @@ static int preSaveCheck(struct buffer *buf) {
  * If skip_backup is zero and the target file already exists, attempt to
  * create a verified backup.  If that fails, ask whether the user wants
  * to continue without a backup.
+ *
+ * If confirmed is nonzero the caller has already had any overwrite of
+ * an existing file approved (see confirmOverwrite).
  */
-static void saveBuffer(int skip_backup) {
+static void saveBuffer(int skip_backup, int confirmed) {
 	char *iopath = NULL;
 	char *buf = NULL;
 	size_t len = 0;
@@ -885,6 +907,15 @@ static void saveBuffer(int skip_backup) {
 			return;
 		}
 
+		/* Before the buffer takes the name: declining leaves it
+		 * as it was. */
+		if (!confirmOverwrite(input)) {
+			free(input);
+			setStatusMessage("Save aborted.");
+			return;
+		}
+		confirmed = 1;
+
 		free(E.buf->filename);
 		E.buf->filename = collapseHome(input);
 		free(input);
@@ -893,6 +924,14 @@ static void saveBuffer(int skip_backup) {
 		E.buf->read_only = 0;
 
 		computeDisplayNames();
+	}
+
+	/* No record of the file on disk: anything there now arrived
+	 * after the buffer was opened, and is not what it holds. */
+	if (!confirmed && E.buf->open_mtime == 0 &&
+	    !confirmOverwrite(E.buf->filename)) {
+		setStatusMessage("Save aborted.");
+		return;
 	}
 
 	iopath = expandTilde(E.buf->filename);
@@ -915,7 +954,10 @@ static void saveBuffer(int skip_backup) {
 	if (!skip_backup) {
 		struct stat st;
 
-		if (stat(iopath, &st) == 0 && S_ISREG(st.st_mode)) {
+		/* A stat() failure other than ENOENT may hide a file the
+		 * write would truncate: try the backup anyway (#151). */
+		if (stat(iopath, &st) == 0 ? S_ISREG(st.st_mode) :
+					     errno != ENOENT) {
 			int backup_rc = makeVerifiedBackup(iopath, backup_path,
 							   sizeof(backup_path));
 			relockIfDirty(E.buf);
@@ -1068,7 +1110,7 @@ void save(int uarg) {
 		return;
 	}
 
-	saveBuffer(skip_backup);
+	saveBuffer(skip_backup, 0);
 }
 
 void saveAs(void) {
@@ -1081,6 +1123,14 @@ void saveAs(void) {
 		(char *)editorPrompt("Save as: ", PROMPT_FILES, NULL);
 
 	if (new_filename == NULL) {
+		setStatusMessage("Save aborted.");
+		return;
+	}
+
+	/* Before the rename, so declining leaves the buffer visiting
+	 * the file it was. */
+	if (!confirmOverwrite(new_filename)) {
+		free(new_filename);
 		setStatusMessage("Save aborted.");
 		return;
 	}
@@ -1105,7 +1155,7 @@ void saveAs(void) {
 
 	computeDisplayNames();
 
-	saveBuffer(0);
+	saveBuffer(0, 1);
 }
 
 /* Buffers are stat()ed now, under the deadline, so a file replaced on
@@ -1336,8 +1386,10 @@ static int insertFileAtPathBody(struct buffer *buf, const char *path,
 	size_t linecap = 0;
 	ssize_t linelen;
 	int ends_with_newline = 0;
+	long consumed = 0; /* bytes that reached a row, counted by strlen */
 
 	while ((linelen = emil_getline(&line, &linecap, fp)) != -1) {
+		consumed += linelen;
 		ends_with_newline = (linelen > 0 && line[linelen - 1] == '\n');
 		while (linelen > 0 && (line[linelen - 1] == '\n' ||
 				       line[linelen - 1] == '\r')) {
@@ -1345,11 +1397,32 @@ static int insertFileAtPathBody(struct buffer *buf, const char *path,
 		}
 		appendRowRaw(tmpbuf, (const uint8_t *)line, linelen);
 	}
+
+	/* emil_getline returns -1 at end of file, on a read error and on
+	 * an allocation failure alike, and its fgets/strlen stop at a NUL
+	 * the pre-scan missed (the pre-scan's own read failed, or the file
+	 * changed between the two passes).  Any of those would insert
+	 * part of the file as if it were all of it.  So the insert goes
+	 * ahead only if the stream reached end of file without error and
+	 * every byte it read is accounted for in a row.  A stream that
+	 * cannot report its position (not a regular file) skips the last
+	 * check. */
+	long read_pos = ftell(fp);
+	int read_whole = !ferror(fp) && feof(fp) &&
+			 (read_pos < 0 || read_pos == consumed);
+
 	if (tmpbuf->numrows == 0 || ends_with_newline)
 		appendRowRaw(tmpbuf, (const uint8_t *)"", 0);
 
 	free(line);
 	fclose(fp);
+
+	if (!read_whole) {
+		destroyBuffer(tmpbuf);
+		setStatusMessage("Can't insert file: it could not be read "
+				 "completely");
+		return 1;
+	}
 
 	/* Validate UTF-8 before inserting */
 	if (!checkUTF8Validity(tmpbuf)) {

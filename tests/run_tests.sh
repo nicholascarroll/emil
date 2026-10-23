@@ -185,15 +185,15 @@ else
     echo "✓ Mutation-layer invariant"
 fi
 
-# Record-construction invariant: mutate.c is the only place that
-# builds undo records.  
-RECORD_HITS=$(grep -nE '\bnewUndo\b' *.c 2>/dev/null \
+# Record-construction invariant: mutate.c is the only place that builds
+# undo records, using undorecord.c.
+RECORD_HITS=$(grep -nE '\b(newUndo|undoRecordNew)\b' *.c 2>/dev/null \
     | grep -v '^mutate\.c:' \
-    | grep -v '^undo\.c:[0-9]*:struct undo \*newUndo' \
+    | grep -v '^undorecord\.c:' \
     | grep -vE ':[0-9]+:.*(/\*|//)' \
     | grep -vE ':[0-9]+:[[:space:]]*\*')
 if [ -n "$RECORD_HITS" ]; then
-    echo "✗ Record-construction invariant violation (newUndo outside mutate.c):"
+    echo "✗ Record-construction invariant violation (records built outside mutate.c):"
     echo "$RECORD_HITS" | sed 's/^/    /'
     INVARIANT_FAIL=1
 else
@@ -239,16 +239,18 @@ fi
 # answers from their arguments and must not reach into the global
 # editor state. 
 LEAF_OBJECTS="abuf.o backup.o base64.o dbuf.o decoder.o \
-    emil_subprocess.o history.o transform.o undo.o unicode.o util.o \
+    emil_subprocess.o history.o transform.o undo.o undorecord.o unicode.o util.o \
     wrap.o"
 
 # Sanity check for nm: keymap.o is known to reference E.  If nm doesn't
 # report it, the leaf check is skipped.
 LEAF_CONTROL=keymap.o
 
-# Mach-O prefixes symbols with an underscore; ELF does not.
+# Mach-O prefixes symbols with an underscore; ELF does not.  AIX's nm
+# puts the name first ("E U -") where the others print "U E".
 refs_E() {
-    $NM -u "$1" 2>/dev/null | grep -qE '^[[:space:]]*U[[:space:]]+_?E$'
+    $NM -u "$1" 2>/dev/null |
+        grep -qE '^[[:space:]]*U[[:space:]]+_?E$|^_?E[[:space:]]+U([[:space:]]|$)'
 }
 
 if [ ! -f "$LEAF_CONTROL" ]; then
@@ -305,8 +307,17 @@ echo ""
 
 ANY_FAIL=0
 ANY_WARN=0
-BUILD_LOG=$(mktemp)
-trap 'rm -f "$BUILD_LOG"' EXIT
+# Not mktemp: it is not in POSIX, and AIX does not have it.  Beside the
+# scratch directory rather than in it, so the suites never see it.
+BUILD_LOG="$PWD/tests/build.log"
+
+# The suites' scratch directory: ours, made fresh for each run, removed
+# at exit.  The suites find it through TMPDIR.
+TMPDIR="$PWD/tests/tmp"
+export TMPDIR
+rm -rf "$TMPDIR"
+mkdir -p "$TMPDIR"
+trap 'rm -f "$BUILD_LOG"; rm -rf "$TMPDIR"' EXIT
 
 # Detect sanitizer build
 SANITIZER_FLAGS=""
@@ -326,11 +337,11 @@ $CC $TEST_CFLAGS $SANITIZER_FLAGS -c tests/stubs.c -o tests/stubs.o 2>&1 || {
 }
 
 # All objects except main.o and terminal.o
-TEST_OBJECTS="decoder.o unicode.o buffer.o region.o undo.o transform.o \
+TEST_OBJECTS="decoder.o unicode.o buffer.o region.o undo.o undorecord.o transform.o \
     find.o pipe.o register.o fileio.o display.o  keymap.o \
     edit.o prompt.o util.o completion.o history.o base64.o abuf.o \
     window.o ctags.o adjust.o mutate.o wrap.o motion.o dbuf.o \
-    emil_subprocess.o palette.o backup.o tests/stubs.o"
+    emil_subprocess.o palette.o backup.o message.o tests/stubs.o"
 
 # ===== Generated fixture: backup.c against fake syscalls  =====
 #
@@ -489,11 +500,11 @@ rm -f tests/stubs.o tests/backup_faked.c
 #   pty_input_test    needs a pty.  Escape sequences, key batching,
 #                     burst detection.  Runs wherever posix_openpt does.
 #   pty_signals_test  needs a pty whose master reports the slave's
-#                     termios, and real job control.  Linux and macOS.
+#                     termios, and real job control.  Linux, macOS, AIX.
 #
 PTY_TESTS="pty_input_test"
 case "$(uname -s)" in
-Linux|Darwin) PTY_TESTS="$PTY_TESTS pty_signals_test" ;;
+Linux|Darwin|AIX) PTY_TESTS="$PTY_TESTS pty_signals_test" ;;
 NetBSD) PTY_TESTS="" ;;
 esac
 
@@ -501,22 +512,22 @@ if [ -z "$RUNNER" ] && [ -x ./emil ]; then
     for t in $PTY_TESTS; do
         printf '  %-16s ' "$t"
         if $CC $TEST_CFLAGS -Itests "tests/$t.c" -o "tests/$t" \
-            && "./tests/$t" ./emil > /tmp/pty_out 2>&1; then
-            n=$(grep -c '^  .*PASS$' /tmp/pty_out)
+            && "./tests/$t" ./emil > "$TMPDIR/pty_out" 2>&1; then
+            n=$(grep -c '^  .*PASS$' "$TMPDIR/pty_out")
             if [ "$n" -eq 0 ]; then
                 # Exit 0 having run nothing is not a pass.
                 echo "FAIL (no scenarios ran)"
-                cat /tmp/pty_out
+                cat "$TMPDIR/pty_out"
                 ANY_FAIL=1
             else
                 echo "PASS ($n scenarios)"
             fi
         else
             echo "FAIL"
-            cat /tmp/pty_out
+            cat "$TMPDIR/pty_out"
             ANY_FAIL=1
         fi
-        rm -f "tests/$t" /tmp/pty_out
+        rm -f "tests/$t" "$TMPDIR/pty_out"
     done
 fi
 

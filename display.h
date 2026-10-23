@@ -12,10 +12,6 @@ struct window;
 struct buffer;
 struct config;
 
-/* Display constants */
-extern int minibuffer_height;
-extern const int statusbar_height;
-
 /* Minibuffer layout. Auto-sizing is capped at MINIBUF_MAX_LINES screen lines.*/
 #define MINIBUF_MAX_LINES 5
 
@@ -55,13 +51,9 @@ void cursorBottomLine(int curs);
 void resizeScreen(void);
 void recenter(struct window *win);
 void toggleVisualLineMode(void);
+void toggleWhitespaceMode(void);
 void editorVersion(void);
 void help(void);
 void describeChar(void);
-
-/* Status message display */
-void setStatusMessage(const char *fmt, ...)
-	__attribute__((format(printf, 1, 2)));
-void clearStatusMessage(void);
 
 #endif /* EMIL_DISPLAY_H */

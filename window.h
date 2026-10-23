@@ -4,6 +4,12 @@
 
 #include "emil.h"
 
+/* How the screen's rows are shared: each window's height plus its
+ * status bar, and the message line below them all.  The display sets
+ * minibuffer_height each frame to fit the message. */
+extern int minibuffer_height;
+extern const int statusbar_height;
+
 int windowFocusedIdx(void);
 int findBufferWindow(struct buffer *buf);
 void synchronizeBufferCursor(struct buffer *buf, struct window *win);

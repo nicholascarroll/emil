@@ -22,14 +22,32 @@
 uint8_t *collectRegionText(struct buffer *buf, int startx, int starty, int endx,
 			   int endy, int *out_len);
 
+enum mutateResult {
+	MUTATE_DONE,
+	MUTATE_REFUSED, /* read-only, or would delete only the final newline */
+	MUTATE_INVALID, /* no such range: nothing changed, and reported */
+};
+
+/* Rebuilding a special buffer's contents (*Completions*, register
+ * views, and so on): call Begin instead of bufferResetRows, fill the
+ * rows, then call End.  A buffer with no history just gets its new rows.
+ * One with history (made writable and edited) gets the change as an
+ * ordinary replace, so its history still matches its text. */
+struct mutateRebuild {
+	uint8_t *old_text; /* NULL when there is no history */
+	int old_len;
+};
+struct mutateRebuild mutateRebuildBegin(struct buffer *buf);
+void mutateRebuildEnd(struct buffer *buf, struct mutateRebuild *r);
+
 /* Delete text in [startx,starty]..[endx,endy], insert 'repl' at
  * (startx,starty).  Either the delete range or repl may be empty
  * (pure insert or pure delete).  Records a paired undo
  * (delete + insert) when both are non-empty, or a single undo
  * when one side is empty.
  *
- * 'old_text' is the text being deleted.  Caller provides it
- * (collected before mutation).  Length is 'old_len'.
+ * The deleted text is read from the buffer here, so the record always
+ * holds what the range held.
  *
  * 'repl' / 'repl_len' is the replacement text.  May be NULL/0 for
  * a pure delete.
@@ -40,7 +58,12 @@ uint8_t *collectRegionText(struct buffer *buf, int startx, int starty, int endx,
  *
  * Refuses read-only buffers before any side effect (including
  * clearRedos): this is the authoritative check for the mutation
- * layer.  On refusal, *out_endx and *out_endy are NOT written.
+ * layer.  On that refusal, *out_endx and *out_endy are NOT written.
+ *
+ * The range must exist and start must not be after end, or the result
+ * is MUTATE_INVALID.  Then, as when refusing to delete only the final
+ * newline, nothing changes and the out-params get the current cursor,
+ * so a caller's "move to the end of the edit" leaves it where it was.
  *
  * Calls clearRedos, records undo, performs mutation via
  * bulkInsert/bulkDelete, calls adjustAllPoints (inside bulk ops),
@@ -50,18 +73,19 @@ uint8_t *collectRegionText(struct buffer *buf, int startx, int starty, int endx,
  *
  * Returns the end position of the inserted text in *out_endx,
  * *out_endy (may be NULL if caller doesn't need them). */
-void mutateReplace(struct buffer *buf, int startx, int starty, int endx,
-		   int endy, const uint8_t *old_text, int old_len,
-		   const uint8_t *repl, int repl_len, int chain_to_prev,
-		   int *out_endx, int *out_endy);
+enum mutateResult mutateReplace(struct buffer *buf, int startx, int starty,
+				int endx, int endy, const uint8_t *repl,
+				int repl_len, int chain_to_prev, int *out_endx,
+				int *out_endy);
 
 /* Convenience: pure delete. */
-void mutateDelete(struct buffer *buf, int startx, int starty, int endx,
-		  int endy, const uint8_t *old_text, int old_len);
+enum mutateResult mutateDelete(struct buffer *buf, int startx, int starty,
+			       int endx, int endy);
 
 /* Convenience: pure insert. */
-void mutateInsert(struct buffer *buf, int startx, int starty,
-		  const uint8_t *text, int len, int *out_endx, int *out_endy);
+enum mutateResult mutateInsert(struct buffer *buf, int startx, int starty,
+			       const uint8_t *text, int len, int *out_endx,
+			       int *out_endy);
 
 /* Single interactive edits — one keystroke's worth.  Identical to
  * mutateInsert / mutateDelete except that the record produced may be
@@ -72,11 +96,11 @@ void mutateInsert(struct buffer *buf, int startx, int starty,
  * mutations (yank, kill, regex replace, insert-file) must use
  * mutateInsert / mutateDelete / mutateReplace, whose records always
  * stand alone. */
-void mutateInsertChar(struct buffer *buf, int startx, int starty,
-		      const uint8_t *text, int len, int *out_endx,
-		      int *out_endy);
-void mutateDeleteChar(struct buffer *buf, int startx, int starty, int endx,
-		      int endy, const uint8_t *old_text, int old_len);
+enum mutateResult mutateInsertChar(struct buffer *buf, int startx, int starty,
+				   const uint8_t *text, int len, int *out_endx,
+				   int *out_endy);
+enum mutateResult mutateDeleteChar(struct buffer *buf, int startx, int starty,
+				   int endx, int endy);
 
 /* Append 'n_rows' empty lines to the end of buf.  Records a single
  * pure-insert undo with paired=0.  Used by yankRectangle to extend
@@ -86,7 +110,8 @@ void mutateDeleteChar(struct buffer *buf, int startx, int starty, int endx,
  *
  * 'from_row' is the row count before extension (buf->numrows at the
  * time of the call); passed explicitly so the caller's pre-state is
- * unambiguous. */
-void mutateExtendRows(struct buffer *buf, int from_row, int n_rows);
+ * unambiguous.  Anything else is MUTATE_INVALID. */
+enum mutateResult mutateExtendRows(struct buffer *buf, int from_row,
+				   int n_rows);
 
 #endif

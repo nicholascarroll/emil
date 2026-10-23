@@ -170,8 +170,10 @@ int writeAll(int fd, const void *buf, size_t len) {
 				continue;
 			return -1;
 		}
-		if (n == 0)
+		if (n == 0) {
+			errno = EIO;
 			return -1;
+		}
 		p += (size_t)n;
 		len -= (size_t)n;
 	}

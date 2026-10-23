@@ -2,30 +2,29 @@
  * SPDX-License-Identifier: MIT */
 #include "register.h"
 #include "buffer.h"
-#include "display.h"
+#include "message.h"
+#include "prompt.h"
 #include "emil.h"
+#include "mutate.h"
 
 #include "region.h"
-#include "terminal.h"
 #include "unicode.h"
 #include "util.h"
 #include "window.h"
+#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 static int getRegisterName(const char *prompt) {
+	char msg[128];
+	snprintf(msg, sizeof(msg), "%s:", prompt);
 	int key;
-	int psize = stringWidth((const uint8_t *)prompt);
 	do {
-		setStatusMessage("%s:", prompt);
-		cursorBottomLine(psize + 2);
-		refreshScreen();
-		key = readKey();
+		key = promptKey(msg);
 	} while (key < 0 ||
 		 key >= (int)(sizeof(E.registers) / sizeof(E.registers[0])));
-	recordKey(key);
 	return key;
 }
 
@@ -83,11 +82,19 @@ static void formatRegName(char *out, size_t outsz, int reg) {
 	}
 }
 
+/* A buffer's name, as one line.  A filename can hold any byte, and a
+ * row must not hold a newline, so these views show it as ^J. */
+static void formatBufferName(char *out, size_t outsz,
+			     const struct buffer *buf) {
+	const char *fname = buf->filename ? buf->filename : "*scratch*";
+	utf8SanitizeLine((const uint8_t *)fname, strlen(fname), out, outsz);
+}
+
 /* ---- Register Preview (shown before prompt) ---- */
 
 static void showRegisterPreview(void) {
 	struct buffer *prev = findOrCreateSpecialBuffer("*Register Preview*");
-	bufferResetRows(prev);
+	struct mutateRebuild rebuild = mutateRebuildBegin(prev);
 	prev->read_only = 1;
 	prev->word_wrap = 0;
 
@@ -107,9 +114,8 @@ static void showRegisterPreview(void) {
 					 "%s: stale point (buffer closed)",
 					 name);
 			} else {
-				const char *fname = pt->buf->filename ?
-							    pt->buf->filename :
-							    "*scratch*";
+				char fname[160];
+				formatBufferName(fname, sizeof(fname), pt->buf);
 				snprintf(
 					line, sizeof(line),
 					"%s: buffer position: buffer %s, line %d col %d",
@@ -153,6 +159,7 @@ static void showRegisterPreview(void) {
 		insertRow(prev, 0, (const uint8_t *)"(no registers set)", 18);
 
 	bufferEnsureRow(prev);
+	mutateRebuildEnd(prev, &rebuild);
 	showPopupBuffer(prev);
 }
 
@@ -166,7 +173,7 @@ static void showRegisterOutput(int reg) {
 	formatRegName(name, sizeof(name), reg);
 
 	struct buffer *out = findOrCreateSpecialBuffer("*Output*");
-	bufferResetRows(out);
+	struct mutateRebuild rebuild = mutateRebuildBegin(out);
 	out->read_only = 1;
 	out->word_wrap = 0;
 
@@ -184,9 +191,8 @@ static void showRegisterOutput(int reg) {
 				 "Register %s: stale point (buffer closed)",
 				 name);
 		} else {
-			const char *fname = pt->buf->filename ?
-						    pt->buf->filename :
-						    "*scratch*";
+			char fname[160];
+			formatBufferName(fname, sizeof(fname), pt->buf);
 			snprintf(
 				header, sizeof(header),
 				"Register %s contains the buffer position: buffer %s, line %d col %d",
@@ -223,6 +229,7 @@ static void showRegisterOutput(int reg) {
 	}
 
 	bufferEnsureRow(out);
+	mutateRebuildEnd(out, &rebuild);
 	showPopupBuffer(out);
 }
 
@@ -336,6 +343,11 @@ void incrementRegister(void) {
 			size_t kill_len = strlen((char *)E.kill.str);
 			size_t region_len =
 				strlen((char *)E.registers[reg].data.text.str);
+			/* Register text is yanked as an int length, so it
+			 * must stay within the same bound as a row. */
+			if (region_len > (size_t)INT_MAX - 1 ||
+			    kill_len > (size_t)INT_MAX - 1 - region_len)
+				abort();
 			size_t new_len = region_len + kill_len + 1;
 			E.registers[reg].data.text.str = xrealloc(
 				E.registers[reg].data.text.str, new_len);

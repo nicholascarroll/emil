@@ -1,27 +1,29 @@
 /* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 /* test_kill_ring.c
  *
- * Kill ring operations today touch three things in parallel:
- *   - E.kill (the "current" kill, used as a read cache)
- *   - E.kill_history (the ring itself)
- *   - E.kill_ring_pos (cursor within the ring for M-y)
+ * Kill, yank and yank-pop, checked by what lands in the buffer.
  *
  *   1. Kill then yank returns the most recent kill.
  *   2. Kill, kill, yank, yank-pop returns the previous kill.
  *   3. A rectangle kill yanked back preserves its geometry.
  *   4. An empty kill is not recorded.
  *
- * The tests exercise killRegion/yank/yankPop directly rather than
- * key sequences — the dispatch layer is covered by test_keymap. */
+ * The tests issue commands through processKeypress() and read the
+ * buffer text, point and mark.  They do not look at how the ring is
+ * stored, so the storage can change without touching them.  The one
+ * exception is the last test, which clears the undo history by hand;
+ * its comment says why. */
 
 #include "test.h"
 #include "test_harness.h"
 #include "emil.h"
 #include "buffer.h"
-#include "region.h"
+#include "fileio.h"
 #include "keymap.h"
+#include "region.h"
 #include "undo.h"
 #include "util.h"
+#include <stdlib.h>
 #include <string.h>
 
 
@@ -33,15 +35,34 @@ void tearDown(void) {
 	cleanupTestEditor();
 }
 
-/* Helper: set mark at (mx, my), point at (px, py), kill the region
- * between them.  killRegion handles normalisation internally. */
-static void kill_range(struct buffer *buf, int mx, int my, int px, int py) {
+/* The whole buffer as the bytes a save would write. */
+#define ASSERT_TEXT(expected, buf)                           \
+	do {                                                 \
+		size_t _len;                                 \
+		char *_text = rowsToString((buf), &_len);    \
+		TEST_ASSERT_EQUAL_STRING((expected), _text); \
+		free(_text);                                 \
+	} while (0)
+
+/* Helper: set mark at (mx, my) and point at (px, py). */
+static void set_region(struct buffer *buf, int mx, int my, int px, int py) {
 	buf->markx = mx;
 	buf->marky = my;
 	buf->mark_active = 1;
 	buf->cx = px;
 	buf->cy = py;
-	killRegion();
+}
+
+/* Helper: set mark at (mx, my), point at (px, py), then C-w. */
+static void kill_range(struct buffer *buf, int mx, int my, int px, int py) {
+	set_region(buf, mx, my, px, py);
+	processKeypress(CMD_KILL_REGION);
+}
+
+/* Helper: put point at the end of row 0. */
+static void end_of_first_row(struct buffer *buf) {
+	buf->cx = buf->row[0].size;
+	buf->cy = 0;
 }
 
 /* --- 1. kill + yank → most recent kill ---------------------------- */
@@ -52,12 +73,10 @@ void test_yank_returns_most_recent_kill(void) {
 	/* Kill "world" (columns 6..11 on row 0). */
 	kill_range(buf, 6, 0, 11, 0);
 	TEST_ASSERT_EQUAL_STRING("hello ", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_INT(1, E.kill_history.count);
 
 	/* Yank it back at end of line. */
-	buf->cx = buf->row[0].size;
-	buf->cy = 0;
-	yank(0);
+	end_of_first_row(buf);
+	processKeypress(CMD_YANK);
 	TEST_ASSERT_EQUAL_STRING("hello world", row_str(buf, 0));
 }
 
@@ -73,16 +92,14 @@ void test_yank_pop_returns_previous_kill(void) {
 	/* Kill "def" (second kill, now most recent; "ghi" is older). */
 	kill_range(buf, 4, 0, 7, 0);
 	TEST_ASSERT_EQUAL_STRING("abc  ", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_INT(2, E.kill_history.count);
 
 	/* Yank at end: most recent kill = "def". */
-	buf->cx = buf->row[0].size;
-	buf->cy = 0;
-	yank(0);
+	end_of_first_row(buf);
+	processKeypress(CMD_YANK);
 	TEST_ASSERT_EQUAL_STRING("abc  def", row_str(buf, 0));
 
 	/* M-y: replace the just-yanked text with the previous kill "ghi". */
-	yankPop(0);
+	processKeypress(CMD_YANK_POP);
 	TEST_ASSERT_EQUAL_STRING("abc  ghi", row_str(buf, 0));
 }
 
@@ -94,66 +111,57 @@ void test_rectangle_yank_preserves_geometry(void) {
 	 *   "ABCDEF"    "AB"  — cols [2..4) of rows 0,1 → "CD" and "cd"
 	 *   "abcdef"
 	 *   "123456"
-	 * so the rectangle kill is "CDcd", width=2, height=2. */
+	 * so the killed rectangle is "CD" over "cd": two columns wide,
+	 * two rows high. */
 	const char *lines[] = { "ABCDEF", "abcdef", "123456" };
 	struct buffer *buf = make_test_buffer_lines(lines, 3);
 
-	/* Enter rectangle mode.  Mark at (2, 0), point at (4, 1). */
-	buf->rectangle_mode = 1;
-	buf->markx = 2;
-	buf->marky = 0;
-	buf->mark_active = 1;
-	buf->cx = 4;
-	buf->cy = 1;
-
-	killRectangle();
+	/* Mark at (2, 0), point at (4, 1), then C-x r k. */
+	set_region(buf, 2, 0, 4, 1);
+	processKeypress(CMD_KILL_RECT);
 
 	/* After kill: columns [2..4) removed from rows 0,1. */
-	TEST_ASSERT_EQUAL_STRING("ABEF", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_STRING("abef", row_str(buf, 1));
-	TEST_ASSERT_EQUAL_STRING("123456", row_str(buf, 2));
-
-	/* Kill ring entry is a rectangle with width=2, height=2. */
-	struct historyEntry *last = getLastHistory(&E.kill_history);
-	TEST_ASSERT_NOT_NULL(last);
-	TEST_ASSERT_TRUE(last->is_rectangle);
-	TEST_ASSERT_EQUAL_INT(2, last->rect_width);
-	TEST_ASSERT_EQUAL_INT(2, last->rect_height);
+	ASSERT_TEXT("ABEF\nabef\n123456\n", buf);
 
 	/* Yank the rectangle back at its original top-left.  Geometry is
 	 * preserved: the original text returns. */
 	buf->cx = 2;
 	buf->cy = 0;
-	yankRectangle();
-	TEST_ASSERT_EQUAL_STRING("ABCDEF", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_STRING("abcdef", row_str(buf, 1));
+	processKeypress(CMD_YANK_RECT);
+	ASSERT_TEXT("ABCDEF\nabcdef\n123456\n", buf);
+
+	/* Yanked somewhere else it is still two columns by two rows:
+	 * "CD" goes into the row at point and "cd" into the row below,
+	 * at the same column. */
+	buf->cx = 0;
+	buf->cy = 1;
+	processKeypress(CMD_YANK_RECT);
+	ASSERT_TEXT("ABCDEF\nCDabcdef\ncd123456\n", buf);
 }
 
 /* --- 4. empty kill is not recorded -------------------------------- */
 
 void test_empty_kill_not_recorded(void) {
-	struct buffer *buf = make_test_buffer("text");
-	(void)buf;
+	struct buffer *buf = make_test_buffer("word text");
 
-	int count_before = E.kill_history.count;
+	/* One real kill: "word". */
+	kill_range(buf, 0, 0, 4, 0);
+	TEST_ASSERT_EQUAL_STRING(" text", row_str(buf, 0));
 
-	/* An empty-string kill: addToKillRing returns early, ring unchanged. */
-	addToKillRing("", 0, 0, 0);
-	TEST_ASSERT_EQUAL_INT(count_before, E.kill_history.count);
+	/* C-w with point == mark is a zero-length region.  It removes
+	 * nothing and must not put an empty entry on the ring. */
+	kill_range(buf, 0, 0, 0, 0);
+	TEST_ASSERT_EQUAL_STRING(" text", row_str(buf, 0));
 
-	/* A NULL kill: same. */
-	addToKillRing(NULL, 0, 0, 0);
-	TEST_ASSERT_EQUAL_INT(count_before, E.kill_history.count);
-
-	/* killRegion with point == mark is a zero-length range; deleteRange
-	 * returns early and nothing is recorded. */
-	buf->markx = 0;
-	buf->marky = 0;
-	buf->mark_active = 1;
+	/* So the latest kill is still "word"... */
 	buf->cx = 0;
 	buf->cy = 0;
-	killRegion();
-	TEST_ASSERT_EQUAL_INT(count_before, E.kill_history.count);
+	processKeypress(CMD_YANK);
+	TEST_ASSERT_EQUAL_STRING("word text", row_str(buf, 0));
+
+	/* ...and it is the only one: M-y cycles back round to it. */
+	processKeypress(CMD_YANK_POP);
+	TEST_ASSERT_EQUAL_STRING("word text", row_str(buf, 0));
 }
 
 /* --- 5. rectangle yank with no rectangle kill --------------------- */
@@ -168,25 +176,34 @@ void test_yank_rectangle_without_rect_kill(void) {
 	buf->cy = 0;
 
 	/* No kill at all */
-	yankRectangle();
-	TEST_ASSERT_EQUAL_STRING("hello", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
+	processKeypress(CMD_YANK_RECT);
+	ASSERT_TEXT("hello\n", buf);
 
-	/* Plain-text (non-rectangle) kill */
-	addToKillRing("plain", 0, 0, 0);
-	yankRectangle();
-	TEST_ASSERT_EQUAL_STRING("hello", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
+	/* Plain-text (non-rectangle) kill: M-w over "hello". */
+	set_region(buf, 0, 0, 5, 0);
+	processKeypress(CMD_COPY);
+	buf->cx = 0;
+	buf->cy = 0;
+	processKeypress(CMD_YANK_RECT);
+	ASSERT_TEXT("hello\n", buf);
 
-	/* Read-only buffer with a real rectangle kill: no modification */
-	addToKillRing("ab", 1, 2, 1);
+	/* Read-only buffer with a real rectangle kill ("he", copied
+	 * with C-x r M-w): no modification. */
+	set_region(buf, 0, 0, 2, 0);
+	processKeypress(CMD_COPY_RECT);
+	buf->cx = 0;
+	buf->cy = 0;
 	buf->read_only = 1;
-	yankRectangle();
-	TEST_ASSERT_EQUAL_STRING("hello", row_str(buf, 0));
-	buf->read_only = 0;
-}
+	processKeypress(CMD_YANK_RECT);
+	ASSERT_TEXT("hello\n", buf);
 
-/* --- runner ------------------------------------------------------- */
+	/* The same yank goes through once the buffer is writable, so
+	 * the refusal above was the read-only check and not a missing
+	 * rectangle. */
+	buf->read_only = 0;
+	processKeypress(CMD_YANK_RECT);
+	ASSERT_TEXT("hehello\n", buf);
+}
 
 /* --- 6. C-u C-y: reverse yank — point before, mark after ---------- */
 
@@ -200,8 +217,7 @@ void test_reverse_yank_leaves_point_before_text(void) {
 	/* C-u C-y at end of line, driven through the real dispatch so
 	 * the uarg hand-off is exercised.  Any positive uarg means
 	 * reverse; bare C-u arrives as 4. */
-	buf->cx = buf->row[0].size;
-	buf->cy = 0;
+	end_of_first_row(buf);
 	E.uarg = 4;
 	processKeypress(CMD_YANK);
 	TEST_ASSERT_EQUAL_STRING("hello world", row_str(buf, 0));
@@ -227,13 +243,13 @@ void test_reverse_yank_pop_cycles_forward(void) {
 	TEST_ASSERT_EQUAL_STRING("abc  ", row_str(buf, 0));
 
 	/* Yank ("def"), M-y (→ "ghi"), then M-- M-y returns to "def". */
-	buf->cx = buf->row[0].size;
-	buf->cy = 0;
-	yank(0);
+	end_of_first_row(buf);
+	processKeypress(CMD_YANK);
 	TEST_ASSERT_EQUAL_STRING("abc  def", row_str(buf, 0));
-	yankPop(0);
+	processKeypress(CMD_YANK_POP);
 	TEST_ASSERT_EQUAL_STRING("abc  ghi", row_str(buf, 0));
-	yankPop(UARG_REVERSE);
+	processKeypress(CMD_NEGATIVE_ARG);
+	processKeypress(CMD_YANK_POP);
 	TEST_ASSERT_EQUAL_STRING("abc  def", row_str(buf, 0));
 }
 
@@ -246,15 +262,16 @@ void test_reverse_modifier_noop_combinations(void) {
 	TEST_ASSERT_EQUAL_STRING(" ", row_str(buf, 0));
 
 	/* M-- C-y: nothing happens. */
-	buf->cx = buf->row[0].size;
-	buf->cy = 0;
-	yank(UARG_REVERSE);
+	end_of_first_row(buf);
+	processKeypress(CMD_NEGATIVE_ARG);
+	processKeypress(CMD_YANK);
 	TEST_ASSERT_EQUAL_STRING(" ", row_str(buf, 0));
 
 	/* Yank, then C-u M-y: nothing happens, buffer unchanged. */
-	yank(0);
+	processKeypress(CMD_YANK);
 	TEST_ASSERT_EQUAL_STRING(" stub", row_str(buf, 0));
-	yankPop(4);
+	processKeypress(CMD_UNIVERSAL_ARG);
+	processKeypress(CMD_YANK_POP);
 	TEST_ASSERT_EQUAL_STRING(" stub", row_str(buf, 0));
 }
 
@@ -266,11 +283,10 @@ void test_negative_arg_preserves_kill_ring_pos(void) {
 	kill_range(buf, 8, 0, 11, 0);
 	kill_range(buf, 4, 0, 7, 0);
 
-	buf->cx = buf->row[0].size;
-	buf->cy = 0;
+	end_of_first_row(buf);
 
 	/* C-y, then M-- as a keypress, then M-y: the M-- keystroke must
-	 * not reset E.kill_ring_pos, or the pop reports "not after
+	 * not break the yank chain, or the pop reports "not after
 	 * yank".  Full dispatch path. */
 	processKeypress(CMD_YANK);
 	TEST_ASSERT_EQUAL_STRING("abc  def", row_str(buf, 0));
@@ -290,24 +306,24 @@ void test_negative_arg_preserves_kill_ring_pos(void) {
  * it never did.  The test documents that rather than guarding a
  * regression. */
 void test_yank_pop_after_final_newline_repair(void) {
-	struct buffer *buf = make_test_buffer("hello");
+	const char *lines[] = { "hello", "second" };
+	struct buffer *buf = make_test_buffer_lines(lines, 2);
 
 	kill_range(buf, 0, 0, 5, 0); /* kill "hello" */
-	buf->cx = 0;
-	buf->cy = 0;
-	insertRow(buf, 0, (const uint8_t *)"second", 6);
-	kill_range(buf, 0, 0, 6, 0); /* kill "second" */
-	TEST_ASSERT_EQUAL_INT(2, E.kill_history.count);
+	kill_range(buf, 0, 1, 6, 1); /* kill "second" */
+	ASSERT_TEXT("\n\n", buf);
 
-	/* Yank at the very end of the buffer. */
+	/* Yank at the very end of the buffer: the text lands on the
+	 * last line and the buffer still ends with a newline. */
 	buf->cy = buf->numrows - 1;
 	buf->cx = buf->row[buf->cy].size;
 	processKeypress(CMD_YANK);
-	TEST_ASSERT(E.kill_ring_pos >= 0);
+	ASSERT_TEXT("\n\nsecond\n", buf);
 
 	/* M-y must be accepted and must cycle to the older kill. */
 	processKeypress(CMD_YANK_POP);
 	TEST_ASSERT(strstr(E.statusmsg, "not a yank") == NULL);
+	ASSERT_TEXT("\n\nhello\n", buf);
 }
 
 /* --- 11. M-y with no preceding yank is still refused -------------- */
@@ -317,31 +333,32 @@ void test_yank_pop_without_preceding_yank_refused(void) {
 	kill_range(buf, 0, 0, 3, 0);
 	buf->cx = 0;
 	buf->cy = 0;
+	ASSERT_TEXT("\n", buf);
 
-	/* Never yanked: kill_ring_pos is -1. */
-	TEST_ASSERT_EQUAL_INT(-1, E.kill_ring_pos);
-	yankPop(0);
+	/* Never yanked: M-y has nothing to replace. */
+	processKeypress(CMD_YANK_POP);
 	TEST_ASSERT(strstr(E.statusmsg, "not a yank") != NULL);
+	ASSERT_TEXT("\n", buf);
 }
 
 /* --- 12. an intervening command breaks the yank chain ------------- */
 void test_intervening_command_breaks_yank_chain(void) {
 	struct buffer *buf = make_test_buffer("abc def ghi");
 
-	kill_range(buf, 0, 0, 3, 0);
-	kill_range(buf, 0, 0, 4, 0);
-	buf->cx = buf->row[0].size;
-	buf->cy = 0;
+	kill_range(buf, 0, 0, 3, 0); /* "abc" */
+	kill_range(buf, 0, 0, 4, 0); /* " def" */
+	end_of_first_row(buf);
 
 	processKeypress(CMD_YANK);
-	TEST_ASSERT(E.kill_ring_pos >= 0);
+	ASSERT_TEXT(" ghi def\n", buf);
 
-	/* Any other command resets the flag (processKeypress does it). */
+	/* Any other command ends the chain... */
 	processKeypress(CMD_FORWARD_CHAR);
-	TEST_ASSERT_EQUAL_INT(-1, E.kill_ring_pos);
 
+	/* ...so M-y is refused and the yanked text stays as it is. */
 	processKeypress(CMD_YANK_POP);
 	TEST_ASSERT(strstr(E.statusmsg, "not a yank") != NULL);
+	ASSERT_TEXT(" ghi def\n", buf);
 }
 
 /* --- 13. M-y with kill_ring_pos set but the undo stack cleared ----
@@ -356,8 +373,7 @@ void test_yank_pop_refused_when_undo_cleared(void) {
 
 	kill_range(buf, 0, 0, 3, 0);
 	kill_range(buf, 0, 0, 4, 0);
-	buf->cx = buf->row[0].size;
-	buf->cy = 0;
+	end_of_first_row(buf);
 
 	processKeypress(CMD_YANK);
 	TEST_ASSERT(E.kill_ring_pos >= 0);

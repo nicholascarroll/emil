@@ -128,11 +128,21 @@ void test_ins_point_before_earlier_line(void) {
 /* ---- Insertion: point at insertion point (same-line) ---- */
 
 void test_ins_point_at_start_same_line(void) {
-	/* Insert 5 chars at (5,3), ending at (10,3), point at (5,3) */
+	/* Insert 5 chars at (5,3), ending at (10,3), point at (5,3):
+	 * like an Emacs marker, the point stays before the new text. */
 	int px = 5, py = 3;
 	int ret = adjustPoint(&px, &py, 5, 3, 10, 3, 0);
 	TEST_ASSERT_EQUAL_INT(0, ret);
-	TEST_ASSERT_EQUAL_INT(10, px); /* shifted right by 5 */
+	TEST_ASSERT_EQUAL_INT(5, px);
+	TEST_ASSERT_EQUAL_INT(3, py);
+}
+
+void test_ins_point_at_start_multiline(void) {
+	/* Insert at (5,3) ending at (8,5), point at (5,3): stays. */
+	int px = 5, py = 3;
+	int ret = adjustPoint(&px, &py, 5, 3, 8, 5, 0);
+	TEST_ASSERT_EQUAL_INT(0, ret);
+	TEST_ASSERT_EQUAL_INT(5, px);
 	TEST_ASSERT_EQUAL_INT(3, py);
 }
 
@@ -443,6 +453,126 @@ void test_rowoff_adjusted_for_focused_window_too(void) {
 	TEST_ASSERT_EQUAL_STRING("L10", row_str(buf, E.windows[1]->rowoff));
 }
 
+/* Spec 05 P2, at the command level: C-SPC then typing.  In Emacs the
+ * mark stays before the typed text, so the region is what was typed
+ * and C-w kills it.  The mark used to move along with the insertion,
+ * leaving an empty region. */
+void test_mark_stays_before_typed_text(void) {
+	const char *lines[] = { "xy", "" };
+	struct buffer *buf = make_test_buffer_lines(lines, 2);
+	buf->cx = 1;
+	buf->cy = 0;
+	processKeypress(CMD_SET_MARK);
+	E.self_insert_key = 'a';
+	processKeypress(CMD_SELF_INSERT);
+	E.self_insert_key = 'b';
+	processKeypress(CMD_SELF_INSERT);
+	TEST_ASSERT_EQUAL_STRING("xaby", (char *)buf->row[0].chars);
+	TEST_ASSERT_EQUAL_INT(1, buf->markx);
+	TEST_ASSERT_EQUAL_INT(0, buf->marky);
+	TEST_ASSERT_EQUAL_INT(3, buf->cx);
+
+	/* So C-w takes exactly what was typed... */
+	processKeypress(CMD_KILL_REGION);
+	TEST_ASSERT_EQUAL_STRING("xy", (char *)buf->row[0].chars);
+
+	/* ...and C-y gives it back. */
+	buf->cx = 2;
+	processKeypress(CMD_YANK);
+	TEST_ASSERT_EQUAL_STRING("xyab", (char *)buf->row[0].chars);
+}
+
+/* Spec 05 P2: another window's cursor, a register point and a ring
+ * entry at the place where text is inserted all stay before it, as in
+ * Emacs (window-point, point-to-register and the mark ring are all
+ * markers there).
+ *
+ * Each is read back the way a user reaches it: C-u C-SPC through the
+ * ring, C-x r j to the register, C-x o to the other window. */
+
+/* Run `cmd` with one key waiting for it. */
+static void pressWithKey(int cmd, int key) {
+	int keys[] = { key };
+	scriptKeys(keys, 1);
+	muteStdout();
+	processKeypress(cmd);
+	unmuteStdout();
+	TEST_ASSERT_EQUAL_INT(1, test_key_pos);
+	clearKeys();
+}
+
+static void assertPoint(struct buffer *buf, int cx, int cy) {
+	TEST_ASSERT_EQUAL_INT(cx, buf->cx);
+	TEST_ASSERT_EQUAL_INT(cy, buf->cy);
+}
+
+void test_other_points_stay_before_inserted_text(void) {
+	/* "b\nc" on the kill ring, copied with M-w out of a scratch
+	 * buffer that is gone again before the test proper starts. */
+	const char *bc[] = { "b", "c" };
+	struct buffer *scratch = make_test_buffer_lines(bc, 2);
+	scratch->markx = 0;
+	scratch->marky = 0;
+	scratch->mark_active = 1;
+	scratch->cx = 1;
+	scratch->cy = 1;
+	processKeypress(CMD_COPY);
+	destroyBuffer(scratch);
+	E.buf = NULL;
+	E.headbuf = NULL;
+	E.windows[0]->buf = NULL;
+
+	makeMinibuffer();
+	const char *lines[] = { "xy", "" };
+	struct buffer *buf = make_test_buffer_lines(lines, 2);
+	buf->cx = 1;
+	buf->cy = 0;
+	processKeypress(CMD_CREATE_WINDOW); /* window 1 keeps (1,0) */
+	processKeypress(CMD_SET_MARK);	    /* mark at (1,0) */
+	buf->cx = 0;
+	processKeypress(CMD_SET_MARK); /* the ring gets (1,0) */
+	buf->cx = 1;
+	pressWithKey(CMD_POINT_REGISTER, 'q'); /* register q: (1,0) */
+
+	/* Type at (1,0), then yank two lines after it. */
+	E.self_insert_key = 'a';
+	processKeypress(CMD_SELF_INSERT);
+	processKeypress(CMD_YANK);
+	TEST_ASSERT_EQUAL_STRING("xab", (char *)buf->row[0].chars);
+	TEST_ASSERT_EQUAL_STRING("cy", (char *)buf->row[1].chars);
+	/* The typing cursor itself is moved by the command. */
+	assertPoint(buf, 1, 1);
+
+	/* C-u C-SPC three times: the mark the yank set where its text
+	 * went in, the mark from before the yank, then the ring entry.
+	 * Had the entry moved with the text it would now be at (1,1),
+	 * after the yanked newline. */
+	E.uarg = 4;
+	processKeypress(CMD_SET_MARK);
+	assertPoint(buf, 2, 0);
+	E.uarg = 4;
+	processKeypress(CMD_SET_MARK);
+	assertPoint(buf, 0, 0);
+	E.uarg = 4;
+	processKeypress(CMD_SET_MARK);
+	assertPoint(buf, 1, 0);
+
+	/* C-x r j q: the register point did not move either. */
+	buf->cx = 0;
+	buf->cy = 1;
+	pressWithKey(CMD_JUMP_REGISTER, 'q');
+	assertPoint(buf, 1, 0);
+
+	/* C-x o: the other window's cursor is where it was. */
+	buf->cx = 0;
+	buf->cy = 1;
+	processKeypress(CMD_OTHER_WINDOW);
+	TEST_ASSERT(E.buf == buf);
+	assertPoint(buf, 1, 0);
+
+	freeMinibuffer();
+}
+
 int main(void) {
 	TEST_BEGIN();
 
@@ -461,6 +591,7 @@ int main(void) {
 	RUN_TEST(test_ins_point_before_same_line);
 	RUN_TEST(test_ins_point_before_earlier_line);
 	RUN_TEST(test_ins_point_at_start_same_line);
+	RUN_TEST(test_ins_point_at_start_multiline);
 	RUN_TEST(test_ins_point_after_on_same_line);
 	RUN_TEST(test_ins_multiline_point_on_start_line);
 	RUN_TEST(test_ins_point_after_later_line);
@@ -480,6 +611,10 @@ int main(void) {
 	RUN_TEST(test_rowoff_inside_deleted_span_collapses_to_first_row);
 	RUN_TEST(test_rowoff_unchanged_by_edit_below_viewport_top);
 	RUN_TEST(test_rowoff_adjusted_for_focused_window_too);
+
+	/* Spec 05 P2: points stay before text inserted at them */
+	RUN_TEST(test_mark_stays_before_typed_text);
+	RUN_TEST(test_other_points_stay_before_inserted_text);
 
 	return TEST_END();
 }

@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <limits.h>
 
 /* E is defined in stubs.c (which replaces main.o) */
 extern struct config E;
@@ -178,11 +179,18 @@ static inline const char *row_str(struct buffer *buf, int row) {
  * readKey(). */
 
 /* Keys fed to readKey() by the stub in stubs.c. */
-extern int test_key_script[64];
+/* Room for a full path typed at a prompt, and a few keys more. */
+#define TEST_KEY_SCRIPT_MAX (PATH_MAX + 64)
+extern int test_key_script[TEST_KEY_SCRIPT_MAX];
 extern int test_key_count;
 extern int test_key_pos;
 
 static inline void scriptKeys(const int *keys, int n) {
+	if (n > TEST_KEY_SCRIPT_MAX) {
+		fprintf(stderr, "scriptKeys: %d keys, room for %d\n", n,
+			TEST_KEY_SCRIPT_MAX);
+		abort();
+	}
 	for (int i = 0; i < n; i++)
 		test_key_script[i] = keys[i];
 	test_key_count = n;
@@ -198,6 +206,32 @@ static inline void clearKeys(void) {
  * which writes escape sequences straight to fd 1.  That would corrupt
  * the test runner's view of stdout, so redirect it for the duration of
  * the call under test. */
+#ifdef __wasi__
+/* Under wasmer, a descriptor for the host's stdout or stderr held at
+ * fd 3 or above makes every posix_spawn() child exit 71 before it
+ * runs, close-on-exec or not.  Saving stdout with dup() while muted
+ * therefore failed every shell command a test typed, even `true`, and
+ * the suites blamed the commands.  Restoring fd 1 by reopening
+ * /dev/stdout is no way out either: after a spawn, nothing written
+ * through it reaches the host.
+ *
+ * So nothing is saved.  fd 1 comes back as a copy of fd 2, which means
+ * that from the first mute on the suite reports on stderr instead of
+ * stdout; run_tests.sh reads the two together. */
+static inline void muteStdout(void) {
+	fflush(stdout);
+	int devnull = open("/dev/null", O_WRONLY);
+	if (devnull >= 0) {
+		dup2(devnull, STDOUT_FILENO);
+		close(devnull);
+	}
+}
+
+static inline void unmuteStdout(void) {
+	fflush(stdout);
+	dup2(STDERR_FILENO, STDOUT_FILENO);
+}
+#else
 static int saved_stdout = -1;
 
 static inline void muteStdout(void) {
@@ -218,6 +252,7 @@ static inline void unmuteStdout(void) {
 		saved_stdout = -1;
 	}
 }
+#endif
 
 /* editorPrompt needs a minibuffer; main.c builds one at startup and
  * initTestEditor does not. */
@@ -233,6 +268,36 @@ static inline void freeMinibuffer(void) {
 		destroyBuffer(E.minibuf);
 		E.minibuf = NULL;
 	}
+}
+
+/* ---- Opening a file the way a user does ----
+ *
+ * C-x C-f, with `path` and RET typed at its prompt.  Needs a
+ * minibuffer (makeMinibuffer) and a current buffer to start from.
+ * Returns the buffer the editor is showing afterwards: the file's
+ * buffer when it opened, the buffer that was current when it did not.
+ *
+ * A C-g waits behind the RET.  The file prompt stays open when the
+ * path names a directory, and without the C-g the script would run
+ * out there and the prompt would wait for ever.  When the prompt has
+ * already returned, the C-g is never read.
+ *
+ * The path is typed a byte at a time, so it must be ASCII, and a
+ * `*`, `?` or `[` in it is a wildcard to find-file, as it is to a
+ * user. */
+static inline struct buffer *findFileTyping(const char *path) {
+	static int keys[TEST_KEY_SCRIPT_MAX];
+	int n = 0;
+	for (const char *p = path; *p && n < TEST_KEY_SCRIPT_MAX - 2; p++)
+		keys[n++] = (unsigned char)*p;
+	keys[n++] = '\r';
+	keys[n++] = KEY_CTRL('g');
+	scriptKeys(keys, n);
+	muteStdout();
+	processKeypress(CMD_FIND_FILE);
+	unmuteStdout();
+	clearKeys();
+	return E.buf;
 }
 
 /* Columns a wide (CJK) character occupies on this platform.

@@ -8,7 +8,7 @@
 #include "emil.h"
 #include "history.h"
 #include "keymap.h"
-
+#include "message.h"
 #include "terminal.h"
 #include "unicode.h"
 #include "util.h"
@@ -195,10 +195,10 @@ uint8_t *editorPrompt(const char *prompt, enum promptType t,
 		recordKey(c);
 
 		/* Repeat search forward/backward */
-		if (t == PROMPT_SEARCH && c == KEY_META(CTRL('s')))
-			c = CTRL('s');
-		else if (t == PROMPT_SEARCH && c == KEY_META(CTRL('r')))
-			c = CTRL('r');
+		if (t == PROMPT_SEARCH && c == KEY_META(KEY_CTRL('s')))
+			c = KEY_CTRL('s');
+		else if (t == PROMPT_SEARCH && c == KEY_META(KEY_CTRL('r')))
+			c = KEY_CTRL('r');
 
 		int callback_key = c;
 
@@ -247,7 +247,7 @@ uint8_t *editorPrompt(const char *prompt, enum promptType t,
 		/* Handle special minibuffer keys */
 		switch (c) {
 		case '\r':
-		case CTRL('j'): {
+		case KEY_CTRL('j'): {
 			/* C-j submits: minibuffer-local-map binds both \r
 			 * and \n to exit-minibuffer.  Emacs's RET/C-j
 			 * divergence exists only in completion maps, and
@@ -309,7 +309,7 @@ uint8_t *editorPrompt(const char *prompt, enum promptType t,
 					if (elen > 0 && !ends_slash) {
 						E.minibuf->cx =
 							E.minibuf->row[0].size;
-						insertChar(E.minibuf, '/', 1);
+						selfInsert(E.minibuf, '/', 1);
 					}
 
 					handleMinibufferCompletion(E.minibuf,
@@ -340,8 +340,8 @@ uint8_t *editorPrompt(const char *prompt, enum promptType t,
 			goto done;
 		}
 
-		case CTRL('g'):
-		case CTRL('c'):
+		case KEY_CTRL('g'):
+		case KEY_CTRL('c'):
 			result = NULL;
 			goto done;
 
@@ -353,12 +353,12 @@ uint8_t *editorPrompt(const char *prompt, enum promptType t,
 				/* A literal TAB is C-q TAB, as in a shell. */
 				handleShellCompletion(E.minibuf);
 			} else {
-				insertChar(E.minibuf, '\t', 1);
+				selfInsert(E.minibuf, '\t', 1);
 			}
 			break;
 
-		case CTRL('s'):
-		case CTRL('r'):
+		case KEY_CTRL('s'):
+		case KEY_CTRL('r'):
 			/* C-s C-s or C-r C-r: populate empty search with
 			 * the last search string. */
 			if (t == PROMPT_SEARCH && E.minibuf->row[0].size == 0) {
@@ -501,4 +501,20 @@ done:
 	clearStatusMessage();
 
 	return result;
+}
+
+int promptKey(const char *msg) {
+	setStatusMessage("%s", msg);
+	refreshScreen();
+	cursorBottomLine(stringWidth((const uint8_t *)msg) + 1);
+	int c = readKey();
+	if (c != -1)
+		recordKey(c);
+	return c;
+}
+
+int confirmYN(const char *msg) {
+	int c = promptKey(msg);
+	clearStatusMessage();
+	return c == 'y' || c == 'Y';
 }

@@ -184,6 +184,7 @@ static const struct {
 	{ CMD_YANK_RECT, "yank-rect" },
 	{ CMD_TOGGLE_RECT_MODE, "toggle-rect-mode" },
 	{ CMD_VISUAL_LINE_MODE, "visual-line-mode" },
+	{ CMD_WHITESPACE_MODE, "whitespace-mode" },
 	{ CMD_WHAT_CURSOR, "what-cursor" },
 	{ CMD_UNDO, "undo" },
 	{ CMD_REDO, "redo" },

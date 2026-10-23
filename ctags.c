@@ -6,7 +6,8 @@
 #include <unistd.h>
 #include "ctags.h"
 #include "emil.h"
-
+#include "mutate.h"
+#include "message.h"
 #include "buffer.h"
 #include "dbuf.h"
 #include "fileio.h"
@@ -17,6 +18,7 @@
 #include "window.h"
 #include "util.h"
 #include "unicode.h"
+#include "region.h"
 
 /* ---- jump-back stack ---- */
 
@@ -122,15 +124,25 @@ static char *wordAtPoint(int hyphens) {
 	while (end < row->size && isWordAt(row, end))
 		end = nextCPStart(row, end);
 
-	while (hyphens && start > 0 && row->chars[start - 1] == '-' &&
-	       isWordAt(row, prevCPStart(row, start - 1))) {
-		start = prevCPStart(row, start - 1);
+	/* A run of hyphens joins two words (Lisp's pkg--internal uses
+	 * two), but only when there is a word on its far side. */
+	while (hyphens && start > 0 && row->chars[start - 1] == '-') {
+		int h = start - 1;
+		while (h > 0 && row->chars[h - 1] == '-')
+			h--;
+		if (h == 0 || !isWordAt(row, prevCPStart(row, h)))
+			break;
+		start = prevCPStart(row, h);
 		while (start > 0 && isWordAt(row, prevCPStart(row, start)))
 			start = prevCPStart(row, start);
 	}
-	while (hyphens && end + 1 < row->size && row->chars[end] == '-' &&
-	       isWordAt(row, end + 1)) {
-		end++;
+	while (hyphens && end < row->size && row->chars[end] == '-') {
+		int h = end + 1;
+		while (h < row->size && row->chars[h] == '-')
+			h++;
+		if (h >= row->size || !isWordAt(row, h))
+			break;
+		end = h;
 		while (end < row->size && isWordAt(row, end))
 			end = nextCPStart(row, end);
 	}
@@ -396,14 +408,49 @@ static int collectMatches(const char *sym, struct tagMatch **out) {
 
 /* One row: the scope padded to a column, the file and line, then the
  * definition's own text.*/
-static void menuRow(struct dbuf *d, const struct tagMatch *m, int scope_cols) {
+/* A tags file is outside text, so a field can hold bytes a row must not.
+ * Each comes back as utf8SanitizeLine leaves it, except that a tab stays
+ * a tab: definition lines often hold one.  Caller frees. */
+static char *menuField(const char *s) {
+	size_t cap = strlen(s) * 3 + 1, o = 0;
+	char *out = xmalloc(cap);
+	out[0] = '\0';
+	while (*s) {
+		size_t n = strcspn(s, "\t");
+		utf8SanitizeLine((const uint8_t *)s, n, out + o, cap - o);
+		o += strlen(out + o);
+		s += n;
+		if (*s == '\t') {
+			out[o++] = '\t';
+			out[o] = '\0';
+			s++;
+		}
+	}
+	return out;
+}
+
+/* The width a scope takes in the menu. */
+static int menuScopeWidth(const char *scope) {
+	char *s = menuField(scope);
+	int w = stringWidth((const uint8_t *)s);
+	free(s);
+	return w;
+}
+
+static void appendMenuField(struct dbuf *d, const char *field) {
+	char *s = menuField(field);
+	dbuf_append(d, (const uint8_t *)s, (int)strlen(s));
+	free(s);
+}
+
+void ctagsMenuRow(struct dbuf *d, const struct tagMatch *m, int scope_cols) {
 	if (scope_cols > 0) {
 		const char *s = m->scope ? m->scope : "";
-		dbuf_append(d, (const uint8_t *)s, (int)strlen(s));
-		dbuf_pad(d, ' ', scope_cols - stringWidth((const uint8_t *)s));
+		appendMenuField(d, s);
+		dbuf_pad(d, ' ', scope_cols - menuScopeWidth(s));
 		dbuf_append(d, (const uint8_t *)"  ", 2);
 	}
-	dbuf_append(d, (const uint8_t *)m->file, (int)strlen(m->file));
+	appendMenuField(d, m->file);
 	if (m->line > 0) {
 		char num[16];
 		int len = snprintf(num, sizeof(num), ":%d", m->line);
@@ -414,7 +461,7 @@ static void menuRow(struct dbuf *d, const struct tagMatch *m, int scope_cols) {
 		def++;
 	if (*def) {
 		dbuf_append(d, (const uint8_t *)"  ", 2);
-		dbuf_append(d, (const uint8_t *)def, (int)strlen(def));
+		appendMenuField(d, def);
 	}
 }
 
@@ -424,8 +471,7 @@ static void menuRow(struct dbuf *d, const struct tagMatch *m, int scope_cols) {
 static int pickMatch(const char *sym, const struct tagMatch *v, int n) {
 	int scope_cols = 0;
 	for (int i = 0; i < n; i++) {
-		int w = v[i].scope ? stringWidth((const uint8_t *)v[i].scope) :
-				     0;
+		int w = v[i].scope ? menuScopeWidth(v[i].scope) : 0;
 		if (w > scope_cols)
 			scope_cols = w;
 	}
@@ -433,15 +479,16 @@ static int pickMatch(const char *sym, const struct tagMatch *v, int n) {
 		scope_cols = TAGS_SCOPE_COLS_MAX;
 
 	struct buffer *pb = findOrCreateSpecialBuffer(TAGS_MENU_NAME);
-	bufferResetRows(pb);
+	struct mutateRebuild rebuild = mutateRebuildBegin(pb);
 	for (int i = 0; i < n; i++) {
 		struct dbuf d = DBUF_INIT;
 		int len;
-		menuRow(&d, &v[i], scope_cols);
+		ctagsMenuRow(&d, &v[i], scope_cols);
 		uint8_t *row = dbuf_detach(&d, &len);
 		insertRow(pb, i, row, (size_t)len);
 		free(row);
 	}
+	mutateRebuildEnd(pb, &rebuild);
 	pb->read_only = 1;
 	pb->word_wrap = 0;
 	pb->rectangle_mode = 0;
@@ -470,12 +517,12 @@ static int pickMatch(const char *sym, const struct tagMatch *v, int n) {
 		if (key == -1) {
 			if (!E.playback)
 				continue;
-			key = CTRL('g');
+			key = KEY_CTRL('g');
 		}
 		recordKey(key);
-		if (key == '\r' || key == CTRL('j'))
+		if (key == '\r' || key == KEY_CTRL('j'))
 			break;
-		if (key == CTRL('g')) {
+		if (key == KEY_CTRL('g')) {
 			sel = -1;
 			break;
 		}
@@ -539,15 +586,71 @@ static void visitMatch(const struct tagMatch *m, const char *sym) {
 	setStatusMessage("Tag: %s", sym);
 }
 
+/* A mark drawn on the character before it, such as a Thai tone mark
+ * or vowel sign, or a combining accent.  Zero-width format characters
+ * (ZWSP, ZWJ, ZWNJ) are not marks: a ZWSP is a word break. */
+static int isCombiningAt(const erow *row, int i) {
+	if (i < 0 || i >= row->size || row->chars[i] < 0x80)
+		return 0;
+	uint32_t cp = utf8Decode(row->chars, i);
+	return !isZeroWidth(cp) && !isSeparatorCP(cp) &&
+	       charInStringWidth(row->chars, i) == 0;
+}
+
+/* The text of an active region on one line, trimmed of blanks, for
+ * tag names the word scanner can't see: *debug*, null?, Foo::bar.
+ * Sets *err and returns NULL when the region can't be a name. */
+static char *regionSymbol(const char **err) {
+	struct buffer *buf = E.buf;
+	if (buf->marky != buf->cy) {
+		*err = "Tag name can't span lines";
+		return NULL;
+	}
+	erow *row = &buf->row[buf->cy];
+	int s = buf->markx < buf->cx ? buf->markx : buf->cx;
+	int e = buf->markx < buf->cx ? buf->cx : buf->markx;
+	/* The cursor can stop invisibly between a letter and its marks:
+	 * keep the marks with their letter at both ends. */
+	while (e < row->size && isCombiningAt(row, e))
+		e = nextCPStart(row, e);
+	while (s > 0 && isCombiningAt(row, s))
+		s = prevCPStart(row, s);
+	while (s < e && (row->chars[s] == ' ' || row->chars[s] == '\t'))
+		s++;
+	while (e > s && (row->chars[e - 1] == ' ' || row->chars[e - 1] == '\t'))
+		e--;
+	if (s == e) {
+		*err = "No symbol in region";
+		return NULL;
+	}
+	char *w = xmalloc(e - s + 1);
+	memcpy(w, &row->chars[s], e - s);
+	w[e - s] = '\0';
+	return w;
+}
+
 void ctagsJump(void) {
-	char *sym = ctagsWordAtPoint();
-	if (!sym) {
-		setStatusMessage("No symbol at point");
-		return;
+	int from_region = E.buf->mark_active && !markInvalidBuf(E.buf);
+	char *sym;
+	if (from_region) {
+		const char *err = NULL;
+		E.buf->mark_active = 0;
+		sym = regionSymbol(&err);
+		if (!sym) {
+			setStatusMessage("%s", err);
+			return;
+		}
+	} else {
+		sym = ctagsWordAtPoint();
+		if (!sym) {
+			setStatusMessage("No symbol at point");
+			return;
+		}
 	}
 	struct tagMatch *v = NULL;
 	int n = -1;
-	char *hyphenated = ctagsHyphenatedWordAtPoint();
+	/* A marked name is taken exactly as marked. */
+	char *hyphenated = from_region ? NULL : ctagsHyphenatedWordAtPoint();
 	if (hyphenated) {
 		n = collectMatches(hyphenated, &v);
 		if (n > 0) {

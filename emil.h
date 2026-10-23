@@ -4,7 +4,6 @@
 #define EMIL_H 1
 
 #include "abuf.h"
-#include "keymap.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <termios.h>
@@ -89,6 +88,10 @@ struct undo {
 	int datasize;
 	int delete;
 	int paired;
+	/* The cursor just before this change, where undo puts it back
+	 * (as Emacs does); pointy is -1 when not recorded. */
+	int pointx;
+	int pointy;
 	uint8_t *data;
 };
 
@@ -173,6 +176,7 @@ struct window {
 	int coloff;
 	int height;
 	int skip_sublines; /* sub-lines of rowoff row to skip (derived per frame) */
+	int whitespace; /* whitespace-mode: tabs and line feeds drawn as marks */
 };
 
 struct macro {

@@ -2,8 +2,9 @@
  * SPDX-License-Identifier: MIT */
 #include "motion.h"
 #include "display.h"
+#include "message.h"
 #include "buffer.h"
-
+#include "keymap.h"
 #include "prompt.h"
 #include "region.h"
 #include "unicode.h"
@@ -13,6 +14,8 @@
 #include <ctype.h>
 #include <stdint.h>
 #include <stdlib.h>
+
+const int page_overlap = 2;
 
 /* Boundary detection */
 
@@ -136,6 +139,8 @@ void forwardWordEnd(struct buffer *buf, int *dx, int *dy) {
 		while (cx < l) {
 			uint8_t c = buf->row[cy].chars[cx];
 			int nb = utf8_nBytes(c);
+			if (nb > l - cx)
+				nb = l - cx; /* truncated sequence */
 
 			/* Decode codepoint for CJK check */
 			if (c >= 0x80) {
@@ -723,7 +728,9 @@ void endOfLine(int count) {
 		int start_byte, end_byte;
 		sublineBounds(row, E.screencols, current_subline, &start_byte,
 			      &end_byte);
-		if (end_byte < row->size) {
+		/* Not the last sub-line: a full last line is followed by
+		 * an empty one, so its end_byte is the row's size. */
+		if (current_subline < countScreenLines(row, E.screencols) - 1) {
 			/* Mid-row sub-line: back up one character so we
 			 * land on the last char of this sub-line, not
 			 * the first char of the next one. */
@@ -732,6 +739,16 @@ void endOfLine(int count) {
 				pos--;
 			while (pos > start_byte &&
 			       utf8_isCont(row->chars[pos]));
+			/* A zero-width character there sits at the wrap
+			 * column, which shows on the next line: back up to
+			 * the character it follows. */
+			while (pos > start_byte &&
+			       charAdvance(row->chars, pos, 0, NULL) == 0) {
+				do
+					pos--;
+				while (pos > start_byte &&
+				       utf8_isCont(row->chars[pos]));
+			}
 			E.buf->cx = pos;
 		} else {
 			E.buf->cx = row->size;

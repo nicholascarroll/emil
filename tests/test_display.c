@@ -334,6 +334,41 @@ void test_drawrows_pads_short_row_to_full_width(void) {
 	cleanupTestEditor();
 }
 
+/* whitespace-mode: a tab's first cell shows ⇥, the rest stay blank,
+ * and the cell after the text shows ↵. */
+void test_whitespace_marks_tab_and_line_feed(void) {
+	initTestEditor();
+	static const char *lines[1] = { "a\tb" };
+	struct buffer *buf = make_test_buffer_lines(lines, 1);
+	E.windows[0]->height = 1;
+	E.screenrows = 1;
+	buf->word_wrap = 0;
+	E.windows[0]->whitespace = 1;
+
+	int len = 0;
+	char *out = render_rows(E.windows[0], &len);
+
+	const char *want = "a⇥      b↵ ";
+	TEST_ASSERT_EQUAL_INT(0, memcmp(out, want, strlen(want)));
+	free(out);
+	cleanupTestEditor();
+}
+
+/* A new window starts with whitespace-mode off, whatever the window
+ * it was split from shows. */
+void test_whitespace_not_inherited_by_new_window(void) {
+	initTestEditor();
+	static const char *lines[1] = { "a" };
+	make_test_buffer_lines(lines, 1);
+	E.windows[0]->whitespace = 1;
+
+	createWindow();
+
+	TEST_ASSERT_EQUAL_INT(2, E.nwindows);
+	TEST_ASSERT_EQUAL_INT(0, E.windows[1]->whitespace);
+	cleanupTestEditor();
+}
+
 /* The status bar takes the column scroll() already computed.  A hint
  * the row's own text could not produce shows it is used rather than
  * recomputed -- and the row is left uncached, so nothing walked it. */
@@ -678,6 +713,75 @@ void test_viewport_stable_across_an_edit_above_a_non_focused_window(void) {
 	cleanupTestEditor();
 }
 
+/* #148: a row is drawn by the fit rule at both edges of a 10-column
+ * window.  Returns the drawn bytes (caller frees) and their columns. */
+static char *edgeRender(const char *text, int wrap, int coloff, int *cells) {
+	initTestEditor();
+	struct buffer *buf = make_test_buffer(text);
+	buf->word_wrap = wrap;
+	E.screencols = 10;
+	E.screenrows = E.windows[0]->height = wrap ? 2 : 1;
+	E.windows[0]->coloff = coloff;
+	int len;
+	char *out = render_rows(E.windows[0], &len);
+	*cells = utf8WidthN((const uint8_t *)out, len);
+	cleanupTestEditor();
+	return out;
+}
+
+void test_row_edges_follow_fit_rule(void) {
+	char *out;
+	int cells;
+	/* A mark on the last column's base is drawn, wrap off and on. */
+	out = edgeRender(combiningCols() ? "        e\xcc\x81" :
+					   "         e\xcc\x81", 0, 0, &cells);
+	TEST_ASSERT(strstr(out, "\xcc\x81") != NULL);
+	free(out);
+	out = edgeRender("aaaaaaaaae\xcc\x81" "bbb", 1, 0, &cells);
+	TEST_ASSERT(strstr(out, "\xcc\x81") != NULL);
+	free(out);
+	/* A wide or control character straddling the edge is blanked. */
+	free(edgeRender("aaaaaaaaa\xe6\x97\xa5", 0, 0, &cells));
+	TEST_ASSERT_EQUAL_INT(10, cells);
+	free(edgeRender("aaaaaaaaa\x01", 0, 0, &cells));
+	TEST_ASSERT_EQUAL_INT(10, cells);
+	/* A mark whose base scrolled off the left goes with it. */
+	out = edgeRender("e\xcc\x81" "abc", 0, 1, &cells);
+	TEST_ASSERT(combiningCols() || (unsigned char)out[0] != 0xcc);
+	free(out);
+	/* ...as does one whose base was blanked at the right edge. */
+	out = edgeRender("aaaaaaaaa\xe6\x97\xa5\xcc\x81", 0, 0, &cells);
+	TEST_ASSERT(strstr(out, "\xcc\x81") == NULL);
+	free(out);
+	/* A mark after a wrap break is drawn once, on the first line. */
+	out = edgeRender("abcdefgh \xcc\x81" "xyzw", 1, 0, &cells);
+	char *first = strstr(out, "\xcc\x81");
+	TEST_ASSERT(first && !strstr(first + 2, "\xcc\x81"));
+	TEST_ASSERT(combiningCols() || first < strstr(out, "\r\n"));
+	free(out);
+	/* ...and with a character forced onto a line too narrow for it. */
+	initTestEditor();
+	struct buffer *buf = make_test_buffer("\xe6\x97\xa5\xcc\x81" "b");
+	buf->word_wrap = 1;
+	E.screencols = 1;
+	E.screenrows = E.windows[0]->height = 3;
+	int len;
+	out = render_rows(E.windows[0], &len);
+	first = strstr(out, "\xcc\x81");
+	TEST_ASSERT(first);
+	TEST_ASSERT(combiningCols() || first < strstr(out, "\r\n"));
+	free(out);
+	cleanupTestEditor();
+	/* The cursor on a wide character at the edge scrolls it into view. */
+	initTestEditor();
+	buf = make_test_buffer("aaaaaaaaa\xe6\x97\xa5" "b");
+	buf->cx = 9;
+	E.screencols = 10;
+	scroll();
+	TEST_ASSERT_EQUAL_INT(wideCols() - 1, E.windows[0]->coloff);
+	cleanupTestEditor();
+}
+
 /* These tests manage the editor themselves. */
 void setUp(void) {
 }
@@ -903,6 +1007,133 @@ void test_minibuf_sizing_matches_what_is_drawn(void) {
 	minibuffer_height = 1;
 }
 
+/* ================================================================
+ * Nothing the terminal would act on is sent raw
+ *
+ * The buffer, file names and status messages are all untrusted text.
+ * A C1 control (U+0080..U+009F) is valid UTF-8, so it reaches the
+ * buffer, but xterm and VTE read U+009B as CSI and U+009D as OSC: a
+ * file could hide its own text from whoever is reviewing it.  A C0
+ * control in a file name is ESC itself.  Each must be drawn as
+ * something inert, in the columns the layout already priced it at.
+ * ================================================================ */
+
+/* Any C1 control, still encoded, anywhere in the bytes? */
+static int hasRawC1(const char *s, int len) {
+	const uint8_t *u = (const uint8_t *)s;
+	for (int i = 0; i + 1 < len; i++)
+		if (u[i] == 0xC2 && u[i + 1] >= 0x80 && u[i + 1] <= 0x9F)
+			return 1;
+	return 0;
+}
+
+/* The bytes with emil's own CSI sequences removed: what a terminal
+ * would show, provided nothing else in them is a control.  Writes a
+ * NUL-terminated string into out. */
+static void visibleText(const char *in, int len, char *out, int cap) {
+	int o = 0;
+	for (int i = 0; i < len && o + 1 < cap;) {
+		if (in[i] == '\x1b' && i + 1 < len && in[i + 1] == '[') {
+			i += 2;
+			while (i < len && !(in[i] >= 0x40 && in[i] <= 0x7E))
+				i++;
+			i++; /* the final byte */
+			continue;
+		}
+		out[o++] = in[i++];
+	}
+	out[o] = '\0';
+}
+
+void test_c1_control_in_a_row_is_not_sent_raw(void) {
+	initTestEditor();
+	/* U+009B CSI, U+009D OSC, U+009C ST around ordinary text. */
+	static const char *lines[1] = { "a\xc2\x9b"
+					"8mX\xc2\x9d"
+					"0;T\xc2\x9c"
+					"b" };
+	struct buffer *buf = make_test_buffer_lines(lines, 1);
+	buf->word_wrap = 0;
+	E.windows[0]->height = 1;
+	E.screenrows = 1;
+
+	int len = 0;
+	char *out = render_rows(E.windows[0], &len);
+	char shown[256];
+	visibleText(out, len, shown, sizeof(shown));
+
+	TEST_ASSERT_FALSE(hasRawC1(out, len));
+	/* One '?' per control, one column each, the text around them in
+	 * place. */
+	TEST_ASSERT_EQUAL_INT(0, strncmp(shown, "a?8mX?0;T?b", 11));
+	free(out);
+	cleanupTestEditor();
+}
+
+void test_control_chars_in_a_file_name_are_not_sent_raw(void) {
+	initTestEditor();
+	struct buffer *buf = make_test_buffer("x");
+	buf->filename = xstrdup("evil\x1b]0;T\x07\xc2\x9d.txt");
+	computeDisplayNames();
+
+	struct abuf ab = ABUF_INIT;
+	drawStatusBar(E.windows[0], &ab, 1, -1);
+
+	TEST_ASSERT_FALSE(containsBytes(ab.b, ab.len, "\x1b]", 2));
+	TEST_ASSERT_FALSE(containsBytes(ab.b, ab.len, "\x07", 1));
+	TEST_ASSERT_FALSE(hasRawC1(ab.b, ab.len));
+	TEST_ASSERT_TRUE(containsBytes(ab.b, ab.len, "evil^[]0;T^G?.txt", 17));
+	abFree(&ab);
+	cleanupTestEditor();
+}
+
+void test_control_chars_in_a_message_are_not_sent_raw(void) {
+	E.screencols = 80;
+	snprintf(E.statusmsg, sizeof(E.statusmsg), "%s",
+		 "Wrote 3 bytes to evil\x1b]0;T\x07\xc2\x9b"
+		 "2J");
+	E.statusmsg_show = 1;
+	E.prefix_display[0] = '\0';
+	minibuffer_height = 1;
+
+	struct minibufLine lines[MINIBUF_MAX_LINES];
+	int n = minibufLayout(E.statusmsg, 0, E.screencols, lines,
+			      MINIBUF_MAX_LINES);
+	TEST_ASSERT_EQUAL_INT(1, n);
+
+	struct abuf ab = ABUF_INIT;
+	drawMinibuffer(&ab);
+	char shown[256];
+	visibleText(ab.b, ab.len, shown, sizeof(shown));
+
+	TEST_ASSERT_FALSE(containsBytes(ab.b, ab.len, "\x1b]", 2));
+	TEST_ASSERT_FALSE(containsBytes(ab.b, ab.len, "\x07", 1));
+	TEST_ASSERT_FALSE(hasRawC1(ab.b, ab.len));
+	TEST_ASSERT_EQUAL_STRING("Wrote 3 bytes to evil^[]0;T^G?2J", shown);
+	/* Drawn as wide as the layout measured it, or the cursor that
+	 * the prompt places after the text lands in the wrong column. */
+	TEST_ASSERT_EQUAL_INT(lines[0].cols, (int)strlen(shown));
+
+	abFree(&ab);
+	E.statusmsg[0] = '\0';
+	E.statusmsg_show = 0;
+}
+
+/* C-x = on a C1 control names it rather than echoing it. */
+void test_describe_char_names_a_c1_control(void) {
+	initTestEditor();
+	static const char *lines[1] = { "\xc2\x9b" };
+	struct buffer *buf = make_test_buffer_lines(lines, 1);
+	buf->cx = 0;
+	buf->cy = 0;
+
+	describeChar();
+
+	TEST_ASSERT_NOT_NULL(strstr(E.statusmsg, "CONTROL-009B"));
+	TEST_ASSERT_FALSE(hasRawC1(E.statusmsg, (int)strlen(E.statusmsg)));
+	cleanupTestEditor();
+}
+
 void tearDown(void) {
 }
 
@@ -926,6 +1157,8 @@ int main(void) {
 	/* §C2 */
 	RUN_TEST(test_drawrows_wide_row_does_not_compute_full_width);
 	RUN_TEST(test_drawrows_pads_short_row_to_full_width);
+	RUN_TEST(test_whitespace_marks_tab_and_line_feed);
+	RUN_TEST(test_whitespace_not_inherited_by_new_window);
 	RUN_TEST(test_statusbar_uses_the_frames_cursor_column);
 	RUN_TEST(test_scroll_returns_the_cursor_display_column);
 
@@ -954,6 +1187,13 @@ int main(void) {
 	RUN_TEST(test_minibuf_sizing_matches_what_is_drawn);
 	RUN_TEST(test_minibuf_layout_ascii_unchanged);
 	RUN_TEST(test_minibuf_layout_forces_progress);
+	RUN_TEST(test_row_edges_follow_fit_rule);
+
+	/* Nothing the terminal would act on is sent raw */
+	RUN_TEST(test_c1_control_in_a_row_is_not_sent_raw);
+	RUN_TEST(test_control_chars_in_a_file_name_are_not_sent_raw);
+	RUN_TEST(test_control_chars_in_a_message_are_not_sent_raw);
+	RUN_TEST(test_describe_char_names_a_c1_control);
 
 	return TEST_END();
 }

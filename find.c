@@ -4,12 +4,11 @@
 #include "buffer.h"
 #include "display.h"
 #include "emil.h"
+#include "message.h"
 #include "history.h"
 #include "keymap.h"
-
 #include "prompt.h"
 #include "region.h"
-#include "terminal.h"
 #include "transform.h"
 #include "undo.h"
 #include "unicode.h"
@@ -246,10 +245,10 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 
 	/* editorPrompt handles C-g, C-c and RET itself and never passes
 	 * them here; searchInteractive resets the per-search state. */
-	if (key == CTRL('s')) {
+	if (key == KEY_CTRL('s')) {
 		direction = 1;
 		allow_wrap = search_failing;
-	} else if (key == CTRL('r')) {
+	} else if (key == KEY_CTRL('r')) {
 		direction = -1;
 		allow_wrap = search_failing;
 	} else {
@@ -543,7 +542,7 @@ static char *qrStatusPrompt(void) {
 	char *o = xmalloc(sz), *r = xmalloc(sz), *prompt = xmalloc(sz);
 	utf8SanitizeLine(replace_orig, olen, o, sz);
 	utf8SanitizeLine(replace_repl, rlen, r, sz);
-	snprintf(prompt, sz, "Query replacing %s with %s:", o, r);
+	snprintf(prompt, sz, "Query replacing %s with %s: ", o, r);
 	free(o);
 	free(r);
 	return prompt;
@@ -592,7 +591,6 @@ void queryReplace(void) {
 
 	/* Status prompt shown during the y/n loop */
 	char *prompt = qrStatusPrompt();
-	int bufwidth = stringWidth((const uint8_t *)prompt);
 
 	int savedMx = E.buf->markx;
 	int savedMy = E.buf->marky;
@@ -605,12 +603,7 @@ void queryReplace(void) {
 		goto QR_CLEANUP;
 
 	for (;;) {
-		setStatusMessage("%s", prompt);
-		refreshScreen();
-		cursorBottomLine(bufwidth + 2);
-
-		int c = readKey();
-		recordKey(c);
+		int c = promptKey(prompt);
 		switch (c) {
 		case ' ':
 		case 'y':
@@ -618,7 +611,7 @@ void queryReplace(void) {
 			if (!findNextMatch(replace_orig, 1))
 				goto QR_CLEANUP;
 			break;
-		case CTRL('h'):
+		case KEY_CTRL('h'):
 		case KEY_BACKSPACE:
 		case KEY_DEL:
 		case 'n':
@@ -629,7 +622,7 @@ void queryReplace(void) {
 		case '\r':
 		case 'q':
 		case 'N':
-		case CTRL('g'):
+		case KEY_CTRL('g'):
 			goto QR_CLEANUP;
 		case '.':
 			transformRegion(transformerReplaceString);
@@ -645,26 +638,28 @@ void queryReplace(void) {
 		case 'u':
 			/* Only undo replacements made in THIS session */
 			if (E.buf->undo != first) {
+				/* Undo returns the cursor to where the
+				 * replacement was made: the match's start.
+				 * Mark its end, as findNextMatch does. */
 				doUndo(E.buf, 1);
-				E.buf->markx = E.buf->cx;
+				E.buf->markx =
+					E.buf->cx +
+					strlen((const char *)replace_orig);
 				E.buf->marky = E.buf->cy;
-				E.buf->cx -= strlen((const char *)replace_orig);
-				if (E.buf->cx < 0)
-					E.buf->cx = 0;
 			}
 			break;
 		case 'U':
 			if (E.buf->undo != first) {
-				while (E.buf->undo != first)
-					doUndo(E.buf, 1);
-				E.buf->markx = E.buf->cx;
+				while (E.buf->undo != first &&
+				       doUndo(E.buf, 1) == UNDO_DONE)
+					;
+				E.buf->markx =
+					E.buf->cx +
+					strlen((const char *)replace_orig);
 				E.buf->marky = E.buf->cy;
-				E.buf->cx -= strlen((const char *)replace_orig);
-				if (E.buf->cx < 0)
-					E.buf->cx = 0;
 			}
 			break;
-		case CTRL('r'): {
+		case KEY_CTRL('r'): {
 			char rprompt[192];
 			snprintf(rprompt, sizeof(rprompt),
 				 "Replace this %.78s with: ", replace_orig);
@@ -682,7 +677,6 @@ void queryReplace(void) {
 			/* Rebuild status prompt */
 			free(prompt);
 			prompt = qrStatusPrompt();
-			bufwidth = stringWidth((const uint8_t *)prompt);
 			break;
 		}
 		case 'e':
@@ -701,10 +695,9 @@ void queryReplace(void) {
 			}
 			free(prompt);
 			prompt = qrStatusPrompt();
-			bufwidth = stringWidth((const uint8_t *)prompt);
 			break;
 		}
-		case CTRL('l'):
+		case KEY_CTRL('l'):
 			recenter(currentWindow);
 			break;
 		}
