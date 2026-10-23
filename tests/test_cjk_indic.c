@@ -558,6 +558,61 @@ void test_wordwrap_combining_cluster_intact(void) {
 	TEST_ASSERT_EQUAL(12, break_byte); /* after กิ, before ค */
 }
 
+/* #148: a character wider than the window is forced onto a line of its
+ * own, and its zero-width marks go with it.  A tab (8 columns) in a
+ * 4-column window is wider under any locale; the mark after it costs
+ * nothing only under a UTF-8 one. */
+void test_wordwrap_forced_char_keeps_marks(void) {
+	uint8_t text[] = "\t\xCC\x81"
+			 "b";
+	erow row = { 0 };
+	row.chars = text;
+	row.size = 4;
+	row.cached_width = -1;
+
+	int break_col, break_byte;
+	int more = wordWrapBreak(&row, 4, 0, 0, &break_col, &break_byte);
+
+	TEST_ASSERT_TRUE(more);
+	TEST_ASSERT_EQUAL(8, break_col);
+	TEST_ASSERT_EQUAL(combiningCols() ? 1 : 3, break_byte);
+}
+
+/* A forced character that ends the row is the row's last screen line:
+ * wordWrapBreak says nothing follows, so the line count and the
+ * cursor's line agree. */
+void test_wordwrap_forced_last_char_ends_row(void) {
+	uint8_t tab[] = "\t";
+	uint8_t marked[] = "\t\xCC\x81";
+	struct {
+		uint8_t *chars;
+		int size;
+	} rows[] = { { tab, 1 }, { marked, 3 } };
+
+	for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) {
+		erow row = { 0 };
+		row.chars = rows[i].chars;
+		row.size = rows[i].size;
+		row.cached_width = -1;
+
+		int break_col, break_byte;
+		int more = wordWrapBreak(&row, 4, 0, 0, &break_col,
+					 &break_byte);
+		int lines = countScreenLines(&row, 4);
+		int line, col;
+		cursorScreenLine(&row, utf8WidthN(row.chars, row.size), 4,
+				 &line, &col);
+
+		TEST_ASSERT_TRUE(line < lines);
+		if (i == 0 || !combiningCols()) {
+			/* The tab alone, or tab + mark under UTF-8. */
+			TEST_ASSERT_FALSE(more);
+			TEST_ASSERT_EQUAL(row.size, break_byte);
+			TEST_ASSERT_EQUAL(1, lines);
+		}
+	}
+}
+
 int main(void) {
 	/* The same locale selection the editor performs, so what these
 	 * tests assert and what emil does cannot drift apart.  Returns 0
@@ -611,6 +666,8 @@ int main(void) {
 	RUN_TEST(test_word_motion_zwsp);
 	RUN_TEST(test_wordwrap_no_split_after_preposed);
 	RUN_TEST(test_wordwrap_combining_cluster_intact);
+	RUN_TEST(test_wordwrap_forced_char_keeps_marks);
+	RUN_TEST(test_wordwrap_forced_last_char_ends_row);
 	RUN_TEST(test_wordwrap_ascii_unchanged);
 
 	return TEST_END();

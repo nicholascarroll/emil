@@ -678,6 +678,75 @@ void test_viewport_stable_across_an_edit_above_a_non_focused_window(void) {
 	cleanupTestEditor();
 }
 
+/* #148: a row is drawn by the fit rule at both edges of a 10-column
+ * window.  Returns the drawn bytes (caller frees) and their columns. */
+static char *edgeRender(const char *text, int wrap, int coloff, int *cells) {
+	initTestEditor();
+	struct buffer *buf = make_test_buffer(text);
+	buf->word_wrap = wrap;
+	E.screencols = 10;
+	E.screenrows = E.windows[0]->height = wrap ? 2 : 1;
+	E.windows[0]->coloff = coloff;
+	int len;
+	char *out = render_rows(E.windows[0], &len);
+	*cells = utf8WidthN((const uint8_t *)out, len);
+	cleanupTestEditor();
+	return out;
+}
+
+void test_row_edges_follow_fit_rule(void) {
+	char *out;
+	int cells;
+	/* A mark on the last column's base is drawn, wrap off and on. */
+	out = edgeRender(combiningCols() ? "        e\xcc\x81" :
+					   "         e\xcc\x81", 0, 0, &cells);
+	TEST_ASSERT(strstr(out, "\xcc\x81") != NULL);
+	free(out);
+	out = edgeRender("aaaaaaaaae\xcc\x81" "bbb", 1, 0, &cells);
+	TEST_ASSERT(strstr(out, "\xcc\x81") != NULL);
+	free(out);
+	/* A wide or control character straddling the edge is blanked. */
+	free(edgeRender("aaaaaaaaa\xe6\x97\xa5", 0, 0, &cells));
+	TEST_ASSERT_EQUAL_INT(10, cells);
+	free(edgeRender("aaaaaaaaa\x01", 0, 0, &cells));
+	TEST_ASSERT_EQUAL_INT(10, cells);
+	/* A mark whose base scrolled off the left goes with it. */
+	out = edgeRender("e\xcc\x81" "abc", 0, 1, &cells);
+	TEST_ASSERT(combiningCols() || (unsigned char)out[0] != 0xcc);
+	free(out);
+	/* ...as does one whose base was blanked at the right edge. */
+	out = edgeRender("aaaaaaaaa\xe6\x97\xa5\xcc\x81", 0, 0, &cells);
+	TEST_ASSERT(strstr(out, "\xcc\x81") == NULL);
+	free(out);
+	/* A mark after a wrap break is drawn once, on the first line. */
+	out = edgeRender("abcdefgh \xcc\x81" "xyzw", 1, 0, &cells);
+	char *first = strstr(out, "\xcc\x81");
+	TEST_ASSERT(first && !strstr(first + 2, "\xcc\x81"));
+	TEST_ASSERT(combiningCols() || first < strstr(out, "\r\n"));
+	free(out);
+	/* ...and with a character forced onto a line too narrow for it. */
+	initTestEditor();
+	struct buffer *buf = make_test_buffer("\xe6\x97\xa5\xcc\x81" "b");
+	buf->word_wrap = 1;
+	E.screencols = 1;
+	E.screenrows = E.windows[0]->height = 3;
+	int len;
+	out = render_rows(E.windows[0], &len);
+	first = strstr(out, "\xcc\x81");
+	TEST_ASSERT(first);
+	TEST_ASSERT(combiningCols() || first < strstr(out, "\r\n"));
+	free(out);
+	cleanupTestEditor();
+	/* The cursor on a wide character at the edge scrolls it into view. */
+	initTestEditor();
+	buf = make_test_buffer("aaaaaaaaa\xe6\x97\xa5" "b");
+	buf->cx = 9;
+	E.screencols = 10;
+	scroll();
+	TEST_ASSERT_EQUAL_INT(wideCols() - 1, E.windows[0]->coloff);
+	cleanupTestEditor();
+}
+
 /* These tests manage the editor themselves. */
 void setUp(void) {
 }
@@ -954,6 +1023,7 @@ int main(void) {
 	RUN_TEST(test_minibuf_sizing_matches_what_is_drawn);
 	RUN_TEST(test_minibuf_layout_ascii_unchanged);
 	RUN_TEST(test_minibuf_layout_forces_progress);
+	RUN_TEST(test_row_edges_follow_fit_rule);
 
 	return TEST_END();
 }

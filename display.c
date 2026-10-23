@@ -483,6 +483,7 @@ void clampCursorToViewport(struct window *win, struct buffer *buf) {
  *             or -1 to scan from the beginning.  The word-wrap caller
  *             already knows the byte offset; passing it in avoids an
  *             O(line-length) skip loop for every wrapped sub-line.
+ * end_byte: no byte at or past it is drawn (the word-wrap break).
  *
  * Returns the display column rendering stopped at -- end_col if the row
  * ran past the right edge, otherwise the row's width.  The caller pads
@@ -490,7 +491,7 @@ void clampCursorToViewport(struct window *win, struct buffer *buf) {
 static int renderLineWithHighlighting(erow *row, struct abuf *ab, int start_col,
 				      int end_col,
 				      const struct rowHighlight *hl,
-				      int start_byte) {
+				      int start_byte, int end_byte) {
 	int render_x = 0;
 	int char_idx = 0;
 	int current_highlight = 0;
@@ -501,7 +502,11 @@ static int renderLineWithHighlighting(erow *row, struct abuf *ab, int start_col,
 		char_idx = start_byte;
 		render_x = start_col;
 	} else {
-		while (char_idx < row->size && render_x < start_col) {
+		/* Marks trailing a skipped character go with it. */
+		while (char_idx < row->size &&
+		       (render_x < start_col ||
+			(char_idx > 0 && charAdvance(row->chars, char_idx,
+						     render_x, NULL) == 0))) {
 			if (row->chars[char_idx] < 0x80 &&
 			    !ISCTRL(row->chars[char_idx])) {
 				render_x += 1;
@@ -541,29 +546,39 @@ static int renderLineWithHighlighting(erow *row, struct abuf *ab, int start_col,
 	 * loop would mis-pad, and the cursor would leave its
 	 * character; sharing the rule removes the possibility rather
 	 * than the instances. */
-	while (char_idx < row->size && render_x < end_col) {
+	while (char_idx < end_byte) {
 		uint8_t c = row->chars[char_idx];
+		int nb;
+		int width = charAdvance(row->chars, char_idx, render_x, &nb);
+		/* Drawn only if it fits, the rule utf8ColsToBytes and
+		 * wordWrapBreak apply: a zero-width mark at end_col still
+		 * belongs to the last cell (#148); a character straddling
+		 * end_col is blanked like a tab rather than overflowing. */
+		if (render_x >= end_col && width > 0)
+			break;
 
 		updateHighlight(ab, &current_highlight,
 				isHighlighted(hl, render_x) ? 1 : 0);
 
-		int nb;
-		int width = charAdvance(row->chars, char_idx, render_x, &nb);
 		/* nb is the length the lead byte announces.  A row that
 		 * ends in an incomplete sequence has fewer bytes left than
 		 * that, and the raw copy below must not read past it. */
 		if (nb > row->size - char_idx)
 			nb = row->size - char_idx;
 
-		if (c == '\t') {
-			/* width is the distance to the next tab stop. */
-			int next_tab_stop = render_x + width;
-			while (render_x < next_tab_stop && render_x < end_col) {
+		if (c == '\t' || render_x + width > end_col) {
+			/* Drawn as spaces: a tab, whose width is the
+			 * distance to the next tab stop, or a character
+			 * straddling end_col, blanked up to it. */
+			int blank_end = render_x + width;
+			while (render_x < blank_end && render_x < end_col) {
 				if (render_x >= start_col) {
 					abAppend(ab, " ", 1);
 				}
 				render_x++;
 			}
+			if (blank_end > end_col)
+				break; /* its marks go with it */
 		} else if (ISCTRL(c)) {
 			if (render_x >= start_col) {
 				abAppend(ab, "^", 1);
@@ -722,10 +737,19 @@ int scrollFocused(struct cursorHint *hint) {
 	scrollVertical(win, buf, cursor_col, &scy, &sub_col);
 
 	if (!buf->word_wrap) {
+		/* Scroll so the character under the cursor fits, not just
+		 * its first column: drawRows blanks one straddling the edge. */
+		erow *row = &buf->row[buf->cy];
+		int w = buf->cx < row->size && row->chars[buf->cx] != '\t' ?
+				charAdvance(row->chars, buf->cx, cursor_col,
+					    NULL) :
+				1;
+		if (w < 1 || w > E.screencols)
+			w = 1;
 		if (cursor_col < win->coloff) {
 			win->coloff = cursor_col;
-		} else if (cursor_col >= win->coloff + E.screencols) {
-			win->coloff = cursor_col - E.screencols + 1;
+		} else if (cursor_col + w > win->coloff + E.screencols) {
+			win->coloff = cursor_col + w - E.screencols;
 		}
 	} else {
 		win->coloff = 0;
@@ -797,7 +821,8 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
 				computeRowHighlightBounds(buf, filerow, end_col,
 							  &hl);
 				int emitted = renderLineWithHighlighting(
-					row, ab, win->coloff, end_col, &hl, -1);
+					row, ab, win->coloff, end_col, &hl, -1,
+					row->size);
 				int rx = emitted - win->coloff;
 				if (rx < 0)
 					rx = 0;
@@ -848,8 +873,8 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
 					/* --- Render the span --- */
 					renderLineWithHighlighting(
 						row, ab, line_start_col,
-						break_col, &hl,
-						line_start_byte);
+						break_col, &hl, line_start_byte,
+						break_byte);
 
 					int fill_col = break_col;
 					int fill_hl = 0;

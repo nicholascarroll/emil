@@ -732,6 +732,16 @@ void endOfLine(int count) {
 				pos--;
 			while (pos > start_byte &&
 			       utf8_isCont(row->chars[pos]));
+			/* A zero-width character there sits at the wrap
+			 * column, which shows on the next line: back up to
+			 * the character it follows. */
+			while (pos > start_byte &&
+			       charAdvance(row->chars, pos, 0, NULL) == 0) {
+				do
+					pos--;
+				while (pos > start_byte &&
+				       utf8_isCont(row->chars[pos]));
+			}
 			E.buf->cx = pos;
 		} else {
 			E.buf->cx = row->size;

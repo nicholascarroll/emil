@@ -174,6 +174,10 @@ int wordWrapBreak(erow *row, int screencols, int line_start_col,
 		if (col + cwidth - line_start_col > screencols)
 			break;
 
+		/* A zero-width mark stays with the character before a break. */
+		if (cwidth == 0 && wb_byte == bidx)
+			wb_byte = bidx + nb;
+
 		int this_preposed = 0;
 		if (isWordBoundary(c)) {
 			if (!breakForbiddenAfter(row, bidx) &&
@@ -211,14 +215,22 @@ int wordWrapBreak(erow *row, int screencols, int line_start_col,
 		*break_byte = hard_byte;
 	} else {
 		/* Nothing fit: the segment's first character is wider
-		 * than the window.  Emit it anyway.*/
-		if (bidx == line_start_byte && bidx < row->size) {
+		 * than the window.  Emit it anyway.  Zero-width characters
+		 * before it (a row that starts with a mark) do not count as
+		 * fitting: a line of no width could never hold the cursor. */
+		if (col == line_start_col && bidx < row->size) {
 			int nb;
 			col += charAdvance(row->chars, bidx, col, &nb);
 			bidx += nb;
+			/* Its zero-width marks go with it (#148). */
+			while (bidx < row->size &&
+			       charAdvance(row->chars, bidx, col, &nb) == 0)
+				bidx += nb;
 		}
 		*break_col = col;
 		*break_byte = bidx;
+		/* Forcing it may have used up the row. */
+		return bidx < row->size;
 	}
 	return 1;
 }
@@ -401,6 +413,7 @@ int displayColumnToByteOffset(erow *row, int screencols, int target_subline,
 	/* Phase 2: walk the sub-line to find the target column */
 	int col = 0; /* column relative to sub-line start */
 	int bidx = ls_byte;
+	int last = ls_byte; /* start of the last character with width */
 
 	while (bidx < subline_end_byte) {
 		int nb;
@@ -409,9 +422,15 @@ int displayColumnToByteOffset(erow *row, int screencols, int target_subline,
 		if (col + cwidth > target_col)
 			break;
 
+		if (cwidth > 0)
+			last = bidx;
 		col += cwidth;
 		bidx += nb;
 	}
 
+	/* The wrap column of a line that continues shows on the next
+	 * line (cursorScreenLine): stay on this line's last character. */
+	if (more && ls_col + col >= end_col)
+		bidx = last;
 	return bidx;
 }

@@ -525,8 +525,11 @@ static int editorOpenBody(struct buffer *bufr, const char *filename) {
 	 * the file does not quietly change at save. */
 	int dos_endings = 0;
 	int no_final_newline = 0;
+	long consumed = 0; /* bytes that reached a row, counted by strlen */
 
 	while ((linelen = emil_getline(&line, &linecap, fp)) != -1) {
+		consumed += linelen;
+
 		/* Sampled before stripping and overwritten each pass, so
 		 * after the loop it describes the final line. */
 		no_final_newline = (linelen == 0 || line[linelen - 1] != '\n');
@@ -542,6 +545,19 @@ static int editorOpenBody(struct buffer *bufr, const char *filename) {
 			linelen--;
 		appendRowRaw(bufr, (const uint8_t *)line, linelen);
 	}
+
+	/* emil_getline returns -1 at end of file, on a read error and on
+	 * an allocation failure alike, and its fgets/strlen stop at a NUL
+	 * the pre-scan missed (the pre-scan's own read failed, or the file
+	 * changed between the two passes).  Any of those would present
+	 * part of the file as all of it, and a save would then write the
+	 * part over the whole.  So the open succeeds only if the stream
+	 * reached end of file without error and every byte it read is
+	 * accounted for in a row.  A stream that cannot report its
+	 * position (not a regular file) skips the last check. */
+	long read_pos = ftell(fp);
+	int read_whole = !ferror(fp) && feof(fp) &&
+			 (read_pos < 0 || read_pos == consumed);
 
 	/* The file is the rows joined by '\n', so a trailing newline is
 	 * one more (empty) row.  Appended unconditionally: emil's buffers
@@ -563,6 +579,17 @@ static int editorOpenBody(struct buffer *bufr, const char *filename) {
 
 	free(line);
 	fclose(fp);
+
+	if (!read_whole) {
+		bufferResetRows(bufr);
+		appendRowRaw(bufr, (const uint8_t *)"", 0);
+		free(bufr->filename);
+		bufr->filename = NULL;
+		setStatusMessage("Can't open file: it could not be read "
+				 "completely");
+		free(iopath);
+		return -1;
+	}
 
 	/* Guard against pathological files with billions of tiny lines. */
 	if (bufr->numrows > INT_MAX / 2) {
@@ -1336,8 +1363,10 @@ static int insertFileAtPathBody(struct buffer *buf, const char *path,
 	size_t linecap = 0;
 	ssize_t linelen;
 	int ends_with_newline = 0;
+	long consumed = 0; /* bytes that reached a row, counted by strlen */
 
 	while ((linelen = emil_getline(&line, &linecap, fp)) != -1) {
+		consumed += linelen;
 		ends_with_newline = (linelen > 0 && line[linelen - 1] == '\n');
 		while (linelen > 0 && (line[linelen - 1] == '\n' ||
 				       line[linelen - 1] == '\r')) {
@@ -1345,11 +1374,32 @@ static int insertFileAtPathBody(struct buffer *buf, const char *path,
 		}
 		appendRowRaw(tmpbuf, (const uint8_t *)line, linelen);
 	}
+
+	/* emil_getline returns -1 at end of file, on a read error and on
+	 * an allocation failure alike, and its fgets/strlen stop at a NUL
+	 * the pre-scan missed (the pre-scan's own read failed, or the file
+	 * changed between the two passes).  Any of those would insert
+	 * part of the file as if it were all of it.  So the insert goes
+	 * ahead only if the stream reached end of file without error and
+	 * every byte it read is accounted for in a row.  A stream that
+	 * cannot report its position (not a regular file) skips the last
+	 * check. */
+	long read_pos = ftell(fp);
+	int read_whole = !ferror(fp) && feof(fp) &&
+			 (read_pos < 0 || read_pos == consumed);
+
 	if (tmpbuf->numrows == 0 || ends_with_newline)
 		appendRowRaw(tmpbuf, (const uint8_t *)"", 0);
 
 	free(line);
 	fclose(fp);
+
+	if (!read_whole) {
+		destroyBuffer(tmpbuf);
+		setStatusMessage("Can't insert file: it could not be read "
+				 "completely");
+		return 1;
+	}
 
 	/* Validate UTF-8 before inserting */
 	if (!checkUTF8Validity(tmpbuf)) {
