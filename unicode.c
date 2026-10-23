@@ -213,6 +213,22 @@ const char *unicodeCharName(uint32_t cp) {
 	if (cp == 0x3000)
 		return "IDEOGRAPHIC SPACE";
 
+	/* Line and paragraph separators */
+	if (cp == 0x2028)
+		return "LINE SEPARATOR";
+	if (cp == 0x2029)
+		return "PARAGRAPH SEPARATOR";
+
+	/* Blank characters that are not spaces */
+	if (cp == 0x115F)
+		return "HANGUL CHOSEONG FILLER";
+	if (cp == 0x2800)
+		return "BRAILLE PATTERN BLANK";
+	if (cp == 0x3164)
+		return "HANGUL FILLER";
+	if (cp == 0xFFA0)
+		return "HALFWIDTH HANGUL FILLER";
+
 	/* Zero-width characters */
 	if (cp == 0x200B)
 		return "ZERO WIDTH SPACE";

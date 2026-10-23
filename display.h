@@ -55,6 +55,7 @@ void cursorBottomLine(int curs);
 void resizeScreen(void);
 void recenter(struct window *win);
 void toggleVisualLineMode(void);
+void toggleWhitespaceMode(void);
 void editorVersion(void);
 void help(void);
 void describeChar(void);

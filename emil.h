@@ -177,6 +177,7 @@ struct window {
 	int coloff;
 	int height;
 	int skip_sublines; /* sub-lines of rowoff row to skip (derived per frame) */
+	int whitespace; /* whitespace-mode: tabs and line feeds drawn as marks */
 };
 
 struct macro {

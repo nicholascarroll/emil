@@ -488,10 +488,46 @@ void clampCursorToViewport(struct window *win, struct buffer *buf) {
  * Returns the display column rendering stopped at -- end_col if the row
  * ran past the right edge, otherwise the row's width.  The caller pads
  * from it rather than asking the row how wide it is. */
+/* whitespace-mode marks.  All are East Asian Width Neutral, so one
+ * column wide in every terminal, CJK ones included. */
+#define TAB_MARK "⇥" /* U+21E5, in a tab's first cell */
+#define LF_MARK "↵"  /* U+21B5, in the cell after a row's text */
+#define SPACE_MARK "⬫" /* U+2B2B, for a space */
+#define NBSP_MARK "⬪"  /* U+2B2A, for the no-break spaces */
+#define OTHER_SPACE_MARK "⬗" /* U+2B17, for the other Unicode spaces */
+#define BLANK_MARK "⬖" /* U+2B16, for blank characters that are not spaces */
+#define LSEP_MARK "⬙" /* U+2B19, for LINE SEPARATOR (U+2028) */
+#define PSEP_MARK "⬘" /* U+2B18, for PARAGRAPH SEPARATOR (U+2029) */
+
+/* The mark whitespace-mode draws in place of the character at idx, or
+ * NULL to draw the character itself.  Tabs and line feeds are marked
+ * by the callers. */
+static const char *whitespaceMark(const uint8_t *s, int idx) {
+	if (s[idx] == ' ')
+		return SPACE_MARK;
+	if (s[idx] < 0x80)
+		return NULL;
+	uint32_t cp = utf8Decode(s, idx);
+	if (cp == 0x00A0 || cp == 0x2007 || cp == 0x202F)
+		return NBSP_MARK;
+	if (cp == 0x2028)
+		return LSEP_MARK;
+	if (cp == 0x2029)
+		return PSEP_MARK;
+	if ((cp >= 0x2000 && cp <= 0x200A) || cp == 0x205F || cp == 0x3000)
+		return OTHER_SPACE_MARK;
+	/* Not spaces, but drawn as blank: BRAILLE PATTERN BLANK and the
+	 * Hangul fillers. */
+	if (cp == 0x2800 || cp == 0x3164 || cp == 0xFFA0 || cp == 0x115F)
+		return BLANK_MARK;
+	return NULL;
+}
+
 static int renderLineWithHighlighting(erow *row, struct abuf *ab, int start_col,
 				      int end_col,
 				      const struct rowHighlight *hl,
-				      int start_byte, int end_byte) {
+				      int start_byte, int end_byte,
+				      int whitespace) {
 	int render_x = 0;
 	int char_idx = 0;
 	int current_highlight = 0;
@@ -571,10 +607,16 @@ static int renderLineWithHighlighting(erow *row, struct abuf *ab, int start_col,
 			 * distance to the next tab stop, or a character
 			 * straddling end_col, blanked up to it. */
 			int blank_end = render_x + width;
+			int mark = whitespace && c == '\t';
 			while (render_x < blank_end && render_x < end_col) {
 				if (render_x >= start_col) {
-					abAppend(ab, " ", 1);
+					if (mark)
+						abAppend(ab, TAB_MARK,
+							 sizeof(TAB_MARK) - 1);
+					else
+						abAppend(ab, " ", 1);
 				}
+				mark = 0;
 				render_x++;
 			}
 			if (blank_end > end_col)
@@ -592,7 +634,22 @@ static int renderLineWithHighlighting(erow *row, struct abuf *ab, int start_col,
 			render_x += width; /* == 2 */
 		} else {
 			if (render_x >= start_col) {
-				abAppend(ab, (char *)&row->chars[char_idx], nb);
+				/* A mark fills the first cell; a second
+				 * cell (U+3000) stays blank, as a tab's do. */
+				const char *mark =
+					whitespace && width > 0 ?
+						whitespaceMark(row->chars,
+							       char_idx) :
+						NULL;
+				if (mark) {
+					abAppend(ab, mark, strlen(mark));
+					for (int i = 1; i < width; i++)
+						abAppend(ab, " ", 1);
+				} else {
+					abAppend(ab,
+						 (char *)&row->chars[char_idx],
+						 nb);
+				}
 			}
 			render_x += width;
 		}
@@ -806,6 +863,7 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
 	int filerow = win->rowoff;
 	int skip = win->skip_sublines; /* sub-lines to skip on first row */
 	int truncated = 0; /* a row was cut off by the window's bottom */
+	int ws = win->whitespace;
 
 	for (y = 0; y < screenrows; y++) {
 		int filled =
@@ -822,10 +880,20 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
 							  &hl);
 				int emitted = renderLineWithHighlighting(
 					row, ab, win->coloff, end_col, &hl, -1,
-					row->size);
+					row->size, ws);
 				int rx = emitted - win->coloff;
 				if (rx < 0)
 					rx = 0;
+				/* Every row but the last ends in a line feed
+				 * (the final-newline invariant); mark it if
+				 * its cell is in view. */
+				if (ws && filerow < buf->numrows - 1 &&
+				    emitted >= win->coloff &&
+				    emitted < end_col) {
+					abAppend(ab, LF_MARK,
+						 sizeof(LF_MARK) - 1);
+					rx++;
+				}
 				while (rx < screencols) {
 					abAppend(ab, " ", 1);
 					rx++;
@@ -874,10 +942,15 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
 					renderLineWithHighlighting(
 						row, ab, line_start_col,
 						break_col, &hl, line_start_byte,
-						break_byte);
+						break_byte, ws);
 
 					int fill_col = break_col;
 					int fill_hl = 0;
+					/* The row's line feed takes the first
+					 * fill cell of its last sub-line. */
+					int lf_mark = ws && !more &&
+						      filerow <
+							      buf->numrows - 1;
 					int pad_hl =
 						more &&
 						isHighlighted(&hl,
@@ -893,7 +966,14 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
 									fill_col)) ?
 								1 :
 								0);
-						abAppend(ab, " ", 1);
+						if (lf_mark)
+							abAppend(
+								ab, LF_MARK,
+								sizeof(LF_MARK) -
+									1);
+						else
+							abAppend(ab, " ", 1);
+						lf_mark = 0;
 						fill_col++;
 					}
 					updateHighlight(ab, &fill_hl, 0);
@@ -917,6 +997,14 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
 					line_start_byte = break_byte;
 					sub_line_idx++;
 				}
+
+				/* An empty row draws no sub-line, so its
+				 * line feed goes here; \x1b[K below clears
+				 * the rest. */
+				if (ws && row->size == 0 &&
+				    filerow < buf->numrows - 1)
+					abAppend(ab, LF_MARK,
+						 sizeof(LF_MARK) - 1);
 
 				filerow++;
 				skip = 0; /* Only skip on the first row */
@@ -1611,6 +1699,13 @@ void toggleVisualLineMode(void) {
 	E.buf->word_wrap = !E.buf->word_wrap;
 	setStatusMessage(E.buf->word_wrap ? "Visual line mode enabled" :
 					    "Visual line mode disabled");
+}
+
+void toggleWhitespaceMode(void) {
+	struct window *win = E.windows[windowFocusedIdx()];
+	win->whitespace = !win->whitespace;
+	setStatusMessage(win->whitespace ? "Whitespace mode enabled" :
+					   "Whitespace mode disabled");
 }
 
 void editorVersion(void) {

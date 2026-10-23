@@ -1,4 +1,5 @@
 ## [Unreleased]
+- New whitespace-mode
 - #146 `M-.` looks up a hyphenated symbol first, then the part under the cursor.
 
 ## [1.0.0] - 2026-10-12

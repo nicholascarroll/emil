@@ -649,8 +649,9 @@ void queryReplace(void) {
 				 * replacement was made: the match's start.
 				 * Mark its end, as findNextMatch does. */
 				doUndo(E.buf, 1);
-				E.buf->markx = E.buf->cx +
-					       strlen((const char *)replace_orig);
+				E.buf->markx =
+					E.buf->cx +
+					strlen((const char *)replace_orig);
 				E.buf->marky = E.buf->cy;
 			}
 			break;
@@ -658,8 +659,9 @@ void queryReplace(void) {
 			if (E.buf->undo != first) {
 				while (E.buf->undo != first)
 					doUndo(E.buf, 1);
-				E.buf->markx = E.buf->cx +
-					       strlen((const char *)replace_orig);
+				E.buf->markx =
+					E.buf->cx +
+					strlen((const char *)replace_orig);
 				E.buf->marky = E.buf->cy;
 			}
 			break;

@@ -334,6 +334,41 @@ void test_drawrows_pads_short_row_to_full_width(void) {
 	cleanupTestEditor();
 }
 
+/* whitespace-mode: a tab's first cell shows ⇥, the rest stay blank,
+ * and the cell after the text shows ↵. */
+void test_whitespace_marks_tab_and_line_feed(void) {
+	initTestEditor();
+	static const char *lines[1] = { "a\tb" };
+	struct buffer *buf = make_test_buffer_lines(lines, 1);
+	E.windows[0]->height = 1;
+	E.screenrows = 1;
+	buf->word_wrap = 0;
+	E.windows[0]->whitespace = 1;
+
+	int len = 0;
+	char *out = render_rows(E.windows[0], &len);
+
+	const char *want = "a⇥      b↵ ";
+	TEST_ASSERT_EQUAL_INT(0, memcmp(out, want, strlen(want)));
+	free(out);
+	cleanupTestEditor();
+}
+
+/* A new window starts with whitespace-mode off, whatever the window
+ * it was split from shows. */
+void test_whitespace_not_inherited_by_new_window(void) {
+	initTestEditor();
+	static const char *lines[1] = { "a" };
+	make_test_buffer_lines(lines, 1);
+	E.windows[0]->whitespace = 1;
+
+	createWindow();
+
+	TEST_ASSERT_EQUAL_INT(2, E.nwindows);
+	TEST_ASSERT_EQUAL_INT(0, E.windows[1]->whitespace);
+	cleanupTestEditor();
+}
+
 /* The status bar takes the column scroll() already computed.  A hint
  * the row's own text could not produce shows it is used rather than
  * recomputed -- and the row is left uncached, so nothing walked it. */
@@ -995,6 +1030,8 @@ int main(void) {
 	/* §C2 */
 	RUN_TEST(test_drawrows_wide_row_does_not_compute_full_width);
 	RUN_TEST(test_drawrows_pads_short_row_to_full_width);
+	RUN_TEST(test_whitespace_marks_tab_and_line_feed);
+	RUN_TEST(test_whitespace_not_inherited_by_new_window);
 	RUN_TEST(test_statusbar_uses_the_frames_cursor_column);
 	RUN_TEST(test_scroll_returns_the_cursor_display_column);
 

@@ -66,6 +66,7 @@ void setupCommands(void) {
 		{ "replace-string", replaceString },
 		{ "revert-buffer", revert },
 		{ "visual-line-mode", toggleVisualLineMode },
+		{ "whitespace-mode", toggleWhitespaceMode },
 		{ "version", editorVersion },
 		{ "view-register", viewRegister },
 	};
@@ -330,6 +331,8 @@ int resolveBinding(int key) {
 				recordKey(nextkey);
 				if (nextkey == 't') {
 					return CMD_VISUAL_LINE_MODE;
+				} else if (nextkey == 'w') {
+					return CMD_WHITESPACE_MODE;
 				} else {
 					setStatusMessage(
 						"Unknown command C-x x %c",
@@ -1061,6 +1064,9 @@ static int dispatchMisc(int c, int uarg) {
 		return 1;
 	case CMD_VISUAL_LINE_MODE:
 		toggleVisualLineMode();
+		return 1;
+	case CMD_WHITESPACE_MODE:
+		toggleWhitespaceMode();
 		return 1;
 	case CMD_WHAT_CURSOR:
 		describeChar();

@@ -102,6 +102,7 @@ void createWindow(void) {
 	E.windows[E.nwindows - 1]->cy = E.buf->cy;
 	E.windows[E.nwindows - 1]->rowoff = 0;
 	E.windows[E.nwindows - 1]->coloff = 0;
+	E.windows[E.nwindows - 1]->whitespace = 0; /* not inherited */
 
 	resetWindowHeights();
 }
