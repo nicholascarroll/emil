@@ -582,6 +582,7 @@ static int renderLineWithHighlighting(erow *row, struct abuf *ab, int start_col,
 	 * loop would mis-pad, and the cursor would leave its
 	 * character; sharing the rule removes the possibility rather
 	 * than the instances. */
+	int edge_wrap = 0; /* auto-wrap switched on for #148 */
 	while (char_idx < end_byte) {
 		uint8_t c = row->chars[char_idx];
 		int nb;
@@ -646,6 +647,30 @@ static int renderLineWithHighlighting(erow *row, struct abuf *ab, int start_col,
 					for (int i = 1; i < width; i++)
 						abAppend(ab, " ", 1);
 				} else {
+					/* A character in the last column with
+					 * zero-width marks after it (#148): with
+					 * auto-wrap off the cursor cannot advance
+					 * past it, so the terminal attaches the
+					 * marks to the cell before.  Auto-wrap on
+					 * leaves the cursor in the pending-wrap
+					 * state instead, where the marks join this
+					 * cell.  Nothing printable follows on this
+					 * row, so the pending wrap never fires; it
+					 * is switched back off after the loop. */
+					if (!edge_wrap && width > 0 &&
+					    render_x + width == end_col &&
+					    char_idx + nb < end_byte) {
+						int next_nb;
+						if (charAdvance(row->chars,
+								char_idx + nb,
+								end_col,
+								&next_nb) ==
+						    0) {
+							abAppend(ab, "\x1b[?7h",
+								 5);
+							edge_wrap = 1;
+						}
+					}
 					abAppend(ab,
 						 (char *)&row->chars[char_idx],
 						 nb);
@@ -658,6 +683,8 @@ static int renderLineWithHighlighting(erow *row, struct abuf *ab, int start_col,
 	}
 
 	updateHighlight(ab, &current_highlight, 0);
+	if (edge_wrap)
+		abAppend(ab, "\x1b[?7l", 5);
 	return render_x;
 }
 
