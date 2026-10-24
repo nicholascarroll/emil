@@ -151,9 +151,12 @@ void test_calculate_line_width(void) {
 
 /* ---- Screen line counting ---- */
 
+/* A row exactly filling the window wraps once more: the end of the row
+ * starts an empty screen line, like any other wrap point. */
 void test_count_screen_lines_exact(void) {
 	struct buffer *buf = make_test_buffer("1234567890");
-	TEST_ASSERT_EQUAL_INT(1, countScreenLines(&buf->row[0], 10));
+	TEST_ASSERT_EQUAL_INT(2, countScreenLines(&buf->row[0], 10));
+	TEST_ASSERT_EQUAL_INT(1, countScreenLines(&buf->row[0], 11));
 }
 
 void test_count_screen_lines_long(void) {

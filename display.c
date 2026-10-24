@@ -915,7 +915,10 @@ void drawRows(struct window *win, struct abuf *ab, int screenrows,
 				computeRowHighlightBounds(buf, filerow, INT_MAX,
 							  &hl);
 
-				while (line_start_byte < row->size &&
+				/* sub_line_idx > 0: the empty line after a
+				 * full last line is drawn too. */
+				while ((line_start_byte < row->size ||
+					sub_line_idx > 0) &&
 				       y < screenrows) {
 					int break_col, break_byte;
 					int more = wordWrapBreak(

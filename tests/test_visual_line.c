@@ -195,10 +195,11 @@ void test_visual_move_down_crosses_row(void) {
 }
 
 void test_visual_move_up_crosses_row(void) {
-	/* Row 0: 40 'a' on 20-col = 2 sublines. Row 1: "Hello" */
-	char buf[41];
-	memset(buf, 'a', 40);
-	buf[40] = '\0';
+	/* Row 0: 39 'a' on 20-col = 2 sublines (40 would fill the second
+	 * exactly and add an empty third). Row 1: "Hello" */
+	char buf[40];
+	memset(buf, 'a', 39);
+	buf[39] = '\0';
 	const char *lines[] = { buf, "Hello" };
 	struct buffer *b = make_test_buffer_lines(lines, 2);
 	E.screencols = 20;
@@ -294,9 +295,10 @@ void test_end_of_visual_line(void) {
 }
 
 void test_end_of_visual_line_last_subline(void) {
-	char buf[41];
-	memset(buf, 'a', 40);
-	buf[40] = '\0';
+	/* 39, not 40: a second sub-line exactly full would not be the last */
+	char buf[40];
+	memset(buf, 'a', 39);
+	buf[39] = '\0';
 	struct buffer *b = make_test_buffer(buf);
 	E.screencols = 20;
 	E.windows[0]->height = 24;
@@ -305,9 +307,9 @@ void test_end_of_visual_line_last_subline(void) {
 	b->cy = 0;
 
 	endOfLine(0);
-	/* Should go to end of sub-line 1 = byte 40 = row->size */
+	/* Should go to end of sub-line 1 = byte 39 = row->size */
 	TEST_ASSERT_EQUAL_INT(0, b->cy);
-	TEST_ASSERT_EQUAL_INT(40, b->cx);
+	TEST_ASSERT_EQUAL_INT(39, b->cx);
 }
 
 /* ---- C-a / C-e without wrap (regression) ---- */

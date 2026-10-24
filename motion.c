@@ -723,7 +723,9 @@ void endOfLine(int count) {
 		int start_byte, end_byte;
 		sublineBounds(row, E.screencols, current_subline, &start_byte,
 			      &end_byte);
-		if (end_byte < row->size) {
+		/* Not the last sub-line: a full last line is followed by
+		 * an empty one, so its end_byte is the row's size. */
+		if (current_subline < countScreenLines(row, E.screencols) - 1) {
 			/* Mid-row sub-line: back up one character so we
 			 * land on the last char of this sub-line, not
 			 * the first char of the next one. */

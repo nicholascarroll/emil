@@ -578,10 +578,11 @@ void test_wordwrap_forced_char_keeps_marks(void) {
 	TEST_ASSERT_EQUAL(combiningCols() ? 1 : 3, break_byte);
 }
 
-/* A forced character that ends the row is the row's last screen line:
- * wordWrapBreak says nothing follows, so the line count and the
+/* A forced character that ends the row is wider than the window, so
+ * its line wraps like a full one: an empty screen line follows, and
+ * the cursor at the end of the row is on it.  The line count and the
  * cursor's line agree. */
-void test_wordwrap_forced_last_char_ends_row(void) {
+void test_wordwrap_forced_last_char_wraps(void) {
 	uint8_t tab[] = "\t";
 	uint8_t marked[] = "\t\xCC\x81";
 	struct {
@@ -606,9 +607,11 @@ void test_wordwrap_forced_last_char_ends_row(void) {
 		TEST_ASSERT_TRUE(line < lines);
 		if (i == 0 || !combiningCols()) {
 			/* The tab alone, or tab + mark under UTF-8. */
-			TEST_ASSERT_FALSE(more);
+			TEST_ASSERT_TRUE(more);
 			TEST_ASSERT_EQUAL(row.size, break_byte);
-			TEST_ASSERT_EQUAL(1, lines);
+			TEST_ASSERT_EQUAL(2, lines);
+			TEST_ASSERT_EQUAL(1, line);
+			TEST_ASSERT_EQUAL(0, col);
 		}
 	}
 }
@@ -667,7 +670,7 @@ int main(void) {
 	RUN_TEST(test_wordwrap_no_split_after_preposed);
 	RUN_TEST(test_wordwrap_combining_cluster_intact);
 	RUN_TEST(test_wordwrap_forced_char_keeps_marks);
-	RUN_TEST(test_wordwrap_forced_last_char_ends_row);
+	RUN_TEST(test_wordwrap_forced_last_char_wraps);
 	RUN_TEST(test_wordwrap_ascii_unchanged);
 
 	return TEST_END();

@@ -143,9 +143,10 @@ static int breakForbiddenAfter(erow *row, int bidx) {
  * and *break_byte hold the position just past the last character that
  * fits on this screen line.
  *
- * Returns 1 if more content follows the break (i.e. the row continues
- * onto another screen line), or 0 if the rest of the row fits on this
- * screen line (meaning this is the last sub-line). */
+ * Returns 1 if the row continues onto another screen line: more content
+ * follows the break, or this line is at least as wide as the window and
+ * the row ends here, so an empty screen line follows.  Returns 0 if
+ * this is the last sub-line. */
 int wordWrapBreak(erow *row, int screencols, int line_start_col,
 		  int line_start_byte, int *break_col, int *break_byte) {
 	int col = line_start_col;
@@ -202,10 +203,13 @@ int wordWrapBreak(erow *row, int screencols, int line_start_col,
 	}
 
 	if (bidx >= row->size) {
-		/* Rest of row fits on this screen line. */
+		/* Rest of row fits on this screen line.  A line that fills
+		 * the window wraps once more, like any other: the end of the
+		 * row then starts an empty screen line. */
 		*break_col = col;
 		*break_byte = row->size;
-		return 0;
+		return line_start_byte < row->size &&
+		       col - line_start_col >= screencols;
 	} else if (wb_col > line_start_col) {
 		/* Break at the last word boundary. */
 		*break_col = wb_col;
@@ -229,8 +233,8 @@ int wordWrapBreak(erow *row, int screencols, int line_start_col,
 		}
 		*break_col = col;
 		*break_byte = bidx;
-		/* Forcing it may have used up the row. */
-		return bidx < row->size;
+		/* Even if forcing it used up the row: the line is wider
+		 * than the window, so it wraps like a full one. */
 	}
 	return 1;
 }
@@ -254,7 +258,7 @@ int countScreenLines(erow *row, int screencols) {
 			break;
 		line_start_col = break_col;
 		line_start_byte = break_byte;
-	} while (line_start_byte < row->size);
+	} while (1); /* a full last line is followed by an empty one */
 
 	return lines;
 }
