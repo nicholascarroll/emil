@@ -916,7 +916,10 @@ static void saveBuffer(int skip_backup) {
 	if (!skip_backup) {
 		struct stat st;
 
-		if (stat(iopath, &st) == 0 && S_ISREG(st.st_mode)) {
+		/* A stat() failure other than ENOENT may hide a file the
+		 * write would truncate: try the backup anyway (#151). */
+		if (stat(iopath, &st) == 0 ? S_ISREG(st.st_mode) :
+					     errno != ENOENT) {
 			int backup_rc = makeVerifiedBackup(iopath, backup_path,
 							   sizeof(backup_path));
 			relockIfDirty(E.buf);
