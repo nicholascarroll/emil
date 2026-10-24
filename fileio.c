@@ -749,32 +749,6 @@ void revert(void) {
 }
 
 /*
- * Write all bytes to fd, retrying on EINTR and handling short writes.
- */
-static int writeToFile(int fd, const char *buf, size_t len) {
-	size_t total = 0;
-
-	while (total < len) {
-		ssize_t n = write(fd, buf + total, len - total);
-
-		if (n < 0) {
-			if (errno == EINTR)
-				continue;
-			return -1;
-		}
-
-		if (n == 0) {
-			errno = EIO;
-			return -1;
-		}
-
-		total += (size_t)n;
-	}
-
-	return 0;
-}
-
-/*
  * Open the target file, truncate it, write the new contents, fsync it,
  * and close it.
  *
@@ -811,7 +785,7 @@ static int writeInPlace(const char *path, const char *buf, size_t len,
 		goto fail;
 	}
 
-	if (writeToFile(fd, buf, len) == -1)
+	if (writeAll(fd, buf, len) == -1)
 		goto fail;
 
 	if (is_reg && !skip_fsync) {
