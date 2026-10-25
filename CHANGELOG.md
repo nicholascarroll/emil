@@ -1,6 +1,8 @@
 ## [Unreleased]
 - New whitespace-mode
 - #146 `M-.` looks up a hyphenated symbol first, then the part under the cursor.
+- #148 Fixed display of combining marks at screen edge.
+- #149 Word wrap: Nano-style display of lines exacty screen width.
 
 ## [1.0.0] - 2026-10-12
 - `emil --help` added.

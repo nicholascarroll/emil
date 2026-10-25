@@ -304,12 +304,7 @@ Split window: Divide the current window horizontally.
 .It Cm C-x x t
 Toggle word wrap (visual-line-mode).
 .It Cm C-x x w
-Toggle whitespace-mode in this window: each tab shows ⇥
-in its first cell, each line feed ↵, each space ⬫
-and each no-break space ⬪.
-Other Unicode spaces show ⬗,
-blank characters that are not spaces ⬖,
-LINE SEPARATOR ⬙ and PARAGRAPH SEPARATOR ⬘.
+Toggle whitespace-mode in this window.
 .El
 .Ss Registers
 Registers provide session-persistent storage of cursor position and text fragments. Each register is identified by a single character.
@@ -463,8 +458,7 @@ Revert buffer from file on disk.
 .It Cm visual-line-mode
 Toggle line wrapping.
 .It Cm whitespace-mode
-Toggle marks for tabs, line feeds, spaces and other blank characters
-in this window.
+Toggle display of whitespace characters: TAB ⇥ ; LINE FEED ↵ ; SPACE ⬫ ; no-break space ⬪ ; other Unicode space ⬗ ; blank character that is not a space ⬖ ; LINE SEPARATOR ⬙ ; PARAGRAPH SEPARATOR ⬘ .
 .It Cm version
 Show version info.
 .It Cm view-register
