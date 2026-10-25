@@ -506,6 +506,7 @@ done:
 int promptKey(const char *msg) {
 	setStatusMessage("%s", msg);
 	refreshScreen();
+	cursorBottomLine(stringWidth((const uint8_t *)msg) + 1);
 	int c = readKey();
 	if (c != -1)
 		recordKey(c);

@@ -3,10 +3,10 @@
 #include "register.h"
 #include "buffer.h"
 #include "display.h"
+#include "prompt.h"
 #include "emil.h"
 
 #include "region.h"
-#include "terminal.h"
 #include "unicode.h"
 #include "util.h"
 #include "window.h"
@@ -16,16 +16,13 @@
 #include <string.h>
 
 static int getRegisterName(const char *prompt) {
+	char msg[128];
+	snprintf(msg, sizeof(msg), "%s:", prompt);
 	int key;
-	int psize = stringWidth((const uint8_t *)prompt);
 	do {
-		setStatusMessage("%s:", prompt);
-		cursorBottomLine(psize + 2);
-		refreshScreen();
-		key = readKey();
+		key = promptKey(msg);
 	} while (key < 0 ||
 		 key >= (int)(sizeof(E.registers) / sizeof(E.registers[0])));
-	recordKey(key);
 	return key;
 }
 

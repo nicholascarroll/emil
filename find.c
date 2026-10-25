@@ -9,7 +9,6 @@
 
 #include "prompt.h"
 #include "region.h"
-#include "terminal.h"
 #include "transform.h"
 #include "undo.h"
 #include "unicode.h"
@@ -543,7 +542,7 @@ static char *qrStatusPrompt(void) {
 	char *o = xmalloc(sz), *r = xmalloc(sz), *prompt = xmalloc(sz);
 	utf8SanitizeLine(replace_orig, olen, o, sz);
 	utf8SanitizeLine(replace_repl, rlen, r, sz);
-	snprintf(prompt, sz, "Query replacing %s with %s:", o, r);
+	snprintf(prompt, sz, "Query replacing %s with %s: ", o, r);
 	free(o);
 	free(r);
 	return prompt;
@@ -592,7 +591,6 @@ void queryReplace(void) {
 
 	/* Status prompt shown during the y/n loop */
 	char *prompt = qrStatusPrompt();
-	int bufwidth = stringWidth((const uint8_t *)prompt);
 
 	int savedMx = E.buf->markx;
 	int savedMy = E.buf->marky;
@@ -605,12 +603,7 @@ void queryReplace(void) {
 		goto QR_CLEANUP;
 
 	for (;;) {
-		setStatusMessage("%s", prompt);
-		refreshScreen();
-		cursorBottomLine(bufwidth + 2);
-
-		int c = readKey();
-		recordKey(c);
+		int c = promptKey(prompt);
 		switch (c) {
 		case ' ':
 		case 'y':
@@ -683,7 +676,6 @@ void queryReplace(void) {
 			/* Rebuild status prompt */
 			free(prompt);
 			prompt = qrStatusPrompt();
-			bufwidth = stringWidth((const uint8_t *)prompt);
 			break;
 		}
 		case 'e':
@@ -702,7 +694,6 @@ void queryReplace(void) {
 			}
 			free(prompt);
 			prompt = qrStatusPrompt();
-			bufwidth = stringWidth((const uint8_t *)prompt);
 			break;
 		}
 		case CTRL('l'):
