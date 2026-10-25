@@ -523,6 +523,27 @@ static const char *whitespaceMark(const uint8_t *s, int idx) {
 	return NULL;
 }
 
+/* Whether the character at idx is itself one of the marks above.
+ * whitespace-mode draws such a character in reverse video, so a ⬫ in
+ * the text cannot pass for a marked space. */
+static int isLiteralMark(const uint8_t *s, int idx) {
+	if (s[idx] < 0x80)
+		return 0;
+	switch (utf8Decode(s, idx)) {
+	case 0x21E5: /* TAB_MARK */
+	case 0x21B5: /* LF_MARK */
+	case 0x2B2B: /* SPACE_MARK */
+	case 0x2B2A: /* NBSP_MARK */
+	case 0x2B17: /* OTHER_SPACE_MARK */
+	case 0x2B16: /* BLANK_MARK */
+	case 0x2B19: /* LSEP_MARK */
+	case 0x2B18: /* PSEP_MARK */
+		return 1;
+	default:
+		return 0;
+	}
+}
+
 static int renderLineWithHighlighting(erow *row, struct abuf *ab, int start_col,
 				      int end_col,
 				      const struct rowHighlight *hl,
@@ -594,8 +615,12 @@ static int renderLineWithHighlighting(erow *row, struct abuf *ab, int start_col,
 		if (render_x >= end_col && width > 0)
 			break;
 
+		/* A literal mark in whitespace-mode is inverted, against
+		 * the region or search highlight when it falls inside one. */
+		int literal = whitespace && isLiteralMark(row->chars, char_idx);
 		updateHighlight(ab, &current_highlight,
-				isHighlighted(hl, render_x) ? 1 : 0);
+				(isHighlighted(hl, render_x) ? 1 : 0) ^
+					literal);
 
 		/* nb is the length the lead byte announces.  A row that
 		 * ends in an incomplete sequence has fewer bytes left than
