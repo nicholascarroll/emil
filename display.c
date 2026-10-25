@@ -24,9 +24,6 @@
 #include <termios.h>
 #endif
 
-int minibuffer_height = 1;
-const int statusbar_height = 1;
-
 /* Pre-computed highlight bounds for a single row.  Computed once per row
  * then checked with simple integer comparisons.
  */

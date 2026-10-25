@@ -12,10 +12,6 @@ struct window;
 struct buffer;
 struct config;
 
-/* Display constants */
-extern int minibuffer_height;
-extern const int statusbar_height;
-
 /* Minibuffer layout. Auto-sizing is capped at MINIBUF_MAX_LINES screen lines.*/
 #define MINIBUF_MAX_LINES 5
 

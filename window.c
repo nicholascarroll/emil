@@ -1,11 +1,14 @@
 /* Copyright (c) 2021 chameleon, 2026 Nicholas Carroll.
  * SPDX-License-Identifier: MIT */
 #include "window.h"
-#include "display.h"
 #include "emil.h"
+#include "message.h"
 
 #include "util.h"
 #include <stdlib.h>
+
+int minibuffer_height = 1;
+const int statusbar_height = 1;
 
 int windowFocusedIdx(void) {
 	for (int i = 0; i < E.nwindows; i++) {
@@ -155,7 +158,7 @@ void destroyOtherWindows(void) {
 	free(E.windows);
 	E.windows = windows;
 
-	resizeScreen();
+	resetWindowHeights();
 }
 
 /* Resize windows so that the popup at win_idx fits its content while
