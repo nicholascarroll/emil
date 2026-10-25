@@ -34,11 +34,11 @@ OBJECTS = main.o unicode.o decoder.o buffer.o region.o undo.o transform.o \
           find.o pipe.o register.o fileio.o terminal.o display.o  \
           keymap.o edit.o prompt.o util.o completion.o history.o base64.o \
           abuf.o window.o ctags.o adjust.o mutate.o wrap.o motion.o dbuf.o \
-          emil_subprocess.o palette.o
+          emil_subprocess.o palette.o message.o
 
 HEADERS = abuf.h adjust.h backup.h base64.h buffer.h completion.h ctags.h \
           dbuf.h decoder.h display.h edit.h emil.h emil_subprocess.h \
-          fileio.h find.h history.h keymap.h motion.h mutate.h \
+          fileio.h find.h history.h keymap.h message.h motion.h mutate.h \
           palette.h pipe.h prompt.h region.h register.h terminal.h \
           transform.h undo.h unicode.h util.h window.h \
           wrap.h

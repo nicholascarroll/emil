@@ -60,9 +60,7 @@ void editorVersion(void);
 void help(void);
 void describeChar(void);
 
-/* Status message display */
-void setStatusMessage(const char *fmt, ...)
-	__attribute__((format(printf, 1, 2)));
-void clearStatusMessage(void);
+/* setStatusMessage() and clearStatusMessage(), for existing callers. */
+#include "message.h"
 
 #endif /* EMIL_DISPLAY_H */

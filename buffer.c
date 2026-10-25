@@ -11,7 +11,7 @@
 #include "unicode.h"
 #include "undo.h"
 #include "prompt.h"
-#include "display.h"
+#include "message.h"
 #include "util.h"
 #include "window.h"
 #include "wrap.h"

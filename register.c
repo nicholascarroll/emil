@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: MIT */
 #include "register.h"
 #include "buffer.h"
-#include "display.h"
+#include "message.h"
 #include "prompt.h"
 #include "emil.h"
 

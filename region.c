@@ -4,7 +4,7 @@
 #include "adjust.h"
 #include "buffer.h"
 #include "dbuf.h"
-#include "display.h"
+#include "message.h"
 #include "emil.h"
 #include "history.h"
 

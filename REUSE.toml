@@ -25,6 +25,7 @@ path = [
   "find.c", "find.h",
   "keymap.c",
   "main.c",
+  "message.c", "message.h",
   "motion.c",
   "pipe.c", "pipe.h",
   "region.c", "region.h",

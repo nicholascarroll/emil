@@ -1775,16 +1775,3 @@ void help(void) {
 		"where C- denotes the Control key, M- denotes the Meta (Alt) key.  "
 		"For the complete command reference, see the man page.");
 }
-
-void setStatusMessage(const char *fmt, ...) {
-	va_list ap;
-	va_start(ap, fmt);
-	vsnprintf(E.statusmsg, sizeof(E.statusmsg), fmt, ap);
-	va_end(ap);
-	E.statusmsg_show = 1;
-}
-
-void clearStatusMessage(void) {
-	E.statusmsg[0] = '\0';
-	E.statusmsg_show = 0;
-}

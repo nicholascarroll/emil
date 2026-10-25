@@ -3,6 +3,8 @@
 - #146 `M-.` looks up a hyphenated symbol first, then the part under the cursor.
 - #148 Fixed display of combining marks at screen edge.
 - #149 Word wrap: Nano-style display of lines exacty screen width.
+- #151 File save: more robust handling of stat() failure
+- Macro playback impoved support for interactive prompts 
 
 ## [1.0.0] - 2026-10-12
 - `emil --help` added.
