@@ -13,7 +13,6 @@
 #include "prompt.h"
 #include "display.h"
 #include "util.h"
-#include "terminal.h"
 #include "window.h"
 #include "wrap.h"
 #include <limits.h>
@@ -539,15 +538,12 @@ void killBuffer(void) {
 				 "Buffer %s modified; kill anyway? (y or n)",
 				 fname);
 		char *killName = leftTruncate(fname, nameFit(fname, n));
-		setStatusMessage("Buffer %s modified; kill anyway? (y or n)",
-				 killName);
+		char msg[sizeof(E.statusmsg)];
+		snprintf(msg, sizeof(msg),
+			 "Buffer %s modified; kill anyway? (y or n)", killName);
 		free(killName);
-		refreshScreen();
-		int c = readKey();
-		clearStatusMessage();
-		if (c != 'y' && c != 'Y') {
+		if (!confirmYN(msg))
 			return;
-		}
 	}
 
 	// Find the previous buffer (if any)

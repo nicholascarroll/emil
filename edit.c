@@ -13,7 +13,6 @@
 #include "mutate.h"
 #include "prompt.h"
 #include "region.h"
-#include "terminal.h"
 #include "transform.h"
 #include "undo.h"
 #include "unicode.h"
@@ -580,14 +579,9 @@ void quit(void) {
 	}
 
 	if (hasUnsavedChanges) {
-		setStatusMessage(
-			"There are unsaved changes. Really quit? (y or n)");
-		refreshScreen();
-		int c = readKey();
-		if (c == 'y' || c == 'Y') {
+		if (confirmYN(
+			    "There are unsaved changes. Really quit? (y or n)"))
 			exit(0);
-		}
-		clearStatusMessage();
 	} else {
 		exit(0);
 	}
@@ -822,10 +816,7 @@ void zapToChar(void) {
 
 	E.buf->mark_active = 0;
 
-	setStatusMessage("Zap to char: ");
-	refreshScreen();
-
-	int c = readKey();
+	int c = promptKey("Zap to char: ");
 	if (c == CTRL('g')) {
 		setStatusMessage("Canceled.");
 		return;

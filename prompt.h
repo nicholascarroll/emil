@@ -15,4 +15,11 @@ uint8_t *editorPrompt(const char *prompt, enum promptType t,
  * returned to a caller, "^J" for display.  Returns a malloc'd string. */
 char *minibufJoin(struct buffer *mb, const char *sep);
 
+/* Show msg in the status line and read one key.  Returns -1 if a signal interrupted the
+ * read. */
+int promptKey(const char *msg);
+
+/* Ask a y-or-n question with promptKey().  Returns 1 for y or Y. */
+int confirmYN(const char *msg);
+
 #endif /* EMIL_PROMPT_H */

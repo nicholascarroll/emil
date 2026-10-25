@@ -502,3 +502,18 @@ done:
 
 	return result;
 }
+
+int promptKey(const char *msg) {
+	setStatusMessage("%s", msg);
+	refreshScreen();
+	int c = readKey();
+	if (c != -1)
+		recordKey(c);
+	return c;
+}
+
+int confirmYN(const char *msg) {
+	int c = promptKey(msg);
+	clearStatusMessage();
+	return c == 'y' || c == 'Y';
+}

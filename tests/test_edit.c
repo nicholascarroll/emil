@@ -450,9 +450,62 @@ void test_mark_paragraph(void) {
 }
 
 /* ---- Zap to char ---- */
-/* Note: zapToChar reads a key interactively, so we can't easily
- * unit test it without mocking readKey. We test the boundary
- * cases that don't require key input through the delete range. */
+
+static void startRecording(void) {
+	E.macro.skeys = 32;
+	E.macro.nkeys = 0;
+	E.macro.keys = xmalloc(E.macro.skeys * sizeof(int));
+	E.recording = 1;
+}
+
+static void stopRecording(void) {
+	E.recording = 0;
+	free(E.macro.keys);
+	E.macro.keys = NULL;
+	E.macro.nkeys = 0;
+}
+
+/* The character zapToChar reads is part of the command, so a keyboard
+ * macro must record it.  Before this was fixed, playback fed the
+ * macro's next key to zapToChar instead. */
+void test_zap_to_char_key_recorded_in_macro(void) {
+	struct buffer *buf = make_test_buffer("1a2a3a");
+	buf->cx = 0;
+	E.buf = buf;
+	startRecording();
+	const int keys[] = { 'a' };
+	scriptKeys(keys, 1);
+
+	muteStdout();
+	zapToChar();
+	unmuteStdout();
+
+	TEST_ASSERT_EQUAL_STRING("2a3a", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(1, E.macro.nkeys);
+	TEST_ASSERT_EQUAL_INT('a', E.macro.keys[0]);
+	stopRecording();
+	clearKeys();
+}
+
+/* Played back from a macro, zapToChar takes its character from it. */
+void test_zap_to_char_reads_key_from_macro_playback(void) {
+	struct buffer *buf = make_test_buffer("1a2a3a");
+	buf->cx = 0;
+	E.buf = buf;
+	int macro_keys[] = { 0, 'a' };
+	E.macro.keys = macro_keys;
+	E.macro.nkeys = 2;
+	E.playback = 1;
+
+	muteStdout();
+	zapToChar();
+	unmuteStdout();
+
+	TEST_ASSERT_EQUAL_STRING("2a3a", row_str(buf, 0));
+	E.playback = 0;
+	E.macro.keys = NULL;
+	E.macro.nkeys = 0;
+}
 
 /* ---- Paragraph movement via refactored functions ---- */
 
@@ -878,5 +931,7 @@ int main(void) {
 
 	RUN_TEST(test_b7_unindent_with_no_prefix_removes_one_tab);
 	RUN_TEST(test_b7_unindent_with_explicit_count_unchanged);
+	RUN_TEST(test_zap_to_char_key_recorded_in_macro);
+	RUN_TEST(test_zap_to_char_reads_key_from_macro_playback);
 	return TEST_END();
 }

@@ -10,7 +10,6 @@
 
 #include "mutate.h"
 #include "prompt.h"
-#include "terminal.h"
 #include "undo.h"
 #include "unicode.h"
 #include "util.h"
@@ -810,15 +809,6 @@ fail:
 	close(fd);
 	errno = saved_errno;
 	return -1;
-}
-
-/* Ask a y/N question in the minibuffer.  Returns 1 for yes. */
-static int confirmYN(const char *msg) {
-	setStatusMessage("%s", msg);
-	refreshScreen();
-	int c = readKey();
-	clearStatusMessage();
-	return (c == 'y' || c == 'Y');
 }
 
 /* The authoritative external-modification check, run immediately

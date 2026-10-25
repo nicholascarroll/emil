@@ -448,6 +448,37 @@ void setUp(void) {
 void tearDown(void) {
 }
 
+/* confirmYN's answer is recorded for keyboard macros, so a macro that
+ * answers a y-or-n question replays the same answer. */
+void test_confirm_yn_answer_recorded_in_macro(void) {
+	initTestEditor();
+	make_test_buffer("text"); /* refreshScreen() draws the focused buffer */
+	E.macro.skeys = 32;
+	E.macro.nkeys = 0;
+	E.macro.keys = xmalloc(E.macro.skeys * sizeof(int));
+	E.recording = 1;
+	const int keys[] = { 'y', 'n' };
+	scriptKeys(keys, 2);
+
+	muteStdout();
+	int first = confirmYN("Really? (y or n)");
+	int second = confirmYN("Really? (y or n)");
+	unmuteStdout();
+
+	TEST_ASSERT_EQUAL_INT(1, first);
+	TEST_ASSERT_EQUAL_INT(0, second);
+	TEST_ASSERT_EQUAL_INT(2, E.macro.nkeys);
+	TEST_ASSERT_EQUAL_INT('y', E.macro.keys[0]);
+	TEST_ASSERT_EQUAL_INT('n', E.macro.keys[1]);
+
+	E.recording = 0;
+	free(E.macro.keys);
+	E.macro.keys = NULL;
+	E.macro.nkeys = 0;
+	clearKeys();
+	cleanupTestEditor();
+}
+
 int main(void) {
 	TEST_BEGIN();
 
@@ -464,6 +495,7 @@ int main(void) {
 	RUN_TEST(test_shell_tab_mid_line);
 	RUN_TEST(test_shell_tab_quoted_insert_and_undo);
 	RUN_TEST(test_history_up_drops_stale_mark);
+	RUN_TEST(test_confirm_yn_answer_recorded_in_macro);
 
 	return TEST_END();
 }
