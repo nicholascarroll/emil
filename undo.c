@@ -4,7 +4,6 @@
 #include "adjust.h"
 #include "buffer.h"
 #include "dbuf.h"
-#include "display.h"
 #include "emil.h"
 
 #include "region.h"
@@ -247,9 +246,9 @@ static void undoStep(struct buffer *buf, int redo) {
 	undoCloseRun(buf);
 }
 
-void doUndo(struct buffer *buf, int count) {
+enum undoResult doUndo(struct buffer *buf, int count) {
 	if (rejectIfReadOnly(buf))
-		return;
+		return UNDO_REFUSED;
 
 	buf->mark_active = 0;
 	undoCloseRun(buf);
@@ -257,42 +256,37 @@ void doUndo(struct buffer *buf, int count) {
 	int times = UARG_COUNT(count);
 	for (int j = 0; j < times; j++) {
 		if (buf->undo == NULL) {
-			setStatusMessage("No further undo information.");
 			if (!buf->internal_mod) {
 				markBufferClean(buf);
 			}
-			return;
+			return UNDO_EXHAUSTED;
 		}
 		int paired = buf->undo->paired;
 		undoStep(buf, 0);
-		setStatusMessage("Undo.");
 
-		if (paired) {
-			doUndo(buf, 1);
-		}
+		if (paired && doUndo(buf, 1) == UNDO_EXHAUSTED)
+			return UNDO_EXHAUSTED;
 	}
+	return UNDO_DONE;
 }
 
-void doRedo(struct buffer *buf, int count) {
+enum undoResult doRedo(struct buffer *buf, int count) {
 	if (rejectIfReadOnly(buf))
-		return;
+		return UNDO_REFUSED;
 
 	buf->mark_active = 0;
 	undoCloseRun(buf);
 
 	int times = UARG_COUNT(count);
 	for (int j = 0; j < times; j++) {
-		if (buf->redo == NULL) {
-			setStatusMessage("No further redo information.");
-			return;
-		}
+		if (buf->redo == NULL)
+			return UNDO_EXHAUSTED;
 		/* Redo leaves the cursor at the start of the change it
 		 * redoes, as Emacs does: the start of the group's first
 		 * record, carried through the rest of the group like any
 		 * other point. */
 		int px = buf->redo->startx, py = buf->redo->starty;
 		undoStep(buf, 1);
-		setStatusMessage("Redo.");
 
 		while (buf->redo != NULL && buf->redo->paired) {
 			struct undo *n = buf->redo;
@@ -303,6 +297,7 @@ void doRedo(struct buffer *buf, int count) {
 		buf->cx = px;
 		buf->cy = py;
 	}
+	return UNDO_DONE;
 }
 
 struct undo *newUndo(void) {

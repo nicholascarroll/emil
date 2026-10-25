@@ -590,6 +590,15 @@ static int refusedInMinibuffer(int c) {
  */
 
 /* Movement */
+/* The undo and redo commands' status message. */
+static void reportUndo(enum undoResult r, const char *done,
+		       const char *exhausted) {
+	if (r == UNDO_DONE)
+		setStatusMessage("%s", done);
+	else if (r == UNDO_EXHAUSTED)
+		setStatusMessage("%s", exhausted);
+}
+
 static int dispatchMove(int c, int uarg, struct window *win) {
 	switch (c) {
 	case CMD_BACKWARD_CHAR:
@@ -837,7 +846,8 @@ static int dispatchBuffer(int c, int uarg) {
 						    "Buffer set to writable");
 		return 1;
 	case CMD_REDO:
-		doRedo(E.buf, uarg);
+		reportUndo(doRedo(E.buf, uarg), "Redo.",
+			   "No further redo information.");
 		if (E.buf->redo != NULL) {
 			setStatusMessage("Press C-_ or C-/ to redo again");
 			E.micro = CMD_REDO;
@@ -1036,7 +1046,8 @@ static int dispatchMacro(int c, int uarg) {
 static int dispatchMisc(int c, int uarg) {
 	switch (c) {
 	case CMD_UNDO:
-		doUndo(E.buf, uarg);
+		reportUndo(doUndo(E.buf, uarg), "Undo.",
+			   "No further undo information.");
 		return 1;
 	case CMD_SUSPEND:
 #ifdef __wasi__
@@ -1135,7 +1146,8 @@ void processKeypress(int c) {
 	 * C-/ continues redoing rather than undoing.  The chain must end
 	 * as soon as the redo stack empties. */
 	if (E.micro == CMD_REDO && c == CMD_UNDO && E.buf->redo != NULL) {
-		doRedo(E.buf, 1);
+		reportUndo(doRedo(E.buf, 1), "Redo.",
+			   "No further redo information.");
 		if (E.buf->redo == NULL)
 			E.micro = 0;
 		return;

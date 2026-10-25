@@ -11,8 +11,14 @@
 void computeInsertEnd(const uint8_t *text, int len, int startx, int starty,
 		      int *endx, int *endy);
 
-void doUndo(struct buffer *buf, int count);
-void doRedo(struct buffer *buf, int count);
+enum undoResult {
+	UNDO_DONE,	/* every requested step was taken */
+	UNDO_EXHAUSTED, /* history ran out first */
+	UNDO_REFUSED,	/* read-only buffer, already reported */
+};
+
+enum undoResult doUndo(struct buffer *buf, int count);
+enum undoResult doRedo(struct buffer *buf, int count);
 struct undo *newUndo(void);
 void undoReplaceData(struct undo *u, int newsize);
 
