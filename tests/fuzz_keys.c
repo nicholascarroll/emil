@@ -55,7 +55,6 @@
 /* ---- the terminal and main.c boundary ------------------------------- */
 
 struct config E;
-const int page_overlap = 2;
 
 void die(const char *s) {
 	fprintf(stderr, "die: %s\n", s);

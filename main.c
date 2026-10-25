@@ -27,8 +27,6 @@
 #include <unistd.h>
 #include "unicode.h"
 
-const int page_overlap = 2;
-
 struct config E;
 void setupHandlers(void);
 

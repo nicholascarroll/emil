@@ -14,6 +14,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+const int page_overlap = 2;
+
 /* Boundary detection */
 
 int isParaBoundary(erow *row) {

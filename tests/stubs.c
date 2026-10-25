@@ -3,7 +3,7 @@
  *
  * The test binary links every .o file except main.o and terminal.o. 
  * This file provides:
- * - The global E and page_overlap that main.o normally defines.
+ * - The global E that main.o normally defines.
  * - No-op replacements for terminal.o functions (the only functions
  *   that physically touch the terminal: read/write fd 0/1, termios,
  *   ioctl). */
@@ -15,7 +15,6 @@
 
 /* Normally defined in main.c */
 struct config E;
-const int page_overlap = 2;
 
 void die(const char *s) {
 	fprintf(stderr, "die: %s\n", s);

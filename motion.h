@@ -48,7 +48,7 @@ void beginningOfLine(void);
 void endOfLine(int count);
 void gotoLine(void);
 
-/* External constants */
+/* Lines kept in view across a page scroll (C-v, M-v) */
 extern const int page_overlap;
 
 #endif
