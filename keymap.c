@@ -55,7 +55,6 @@ static int uargScale(int uarg) {
 
 void setupCommands(void) {
 	static struct command commands[] = {
-		{ "capitalize-region", capitalizeRegion },
 		{ "insert-char", insertCharHex },
 		{ "insert-file", insertFile },
 		{ "cd", changeDirectory },

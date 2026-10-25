@@ -4,8 +4,6 @@
 #include "buffer.h"
 #include "display.h"
 #include "emil.h"
-
-#include "region.h"
 #include "undo.h"
 #include "unicode.h"
 #include "util.h"
@@ -224,8 +222,4 @@ uint8_t *transformerTransposeWords(uint8_t *input) {
 	output[len] = 0;
 
 	return output;
-}
-
-void capitalizeRegion(void) {
-	transformRegion(transformerCapitalCase);
 }
