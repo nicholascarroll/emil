@@ -56,7 +56,4 @@ void editorVersion(void);
 void help(void);
 void describeChar(void);
 
-/* setStatusMessage() and clearStatusMessage(), for existing callers. */
-#include "message.h"
-
 #endif /* EMIL_DISPLAY_H */

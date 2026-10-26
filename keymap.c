@@ -7,9 +7,9 @@
 #include "display.h"
 #include "edit.h"
 #include "emil.h"
+#include "message.h"
 #include "fileio.h"
 #include "find.h"
-
 #include "palette.h"
 #include "pipe.h"
 #include "prompt.h"

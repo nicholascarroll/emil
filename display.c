@@ -4,9 +4,9 @@
 #include "abuf.h"
 #include "buffer.h"
 #include "emil.h"
+#include "message.h"
 #include "fileio.h"
 #include "history.h"
-
 #include "region.h"
 #include "wrap.h"
 #include "terminal.h"

@@ -6,13 +6,13 @@
 
 #include "abuf.h"
 #include "buffer.h"
-#include "display.h"
 #include "emil.h"
 #include "fileio.h"
 #include "history.h"
 #include "keymap.h"
 #include "undo.h"
-
+#include "message.h"
+#include "display.h"
 #include "terminal.h"
 #include "util.h"
 #include "window.h"

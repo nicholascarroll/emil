@@ -6,7 +6,7 @@
 #include <unistd.h>
 #include "ctags.h"
 #include "emil.h"
-
+#include "message.h"
 #include "buffer.h"
 #include "dbuf.h"
 #include "fileio.h"

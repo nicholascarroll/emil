@@ -4,9 +4,9 @@
 #include "buffer.h"
 #include "display.h"
 #include "emil.h"
+#include "message.h"
 #include "history.h"
 #include "keymap.h"
-
 #include "prompt.h"
 #include "region.h"
 #include "transform.h"

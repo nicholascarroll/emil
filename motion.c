@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: MIT */
 #include "motion.h"
 #include "display.h"
+#include "message.h"
 #include "buffer.h"
 #include "keymap.h"
 #include "prompt.h"

@@ -31,8 +31,9 @@
 
 #include "buffer.h"
 #include "dbuf.h"
-#include "display.h"
 #include "emil.h"
+#include "display.h"
+#include "message.h"
 #include "fileio.h"
 #include "pipe.h"
 #include "prompt.h"
@@ -652,8 +653,8 @@ void diffBufferWithFile(void) {
 
 #else /* EMIL_DISABLE_SHELL */
 
-#include "display.h"
 #include "emil.h"
+#include "message.h"
 
 void pipeCmd(int useRegion) {
 	(void)useRegion; /* unused parameter */

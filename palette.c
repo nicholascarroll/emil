@@ -4,6 +4,7 @@
 #include "display.h"
 #include "edit.h"
 #include "emil.h"
+#include "message.h"
 #include "keymap.h"
 #include "motion.h"
 #include "terminal.h"

@@ -6,8 +6,8 @@
 #include "dbuf.h"
 #include "display.h"
 #include "emil.h"
+#include "message.h"
 #include "keymap.h"
-
 #include "mutate.h"
 #include "prompt.h"
 #include "undo.h"
