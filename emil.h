@@ -4,7 +4,6 @@
 #define EMIL_H 1
 
 #include "abuf.h"
-#include "keymap.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <termios.h>

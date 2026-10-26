@@ -3,7 +3,7 @@
 #include "motion.h"
 #include "display.h"
 #include "buffer.h"
-
+#include "keymap.h"
 #include "prompt.h"
 #include "region.h"
 #include "unicode.h"
