@@ -520,11 +520,6 @@ static void showOutputBuffer(const char *name, const uint8_t *data, size_t len,
 }
 
 void pipeCmd(int useRegion) {
-	/* Not allowed during macro record/playback */
-	if (E.recording || E.playback) {
-		setStatusMessage("Not available during macro");
-		return;
-	}
 	uint8_t *pipeOutput = editorPipe(useRegion);
 	if (pipeOutput != NULL && pipeOutput[0] == '\0') {
 		/* Nothing on stdout: leave the windows alone. */
