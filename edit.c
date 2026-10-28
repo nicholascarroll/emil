@@ -7,7 +7,6 @@
 #include "emil.h"
 #include "history.h"
 #include "keymap.h"
-
 #include "motion.h"
 #include "dbuf.h"
 #include "mutate.h"
@@ -807,24 +806,27 @@ void transposeSentences(int uarg) {
 	free(repl);
 }
 
-/* Zap to char (M-z): kill from point up to and including the next
- * occurrence of a prompted character. */
-
-void zapToChar(void) {
+/* Greedy means delete up to and including the character entered 
+ * at the prompt. Otherwise, only up to. */
+void zap(int greedy, int uarg) {
 	if (rejectIfReadOnly(E.buf))
 		return;
+	/* TODO
+	if (uarg == UARG_REVERSE) 
+	int times = UARG_COUNT(count);
+	for (int i = 0; i < times; i++) 
+*/
 
 	E.buf->mark_active = 0;
 
-	int c = promptKey("Zap to char: ");
-	if (c == CTRL('g')) {
-		setStatusMessage("Canceled.");
-		return;
-	}
-	if (c == 033) {
-		setStatusMessage("Canceled.");
-		return;
-	}
+	const char *prompt;
+	if (greedy) {
+		prompt = "Zap to char: ";
+	} else {
+		prompt = "Zap up to char: ";
+	};
+
+	int c = promptKey(prompt);
 
 	/* The target is compared byte-for-byte against buffer content, so
 	 * it has to be a single ASCII byte.*/
@@ -833,7 +835,7 @@ void zapToChar(void) {
 		return;
 	}
 
-	/* Search forward for the character */
+	/* TOOD Search backward or forward for the character */
 	int sy = E.buf->cy;
 
 	while (sy < E.buf->numrows) {
@@ -845,11 +847,12 @@ void zapToChar(void) {
 				 * the starting position */
 				if (x == E.buf->cx && sy == E.buf->cy)
 					continue;
-				/* Kill up to and including this char */
-				int endx = x + 1;
+				/* Kill up to and/or including this char */
+				int endx = x + greedy;
 				int endy = sy;
 				deleteRange(E.buf, E.buf->cx, E.buf->cy, endx,
 					    endy, 1);
+				clearStatusMessage();
 				return;
 			}
 		}
@@ -859,10 +862,14 @@ void zapToChar(void) {
 	setStatusMessage("'%c' not found", c);
 }
 
-#include "prompt.h"
-#include "unicode.h"
-#include "util.h"   // For setStatusMessage
-#include <stdlib.h> // For strtoul, free
+/* Delete up to and INCLUDING the character*/
+void zapToChar(int uarg) {
+	zap(1, uarg);
+}
+/* Delete up to and NOT including the character*/
+void zapUpToChar(int uarg) {
+	zap(0, uarg);
+}
 
 /* Insert Unicode codepoint hex */
 void insertCharHex(void) {

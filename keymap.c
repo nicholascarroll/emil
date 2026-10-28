@@ -178,6 +178,9 @@ static int resolveMetaBinding(int ch) {
 		return CMD_SCROLL_UP;
 	case 'z':
 		return CMD_ZAP_TO_CHAR;
+	case 'Z':
+		return CMD_ZAP_UP_TO_CHAR;
+
 	/* Punctuation and symbols */
 	case '-':
 		return CMD_NEGATIVE_ARG;
@@ -761,7 +764,10 @@ static int dispatchEdit(int c, int uarg) {
 		transposeSentences(uarg);
 		return 1;
 	case CMD_ZAP_TO_CHAR:
-		zapToChar();
+		zapToChar(uarg);
+		return 1;
+	case CMD_ZAP_UP_TO_CHAR:
+		zapUpToChar(uarg);
 		return 1;
 	case CMD_INSERT_CHAR_HEX:
 		insertCharHex();

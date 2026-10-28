@@ -5,6 +5,7 @@
 - #151 File save: more robust handling of stat() failure
 - Macro playback impoved support for interactive prompts 
 - Allow shell command within macros #155
+- #136, #154 zap-to-char improvements
 
 ## [1.0.0] - 2026-10-12
 - `emil --help` added.

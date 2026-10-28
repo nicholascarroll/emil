@@ -47,7 +47,8 @@ void markParagraph(void);
 
 void transposeSentences(int uarg);
 
-void zapToChar(void);
+void zapToChar(int uarg);
+void zapUpToChar(int uarg);
 
 void insertCharHex(void);
 
