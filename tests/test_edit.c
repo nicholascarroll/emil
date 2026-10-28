@@ -477,7 +477,7 @@ void test_zap_to_char_key_recorded_in_macro(void) {
 	scriptKeys(keys, 1);
 
 	muteStdout();
-	zapToChar();
+	zapToChar(1);
 	unmuteStdout();
 
 	TEST_ASSERT_EQUAL_STRING("2a3a", row_str(buf, 0));
@@ -498,7 +498,7 @@ void test_zap_to_char_reads_key_from_macro_playback(void) {
 	E.playback = 1;
 
 	muteStdout();
-	zapToChar();
+	zapToChar(1);
 	unmuteStdout();
 
 	TEST_ASSERT_EQUAL_STRING("2a3a", row_str(buf, 0));

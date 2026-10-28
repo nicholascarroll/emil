@@ -95,7 +95,7 @@ void test_zap_arrow_key_does_not_corrupt_utf8(void) {
 	int keys[] = { KEY_ARROW_LEFT };
 	scriptKeys(keys, 1);
 	muteStdout();
-	zapToChar();
+	zapToChar(1);
 	unmuteStdout();
 	clearKeys();
 
@@ -122,7 +122,7 @@ void test_zap_meta_key_does_not_corrupt_utf8(void) {
 	keys[0] = KEY_META_BASE;	/* 2000 -> 0xD0 exactly */
 	scriptKeys(keys, 1);
 	muteStdout();
-	zapToChar();
+	zapToChar(1);
 	unmuteStdout();
 	clearKeys();
 
@@ -145,7 +145,7 @@ void test_zap_ascii_still_works(void) {
 	int keys[] = { 'o' };
 	scriptKeys(keys, 1);
 	muteStdout();
-	zapToChar();
+	zapToChar(1);
 	unmuteStdout();
 	clearKeys();
 
