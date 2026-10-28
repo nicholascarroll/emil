@@ -195,6 +195,58 @@ void test_find_tags_absent(void) {
 	rm_project(dir);
 }
 
+/* ---- ctagsHyphenatedWordAtPoint: Lisp-style symbols ---- */
+
+static char *hyphenated_at(const char *line, int cx) {
+	struct buffer *buf = make_test_buffer(line);
+	buf->cx = cx;
+	return ctagsHyphenatedWordAtPoint();
+}
+
+/* Called several times per test, so it frees its own buffer: the
+ * harness only cleans up the last one. */
+static void assert_hyphenated(const char *line, int cx, const char *want) {
+	char *w = hyphenated_at(line, cx);
+	if (want)
+		TEST_ASSERT_EQUAL_STRING(want, w);
+	else
+		TEST_ASSERT_TRUE(w == NULL);
+	free(w);
+	destroyBuffer(E.buf);
+	E.buf = NULL;
+	E.headbuf = NULL;
+	E.windows[0]->buf = NULL;
+}
+
+void test_hyphenated_several_single_hyphens(void) {
+	assert_hyphenated("(foo-bar-baz x)", 1, "foo-bar-baz");
+	assert_hyphenated("(foo-bar-baz x)", 6, "foo-bar-baz");
+	assert_hyphenated("(foo-bar-baz x)", 10, "foo-bar-baz");
+}
+
+/* Emacs Lisp names internal functions pkg--name. */
+void test_hyphenated_double_hyphen(void) {
+	assert_hyphenated("(my-pkg--helper x)", 1, "my-pkg--helper");
+	assert_hyphenated("(my-pkg--helper x)", 5, "my-pkg--helper");
+	assert_hyphenated("(my-pkg--helper x)", 10, "my-pkg--helper");
+}
+
+/* Point on the first hyphen, just after a word. */
+void test_hyphenated_on_double_hyphen(void) {
+	assert_hyphenated("(my-pkg--helper x)", 7, "my-pkg--helper");
+}
+
+/* Hyphens not followed by a word stay out of the symbol. */
+void test_hyphenated_trailing_hyphens_excluded(void) {
+	assert_hyphenated("foo-bar-- x", 1, "foo-bar");
+	assert_hyphenated("x --foo-bar", 4, "foo-bar");
+}
+
+/* C: a - b and x--y are not symbols. Plain word, so NULL. */
+void test_hyphenated_spaced_minus_is_not_symbol(void) {
+	assert_hyphenated("a - b", 0, NULL);
+}
+
 /* ---- ctagsWordAtPoint: ASCII identifiers and non-ASCII words ---- */
 
 /* "ภาษา" ZWSP "ไทย" ZWSP "ง่าย" -- three words, 12 + 3 + 9 + 3 + 12
@@ -546,6 +598,232 @@ static int ends_with(const char *s, const char *suffix) {
 	return a >= b && strcmp(s + a - b, suffix) == 0;
 }
 
+/* ---- ctagsJump on a marked region ---- */
+
+static char reg_root[PATH_MAX];
+static char reg_saved_cwd[PATH_MAX];
+
+static int enter_region_project(void) {
+	char tmpl[] = "/tmp/emil_tagregion_XXXXXX";
+	char *made = mkdtemp(tmpl);
+	if (!made || emil_strlcpy(reg_root, made, sizeof(reg_root)) >=
+			     sizeof(reg_root))
+		return -1;
+	write_file(reg_root, "lib.lisp",
+		   "(defvar *debug* nil)\n"
+		   "(defun set-car! (c v) v)\n"
+		   "(defun car (c) c)\n");
+	write_file(reg_root, "foo.cpp", "int x;\nvoid Foo::bar() {}\n");
+	write_file(reg_root, "tags",
+		   "!_TAG_FILE_FORMAT\t2\t//\n"
+		   "!_TAG_FILE_SORTED\t1\t//\n"
+		   "*debug*\tlib.lisp\t1;\"\tv\n"
+		   "Foo::bar\tfoo.cpp\t2;\"\tf\n"
+		   "car\tlib.lisp\t3;\"\tf\n"
+		   "set-car!\tlib.lisp\t2;\"\tf\n");
+	if (!getcwd(reg_saved_cwd, sizeof(reg_saved_cwd)) ||
+	    chdir(reg_root) != 0)
+		return -1;
+	return 0;
+}
+
+static void leave_region_project(void) {
+	TEST_ASSERT_EQUAL_INT(0, chdir(reg_saved_cwd));
+	rm_project(reg_root);
+}
+
+/* Mark [markx, cx) on a one-line buffer and jump. */
+static struct buffer *jump_marked(const char *line, int markx, int cx) {
+	struct buffer *buf = make_test_buffer(line);
+	buf->markx = markx;
+	buf->marky = 0;
+	buf->cx = cx;
+	buf->mark_active = 1;
+	int keys[] = { CTRL('g') }; /* would cancel a menu, if one opened */
+	scriptKeys(keys, 1);
+	muteStdout();
+	ctagsJump();
+	unmuteStdout();
+	return buf;
+}
+
+void test_region_jump_lisp_earmuffs(void) {
+	if (enter_region_project() != 0) {
+		TEST_ASSERT(0 && "could not create temp project");
+		return;
+	}
+	jump_marked("(when *debug* (print x))", 6, 13);
+	TEST_ASSERT(E.buf->filename && ends_with(E.buf->filename, "lib.lisp"));
+	TEST_ASSERT_EQUAL_INT(0, E.buf->cy);
+	leave_region_project();
+}
+
+/* Mark set after point, with blanks around the name. */
+void test_region_jump_backward_mark_trims_blanks(void) {
+	if (enter_region_project() != 0) {
+		TEST_ASSERT(0 && "could not create temp project");
+		return;
+	}
+	jump_marked("call  Foo::bar  now", 15, 4);
+	TEST_ASSERT(E.buf->filename && ends_with(E.buf->filename, "foo.cpp"));
+	TEST_ASSERT_EQUAL_INT(1, E.buf->cy);
+	leave_region_project();
+}
+
+void test_region_jump_lisp_bang(void) {
+	if (enter_region_project() != 0) {
+		TEST_ASSERT(0 && "could not create temp project");
+		return;
+	}
+	jump_marked("(set-car! p 1)", 1, 9);
+	TEST_ASSERT(E.buf->filename && ends_with(E.buf->filename, "lib.lisp"));
+	TEST_ASSERT_EQUAL_INT(1, E.buf->cy);
+	leave_region_project();
+}
+
+/* A marked name is exact: no fallback to the word at point. */
+void test_region_jump_no_fallback_to_word(void) {
+	if (enter_region_project() != 0) {
+		TEST_ASSERT(0 && "could not create temp project");
+		return;
+	}
+	struct buffer *buf = jump_marked("(car-x 1)", 1, 6);
+	TEST_ASSERT(E.buf == buf);
+	TEST_ASSERT_EQUAL_STRING("Tag not found: car-x", E.statusmsg);
+	TEST_ASSERT_EQUAL_INT(0, buf->mark_active);
+	leave_region_project();
+}
+
+void test_region_jump_rejects_multiline(void) {
+	if (enter_region_project() != 0) {
+		TEST_ASSERT(0 && "could not create temp project");
+		return;
+	}
+	const char *lines[] = { "(car", " x)" };
+	struct buffer *buf = make_test_buffer_lines(lines, 2);
+	buf->markx = 1;
+	buf->marky = 0;
+	buf->cx = 2;
+	buf->cy = 1;
+	buf->mark_active = 1;
+	muteStdout();
+	ctagsJump();
+	unmuteStdout();
+	TEST_ASSERT(E.buf == buf);
+	TEST_ASSERT_EQUAL_STRING("Tag name can't span lines", E.statusmsg);
+	TEST_ASSERT_EQUAL_INT(0, buf->mark_active);
+	leave_region_project();
+}
+
+void test_region_jump_blank_region(void) {
+	if (enter_region_project() != 0) {
+		TEST_ASSERT(0 && "could not create temp project");
+		return;
+	}
+	struct buffer *buf = jump_marked("car   car", 3, 6);
+	TEST_ASSERT(E.buf == buf);
+	TEST_ASSERT_EQUAL_STRING("No symbol in region", E.statusmsg);
+	leave_region_project();
+}
+
+/* ---- Marked region keeps combining marks with their letter ---- */
+
+/* "ไม่" (not) and "ดี" (good): ไ ม + tone mark, ด + vowel sign above.
+ * Every Thai character is 3 bytes.  "café" is decomposed: e + U+0301. */
+#define TH_MAI "\xe0\xb9\x84\xe0\xb8\xa1\xe0\xb9\x88"
+#define TH_DII "\xe0\xb8\x94\xe0\xb8\xb5"
+#define CAFE_NFD "cafe\xcc\x81"
+
+static char th_root[PATH_MAX];
+static char th_saved_cwd[PATH_MAX];
+
+static int enter_thai_project(void) {
+	char tmpl[] = "/tmp/emil_tagthai_XXXXXX";
+	char *made = mkdtemp(tmpl);
+	if (!made || emil_strlcpy(th_root, made, sizeof(th_root)) >=
+			     sizeof(th_root))
+		return -1;
+	write_file(th_root, "dict.txt",
+		   CAFE_NFD " coffee\n" TH_DII " good\n" TH_MAI " not\n");
+	/* Sorted by byte: c < ด < ไ. */
+	write_file(th_root, "tags",
+		   "!_TAG_FILE_FORMAT\t2\t//\n"
+		   "!_TAG_FILE_SORTED\t1\t//\n"
+		   CAFE_NFD "\tdict.txt\t1;\"\tw\n"
+		   TH_DII "\tdict.txt\t2;\"\tw\n"
+		   TH_MAI "\tdict.txt\t3;\"\tw\n");
+	if (!getcwd(th_saved_cwd, sizeof(th_saved_cwd)) ||
+	    chdir(th_root) != 0)
+		return -1;
+	return 0;
+}
+
+static void leave_thai_project(void) {
+	TEST_ASSERT_EQUAL_INT(0, chdir(th_saved_cwd));
+	rm_project(th_root);
+}
+
+static int jumped_to_dict_line(int line) {
+	return E.buf->filename && ends_with(E.buf->filename, "dict.txt") &&
+	       E.buf->cy == line;
+}
+
+/* Marks only draw at zero width under a UTF-8 locale.  In the C locale
+ * (Genode) each takes its own column, so the cursor can't stop before
+ * one unseen; the name is taken as marked, which here misses the mark. */
+static void assert_mark_lookup(int line) {
+	if (combiningCols() == 0) {
+		TEST_ASSERT(jumped_to_dict_line(line));
+	} else {
+		TEST_ASSERT_NULL(E.buf->filename);
+		TEST_ASSERT(strncmp(E.statusmsg, "Tag not found", 13) == 0);
+	}
+}
+
+/* Mark ends between ม and its tone mark: the mark still counts. */
+void test_region_thai_end_before_tone_mark(void) {
+	if (enter_thai_project() != 0) {
+		TEST_ASSERT(0 && "could not create temp project");
+		return;
+	}
+	jump_marked(TH_MAI TH_DII, 0, 6);
+	assert_mark_lookup(2);
+	leave_thai_project();
+}
+
+/* Mark starts on the vowel sign above ด: start moves back to ด. */
+void test_region_thai_start_on_vowel_sign(void) {
+	if (enter_thai_project() != 0) {
+		TEST_ASSERT(0 && "could not create temp project");
+		return;
+	}
+	jump_marked(TH_MAI TH_DII, 12, 15);
+	assert_mark_lookup(1);
+	leave_thai_project();
+}
+
+/* A ZWSP word break after the word is not pulled into the name. */
+void test_region_thai_zwsp_not_absorbed(void) {
+	if (enter_thai_project() != 0) {
+		TEST_ASSERT(0 && "could not create temp project");
+		return;
+	}
+	jump_marked(TH_MAI ZW TH_DII, 0, 9);
+	TEST_ASSERT(jumped_to_dict_line(2));
+	leave_thai_project();
+}
+
+/* Decomposed Latin: a mark ending before the accent keeps it. */
+void test_region_decomposed_accent(void) {
+	if (enter_thai_project() != 0) {
+		TEST_ASSERT(0 && "could not create temp project");
+		return;
+	}
+	jump_marked("un " CAFE_NFD " solo", 3, 7);
+	assert_mark_lookup(0);
+	leave_thai_project();
+}
+
 void test_menu_single_match_jumps_directly(void) {
 	if (enter_menu_project() != 0) {
 		TEST_ASSERT(0 && "could not create temp project");
@@ -656,6 +934,7 @@ void test_menu_cancels_when_macro_runs_out(void) {
 
 int main(void) {
 	TEST_BEGIN();
+	(void)selectUtf8Locale();
 
 	RUN_TEST(test_resolve_relative_joins_onto_tagsdir);
 	RUN_TEST(test_resolve_bare_filename);
@@ -693,6 +972,21 @@ int main(void) {
 	RUN_TEST(test_word_em_dash_is_a_separator);
 	RUN_TEST(test_word_guillemets_are_separators);
 	RUN_TEST(test_word_truncated_sequence_does_not_swallow_following_bytes);
+	RUN_TEST(test_hyphenated_several_single_hyphens);
+	RUN_TEST(test_hyphenated_double_hyphen);
+	RUN_TEST(test_hyphenated_on_double_hyphen);
+	RUN_TEST(test_hyphenated_trailing_hyphens_excluded);
+	RUN_TEST(test_hyphenated_spaced_minus_is_not_symbol);
+	RUN_TEST(test_region_jump_lisp_earmuffs);
+	RUN_TEST(test_region_jump_backward_mark_trims_blanks);
+	RUN_TEST(test_region_jump_lisp_bang);
+	RUN_TEST(test_region_jump_no_fallback_to_word);
+	RUN_TEST(test_region_jump_rejects_multiline);
+	RUN_TEST(test_region_jump_blank_region);
+	RUN_TEST(test_region_thai_end_before_tone_mark);
+	RUN_TEST(test_region_thai_start_on_vowel_sign);
+	RUN_TEST(test_region_thai_zwsp_not_absorbed);
+	RUN_TEST(test_region_decomposed_accent);
 	RUN_TEST(test_parse_pattern_address_and_scope);
 	RUN_TEST(test_parse_number_address);
 	RUN_TEST(test_parse_combined_address);

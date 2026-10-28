@@ -17,6 +17,7 @@
 #include "window.h"
 #include "util.h"
 #include "unicode.h"
+#include "region.h"
 
 /* ---- jump-back stack ---- */
 
@@ -122,15 +123,25 @@ static char *wordAtPoint(int hyphens) {
 	while (end < row->size && isWordAt(row, end))
 		end = nextCPStart(row, end);
 
-	while (hyphens && start > 0 && row->chars[start - 1] == '-' &&
-	       isWordAt(row, prevCPStart(row, start - 1))) {
-		start = prevCPStart(row, start - 1);
+	/* A run of hyphens joins two words (Lisp's pkg--internal uses
+	 * two), but only when there is a word on its far side. */
+	while (hyphens && start > 0 && row->chars[start - 1] == '-') {
+		int h = start - 1;
+		while (h > 0 && row->chars[h - 1] == '-')
+			h--;
+		if (h == 0 || !isWordAt(row, prevCPStart(row, h)))
+			break;
+		start = prevCPStart(row, h);
 		while (start > 0 && isWordAt(row, prevCPStart(row, start)))
 			start = prevCPStart(row, start);
 	}
-	while (hyphens && end + 1 < row->size && row->chars[end] == '-' &&
-	       isWordAt(row, end + 1)) {
-		end++;
+	while (hyphens && end < row->size && row->chars[end] == '-') {
+		int h = end + 1;
+		while (h < row->size && row->chars[h] == '-')
+			h++;
+		if (h >= row->size || !isWordAt(row, h))
+			break;
+		end = h;
 		while (end < row->size && isWordAt(row, end))
 			end = nextCPStart(row, end);
 	}
@@ -539,15 +550,71 @@ static void visitMatch(const struct tagMatch *m, const char *sym) {
 	setStatusMessage("Tag: %s", sym);
 }
 
+/* A mark drawn on the character before it, such as a Thai tone mark
+ * or vowel sign, or a combining accent.  Zero-width format characters
+ * (ZWSP, ZWJ, ZWNJ) are not marks: a ZWSP is a word break. */
+static int isCombiningAt(const erow *row, int i) {
+	if (i < 0 || i >= row->size || row->chars[i] < 0x80)
+		return 0;
+	uint32_t cp = utf8Decode(row->chars, i);
+	return !isZeroWidth(cp) && !isSeparatorCP(cp) &&
+	       charInStringWidth(row->chars, i) == 0;
+}
+
+/* The text of an active region on one line, trimmed of blanks, for
+ * tag names the word scanner can't see: *debug*, null?, Foo::bar.
+ * Sets *err and returns NULL when the region can't be a name. */
+static char *regionSymbol(const char **err) {
+	struct buffer *buf = E.buf;
+	if (buf->marky != buf->cy) {
+		*err = "Tag name can't span lines";
+		return NULL;
+	}
+	erow *row = &buf->row[buf->cy];
+	int s = buf->markx < buf->cx ? buf->markx : buf->cx;
+	int e = buf->markx < buf->cx ? buf->cx : buf->markx;
+	/* The cursor can stop invisibly between a letter and its marks:
+	 * keep the marks with their letter at both ends. */
+	while (e < row->size && isCombiningAt(row, e))
+		e = nextCPStart(row, e);
+	while (s > 0 && isCombiningAt(row, s))
+		s = prevCPStart(row, s);
+	while (s < e && (row->chars[s] == ' ' || row->chars[s] == '\t'))
+		s++;
+	while (e > s && (row->chars[e - 1] == ' ' || row->chars[e - 1] == '\t'))
+		e--;
+	if (s == e) {
+		*err = "No symbol in region";
+		return NULL;
+	}
+	char *w = xmalloc(e - s + 1);
+	memcpy(w, &row->chars[s], e - s);
+	w[e - s] = '\0';
+	return w;
+}
+
 void ctagsJump(void) {
-	char *sym = ctagsWordAtPoint();
-	if (!sym) {
-		setStatusMessage("No symbol at point");
-		return;
+	int from_region = E.buf->mark_active && !markInvalidBuf(E.buf);
+	char *sym;
+	if (from_region) {
+		const char *err = NULL;
+		E.buf->mark_active = 0;
+		sym = regionSymbol(&err);
+		if (!sym) {
+			setStatusMessage("%s", err);
+			return;
+		}
+	} else {
+		sym = ctagsWordAtPoint();
+		if (!sym) {
+			setStatusMessage("No symbol at point");
+			return;
+		}
 	}
 	struct tagMatch *v = NULL;
 	int n = -1;
-	char *hyphenated = ctagsHyphenatedWordAtPoint();
+	/* A marked name is taken exactly as marked. */
+	char *hyphenated = from_region ? NULL : ctagsHyphenatedWordAtPoint();
 	if (hyphenated) {
 		n = collectMatches(hyphenated, &v);
 		if (n > 0) {
