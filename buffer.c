@@ -91,11 +91,13 @@ void rowEnsureCap(erow *row, int needed) {
 static void bufEnsureRowCap(struct buffer *bufr) {
 	if (bufr->numrows < bufr->rowcap)
 		return;
-	/* The row count is bounded at INT_MAX / 2 by the load path, so the
-	 * cap below is reached before the multiplication can overflow.*/
+
 	int new_cap = !bufr->rowcap		 ? 16 :
 		      bufr->rowcap > INT_MAX / 2 ? INT_MAX :
 						   bufr->rowcap * 2;
+	if (bufr->rowcap == INT_MAX ||
+	    (size_t)new_cap > SIZE_MAX / sizeof(erow))
+		abort();
 	bufr->row = xrealloc(bufr->row, sizeof(erow) * new_cap);
 	memset(&bufr->row[bufr->rowcap], 0,
 	       sizeof(erow) * (new_cap - bufr->rowcap));
@@ -105,6 +107,9 @@ static void bufEnsureRowCap(struct buffer *bufr) {
 void insertRow(struct buffer *bufr, int at, const uint8_t *s, size_t len) {
 	if (at < 0 || at > bufr->numrows)
 		return;
+
+	if (len > (size_t)INT_MAX - 1)
+		abort();
 
 	bufEnsureRowCap(bufr);
 
@@ -129,6 +134,9 @@ void insertRow(struct buffer *bufr, int at, const uint8_t *s, size_t len) {
  * buffer is being populated from disk.
  */
 void appendRowRaw(struct buffer *bufr, const uint8_t *s, size_t len) {
+	if (len > (size_t)INT_MAX - 1)
+		abort();
+
 	bufEnsureRowCap(bufr);
 
 	int at = bufr->numrows;
@@ -165,6 +173,8 @@ void rowInsertChar(struct buffer *bufr, erow *row, int at, int c) {
 	if (at < 0 || at > row->size)
 		at = row->size;
 
+	if (row->size > INT_MAX - 2)
+		abort();
 	int needed = row->size + 2;
 	rowEnsureCap(row, needed);
 	memmove(&row->chars[at + 1], &row->chars[at], row->size - at + 1);

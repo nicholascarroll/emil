@@ -5,6 +5,7 @@
 #endif
 
 #include <sys/types.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -569,6 +570,8 @@ size_t utf8SanitizeLine(const uint8_t *in, size_t len, char *out,
  * Every walk that accumulates display columns over row or message
  * bytes must get its per-character widths from here.*/
 int charAdvance(const uint8_t *str, int idx, int x, int *nbytes) {
+	if (x > INT_MAX / 4 * 3)
+		abort();
 	uint8_t ch = str[idx];
 	int width;
 

@@ -14,14 +14,22 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Callers run this before the row mutation and its size guards, so it
+ * checks its own counters: no valid column exceeds INT_MAX - 1 (row
+ * size <= INT_MAX - 1) and no valid row index does either (numrows <=
+ * INT_MAX).  Abort before the increment that would overflow. */
 void computeInsertEnd(const uint8_t *text, int len, int startx, int starty,
 		      int *endx, int *endy) {
 	int ex = startx, ey = starty;
 	for (int i = 0; i < len; i++) {
 		if (text[i] == '\n') {
+			if (ey >= INT_MAX - 1)
+				abort();
 			ey++;
 			ex = 0;
 		} else {
+			if (ex >= INT_MAX - 1)
+				abort();
 			ex++;
 		}
 	}
@@ -30,18 +38,12 @@ void computeInsertEnd(const uint8_t *text, int len, int startx, int starty,
 }
 
 /* Perform the row-array mutation for an insert at (startx, starty).
- * Takes an ALREADY-ANCHORED position and payload, and does NOT adjust
- * tracked points (bulkInsert does that on the logical range).  Uses
- * direct memmove/memcpy and insertRow, no character-at-a-time
- * primitives.  Does NOT record undo. */
+ * Does NOT record undo. */
 static void bulkInsertRaw(struct buffer *buf, int startx, int starty,
 			  const uint8_t *data, int datalen) {
 	if (datalen <= 0)
 		return;
 
-	/* numrows >= 1 and starty < numrows (#105), so the target row
-	 * always exists.  A malformed record is a bug, not a case to
-	 * paper over. */
 	if (starty >= buf->numrows)
 		return;
 
@@ -51,6 +53,8 @@ static void bulkInsertRaw(struct buffer *buf, int startx, int starty,
 	if (first_nl == NULL) {
 		/* Single-line insert: memmove tail right, memcpy data in */
 		struct erow *row = &buf->row[starty];
+		if (datalen > INT_MAX - 1 - row->size)
+			abort();
 		int needed = row->size + datalen + 1;
 		rowEnsureCap(row, needed);
 		memmove(&row->chars[startx + datalen], &row->chars[startx],
@@ -81,6 +85,8 @@ static void bulkInsertRaw(struct buffer *buf, int startx, int starty,
 
 	/* Truncate start row at startx, then append first fragment */
 	int first_frag_len = (int)(first_nl - data);
+	if (first_frag_len > INT_MAX - 1 - startx)
+		abort();
 	int new_size = startx + first_frag_len;
 	row->chars = xrealloc(row->chars, new_size + 1);
 	row->charcap = new_size + 1;
@@ -100,6 +106,8 @@ static void bulkInsertRaw(struct buffer *buf, int startx, int starty,
 		if (nl == NULL) {
 			/* Last fragment — combine with saved suffix */
 			int last_frag_len = (int)(end - p);
+			if (last_frag_len > INT_MAX - 1 - suffix_len)
+				abort();
 			int combined_len = last_frag_len + suffix_len;
 			uint8_t *combined = xmalloc(combined_len + 1);
 			memcpy(combined, p, last_frag_len);
@@ -163,8 +171,18 @@ void bulkDelete(struct buffer *buf, int startx, int starty, int endx,
 		startx = buf->row[starty].size;
 	if (endx > buf->row[endy].size)
 		endx = buf->row[endy].size;
+	if (startx < 0)
+		startx = 0;
+	if (endx < 0)
+		endx = 0;
 	if (starty == endy && endx < startx)
 		endx = startx;
+
+	/* A multi-row delete joins the start row's prefix to the end
+	 * row's suffix.  Check that the joined row fits before
+	 * adjustAllPoints, which computes points' columns in it. */
+	if (starty != endy && buf->row[endy].size - endx > INT_MAX - 1 - startx)
+		abort();
 
 	/* Adjust tracked points before the mutation changes row structure */
 	adjustAllPoints(buf, startx, starty, endx, endy, 1);
@@ -379,6 +397,8 @@ static int undoMerge(struct undo *prev, struct undo *new) {
 	    prev->nmerges >= UNDO_MERGE_LIMIT)
 		return 0;
 	if (new->datalen <= 0)
+		return 0;
+	if (prev->datalen > INT_MAX / 2 || new->datalen > INT_MAX / 2)
 		return 0;
 
 	int prepend = 0;

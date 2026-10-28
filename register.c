@@ -10,6 +10,7 @@
 #include "unicode.h"
 #include "util.h"
 #include "window.h"
+#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -333,6 +334,11 @@ void incrementRegister(void) {
 			size_t kill_len = strlen((char *)E.kill.str);
 			size_t region_len =
 				strlen((char *)E.registers[reg].data.text.str);
+			/* Register text is yanked as an int length, so it
+			 * must stay within the same bound as a row. */
+			if (region_len > (size_t)INT_MAX - 1 ||
+			    kill_len > (size_t)INT_MAX - 1 - region_len)
+				abort();
 			size_t new_len = region_len + kill_len + 1;
 			E.registers[reg].data.text.str = xrealloc(
 				E.registers[reg].data.text.str, new_len);

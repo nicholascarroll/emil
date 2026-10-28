@@ -1655,7 +1655,7 @@ void describeChar(void) {
 	int cx = E.buf->cx;
 
 	/* Calculate absolute byte offset from the start of the file/buffer */
-	long abs_offset = cx;
+	long long abs_offset = cx; /* long is 32-bit on wasm32 */
 	for (int i = 0; i < E.buf->cy; i++) {
 		abs_offset += E.buf->row[i].size;
 		abs_offset +=
@@ -1665,7 +1665,7 @@ void describeChar(void) {
 	if (cx >= row->size) {
 		snprintf(info, sizeof(info),
 			 "Character: LINE FEED | Line Byte Offset: %d | "
-			 "Absolute Byte Offset: %ld",
+			 "Absolute Byte Offset: %lld",
 			 cx, abs_offset);
 		setStatusMessage("%s", info);
 		return;
@@ -1702,7 +1702,7 @@ void describeChar(void) {
 		snprintf(info, sizeof(info),
 			 "Character: %s | Unicode Codepoint: U+%04lX | "
 			 "Display Width: %d | Line Byte Offset: %d | "
-			 "Absolute Byte Offset: %ld | Hex Bytes: %s",
+			 "Absolute Byte Offset: %lld | Hex Bytes: %s",
 			 name, (unsigned long)cp, sw, cx, abs_offset, raw);
 	} else {
 		/* Printable character: show the glyph */
@@ -1721,7 +1721,7 @@ void describeChar(void) {
 
 		snprintf(
 			info, sizeof(info),
-			"Character: %s%s | Unicode Codepoint: U+%04lX | Display Width: %d | Line Byte Offset: %d | Absolute Byte Offset: %ld | Raw Hex Bytes: %s",
+			"Character: %s%s | Unicode Codepoint: U+%04lX | Display Width: %d | Line Byte Offset: %d | Absolute Byte Offset: %lld | Raw Hex Bytes: %s",
 			glyph, scriptpart, (unsigned long)cp, sw, cx,
 			abs_offset, raw);
 	}

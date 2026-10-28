@@ -6,6 +6,7 @@
 #include "undo.h"
 #include "util.h"
 #include "wrap.h"
+#include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -104,6 +105,10 @@ static void mutateReplaceEx(struct buffer *buf, int startx, int starty,
 	    deletesOnlyFinalNewline(buf, startx, starty, endx, endy, old_len,
 				    repl_len))
 		return;
+
+	if (old_len < 0 || repl_len < 0 || old_len > INT_MAX - 1 ||
+	    repl_len > INT_MAX - 1)
+		abort();
 
 	int is_replace = (old_len > 0 && repl_len > 0);
 	if (is_replace || chain_to_prev)

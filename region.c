@@ -13,6 +13,7 @@
 #include "undo.h"
 #include "unicode.h"
 #include "util.h"
+#include <limits.h>
 #include <regex.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -945,10 +946,17 @@ void stringRectangleWithText(uint8_t *string) {
 static uint8_t *extractRectColumns(struct buffer *buf, int topx, int topy,
 				   int rw, int rh) {
 	int botx = topx + rw;
+	/* rw * rh can exceed INT_MAX with ordinary input (a 1 MB line
+	 * and a few thousand short ones), so cell offsets are size_t,
+	 * and on 32-bit hosts the product can exceed SIZE_MAX too. */
+	if (rw < 0 || rh < 0 ||
+	    (rw > 0 && (size_t)rh > (SIZE_MAX - 1) / (size_t)rw))
+		abort();
 	uint8_t *out = xcalloc((size_t)rw * rh + 1, 1);
 	for (int idx = 0; idx < rh; idx++) {
 		erow *row = &buf->row[topy + idx];
-		memset(&out[idx * rw], ' ', rw);
+		size_t cell = (size_t)idx * rw;
+		memset(&out[cell], ' ', rw);
 		/* Snap inward so no multi-byte character is split; the
 		 * slice can only shrink (s >= topx, e <= botx), so it
 		 * always fits in the rw-byte cell, space-padded. */
@@ -958,7 +966,7 @@ static uint8_t *extractRectColumns(struct buffer *buf, int topx, int topy,
 			e = s;
 		if (s >= row->size || e <= s)
 			continue;
-		memcpy(&out[idx * rw], &row->chars[s], e - s);
+		memcpy(&out[cell], &row->chars[s], e - s);
 	}
 	return out;
 }
@@ -1090,6 +1098,8 @@ void yankRectangle(void) {
 	struct buffer *buf = E.buf;
 	int topx = buf->cx;
 	int topy = buf->cy;
+	if (rh - 1 > INT_MAX - 1 - topy)
+		abort();
 	int boty = topy + rh - 1;
 
 	/* If the rectangle overruns the buffer, extend with blank
@@ -1120,7 +1130,7 @@ void yankRectangle(void) {
 	/* Build new text: for each row, insert rectangle slice at topx,
 	 * padding with spaces if the row is shorter than topx. */
 	struct dbuf d = DBUF_INIT;
-	char *slice = xcalloc(rw + 1, 1);
+	char *slice = xcalloc((size_t)rw + 1, 1);
 
 	for (int idx = 0; idx < rh; idx++) {
 		int cur = topy + idx;
@@ -1128,7 +1138,8 @@ void yankRectangle(void) {
 		if (idx > 0)
 			dbuf_byte(&d, '\n');
 
-		strncpy(slice, (char *)&saved.str[idx * rw], rw);
+		/* size_t: rw * rh can exceed INT_MAX (see extractRectColumns) */
+		strncpy(slice, (char *)&saved.str[(size_t)idx * rw], rw);
 
 		/* Snap the per-row insertion point forward to a
 		 * character boundary so a destination multi-byte
