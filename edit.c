@@ -806,57 +806,76 @@ void transposeSentences(int uarg) {
 	free(repl);
 }
 
-/* Greedy means delete up to and including the character entered 
+/* Greedy means delete up to and including the character entered
  * at the prompt. Otherwise, only up to. */
 void zap(int greedy, int uarg) {
 	if (rejectIfReadOnly(E.buf))
 		return;
-	/* TODO
-	if (uarg == UARG_REVERSE) 
-	int times = UARG_COUNT(count);
-	for (int i = 0; i < times; i++) 
-*/
 
 	E.buf->mark_active = 0;
+
+	int reverse = (uarg == UARG_REVERSE);
+	int times = UARG_COUNT(uarg);
 
 	const char *prompt;
 	if (greedy) {
 		prompt = "Zap to char: ";
 	} else {
 		prompt = "Zap up to char: ";
-	};
+	}
 
 	int c = promptKey(prompt);
 
 	/* The target is compared byte-for-byte against buffer content, so
 	 * it has to be a single ASCII byte.*/
 	if (c != '\t' && (c < ' ' || c > '~')) {
-		setStatusMessage("Zap to char: not a character");
+		setStatusMessage("%snot a character", prompt);
 		return;
+	} else {
+		setStatusMessage("%s%c", prompt, c);
 	}
 
-	/* TOOD Search backward or forward for the character */
-	int sy = E.buf->cy;
+	int cx = E.buf->cx, cy = E.buf->cy;
+	int found = 0;
 
-	while (sy < E.buf->numrows) {
-		erow *row = &E.buf->row[sy];
-		int start = (sy == E.buf->cy) ? E.buf->cx : 0;
-		for (int x = start; x < row->size; x++) {
-			if (row->chars[x] == (uint8_t)c) {
-				/* Skip past the target if it's not at
-				 * the starting position */
-				if (x == E.buf->cx && sy == E.buf->cy)
+	if (reverse) {
+		/* Scan backward starting at the char just before point. */
+		for (int sy = cy; sy >= 0; sy--) {
+			erow *row = &E.buf->row[sy];
+			int start = (sy == cy) ? cx - 1 : row->size - 1;
+			for (int x = start; x >= 0; x--) {
+				if (row->chars[x] != (uint8_t)c)
 					continue;
-				/* Kill up to and/or including this char */
-				int endx = x + greedy;
-				int endy = sy;
-				deleteRange(E.buf, E.buf->cx, E.buf->cy, endx,
-					    endy, 1);
-				clearStatusMessage();
+				/* Up-to with the target right behind point
+				 * would delete nothing: skip past it. */
+				if (!greedy && sy == cy && x == cx - 1)
+					continue;
+				if (++found < times)
+					continue;
+				int startx = greedy ? x : x + 1;
+				/* deleteRange orders the points and leaves
+				 * the cursor at the start of the range. */
+				deleteRange(E.buf, startx, sy, cx, cy, 1);
 				return;
 			}
 		}
-		sy++;
+	} else {
+		for (int sy = cy; sy < E.buf->numrows; sy++) {
+			erow *row = &E.buf->row[sy];
+			int start = (sy == cy) ? cx : 0;
+			for (int x = start; x < row->size; x++) {
+				if (row->chars[x] != (uint8_t)c)
+					continue;
+				/* Skip past the target if it's at point */
+				if (!greedy && x == cx && sy == cy)
+					continue;
+				if (++found < times)
+					continue;
+				/* Kill up to and/or including this char */
+				deleteRange(E.buf, cx, cy, x + greedy, sy, 1);
+				return;
+			}
+		}
 	}
 
 	setStatusMessage("'%c' not found", c);
