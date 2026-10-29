@@ -270,6 +270,29 @@ void test_utf8_drop_to_fit(void) {
 	}
 }
 
+/* A C1 control (U+0080..U+009F) is drawn as one '?' and never sent to
+ * the terminal, so THE rule prices it at one column whatever the
+ * platform's wcwidth says, and C-x = names it as it names C0. */
+void test_c1_controls_are_one_column_and_named(void) {
+	for (uint32_t cp = 0x80; cp <= 0x9F; cp++) {
+		uint8_t s[3] = { 0xC2, (uint8_t)cp, 0 };
+		int nb = 0;
+		TEST_ASSERT_EQUAL_INT(1, charAdvance(s, 0, 0, &nb));
+		TEST_ASSERT_EQUAL_INT(2, nb);
+
+		const char *name = unicodeCharName(cp);
+		TEST_ASSERT_NOT_NULL(name);
+		if (name) {
+			char want[16];
+			snprintf(want, sizeof(want), "CONTROL-%04X",
+				 (unsigned)cp);
+			TEST_ASSERT_EQUAL_STRING(want, name);
+		}
+	}
+	/* NO-BREAK SPACE, just past the range, is still a space. */
+	TEST_ASSERT_EQUAL_STRING("NO-BREAK SPACE", unicodeCharName(0xA0));
+}
+
 int main(void) {
 	TEST_BEGIN();
 	/* The same locale selection the editor performs, so what these
@@ -291,5 +314,6 @@ int main(void) {
 	RUN_TEST(test_utf8_cols_to_bytes);
 	RUN_TEST(test_utf8_width_n);
 	RUN_TEST(test_utf8_drop_to_fit);
+	RUN_TEST(test_c1_controls_are_one_column_and_named);
 	return TEST_END();
 }

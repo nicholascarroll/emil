@@ -541,6 +541,57 @@ static int isLiteralMark(const uint8_t *s, int idx) {
 	}
 }
 
+/* Whether s[idx..idx+avail) starts with a C1 control, U+0080..U+009F.
+ * Valid UTF-8, so it reaches the buffer, but a UTF-8 terminal reads it
+ * as a control: U+009B is CSI and U+009D is OSC in xterm and VTE, and a
+ * file could rewrite or hide what is drawn around it.  Never sent raw.
+ * charAdvance() prices it at one column, the '?' drawn in its place. */
+static int isC1At(const uint8_t *s, int idx, int avail) {
+	return avail >= 2 && s[idx] == 0xC2 && s[idx + 1] >= 0x80 &&
+	       s[idx + 1] <= 0x9F;
+}
+
+/* Append s[0..len) for the terminal with nothing in it the terminal
+ * would act on.  For text that is not a buffer row: file names, status
+ * messages, and the minibuffer echo of whatever was typed or yanked.
+ *
+ *   C0 control, DEL   ^X, as rows draw them   (two columns)
+ *   C1 control        ?                         (one column)
+ *   invalid UTF-8     ?, per byte              (one column)
+ *   TAB, the rest     as is
+ *
+ * Each width is the one charAdvance() gives the original, so layouts
+ * measured on the raw text (minibufLayout, the status bar's name
+ * budget) still describe what is drawn.  A TAB only moves the cursor,
+ * and its width depends on position, so it is left alone. */
+static void abAppendSafe(struct abuf *ab, const char *s, int len) {
+	const uint8_t *u = (const uint8_t *)s;
+	int i = 0;
+	while (i < len) {
+		uint8_t c = u[i];
+		if ((c < 0x20 && c != '\t') || c == 0x7f) {
+			char caret[2] = { '^', (char)(c ^ 0x40) };
+			abAppend(ab, caret, 2);
+			i++;
+		} else if (c < 0x80) {
+			abAppend(ab, s + i, 1);
+			i++;
+		} else {
+			int n = utf8_nBytes(c);
+			if (n < 2 || n > len - i || !utf8_validate(u + i, n)) {
+				abAppend(ab, "?", 1);
+				i++;
+			} else if (isC1At(u, i, len - i)) {
+				abAppend(ab, "?", 1);
+				i += n;
+			} else {
+				abAppend(ab, s + i, n);
+				i += n;
+			}
+		}
+	}
+}
+
 static int renderLineWithHighlighting(erow *row, struct abuf *ab, int start_col,
 				      int end_col,
 				      const struct rowHighlight *hl,
@@ -612,9 +663,15 @@ static int renderLineWithHighlighting(erow *row, struct abuf *ab, int start_col,
 		if (render_x >= end_col && width > 0)
 			break;
 
+		/* A C1 control is drawn as an inverted '?' so that it can
+		 * be neither obeyed by the terminal nor mistaken for a
+		 * real question mark. */
+		int c1 = isC1At(row->chars, char_idx, row->size - char_idx);
+
 		/* A literal mark in whitespace-mode is inverted, against
 		 * the region or search highlight when it falls inside one. */
-		int literal = whitespace && isLiteralMark(row->chars, char_idx);
+		int literal = c1 || (whitespace &&
+				     isLiteralMark(row->chars, char_idx));
 		updateHighlight(ab, &current_highlight,
 				(isHighlighted(hl, render_x) ? 1 : 0) ^
 					literal);
@@ -664,7 +721,9 @@ static int renderLineWithHighlighting(erow *row, struct abuf *ab, int start_col,
 						whitespaceMark(row->chars,
 							       char_idx) :
 						NULL;
-				if (mark) {
+				if (c1) {
+					abAppend(ab, "?", 1);
+				} else if (mark) {
 					abAppend(ab, mark, strlen(mark));
 					for (int i = 1; i < width; i++)
 						abAppend(ab, " ", 1);
@@ -1153,15 +1212,20 @@ static int statusLeft(const struct buffer *bufr, char *out, int cap,
 		show_name = trunc;
 	}
 
-	/* snprintf returns the length it WOULD have written.  The caller
-	 * hands this straight to abAppend against a fixed-size stack
-	 * buffer, so an over-long name made it read past the end.  Clamp
-	 * to what actually fits. */
-	int n = snprintf(out, cap, "%s %s", show_name, flags);
+	/* A file name is whatever bytes the file system allowed, so it
+	 * goes out through abAppendSafe like any other untrusted text.
+	 * The caller hands the result straight to abAppend against a
+	 * fixed-size stack buffer: clamp to what actually fits. */
+	struct abuf safe = ABUF_INIT;
+	abAppendSafe(&safe, show_name, (int)strlen(show_name));
+	abAppend(&safe, " ", 1);
+	abAppend(&safe, flags, 2);
+	int n = safe.len < cap ? safe.len : cap - 1;
 	if (n < 0)
-		return 0;
-	if (n >= cap)
-		n = cap - 1;
+		n = 0;
+	memcpy(out, safe.b, n);
+	out[n] = '\0';
+	abFree(&safe);
 	return n;
 }
 
@@ -1474,8 +1538,10 @@ void drawMinibuffer(struct abuf *ab) {
 		if (line < nlines) {
 			int start = lines[line].start;
 			int len = lines[line].end - start;
+			/* File names, shell stderr and anything typed or
+			 * yanked into a prompt all pass through here. */
 			if (len > 0)
-				abAppend(ab, msg + start, len);
+				abAppendSafe(ab, msg + start, len);
 			abAppend(ab, "\x1b[0m", 4);
 		}
 

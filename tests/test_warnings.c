@@ -189,6 +189,31 @@ void test_markdirty_normal_path_still_locks(void) {
 	free(path);
 }
 
+#ifndef EMIL_NO_FILE_LOCKING
+/* The lock descriptor is open, read-write where possible, for as long
+ * as the buffer has unsaved changes.  Every M-! and M-| child spawned
+ * meanwhile used to inherit it: close-on-exec keeps the user's file out
+ * of them. */
+void test_lock_descriptor_is_close_on_exec(void) {
+	char *path = make_temp_file("content\n");
+	TEST_ASSERT_NOT_NULL(path);
+
+	struct buffer *buf = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, editorOpen(buf, path));
+	markBufferDirty(buf);
+	TEST_ASSERT_TRUE(buf->lock_fd >= 0);
+
+	if (buf->lock_fd >= 0) {
+		int flags = fcntl(buf->lock_fd, F_GETFD);
+		TEST_ASSERT_TRUE(flags != -1);
+		TEST_ASSERT_TRUE((flags & FD_CLOEXEC) != 0);
+	}
+
+	unlink(path);
+	free(path);
+}
+#endif /* !EMIL_NO_FILE_LOCKING */
+
 /* ---- lock_blocked_pid state machine ----
  *
  * fcntl advisory locks are per-process: a second fd opened by the
@@ -1082,6 +1107,9 @@ int main(void) {
 
 	RUN_TEST(test_markdirty_skips_lock_when_externally_modified);
 	RUN_TEST(test_markdirty_normal_path_still_locks);
+#ifndef EMIL_NO_FILE_LOCKING
+	RUN_TEST(test_lock_descriptor_is_close_on_exec);
+#endif
 
 #ifndef EMIL_NO_FILE_LOCKING
 	RUN_TEST(test_lock_blocked_set_when_other_process_holds_lock);

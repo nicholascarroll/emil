@@ -31,6 +31,26 @@ static void encode2(int cp, uint8_t *b0, uint8_t *b1) {
 	*b1 = 0x80 | (cp & 0x3F);
 }
 
+/* Latin Extended-A puts each capital immediately before its small
+ * letter, but which of the two sits on the even codepoint changes
+ * part way through the block:
+ *
+ *   U+0100–U+012F, U+0132–U+0137, U+014A–U+0177   capital even
+ *   U+0139–U+0148, U+0179–U+017E                   capital odd
+ *
+ * Returns the parity of the capital (0 even, 1 odd), or -1 for a
+ * codepoint with no partner of the same encoded length: U+0130 İ,
+ * U+0131 ı, U+0138 ĸ, U+0149 ŉ, U+017F ſ.  U+0178 Ÿ pairs with
+ * U+00FF ÿ and is handled by the callers. */
+static int latinExtACapitalParity(int cp) {
+	if ((cp >= 0x0100 && cp <= 0x012F) || (cp >= 0x0132 && cp <= 0x0137) ||
+	    (cp >= 0x014A && cp <= 0x0177))
+		return 0;
+	if ((cp >= 0x0139 && cp <= 0x0148) || (cp >= 0x0179 && cp <= 0x017E))
+		return 1;
+	return -1;
+}
+
 /* Return the uppercase form of a Latin Unicode codepoint in the range
  * U+00C0–U+017F.  Returns the codepoint unchanged if no mapping exists.
  * Input/output are Unicode codepoints, not UTF-8 bytes. */
@@ -40,10 +60,9 @@ static int latin_toupper(int cp) {
 	if (cp >= 0xE0 && cp <= 0xFE && cp != 0xF7)
 		return cp - 0x20;
 
-	/* Latin Extended-A: even=upper, odd=lower for most pairs */
-	if (cp >= 0x0101 && cp <= 0x012F && (cp & 1))
-		return cp - 1;
-	if (cp >= 0x0133 && cp <= 0x0177 && (cp & 1))
+	/* Latin Extended-A: a small letter follows its capital. */
+	int parity = latinExtACapitalParity(cp);
+	if (parity >= 0 && (cp & 1) != parity)
 		return cp - 1;
 
 	/* U+00FF ÿ → U+0178 Ÿ */
@@ -62,10 +81,9 @@ static int latin_tolower(int cp) {
 	if (cp >= 0xC0 && cp <= 0xDE && cp != 0xD7)
 		return cp + 0x20;
 
-	/* Latin Extended-A: even=upper, odd=lower for most pairs */
-	if (cp >= 0x0100 && cp <= 0x012E && !(cp & 1))
-		return cp + 1;
-	if (cp >= 0x0132 && cp <= 0x0176 && !(cp & 1))
+	/* Latin Extended-A: a capital precedes its small letter. */
+	int parity = latinExtACapitalParity(cp);
+	if (parity >= 0 && (cp & 1) == parity)
 		return cp + 1;
 
 	/* U+0178 Ÿ → U+00FF ÿ */

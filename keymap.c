@@ -710,7 +710,17 @@ static int dispatchEdit(int c, int uarg) {
 		openLine(uarg);
 		return 1;
 	case CMD_QUOTED_INSERT: {
-		int key = readKey();
+		/* readKey() returns -1 when a signal (a resize, a resume)
+		 * interrupts the wait, and in a macro that ends here.
+		 * Neither is a key: the first waits again, the second
+		 * inserts nothing.  Falling through would insert 0xFF,
+		 * which is not UTF-8 and leaves the buffer unsaveable. */
+		int key;
+		do {
+			key = readKey();
+		} while (key == -1 && !E.playback);
+		if (key == -1)
+			return 1;
 		recordKey(key);
 		if (key == KEY_UNICODE) {
 			int count = UARG_COUNT(uarg);

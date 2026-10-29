@@ -290,6 +290,14 @@ void test_save_valid_utf8_succeeds(void) {
 	struct buffer *buf = make_test_buffer_lines(lines, 1);
 	buf->filename = xstrdup(tmpname);
 	buf->dirty = 1;
+	/* The buffer is visiting the file: give it the baseline that
+	 * editorOpen would have recorded.  A buffer without one has no
+	 * record of what is on disk, and saving over an existing file
+	 * from there asks first (see the overwrite tests below). */
+	struct stat st;
+	TEST_ASSERT_EQUAL_INT(0, stat(tmpname, &st));
+	buf->open_mtime = st.st_mtime;
+	buf->open_size = st.st_size;
 
 	save(0);
 
@@ -340,6 +348,182 @@ void test_save_invalid_utf8_refused(void) {
 	}
 
 	unlink(tmpname);
+}
+
+/* ---- Saving over a file the buffer knows nothing of ----
+ *
+ * A buffer opened from a file records what it found (open_mtime), and
+ * the pre-save check compares against that.  A buffer with no such
+ * record -- the target of C-x C-w, a buffer that has no file yet, a
+ * "(New file)" -- used to write straight over whatever was at the path,
+ * then delete the backup it had made: the old contents were gone.  It
+ * must ask, as Emacs does, and "n" must leave the file alone. */
+
+static char ow_dir[64];
+
+static void owSetup(void) {
+	emil_strlcpy(ow_dir, "/tmp/emil_ow_XXXXXX", sizeof(ow_dir));
+	TEST_ASSERT_NOT_NULL(mkdtemp(ow_dir));
+	makeMinibuffer();
+}
+
+static void owPath(char *out, size_t n, const char *name) {
+	snprintf(out, n, "%s/%s", ow_dir, name);
+}
+
+static void owWrite(const char *name, const char *content) {
+	char p[128];
+	owPath(p, sizeof(p), name);
+	FILE *fp = fopen(p, "w");
+	TEST_ASSERT_NOT_NULL(fp);
+	if (fp) {
+		fputs(content, fp);
+		fclose(fp);
+	}
+}
+
+/* The file's contents, or "(missing)". */
+static const char *owRead(const char *name) {
+	static char buf[256];
+	char p[128];
+	owPath(p, sizeof(p), name);
+	FILE *fp = fopen(p, "r");
+	if (!fp)
+		return "(missing)";
+	size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
+	buf[n] = '\0';
+	fclose(fp);
+	return buf;
+}
+
+static void owTeardown(void) {
+	const char *names[] = { "a", "b", "c" };
+	for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+		char p[128];
+		owPath(p, sizeof(p), names[i]);
+		unlink(p);
+	}
+	rmdir(ow_dir);
+	freeMinibuffer();
+}
+
+/* Run fn with the keys for typing `name`'s full path and RET at a
+ * prompt, followed by `answer` (0 for none). */
+static void owRun(void (*fn)(void), const char *name, int answer) {
+	char p[128];
+	owPath(p, sizeof(p), name);
+	int keys[64];
+	int n = 0;
+	for (const char *q = p; *q && n < 60; q++)
+		keys[n++] = (unsigned char)*q;
+	keys[n++] = '\r';
+	if (answer)
+		keys[n++] = answer;
+	scriptKeys(keys, n);
+	muteStdout();
+	fn();
+	unmuteStdout();
+	clearKeys();
+}
+
+static void doSaveAs(void) {
+	saveAs();
+}
+
+static void doSave(void) {
+	save(0);
+}
+
+/* A buffer visiting a, holding "mine". */
+static struct buffer *owVisitA(void) {
+	char p[128];
+	owWrite("a", "mine\n");
+	owPath(p, sizeof(p), "a");
+	struct buffer *buf = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, editorOpen(buf, p));
+	return buf;
+}
+
+void test_save_as_over_existing_file_declined_keeps_it(void) {
+	owSetup();
+	struct buffer *buf = owVisitA();
+	owWrite("b", "precious\n");
+	char a[128];
+	owPath(a, sizeof(a), "a");
+
+	owRun(doSaveAs, "b", 'n');
+
+	TEST_ASSERT_EQUAL_STRING("precious\n", owRead("b"));
+	/* Declined before the rename: still visiting a. */
+	TEST_ASSERT_EQUAL_STRING(a, buf->filename);
+	TEST_ASSERT_EQUAL_STRING("Save aborted.", E.statusmsg);
+	owTeardown();
+}
+
+void test_save_as_over_existing_file_accepted_writes(void) {
+	owSetup();
+	struct buffer *buf = owVisitA();
+	owWrite("b", "precious\n");
+	char b[128];
+	owPath(b, sizeof(b), "b");
+
+	owRun(doSaveAs, "b", 'y');
+
+	TEST_ASSERT_EQUAL_STRING("mine\n", owRead("b"));
+	TEST_ASSERT_EQUAL_STRING(b, buf->filename);
+	TEST_ASSERT_FALSE(buf->dirty);
+	owTeardown();
+}
+
+/* Nothing there: nothing to ask.  A stray prompt would read the
+ * scripted keys' end (0) as "n" and abandon the save. */
+void test_save_as_to_a_new_name_does_not_ask(void) {
+	owSetup();
+	owVisitA();
+
+	owRun(doSaveAs, "c", 0);
+
+	TEST_ASSERT_EQUAL_STRING("mine\n", owRead("c"));
+	owTeardown();
+}
+
+/* A buffer that has no file yet, saved to a name that exists. */
+void test_first_save_of_unnamed_buffer_over_existing_file_asks(void) {
+	owSetup();
+	struct buffer *buf = make_test_buffer("mine");
+	buf->dirty = 1;
+	owWrite("b", "precious\n");
+
+	owRun(doSave, "b", 'n');
+
+	TEST_ASSERT_EQUAL_STRING("precious\n", owRead("b"));
+	TEST_ASSERT_NULL(buf->filename);
+	TEST_ASSERT_TRUE(buf->dirty);
+	owTeardown();
+}
+
+/* Opened as "(New file)"; something else creates the file meanwhile. */
+void test_new_file_created_meanwhile_is_not_overwritten_silently(void) {
+	owSetup();
+	char c[128];
+	owPath(c, sizeof(c), "c");
+	struct buffer *buf = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, editorOpen(buf, c));
+	TEST_ASSERT_EQUAL_STRING("(missing)", owRead("c"));
+	insertRow(buf, 0, (const uint8_t *)"mine", 4);
+	TEST_ASSERT_TRUE(buf->dirty);
+
+	owWrite("c", "theirs\n");
+	int keys[] = { 'n' };
+	scriptKeys(keys, 1);
+	muteStdout();
+	save(0);
+	unmuteStdout();
+	clearKeys();
+
+	TEST_ASSERT_EQUAL_STRING("theirs\n", owRead("c"));
+	TEST_ASSERT_TRUE(buf->dirty);
+	owTeardown();
 }
 
 void setUp(void) {
@@ -649,6 +833,13 @@ int main(void) {
 
 	RUN_TEST(test_save_valid_utf8_succeeds);
 	RUN_TEST(test_save_invalid_utf8_refused);
+
+	/* Saving over a file the buffer knows nothing of */
+	RUN_TEST(test_save_as_over_existing_file_declined_keeps_it);
+	RUN_TEST(test_save_as_over_existing_file_accepted_writes);
+	RUN_TEST(test_save_as_to_a_new_name_does_not_ask);
+	RUN_TEST(test_first_save_of_unnamed_buffer_over_existing_file_asks);
+	RUN_TEST(test_new_file_created_meanwhile_is_not_overwritten_silently);
 
 	RUN_TEST(test_load_keeps_existing_final_newline);
 	RUN_TEST(test_load_adds_missing_final_newline);

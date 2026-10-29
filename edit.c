@@ -808,7 +808,7 @@ void transposeSentences(int uarg) {
 
 /* Greedy means delete up to and including the character entered
  * at the prompt. Otherwise, only up to. */
-void zap(int greedy, int uarg) {
+static void zap(int greedy, int uarg) {
 	if (rejectIfReadOnly(E.buf))
 		return;
 

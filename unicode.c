@@ -172,9 +172,11 @@ const char *unicodeCharName(uint32_t cp) {
 		return "CARRIAGE RETURN";
 	if (cp == 0x7F)
 		return "DELETE";
-	if (cp < 0x20) {
+	/* C0 and C1 controls */
+	if (cp < 0x20 || (cp >= 0x80 && cp <= 0x9F)) {
 		static char ctrl_name[16];
-		snprintf(ctrl_name, sizeof(ctrl_name), "CONTROL-%04X", cp);
+		snprintf(ctrl_name, sizeof(ctrl_name), "CONTROL-%04X",
+			 (unsigned)cp);
 		return ctrl_name;
 	}
 
@@ -325,6 +327,11 @@ int charInStringWidth(const uint8_t *str, int idx) {
 		return 2;
 	} else {
 		int rune = utf8Decode(str, idx);
+		/* A C1 control (U+0080..U+009F) is never sent to the
+		 * terminal: one '?' is drawn in its place, whatever the
+		 * platform's wcwidth makes of it. */
+		if (rune >= 0x80 && rune <= 0x9F)
+			return 1;
 		int w = wcwidth((wchar_t)rune);
 		return w < 0 ? 1 : w;
 	}

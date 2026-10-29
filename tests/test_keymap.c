@@ -173,6 +173,40 @@ void test_quoted_insert_refuses_nul(void) {
 	TEST_ASSERT_EQUAL_STRING("ab", row_str(buf, 0));
 }
 
+/* readKey() answers -1 when a signal -- a terminal resize, a resume --
+ * interrupts its wait.  That is not a key: C-q must wait for the real
+ * one.  Inserting it instead put a raw 0xFF in the buffer, which is not
+ * UTF-8, and every save after that refused. */
+void test_quoted_insert_waits_out_a_signal(void) {
+	struct buffer *buf = make_test_buffer("ab");
+	buf->cx = 1;
+	buf->cy = 0;
+
+	int keys[] = { -1, 'x' };
+	scriptKeys(keys, 2);
+	processKeypress(CMD_QUOTED_INSERT);
+	clearKeys();
+
+	TEST_ASSERT_EQUAL_STRING("axb", row_str(buf, 0));
+	TEST_ASSERT_TRUE(utf8_validate(buf->row[0].chars, buf->row[0].size));
+}
+
+/* A macro that ends on C-q has nothing left to quote: insert nothing. */
+void test_quoted_insert_at_end_of_macro_inserts_nothing(void) {
+	struct buffer *buf = make_test_buffer("ab");
+	buf->cx = 1;
+	buf->cy = 0;
+	E.macro.keys = xmalloc(sizeof(int));
+	E.macro.keys[0] = CTRL('q');
+	E.macro.nkeys = 1;
+	E.macro.skeys = 1;
+
+	execMacro(&E.macro);
+
+	TEST_ASSERT_EQUAL_STRING("ab", row_str(buf, 0));
+	TEST_ASSERT_TRUE(utf8_validate(buf->row[0].chars, buf->row[0].size));
+}
+
 void test_palette_cancels_when_macro_runs_out(void) {
 	struct buffer *buf = make_test_buffer("ab");
 	E.macro.keys = xmalloc(sizeof(int));
@@ -197,6 +231,8 @@ int main(void) {
 	RUN_TEST(test_negative_arg_refuses_digits);
 	RUN_TEST(test_redo_micro_reroutes_following_undo_to_redo);
 	RUN_TEST(test_quoted_insert_refuses_nul);
+	RUN_TEST(test_quoted_insert_waits_out_a_signal);
+	RUN_TEST(test_quoted_insert_at_end_of_macro_inserts_nothing);
 	RUN_TEST(test_palette_cancels_when_macro_runs_out);
 	return TEST_END();
 }
