@@ -69,6 +69,8 @@ jobs:
           --new "${{ steps.range.outputs.new }}" --work refcheck-work \
           --jobs "$(nproc)" --fuzz-seeds 4000 --fuzz-budget "$BUDGET"
         cat refcheck-work/report-*.md >> "$GITHUB_STEP_SUMMARY"
+        echo; echo "================ refcheck report ================"
+        cat refcheck-work/report-*.md
 
     - name: Keep the report and witnesses
       if: always()
