@@ -1,0 +1,85 @@
+name: refcheck
+
+# Compare each push with what it replaced and report only what the push
+# changed.  Report-only: findings never fail the run.  See refcheck/README.md.
+
+on:
+  push:
+  workflow_dispatch:
+    inputs:
+      old:
+        description: "Old commit (default: parent of new)"
+        required: false
+      new:
+        description: "New commit (default: the branch head)"
+        required: false
+      fuzz_budget:
+        description: "Seconds of differential fuzzing"
+        required: false
+        default: "900"
+
+concurrency:
+  group: refcheck-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  refcheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Choose the commits to compare
+      id: range
+      env:
+        BEFORE: ${{ github.event.before }}
+        IN_OLD: ${{ inputs.old }}
+        IN_NEW: ${{ inputs.new }}
+      run: |
+        NEW=${IN_NEW:-$GITHUB_SHA}
+        OLD=$IN_OLD
+        if [ -z "$OLD" ]; then
+          if [ -n "$BEFORE" ] && [ "$BEFORE" != 0000000000000000000000000000000000000000 ] &&
+             git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            OLD=$BEFORE
+          elif [ "$GITHUB_REF_NAME" != main ]; then
+            OLD=$(git merge-base origin/main "$NEW")
+          else
+            OLD=$(git rev-parse "$NEW^")
+          fi
+        fi
+        echo "old=$OLD" >> "$GITHUB_OUTPUT"
+        echo "new=$NEW" >> "$GITHUB_OUTPUT"
+        echo "Comparing $OLD .. $NEW"
+
+    - name: Install libvterm (screen comparison) and clang (footprints)
+      run: sudo apt-get update -q && sudo apt-get install -y -q libvterm-dev clang
+
+    - name: Run refcheck
+      if: steps.range.outputs.old != steps.range.outputs.new
+      env:
+        BUDGET: ${{ inputs.fuzz_budget || '900' }}
+      run: |
+        python3 refcheck/run.py --old "${{ steps.range.outputs.old }}" \
+          --new "${{ steps.range.outputs.new }}" --work refcheck-work \
+          --jobs "$(nproc)" --fuzz-seeds 20000 --fuzz-budget "$BUDGET"
+        cat refcheck-work/report-*.md >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Keep the report and witnesses
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: refcheck-${{ github.sha }}
+        path: |
+          refcheck-work/report-*
+          refcheck-work/*/difffuzz.json
+          refcheck-work/*/witness-*.skip
+          refcheck-work/*/tests.log
+          refcheck-work/*/newtests.log
+        if-no-files-found: ignore
+        retention-days: 30
