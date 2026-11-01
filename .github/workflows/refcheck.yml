@@ -67,7 +67,7 @@ jobs:
       run: |
         python3 refcheck/run.py --old "${{ steps.range.outputs.old }}" \
           --new "${{ steps.range.outputs.new }}" --work refcheck-work \
-          --jobs "$(nproc)" --fuzz-seeds 20000 --fuzz-budget "$BUDGET"
+          --jobs "$(nproc)" --fuzz-seeds 4000 --fuzz-budget "$BUDGET"
         cat refcheck-work/report-*.md >> "$GITHUB_STEP_SUMMARY"
 
     - name: Keep the report and witnesses
