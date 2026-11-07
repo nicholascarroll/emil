@@ -16,11 +16,11 @@
 const PaletteEntry palette[] = {
 	/* Punctuation and Misc */
 	{ 0x2014, "EM DASH" },					  // —
+	{ 0x2013, "EN DASH" },					  // –
+	{ 0x2010, "HYPHEN" },					  // ‐
 	{ 0x00A7, "SECTION SIGN" },				  // §
 	{ 0x2713, "CHECK MARK" },				  // ✓
 	{ 0x2717, "BALLOT X" },					  // ✗
-	{ 0x2013, "EN DASH" },					  // –
-	{ 0x2010, "HYPHEN" },					  // ‐
 	{ 0x2026, "HORIZONTAL ELLIPSIS" },			  // …
 	{ 0x201C, "LEFT DOUBLE QUOTATION MARK" },		  // “
 	{ 0x201D, "RIGHT DOUBLE QUOTATION MARK" },		  // ”
@@ -39,7 +39,8 @@ const PaletteEntry palette[] = {
 	{ 0x00B7, "MIDDLE DOT" },   // ·
 	{ 0x2032, "PRIME" },	    // ′
 	{ 0x2033, "DOUBLE PRIME" }, // ″
-	{ 0x00B0, " DEGREE SIGN" }, // °
+	{ 0x00B0, "DEGREE SIGN" },  // °
+	{ 0x221E, "INFINITY" },	    // ∞
 	/* Legal */
 	{ 0x00A9, "COPYRIGHT SIGN" },  // ©
 	{ 0x00AE, "REGISTERED SIGN" }, // ®
@@ -142,6 +143,17 @@ const PaletteEntry palette[] = {
 	{ 0x20AE, "TUGRIK SIGN" },		 // ₮
 	{ 0x20B4, "HRYVNIA SIGN" },		 // ₴
 	{ 0x20BF, "BITCOIN SIGN" },		 // ₿
+	/* Arrows */
+	{ 0x2190, "LEFTWARDS ARROW" },	// ←
+	{ 0x2192, "RIGHTWARDS ARROW" }, // →
+	{ 0x2191, "UPWARDS ARROW" },	// ↑
+	{ 0x2193, "DOWNWARDS ARROW" },	// ↓
+	{ 0x2194, "LEFT RIGHT ARROW" }, // ↔
+	{ 0x2195, "UP DOWN ARROW" },	// ↕
+	{ 0x2196, "NORTH WEST ARROW" }, // ↖
+	{ 0x2197, "NORTH EAST ARROW" }, // ↗
+	{ 0x2198, "SOUTH EAST ARROW" }, // ↘
+	{ 0x2199, "SOUTH WEST ARROW" }, // ↙
 
 	/* Greek Letters */
 	{ PALETTE_BREAK, NULL },
@@ -180,7 +192,36 @@ const PaletteEntry palette[] = {
 	{ 0x03A8, "GREEK CAPITAL LETTER PSI" },	  // Ψ
 	{ 0x03A9, "GREEK CAPITAL LETTER OMEGA" }, // Ω
 
-	/* Box Drawing - Light & Heavy */
+	/* Logic and Sets */
+	{ PALETTE_BREAK, NULL },
+	{ 0x00AC, "NOT SIGN" },		       // ¬
+	{ 0x2227, "LOGICAL AND" },	       // ∧
+	{ 0x2228, "LOGICAL OR" },	       // ∨
+	{ 0x21D2, "RIGHTWARDS DOUBLE ARROW" }, // ⇒
+	{ 0x21D4, "LEFT RIGHT DOUBLE ARROW" }, // ⇔
+	{ 0x2200, "FOR ALL" },		       // ∀
+	{ 0x2203, "THERE EXISTS" },	       // ∃
+	{ 0x22A2, "RIGHT TACK" },	       // ⊢
+	{ 0x22A8, "TRUE" },		       // ⊨
+	{ 0x22A4, "DOWN TACK" },	       // ⊤
+	{ 0x22A5, "UP TACK" },		       // ⊥
+	{ 0x2261, "IDENTICAL TO" },	       // ≡
+	{ 0x2234, "THEREFORE" },	       // ∴
+	{ 0x2235, "BECAUSE" },		       // ∵
+	{ 0x2208, "ELEMENT OF" },	       // ∈
+	{ 0x2209, "NOT AN ELEMENT OF" },       // ∉
+	{ 0x2282, "SUBSET OF" },	       // ⊂
+	{ 0x2286, "SUBSET OF OR EQUAL TO" },   // ⊆
+	{ 0x2283, "SUPERSET OF" },	       // ⊃
+	{ 0x2287, "SUPERSET OF OR EQUAL TO" }, // ⊇
+	{ 0x222A, "UNION" },		       // ∪
+	{ 0x2229, "INTERSECTION" },	       // ∩
+	{ 0x2205, "EMPTY SET" },	       // ∅
+	{ 0x2216, "SET MINUS" },	       // ∖
+	{ 0x2115, "DOUBLE-STRUCK CAPITAL N" }, // ℕ
+	{ 0x211D, "DOUBLE-STRUCK CAPITAL R" }, // ℝ
+
+	/* Box Drawing - Light */
 	{ PALETTE_BREAK, NULL },
 	{ 0x2500, "BOX DRAWINGS LIGHT HORIZONTAL" },		  // ─
 	{ 0x2502, "BOX DRAWINGS LIGHT VERTICAL" },		  // │
@@ -193,13 +234,25 @@ const PaletteEntry palette[] = {
 	{ 0x252C, "BOX DRAWINGS LIGHT DOWN AND HORIZONTAL" },	  // ┬
 	{ 0x2534, "BOX DRAWINGS LIGHT UP AND HORIZONTAL" },	  // ┴
 	{ 0x253C, "BOX DRAWINGS LIGHT VERTICAL AND HORIZONTAL" }, // ┼
+	{ 0x256D, "BOX DRAWINGS LIGHT ARC DOWN AND RIGHT" },	  // ╭
+	{ 0x256E, "BOX DRAWINGS LIGHT ARC DOWN AND LEFT" },	  // ╮
+	{ 0x2570, "BOX DRAWINGS LIGHT ARC UP AND RIGHT" },	  // ╰
+	{ 0x256F, "BOX DRAWINGS LIGHT ARC UP AND LEFT" },	  // ╯
+	/* Box Drawing - Heavy */
 	{ 0x2501, "BOX DRAWINGS HEAVY HORIZONTAL" },		  // ━
 	{ 0x2503, "BOX DRAWINGS HEAVY VERTICAL" },		  // ┃
 	{ 0x250F, "BOX DRAWINGS HEAVY DOWN AND RIGHT" },	  // ┏
+	{ 0x2513, "BOX DRAWINGS HEAVY DOWN AND LEFT" },		  // ┓
 	{ 0x251B, "BOX DRAWINGS HEAVY UP AND LEFT" },		  // ┛
+	{ 0x2517, "BOX DRAWINGS HEAVY UP AND RIGHT" },		  // ┗
+	{ 0x2523, "BOX DRAWINGS HEAVY VERTICAL AND RIGHT" },	  // ┣
+	{ 0x252B, "BOX DRAWINGS HEAVY VERTICAL AND LEFT" },	  // ┫
+	{ 0x2533, "BOX DRAWINGS HEAVY DOWN AND HORIZONTAL" },	  // ┳
+	{ 0x253B, "BOX DRAWINGS HEAVY UP AND HORIZONTAL" },	  // ┻
+	{ 0x254B, "BOX DRAWINGS HEAVY VERTICAL AND HORIZONTAL" }, // ╋
 	/* Box Drawing - Double */
-	{ 0x2551, "BOX DRAWINGS DOUBLE VERTICAL" },		   // ║
 	{ 0x2550, "BOX DRAWINGS DOUBLE HORIZONTAL" },		   // ═
+	{ 0x2551, "BOX DRAWINGS DOUBLE VERTICAL" },		   // ║
 	{ 0x2554, "BOX DRAWINGS DOUBLE DOWN AND RIGHT" },	   // ╔
 	{ 0x2557, "BOX DRAWINGS DOUBLE DOWN AND LEFT" },	   // ╗
 	{ 0x255A, "BOX DRAWINGS DOUBLE UP AND RIGHT" },		   // ╚
@@ -392,6 +445,7 @@ void expandPalette(void) {
 
 	/* Snap to the first symbol */
 	snapToSymbol(pbuf, 0);
+	setStatusMessage("%s", palette[0].name);
 
 	/* ---- Modal key loop ---- */
 	for (;;) {
