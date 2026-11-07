@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include "ctags.h"
 #include "emil.h"
+#include "mutate.h"
 #include "message.h"
 #include "buffer.h"
 #include "dbuf.h"
@@ -444,7 +445,7 @@ static int pickMatch(const char *sym, const struct tagMatch *v, int n) {
 		scope_cols = TAGS_SCOPE_COLS_MAX;
 
 	struct buffer *pb = findOrCreateSpecialBuffer(TAGS_MENU_NAME);
-	bufferResetRows(pb);
+	struct mutateRebuild rebuild = mutateRebuildBegin(pb);
 	for (int i = 0; i < n; i++) {
 		struct dbuf d = DBUF_INIT;
 		int len;
@@ -453,6 +454,7 @@ static int pickMatch(const char *sym, const struct tagMatch *v, int n) {
 		insertRow(pb, i, row, (size_t)len);
 		free(row);
 	}
+	mutateRebuildEnd(pb, &rebuild);
 	pb->read_only = 1;
 	pb->word_wrap = 0;
 	pb->rectangle_mode = 0;

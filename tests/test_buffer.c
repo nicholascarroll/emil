@@ -99,12 +99,35 @@ void test_del_row_end(void) {
 	TEST_ASSERT_EQUAL_STRING("second", (char *)buf->row[1].chars);
 }
 
-void test_row_insert_char(void) {
-	struct buffer *buf = make_test_buffer("AC");
-	rowInsertChar(buf, &buf->row[0], 1, 'B');
-	TEST_ASSERT_EQUAL_INT(3, buf->row[0].size);
-	TEST_ASSERT_EQUAL_STRING("ABC", (char *)buf->row[0].chars);
+/* ---- The newline rule, in the sanitize build ---- */
+
+#ifdef EMIL_DEBUG_ROW_BYTES
+#include <signal.h>
+#include <sys/wait.h>
+#include <unistd.h>
+static void assert_row_write_aborts(int append) {
+	pid_t pid = fork();
+	TEST_ASSERT(pid >= 0);
+	if (pid == 0) {
+		if (freopen("/dev/null", "w", stderr) == NULL)
+			_exit(1);
+		struct buffer *buf = make_test_buffer("x");
+		if (append)
+			appendRowRaw(buf, (const uint8_t *)"a\nb", 3);
+		else
+			insertRow(buf, 0, (const uint8_t *)"a\nb", 3);
+		_exit(0);
+	}
+	int status = 0;
+	waitpid(pid, &status, 0);
+	TEST_ASSERT(WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT);
 }
+
+void test_debug_check_stops_newline_entering_a_row(void) {
+	assert_row_write_aborts(0);
+	assert_row_write_aborts(1);
+}
+#endif
 
 /* ---- Coordinate mapping ---- */
 
@@ -414,12 +437,14 @@ void test_blob_does_not_mark_dirty(void) {
 int main(void) {
 	TEST_BEGIN();
 
+	#ifdef EMIL_DEBUG_ROW_BYTES
+	RUN_TEST(test_debug_check_stops_newline_entering_a_row);
+#endif
 	RUN_TEST(test_new_destroy_buffer);
 	RUN_TEST(test_insert_row_beginning);
 	RUN_TEST(test_insert_row_end);
 	RUN_TEST(test_del_row_beginning);
 	RUN_TEST(test_del_row_end);
-	RUN_TEST(test_row_insert_char);
 
 	RUN_TEST(test_chars_to_display_ascii);
 	RUN_TEST(test_chars_to_display_tab);

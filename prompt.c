@@ -309,7 +309,7 @@ uint8_t *editorPrompt(const char *prompt, enum promptType t,
 					if (elen > 0 && !ends_slash) {
 						E.minibuf->cx =
 							E.minibuf->row[0].size;
-						insertChar(E.minibuf, '/', 1);
+						selfInsert(E.minibuf, '/', 1);
 					}
 
 					handleMinibufferCompletion(E.minibuf,
@@ -353,7 +353,7 @@ uint8_t *editorPrompt(const char *prompt, enum promptType t,
 				/* A literal TAB is C-q TAB, as in a shell. */
 				handleShellCompletion(E.minibuf);
 			} else {
-				insertChar(E.minibuf, '\t', 1);
+				selfInsert(E.minibuf, '\t', 1);
 			}
 			break;
 

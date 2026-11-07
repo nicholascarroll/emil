@@ -139,6 +139,8 @@ void forwardWordEnd(struct buffer *buf, int *dx, int *dy) {
 		while (cx < l) {
 			uint8_t c = buf->row[cy].chars[cx];
 			int nb = utf8_nBytes(c);
+			if (nb > l - cx)
+				nb = l - cx; /* truncated sequence */
 
 			/* Decode codepoint for CJK check */
 			if (c >= 0x80) {

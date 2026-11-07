@@ -255,11 +255,22 @@ void replaceMinibufferText(struct buffer *minibuf, const char *text) {
 	}
 }
 
+/* A match as one line of *Completions*.  A buffer name is a filename,
+ * which can hold any byte, and a row must not hold a newline, so it
+ * shows as ^J.  The match itself stays as it is for M-n and M-p. */
+static char *completionRowText(const char *name) {
+	size_t len = strlen(name);
+	/* The worst case is a byte becoming U+FFFD: three bytes. */
+	char *shown = xmalloc(len * 3 + 1);
+	utf8SanitizeLine((const uint8_t *)name, len, shown, len * 3 + 1);
+	return shown;
+}
+
 static void showCompletionsBuffer(char **matches, int n_matches,
 				  enum promptType type) {
 	/* Find or create completions buffer */
 	struct buffer *comp_buf = findOrCreateSpecialBuffer("*Completions*");
-	bufferResetRows(comp_buf);
+	struct mutateRebuild rebuild = mutateRebuildBegin(comp_buf);
 	comp_buf->read_only = 1;
 	comp_buf->word_wrap = 0;
 
@@ -287,9 +298,10 @@ static void showCompletionsBuffer(char **matches, int n_matches,
 					break;
 				}
 			}
-			int len = (int)strlen(show);
+			char *shown = completionRowText(show);
 			insertRow(comp_buf, comp_buf->numrows,
-				  (const uint8_t *)show, len);
+				  (const uint8_t *)shown, strlen(shown));
+			free(shown);
 		}
 
 		/* Store match list for M-n/M-p navigation. */
@@ -313,8 +325,11 @@ static void showCompletionsBuffer(char **matches, int n_matches,
 
 		/* Build truncated copies for display. */
 		char **display = xmalloc(n_matches * sizeof(char *));
-		for (int i = 0; i < n_matches; i++)
-			display[i] = leftTruncate(matches[i], term_width - 2);
+		for (int i = 0; i < n_matches; i++) {
+			char *cut = leftTruncate(matches[i], term_width - 2);
+			display[i] = completionRowText(cut);
+			free(cut);
+		}
 
 		int max_width = 0;
 		for (int i = 0; i < n_matches; i++) {
@@ -372,6 +387,7 @@ static void showCompletionsBuffer(char **matches, int n_matches,
 		free(display);
 	}
 
+	mutateRebuildEnd(comp_buf, &rebuild);
 	showPopupBuffer(comp_buf);
 	refreshScreen();
 }

@@ -5,6 +5,7 @@
 #include "buffer.h"
 #include "dbuf.h"
 #include "emil.h"
+#include "message.h"
 
 #include "region.h"
 #include "unicode.h"
@@ -37,14 +38,22 @@ void computeInsertEnd(const uint8_t *text, int len, int startx, int starty,
 	*endy = ey;
 }
 
+int bufferPosValid(const struct buffer *buf, int x, int y) {
+	return y >= 0 && y < buf->numrows && x >= 0 && x <= buf->row[y].size;
+}
+
+int bufferRangeValid(const struct buffer *buf, int startx, int starty, int endx,
+		     int endy) {
+	return bufferPosValid(buf, startx, starty) &&
+	       bufferPosValid(buf, endx, endy) &&
+	       (starty < endy || (starty == endy && startx <= endx));
+}
+
 /* Perform the row-array mutation for an insert at (startx, starty).
  * Does NOT record undo. */
 static void bulkInsertRaw(struct buffer *buf, int startx, int starty,
 			  const uint8_t *data, int datalen) {
 	if (datalen <= 0)
-		return;
-
-	if (starty >= buf->numrows)
 		return;
 
 	/* Scan for newlines to decide single-line vs multi-line */
@@ -59,6 +68,7 @@ static void bulkInsertRaw(struct buffer *buf, int startx, int starty,
 		rowEnsureCap(row, needed);
 		memmove(&row->chars[startx + datalen], &row->chars[startx],
 			row->size - startx + 1); /* +1 for NUL */
+		debugCheckRowBytes(data, datalen);
 		memcpy(&row->chars[startx], data, datalen);
 		row->size += datalen;
 		row->cached_width = -1;
@@ -90,6 +100,7 @@ static void bulkInsertRaw(struct buffer *buf, int startx, int starty,
 	int new_size = startx + first_frag_len;
 	row->chars = xrealloc(row->chars, new_size + 1);
 	row->charcap = new_size + 1;
+	debugCheckRowBytes(data, first_frag_len);
 	if (first_frag_len > 0)
 		memcpy(&row->chars[startx], data, first_frag_len);
 	row->size = new_size;
@@ -145,10 +156,12 @@ static void bulkInsertRaw(struct buffer *buf, int startx, int starty,
  * Records name the insertion's own coordinates, so replaying
  * one through here is the identity translation and adjusts on the
  * range the record states. */
-void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
-		int datalen) {
+int bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
+	       int datalen) {
+	if (!bufferPosValid(buf, startx, starty))
+		return -1;
 	if (datalen <= 0)
-		return;
+		return 0;
 
 	int log_endx, log_endy;
 	computeInsertEnd(data, datalen, startx, starty, &log_endx, &log_endy);
@@ -156,27 +169,13 @@ void bulkInsert(struct buffer *buf, int startx, int starty, const uint8_t *data,
 	bulkInsertRaw(buf, startx, starty, data, datalen);
 
 	adjustAllPoints(buf, startx, starty, log_endx, log_endy, 0);
+	return 0;
 }
 
 /* Bulk-delete text from (startx, starty) to (endx, endy).*/
-void bulkDelete(struct buffer *buf, int startx, int starty, int endx,
-		int endy) {
-	if (starty >= buf->numrows)
-		return;
-
-	/* Clamp to what the rows hold.*/
-	if (endy >= buf->numrows)
-		endy = buf->numrows - 1;
-	if (startx > buf->row[starty].size)
-		startx = buf->row[starty].size;
-	if (endx > buf->row[endy].size)
-		endx = buf->row[endy].size;
-	if (startx < 0)
-		startx = 0;
-	if (endx < 0)
-		endx = 0;
-	if (starty == endy && endx < startx)
-		endx = startx;
+int bulkDelete(struct buffer *buf, int startx, int starty, int endx, int endy) {
+	if (!bufferRangeValid(buf, startx, starty, endx, endy))
+		return -1;
 
 	/* A multi-row delete joins the start row's prefix to the end
 	 * row's suffix.  Check that the joined row fits before
@@ -205,14 +204,12 @@ void bulkDelete(struct buffer *buf, int startx, int starty, int endx,
 
 		/* After deleting interior rows, the end row is now at
 		 * starty + 1 */
-		if (starty + 1 >= buf->numrows)
-			return;
-
 		struct erow *first = &buf->row[starty];
 		struct erow *last = &buf->row[starty + 1];
 		int new_size = startx + (last->size - endx);
 		first->chars = xrealloc(first->chars, new_size + 1);
 		first->charcap = new_size + 1;
+		debugCheckRowBytes(&last->chars[endx], last->size - endx);
 		memcpy(&first->chars[startx], &last->chars[endx],
 		       last->size - endx);
 		first->size = new_size;
@@ -221,15 +218,58 @@ void bulkDelete(struct buffer *buf, int startx, int starty, int endx,
 		delRow(buf, starty + 1);
 		markBufferDirty(buf);
 	}
+	return 0;
+}
+
+/* Does the text in a valid range hold exactly these bytes? */
+static int regionHolds(const struct buffer *buf, int startx, int starty,
+		       int endx, int endy, const uint8_t *data, int datalen) {
+	int x = startx, y = starty, i = 0;
+	while (y != endy || x != endx) {
+		if (i >= datalen)
+			return 0;
+		if (x >= buf->row[y].size) {
+			if (data[i] != '\n')
+				return 0;
+			y++;
+			x = 0;
+		} else {
+			if (data[i] != buf->row[y].chars[x])
+				return 0;
+			x++;
+		}
+		i++;
+	}
+	return i == datalen;
+}
+
+/* Replay relies on the history matching the text.  Text changed outside
+ * the mutation layer can break that, so check it: a delete must find
+ * what the record says, and an insert must have a place to go. */
+static int replayMatchesText(const struct buffer *buf, const struct undo *node,
+			     int is_delete) {
+	if (!is_delete)
+		return bufferPosValid(buf, node->startx, node->starty);
+	return bufferRangeValid(buf, node->startx, node->starty, node->endx,
+				node->endy) &&
+	       regionHolds(buf, node->startx, node->starty, node->endx,
+			   node->endy, node->data, node->datalen);
 }
 
 /* Apply one undo or redo step: replay the mutation and move the node
- * between the two lists. */
-static void undoStep(struct buffer *buf, int redo) {
+ * between the two lists.  Returns 0, or -1 with nothing changed and the
+ * problem reported if the record doesn't match the text. */
+static int undoStep(struct buffer *buf, int redo) {
 	struct undo **src = redo ? &buf->redo : &buf->undo;
 	struct undo **dst = redo ? &buf->undo : &buf->redo;
 	struct undo *node = *src;
 	int is_delete = redo ? node->delete : !node->delete;
+
+	if (!replayMatchesText(buf, node, is_delete)) {
+		setStatusMessage("Undo history doesn't match the text; "
+				 "nothing changed");
+		return -1;
+	}
 
 	if (is_delete) {
 		bulkDelete(buf, node->startx, node->starty, node->endx,
@@ -262,6 +302,7 @@ static void undoStep(struct buffer *buf, int redo) {
 
 	/* Close whatever now sits at the head of the undo list. */
 	undoCloseRun(buf);
+	return 0;
 }
 
 enum undoResult doUndo(struct buffer *buf, int count) {
@@ -280,10 +321,14 @@ enum undoResult doUndo(struct buffer *buf, int count) {
 			return UNDO_EXHAUSTED;
 		}
 		int paired = buf->undo->paired;
-		undoStep(buf, 0);
+		if (undoStep(buf, 0) != 0)
+			return UNDO_MISMATCH;
 
-		if (paired && doUndo(buf, 1) == UNDO_EXHAUSTED)
-			return UNDO_EXHAUSTED;
+		if (paired) {
+			enum undoResult r = doUndo(buf, 1);
+			if (r != UNDO_DONE)
+				return r;
+		}
 	}
 	return UNDO_DONE;
 }
@@ -304,13 +349,16 @@ enum undoResult doRedo(struct buffer *buf, int count) {
 		 * record, carried through the rest of the group like any
 		 * other point. */
 		int px = buf->redo->startx, py = buf->redo->starty;
-		undoStep(buf, 1);
+		if (undoStep(buf, 1) != 0)
+			return UNDO_MISMATCH;
 
 		while (buf->redo != NULL && buf->redo->paired) {
 			struct undo *n = buf->redo;
-			adjustPoint(&px, &py, n->startx, n->starty, n->endx,
-				    n->endy, n->delete);
-			undoStep(buf, 1);
+			int nsx = n->startx, nsy = n->starty;
+			int nex = n->endx, ney = n->endy, ndel = n->delete;
+			if (undoStep(buf, 1) != 0)
+				return UNDO_MISMATCH;
+			adjustPoint(&px, &py, nsx, nsy, nex, ney, ndel);
 		}
 		buf->cx = px;
 		buf->cy = py;
@@ -318,65 +366,12 @@ enum undoResult doRedo(struct buffer *buf, int count) {
 	return UNDO_DONE;
 }
 
-struct undo *newUndo(void) {
-	struct undo *ret = xmalloc(sizeof(*ret));
-	ret->prev = NULL;
-	ret->paired = 0;
-	ret->startx = 0;
-	ret->starty = 0;
-	ret->endx = 0;
-	ret->endy = 0;
-	ret->append = 0; /* the mutation layer opts in; see pushUndo */
-	ret->nmerges = 0;
-	ret->uncapped = 0;
-	ret->delete = 0;
-	ret->pointx = 0;
-	ret->pointy = -1; /* not recorded */
-	ret->datalen = 0;
-	ret->datasize = 22;
-	ret->data = xmalloc(ret->datasize);
-	ret->data[0] = 0;
-	return ret;
-}
-
-/* Replace an undo record's data buffer with a new allocation of
- * 'newsize' bytes.  Callers must fill in the new data themselves
- * after this returns. */
-void undoReplaceData(struct undo *u, int newsize) {
-	free(u->data);
-	u->datasize = newsize;
-	u->data = xmalloc(u->datasize);
-}
-
 #define ALIGNED(x1, y1, x2, y2) ((x1 == x2) && (y1 == y2))
 
 /* Maximum number of operations folded into one record.*/
 #define UNDO_MERGE_LIMIT 20
 
-/* Grow u->data to hold at least 'needed' bytes plus a NUL. */
-static void undoEnsureData(struct undo *u, int needed) {
-	if (needed < 0 || needed == INT_MAX)
-		abort();
-	if (needed + 1 <= u->datasize)
-		return;
-	int newsize = u->datasize ? u->datasize : 22;
-	while (newsize < needed + 1) {
-		if (newsize > INT_MAX / 2) {
-			newsize = needed + 1;
-			break;
-		}
-		newsize *= 2;
-	}
-	u->data = xrealloc(u->data, newsize);
-	u->datasize = newsize;
-}
-
-/* Try to fold 'new' into 'prev', which must be the head of the undo
- * list.  Returns 1 if merged ('new' is then spent and must be freed by
- * the caller), 0 if the records cannot be joined.
- *
- * Invariant:
- *     end == computeInsertEnd(data, start)
+/* Would 'new' fold into 'prev', and at which end?  Pure.
  *
  * Only these three shapes join:
  *
@@ -384,37 +379,45 @@ static void undoEnsureData(struct undo *u, int needed) {
  *   C-d        prev.start == new.start   append,  start unchanged
  *   backspace  prev.start == new.end     prepend, start := new.start
  */
-static int undoMerge(struct undo *prev, struct undo *new) {
+enum undoMergeShape undoMergeDecision(const struct undo *prev,
+				      const struct undo *new) {
 	if (prev == NULL || new == NULL)
-		return 0;
+		return UNDO_MERGE_NONE;
 	if (!prev->append)
-		return 0;
+		return UNDO_MERGE_NONE;
 	if (prev->delete != new->delete)
-		return 0;
+		return UNDO_MERGE_NONE;
 	if (prev->paired || new->paired)
-		return 0;
+		return UNDO_MERGE_NONE;
 	if (!prev->uncapped && !new->uncapped &&
 	    prev->nmerges >= UNDO_MERGE_LIMIT)
-		return 0;
+		return UNDO_MERGE_NONE;
 	if (new->datalen <= 0)
-		return 0;
+		return UNDO_MERGE_NONE;
 	if (prev->datalen > INT_MAX / 2 || new->datalen > INT_MAX / 2)
-		return 0;
+		return UNDO_MERGE_NONE;
 
-	int prepend = 0;
-	if (!new->delete) {
-		if (!ALIGNED(prev->endx, prev->endy, new->startx, new->starty))
-			return 0;
-	} else if (ALIGNED(prev->startx, prev->starty, new->startx,
-			   new->starty)) {
-	} else if (ALIGNED(prev->startx, prev->starty, new->endx, new->endy)) {
-		prepend = 1;
-	} else {
-		return 0;
-	}
+	if (!new->delete)
+		return ALIGNED(prev->endx, prev->endy, new->startx,
+			       new->starty) ?
+			       UNDO_MERGE_APPEND :
+			       UNDO_MERGE_NONE;
+	if (ALIGNED(prev->startx, prev->starty, new->startx, new->starty))
+		return UNDO_MERGE_APPEND;
+	if (ALIGNED(prev->startx, prev->starty, new->endx, new->endy))
+		return UNDO_MERGE_PREPEND;
+	return UNDO_MERGE_NONE;
+}
 
-	undoEnsureData(prev, prev->datalen + new->datalen);
-	if (prepend) {
+/* Fold 'new' into 'prev', the head of the undo list, as decided above.
+ *
+ * Invariant:
+ *     end == computeInsertEnd(data, start)
+ */
+static void undoMergeApply(struct undo *prev, const struct undo *new,
+			   enum undoMergeShape shape) {
+	undoRecordReserve(prev, prev->datalen + new->datalen);
+	if (shape == UNDO_MERGE_PREPEND) {
 		memmove(&prev->data[new->datalen], prev->data, prev->datalen);
 		memcpy(prev->data, new->data, new->datalen);
 		prev->startx = new->startx;
@@ -429,17 +432,18 @@ static int undoMerge(struct undo *prev, struct undo *new) {
 
 	computeInsertEnd(prev->data, prev->datalen, prev->startx, prev->starty,
 			 &prev->endx, &prev->endy);
-	return 1;
 }
-
-static void freeUndos(struct undo *first);
 
 /* Add a record to the undo list, taking ownership.*/
 void pushUndo(struct buffer *buf, struct undo *new) {
-	if (new->append && undoMerge(buf->undo, new)) {
-		new->prev = NULL;
-		freeUndos(new);
-		return;
+	if (new->append) {
+		enum undoMergeShape shape = undoMergeDecision(buf->undo, new);
+		if (shape != UNDO_MERGE_NONE) {
+			undoMergeApply(buf->undo, new, shape);
+			new->prev = NULL;
+			undoRecordFreeList(new);
+			return;
+		}
 	}
 	if (buf->undo != NULL)
 		buf->undo->append = 0;
@@ -453,25 +457,13 @@ void undoCloseRun(struct buffer *buf) {
 		buf->undo->append = 0;
 }
 
-static void freeUndos(struct undo *first) {
-	struct undo *cur = first;
-	struct undo *prev;
-
-	while (cur != NULL) {
-		free(cur->data);
-		prev = cur;
-		cur = prev->prev;
-		free(prev);
-	}
-}
-
 void clearRedos(struct buffer *buf) {
-	freeUndos(buf->redo);
+	undoRecordFreeList(buf->redo);
 	buf->redo = NULL;
 }
 
 void clearUndosAndRedos(struct buffer *buf) {
-	freeUndos(buf->undo);
+	undoRecordFreeList(buf->undo);
 	buf->undo = NULL;
 	clearRedos(buf);
 }

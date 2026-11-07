@@ -8,8 +8,262 @@
 #include "edit.h"
 #include "mutate.h"
 #include "undo.h"
+#include "prompt.h"
+#include "buffer.h"
+#include "motion.h"
+#include "transform.h"
 #include "keymap.h"
 #include <stdint.h>
+
+/* For tests that make several buffers: the harness frees only the last. */
+static void drop_test_buffer(struct buffer *buf) {
+	destroyBuffer(buf);
+	E.buf = NULL;
+	E.headbuf = NULL;
+	E.windows[0]->buf = NULL;
+}
+
+/* ---- Truncated UTF-8 at the end of a row ---- */
+
+/* C-d read and recorded bytes past the row, so undo added a NUL. */
+void test_undo_delchar_truncated_lead(void) {
+	const char *leads[] = { "a\xC3", "a\xE2", "a\xF0" };
+	for (int i = 0; i < 3; i++) {
+		const char *lines[] = { leads[i] };
+		struct buffer *buf = make_test_buffer_lines(lines, 1);
+		buf->cx = 1;
+		E.buf = buf;
+		delChar(1);
+		TEST_ASSERT_EQUAL_STRING("a", row_str(buf, 0));
+		doUndo(buf, 1);
+		TEST_ASSERT_EQUAL_STRING(leads[i], row_str(buf, 0));
+		TEST_ASSERT_EQUAL_INT((int)strlen(leads[i]), buf->row[0].size);
+		doRedo(buf, 1);
+		TEST_ASSERT_EQUAL_STRING("a", row_str(buf, 0));
+		drop_test_buffer(buf);
+	}
+}
+
+/* ---- Creating and freeing records ---- */
+
+void test_undo_record_new_copies_data(void) {
+	uint8_t text[] = { 'a', '\n', 'b' };
+	struct undo *u = undoRecordNew(1, 2, 1, 3, 1, text, 3);
+	text[0] = 'z';
+	TEST_ASSERT_EQUAL_INT(1, u->startx);
+	TEST_ASSERT_EQUAL_INT(2, u->starty);
+	TEST_ASSERT_EQUAL_INT(1, u->endx);
+	TEST_ASSERT_EQUAL_INT(3, u->endy);
+	TEST_ASSERT_EQUAL_INT(1, u->delete);
+	TEST_ASSERT_EQUAL_INT(3, u->datalen);
+	TEST_ASSERT_EQUAL_STRING("a\nb", (char *)u->data);
+	TEST_ASSERT_EQUAL_INT(-1, u->pointy);
+	TEST_ASSERT_EQUAL_INT(0, u->append);
+	TEST_ASSERT_EQUAL_INT(0, u->paired);
+	undoRecordFreeList(u);
+}
+
+void test_undo_record_reserve_keeps_data(void) {
+	struct undo *u = undoRecordNew(0, 0, 3, 0, 0, (const uint8_t *)"abc", 3);
+	undoRecordReserve(u, 1000);
+	TEST_ASSERT(u->datasize >= 1001);
+	TEST_ASSERT_EQUAL_STRING("abc", (char *)u->data);
+	undoRecordFreeList(u);
+}
+
+/* forwardWordEnd stepped past the row over a truncated sequence, so M-u
+ * and friends asked to replace a range that doesn't exist. */
+void test_word_transform_truncated_lead(void) {
+	const char *lines[] = { "ab\xC3" };
+	struct buffer *buf = make_test_buffer_lines(lines, 1);
+	E.buf = buf;
+	int x = 0, y = 0;
+	forwardWordEnd(buf, &x, &y);
+	TEST_ASSERT_EQUAL_INT(3, x);
+	TEST_ASSERT_EQUAL_INT(0, y);
+	wordTransform(1, transformerUpcase);
+	TEST_ASSERT_EQUAL_STRING("AB\xC3", row_str(buf, 0));
+	doUndo(buf, 1);
+	TEST_ASSERT_EQUAL_STRING("ab\xC3", row_str(buf, 0));
+}
+
+/* ---- Invalid ranges are refused ---- */
+
+/* One record and one redo entry, so "nothing changed" means something. */
+static struct buffer *make_invalid_range_buffer(void) {
+	const char *lines[] = { "abc", "def" };
+	struct buffer *buf = make_test_buffer_lines(lines, 2);
+	mutateInsert(buf, 0, 0, (const uint8_t *)"X", 1, NULL, NULL);
+	mutateInsert(buf, 1, 0, (const uint8_t *)"Y", 1, NULL, NULL);
+	doUndo(buf, 1);
+	return buf;
+}
+
+static void assert_range_refused(int sx, int sy, int ex, int ey) {
+	struct buffer *buf = make_invalid_range_buffer();
+	int numrows = buf->numrows;
+	struct undo *undo = buf->undo, *redo = buf->redo;
+	buf->cx = 2;
+	buf->cy = 1;
+	int ox = -9, oy = -9;
+
+	TEST_ASSERT_EQUAL_INT(MUTATE_INVALID,
+			      mutateReplace(buf, sx, sy, ex, ey,
+					    (const uint8_t *)"Z", 1, 0, &ox, &oy));
+	TEST_ASSERT_EQUAL_INT(MUTATE_INVALID, mutateDelete(buf, sx, sy, ex, ey));
+	TEST_ASSERT_EQUAL_INT(MUTATE_INVALID,
+			      mutateDeleteChar(buf, sx, sy, ex, ey));
+	TEST_ASSERT_EQUAL_INT(-1, bulkDelete(buf, sx, sy, ex, ey));
+
+	TEST_ASSERT_EQUAL_STRING("Xabc", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_STRING("def", row_str(buf, 1));
+	TEST_ASSERT_EQUAL_INT(numrows, buf->numrows);
+	TEST_ASSERT_TRUE(buf->undo == undo);
+	TEST_ASSERT_TRUE(buf->redo == redo);
+	/* A caller's "move to the end of the edit" stays put. */
+	TEST_ASSERT_EQUAL_INT(2, ox);
+	TEST_ASSERT_EQUAL_INT(1, oy);
+	drop_test_buffer(buf);
+}
+
+void test_mutate_refuses_invalid_ranges(void) {
+	assert_range_refused(1, 0, 9, 0);   /* end x past its row */
+	assert_range_refused(1, 0, 9, 1);   /* end x past a later row */
+	assert_range_refused(1, 0, 1, 7);   /* end row past the last */
+	assert_range_refused(2, 0, 1, 0);   /* reversed on one row */
+	assert_range_refused(1, 1, 1, 0);   /* reversed across rows */
+	assert_range_refused(9, 0, 0, 1);   /* start x past its row */
+	assert_range_refused(0, 7, 0, 8);   /* start row past the last */
+	assert_range_refused(-1, 0, 1, 0);  /* negative */
+	assert_range_refused(0, -1, 1, 0);
+}
+
+void test_mutate_refuses_invalid_insert(void) {
+	struct buffer *buf = make_invalid_range_buffer();
+	struct undo *undo = buf->undo;
+	const uint8_t *x = (const uint8_t *)"x";
+	TEST_ASSERT_EQUAL_INT(MUTATE_INVALID,
+			      mutateInsert(buf, 9, 0, x, 1, NULL, NULL));
+	TEST_ASSERT_EQUAL_INT(MUTATE_INVALID,
+			      mutateInsert(buf, 0, 7, x, 1, NULL, NULL));
+	TEST_ASSERT_EQUAL_INT(MUTATE_INVALID,
+			      mutateInsertChar(buf, 9, 0, x, 1, NULL, NULL));
+	TEST_ASSERT_EQUAL_INT(-1, bulkInsert(buf, 9, 0, x, 1));
+	TEST_ASSERT_EQUAL_STRING("Xabc", row_str(buf, 0));
+	TEST_ASSERT_TRUE(buf->undo == undo);
+}
+
+void test_mutate_extend_refuses_wrong_row_count(void) {
+	struct buffer *buf = make_invalid_range_buffer();
+	int numrows = buf->numrows;
+	TEST_ASSERT_EQUAL_INT(MUTATE_INVALID, mutateExtendRows(buf, 1, 1));
+	TEST_ASSERT_EQUAL_INT(numrows, buf->numrows);
+	TEST_ASSERT_EQUAL_INT(MUTATE_DONE, mutateExtendRows(buf, numrows, 1));
+	TEST_ASSERT_EQUAL_INT(numrows + 1, buf->numrows);
+}
+
+/* ---- Replay checks the record against the text ---- */
+
+/* Text rebuilt outside the mutation layer, keeping its history, as a
+ * writable special buffer's is. */
+void test_undo_reports_stale_position(void) {
+	struct buffer *buf = make_test_buffer("a long line of text");
+	mutateInsert(buf, 15, 0, (const uint8_t *)"x", 1, NULL, NULL);
+	bufferResetRows(buf);
+	insertRow(buf, 0, (const uint8_t *)"short", 5);
+
+	struct undo *undo = buf->undo;
+	TEST_ASSERT_EQUAL_INT(UNDO_MISMATCH, doUndo(buf, 1));
+	TEST_ASSERT_EQUAL_STRING("short", row_str(buf, 0));
+	TEST_ASSERT_TRUE(buf->undo == undo);
+	TEST_ASSERT_TRUE(buf->redo == NULL);
+}
+
+/* A record's range still exists, but holds other text: a change made
+ * without a record, as TAB in a prompt does. */
+void test_undo_reports_changed_text(void) {
+	struct buffer *buf = make_test_buffer("");
+	mutateInsert(buf, 0, 0, (const uint8_t *)"ab", 2, NULL, NULL);
+	buf->cx = 0;
+	buf->cy = 0;
+	/* Rebuild the row by hand: nothing in emil changes text this way. */
+	bufferResetRows(buf);
+	insertRow(buf, 0, (const uint8_t *)"\tab", 3);
+	buf->cx = 1;
+
+	struct undo *undo = buf->undo;
+	TEST_ASSERT_EQUAL_INT(UNDO_MISMATCH, doUndo(buf, 1));
+	TEST_ASSERT_EQUAL_STRING("\tab", row_str(buf, 0));
+	TEST_ASSERT_TRUE(buf->undo == undo);
+}
+
+/* TAB in a prompt is an ordinary edit, so undo in the prompt is exact.
+ * It used to make no record, so undo deleted the wrong bytes. */
+void test_prompt_tab_undoes(void) {
+	makeMinibuffer();
+	make_test_buffer("x");
+	int keys[] = { 'a', 'b', CTRL('a'), '\t', CTRL('_'), '\r' };
+	scriptKeys(keys, 6);
+	muteStdout();
+	uint8_t *got = editorPrompt("p: ", PROMPT_PLAIN, NULL);
+	unmuteStdout();
+	clearKeys();
+	TEST_ASSERT_EQUAL_STRING("ab", (char *)got);
+	free(got);
+	freeMinibuffer();
+}
+
+/* A rebuilt buffer with no history just gets its new rows. */
+void test_rebuild_without_history_no_record(void) {
+	struct buffer *buf = make_test_buffer("old");
+	buf->read_only = 1;
+	struct mutateRebuild r = mutateRebuildBegin(buf);
+	insertRow(buf, 0, (const uint8_t *)"new", 3);
+	mutateRebuildEnd(buf, &r);
+	TEST_ASSERT_EQUAL_STRING("new", row_str(buf, 0));
+	TEST_ASSERT_TRUE(buf->undo == NULL);
+	TEST_ASSERT_EQUAL_INT(1, buf->read_only);
+}
+
+/* With history, the rebuild is an ordinary replace: undoing it gets the
+ * old text back, and the earlier history still works. */
+void test_rebuild_with_history_is_an_edit(void) {
+	const char *lines[] = { "a long line of text", "" };
+	struct buffer *buf = make_test_buffer_lines(lines, 2);
+	mutateInsert(buf, 15, 0, (const uint8_t *)"x", 1, NULL, NULL);
+
+	struct mutateRebuild r = mutateRebuildBegin(buf);
+	buf->read_only = 1;
+	insertRow(buf, 0, (const uint8_t *)"short", 5);
+	insertRow(buf, 1, (const uint8_t *)"", 0);
+	mutateRebuildEnd(buf, &r);
+
+	TEST_ASSERT_EQUAL_STRING("short", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
+	TEST_ASSERT_EQUAL_INT(1, buf->read_only);
+
+	buf->read_only = 0;
+	TEST_ASSERT_EQUAL_INT(UNDO_DONE, doUndo(buf, 1));
+	TEST_ASSERT_EQUAL_STRING("a long line of xtext", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(UNDO_DONE, doUndo(buf, 1));
+	TEST_ASSERT_EQUAL_STRING("a long line of text", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(UNDO_DONE, doRedo(buf, 2));
+	TEST_ASSERT_EQUAL_STRING("short", row_str(buf, 0));
+}
+
+/* A stale redo entry is reported in the same way. */
+void test_redo_reports_changed_text(void) {
+	struct buffer *buf = make_test_buffer("abc");
+	mutateDelete(buf, 0, 0, 1, 0);
+	doUndo(buf, 1);
+	bufferResetRows(buf);
+	insertRow(buf, 0, (const uint8_t *)"xyz", 3);
+
+	struct undo *redo = buf->redo;
+	TEST_ASSERT_EQUAL_INT(UNDO_MISMATCH, doRedo(buf, 1));
+	TEST_ASSERT_EQUAL_STRING("xyz", row_str(buf, 0));
+	TEST_ASSERT_TRUE(buf->redo == redo);
+}
 
 /* ---- Basic undo/redo ---- */
 
@@ -129,7 +383,7 @@ void test_mutate_replace_readonly(void) {
 	TEST_ASSERT_NOT_NULL(buf->redo);
 
 	buf->read_only = 1;
-	mutateReplace(buf, 0, 0, 5, 0, (const uint8_t *)"Hello", 5,
+	mutateReplace(buf, 0, 0, 5, 0,
 		      (const uint8_t *)"bye", 3, 0, NULL, NULL);
 
 	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
@@ -786,17 +1040,17 @@ void test_minibuffer_reset_drops_stale_undo_records(void) {
 }
 
 /* Whatever a record claims, bulkDelete must not derive a negative
- * length from it. */
-void test_bulk_delete_clamps_out_of_range_end(void) {
+ * length from it.  A range the rows don't hold is refused, not clamped. */
+void test_bulk_delete_refuses_out_of_range_end(void) {
 	struct buffer *buf = make_test_buffer("abc");
 	E.buf = buf;
 
 	/* endx far past the end of a 3-byte row, as a stale record
 	 * would give. */
-	bulkDelete(buf, 0, 0, 99, 0);
+	TEST_ASSERT_EQUAL_INT(-1, bulkDelete(buf, 0, 0, 99, 0));
 
-	TEST_ASSERT_EQUAL_INT(0, buf->row[0].size);
-	TEST_ASSERT_EQUAL_STRING("", (char *)buf->row[0].chars);
+	TEST_ASSERT_EQUAL_INT(3, buf->row[0].size);
+	TEST_ASSERT_EQUAL_STRING("abc", (char *)buf->row[0].chars);
 
 }
 
@@ -943,6 +1197,19 @@ void test_query_replace_U_offers_the_first_match_again(void) {
 int main(void) {
 	TEST_BEGIN();
 
+	RUN_TEST(test_undo_record_new_copies_data);
+	RUN_TEST(test_undo_record_reserve_keeps_data);
+	RUN_TEST(test_undo_delchar_truncated_lead);
+	RUN_TEST(test_word_transform_truncated_lead);
+	RUN_TEST(test_mutate_refuses_invalid_ranges);
+	RUN_TEST(test_mutate_refuses_invalid_insert);
+	RUN_TEST(test_mutate_extend_refuses_wrong_row_count);
+	RUN_TEST(test_undo_reports_stale_position);
+	RUN_TEST(test_undo_reports_changed_text);
+	RUN_TEST(test_prompt_tab_undoes);
+	RUN_TEST(test_rebuild_without_history_no_record);
+	RUN_TEST(test_rebuild_with_history_is_an_edit);
+	RUN_TEST(test_redo_reports_changed_text);
 	RUN_TEST(test_undo_insert_chars);
 	RUN_TEST(test_undo_then_redo);
 	RUN_TEST(test_multiple_sequential_undos);
@@ -983,7 +1250,7 @@ int main(void) {
 	RUN_TEST(test_rectangle_yank_at_virtual_eof_roundtrip);
 	RUN_TEST(test_redo_chain_releases_undo);
 	RUN_TEST(test_minibuffer_reset_drops_stale_undo_records);
-	RUN_TEST(test_bulk_delete_clamps_out_of_range_end);
+	RUN_TEST(test_bulk_delete_refuses_out_of_range_end);
 
 	/* Spec 05 P5 */
 	RUN_TEST(test_undo_forward_delete_returns_cursor_to_start);

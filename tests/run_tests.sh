@@ -185,15 +185,15 @@ else
     echo "✓ Mutation-layer invariant"
 fi
 
-# Record-construction invariant: mutate.c is the only place that
-# builds undo records.  
-RECORD_HITS=$(grep -nE '\bnewUndo\b' *.c 2>/dev/null \
+# Record-construction invariant: mutate.c is the only place that builds
+# undo records, using undorecord.c.
+RECORD_HITS=$(grep -nE '\b(newUndo|undoRecordNew)\b' *.c 2>/dev/null \
     | grep -v '^mutate\.c:' \
-    | grep -v '^undo\.c:[0-9]*:struct undo \*newUndo' \
+    | grep -v '^undorecord\.c:' \
     | grep -vE ':[0-9]+:.*(/\*|//)' \
     | grep -vE ':[0-9]+:[[:space:]]*\*')
 if [ -n "$RECORD_HITS" ]; then
-    echo "✗ Record-construction invariant violation (newUndo outside mutate.c):"
+    echo "✗ Record-construction invariant violation (records built outside mutate.c):"
     echo "$RECORD_HITS" | sed 's/^/    /'
     INVARIANT_FAIL=1
 else
@@ -239,7 +239,7 @@ fi
 # answers from their arguments and must not reach into the global
 # editor state. 
 LEAF_OBJECTS="abuf.o backup.o base64.o dbuf.o decoder.o \
-    emil_subprocess.o history.o transform.o undo.o unicode.o util.o \
+    emil_subprocess.o history.o transform.o undo.o undorecord.o unicode.o util.o \
     wrap.o"
 
 # Sanity check for nm: keymap.o is known to reference E.  If nm doesn't
@@ -326,7 +326,7 @@ $CC $TEST_CFLAGS $SANITIZER_FLAGS -c tests/stubs.c -o tests/stubs.o 2>&1 || {
 }
 
 # All objects except main.o and terminal.o
-TEST_OBJECTS="decoder.o unicode.o buffer.o region.o undo.o transform.o \
+TEST_OBJECTS="decoder.o unicode.o buffer.o region.o undo.o undorecord.o transform.o \
     find.o pipe.o register.o fileio.o display.o  keymap.o \
     edit.o prompt.o util.o completion.o history.o base64.o abuf.o \
     window.o ctags.o adjust.o mutate.o wrap.o motion.o dbuf.o \

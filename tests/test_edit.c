@@ -13,7 +13,7 @@
 void test_insert_char_beginning(void) {
 	struct buffer *buf = make_test_buffer("BCD");
 	buf->cx = 0;
-	insertChar(buf, 'A', 1);
+	selfInsert(buf, 'A', 1);
 	TEST_ASSERT_EQUAL_STRING("ABCD", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_INT(1, buf->cx);
 }
@@ -21,14 +21,14 @@ void test_insert_char_beginning(void) {
 void test_insert_char_end(void) {
 	struct buffer *buf = make_test_buffer("ABC");
 	buf->cx = 3;
-	insertChar(buf, 'D', 1);
+	selfInsert(buf, 'D', 1);
 	TEST_ASSERT_EQUAL_STRING("ABCD", row_str(buf, 0));
 }
 
 void test_insert_char_with_count(void) {
 	struct buffer *buf = make_test_buffer("AE");
 	buf->cx = 1;
-	insertChar(buf, 'B', 3);
+	selfInsert(buf, 'B', 3);
 	TEST_ASSERT_EQUAL_STRING("ABBBE", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_INT(4, buf->cx);
 }

@@ -600,6 +600,7 @@ static void reportUndo(enum undoResult r, const char *done,
 		setStatusMessage("%s", done);
 	else if (r == UNDO_EXHAUSTED)
 		setStatusMessage("%s", exhausted);
+	/* UNDO_REFUSED and UNDO_MISMATCH report themselves. */
 }
 
 static int dispatchMove(int c, int uarg, struct window *win) {
@@ -861,14 +862,15 @@ static int dispatchBuffer(int c, int uarg) {
 		setStatusMessage(E.buf->read_only ? "Buffer is read-only" :
 						    "Buffer set to writable");
 		return 1;
-	case CMD_REDO:
-		reportUndo(doRedo(E.buf, uarg), "Redo.",
-			   "No further redo information.");
-		if (E.buf->redo != NULL) {
+	case CMD_REDO: {
+		enum undoResult r = doRedo(E.buf, uarg);
+		reportUndo(r, "Redo.", "No further redo information.");
+		if (r != UNDO_MISMATCH && E.buf->redo != NULL) {
 			setStatusMessage("Press C-_ or C-/ to redo again");
 			E.micro = CMD_REDO;
 		}
 		return 1;
+	}
 	default:
 		return 0;
 	}

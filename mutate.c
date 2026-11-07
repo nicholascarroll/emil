@@ -3,6 +3,7 @@
 #include "adjust.h"
 #include "buffer.h"
 #include "dbuf.h"
+#include "message.h"
 #include "undo.h"
 #include "util.h"
 #include "wrap.h"
@@ -44,9 +45,8 @@ static int wantsFinalNewline(struct buffer *buf) {
 /* Would this mutation delete the final newline and nothing else?
  * The repair below would restore it, so it is refused. */
 static int deletesOnlyFinalNewline(struct buffer *buf, int startx, int starty,
-				   int endx, int endy, int old_len,
-				   int repl_len) {
-	if (old_len <= 0 || repl_len > 0)
+				   int endx, int endy, int repl_len) {
+	if ((startx == endx && starty == endy) || repl_len > 0)
 		return 0;
 	if (buf->numrows < 2)
 		return 0;
@@ -71,44 +71,61 @@ static void restoreFinalNewline(struct buffer *buf) {
 	int atx = buf->row[buf->numrows - 1].size;
 	int aty = buf->numrows - 1;
 
-	struct undo *fix = newUndo();
-	fix->startx = atx;
-	fix->starty = aty;
-	computeInsertEnd((const uint8_t *)"\n", 1, atx, aty, &fix->endx,
-			 &fix->endy);
-	fix->delete = 0;
-	fix->append = 0;
+	const uint8_t nl = '\n';
+	int endx, endy;
+	computeInsertEnd(&nl, 1, atx, aty, &endx, &endy);
+	struct undo *fix = undoRecordNew(atx, aty, endx, endy, 0, &nl, 1);
 	fix->paired = 1;
-	undoReplaceData(fix, 2);
-	fix->data[0] = '\n';
-	fix->data[1] = 0;
-	fix->datalen = 1;
 	pushUndo(buf, fix);
 
 	bulkInsert(buf, atx, aty, (const uint8_t *)"\n", 1);
 }
 
+/* What a caller's "move to the end of the edit" gets when nothing changed. */
+static void cursorAsEnd(const struct buffer *buf, int *out_endx,
+			int *out_endy) {
+	if (out_endx)
+		*out_endx = buf->cx;
+	if (out_endy)
+		*out_endy = buf->cy;
+}
+
 /* Shared body of every mutation.  'coalesce' merges the record into
  * the run at the head of the undo list; honoured only when exactly one
  * record is pushed.  During an input burst the run is uncapped. */
-static void mutateReplaceEx(struct buffer *buf, int startx, int starty,
-			    int endx, int endy, const uint8_t *old_text,
-			    int old_len, const uint8_t *repl, int repl_len,
-			    int chain_to_prev, int coalesce, int *out_endx,
-			    int *out_endy) {
+static enum mutateResult mutateReplaceEx(struct buffer *buf, int startx,
+					 int starty, int endx, int endy,
+					 const uint8_t *repl, int repl_len,
+					 int chain_to_prev, int coalesce,
+					 int *out_endx, int *out_endy) {
 	/* Before clearRedos; out-params untouched on refusal. */
 	if (rejectIfReadOnly(buf))
-		return;
+		return MUTATE_REFUSED;
+
+	if (!bufferRangeValid(buf, startx, starty, endx, endy)) {
+		setStatusMessage("Invalid edit range; nothing changed");
+		cursorAsEnd(buf, out_endx, out_endy);
+		return MUTATE_INVALID;
+	}
 
 	/* As above. */
 	if (wantsFinalNewline(buf) &&
-	    deletesOnlyFinalNewline(buf, startx, starty, endx, endy, old_len,
-				    repl_len))
-		return;
+	    deletesOnlyFinalNewline(buf, startx, starty, endx, endy,
+				    repl_len)) {
+		cursorAsEnd(buf, out_endx, out_endy);
+		return MUTATE_REFUSED;
+	}
 
-	if (old_len < 0 || repl_len < 0 || old_len > INT_MAX - 1 ||
-	    repl_len > INT_MAX - 1)
+	if (repl_len < 0 || repl_len > INT_MAX - 1)
 		abort();
+
+	/* What the delete record restores: the buffer's own text, read
+	 * before anything changes.  The common pure insert skips this. */
+	int old_len = 0;
+	uint8_t *old_text = NULL;
+	if (startx != endx || starty != endy)
+		old_text = collectRegionText(buf, startx, starty, endx, endy,
+					     &old_len);
 
 	int is_replace = (old_len > 0 && repl_len > 0);
 	if (is_replace || chain_to_prev)
@@ -126,27 +143,20 @@ static void mutateReplaceEx(struct buffer *buf, int startx, int starty,
 
 	/* Delete undo record */
 	if (old_len > 0) {
-		struct undo *del = newUndo();
-		del->startx = startx;
-		del->starty = starty;
-		del->endx = endx;
-		del->endy = endy;
-		del->delete = 1;
+		struct undo *del = undoRecordNew(startx, starty, endx, endy, 1,
+						 old_text, old_len);
 		del->append = coalesce;
 		del->uncapped = coalesce && E.input_burst;
 		del->paired = chain_to_prev ? 1 : 0;
 		del->pointx = pointx;
 		del->pointy = pointy;
-		undoReplaceData(del, old_len + 1);
-		memcpy(del->data, old_text, old_len);
-		del->data[old_len] = 0;
-		del->datalen = old_len;
 		pushUndo(buf, del);
 	}
 
 	/* Perform deletion (bulkDelete calls adjustAllPoints internally) */
 	if (old_len > 0)
 		bulkDelete(buf, startx, starty, endx, endy);
+	free(old_text);
 
 	/* The logical insert end, as told to the caller. */
 	int iex = startx, iey = starty;
@@ -155,26 +165,14 @@ static void mutateReplaceEx(struct buffer *buf, int startx, int starty,
 
 	/* Insert undo record */
 	if (repl_len > 0) {
-		struct dbuf adata = DBUF_INIT;
-		dbuf_append(&adata, repl, repl_len);
-
-		struct undo *ins = newUndo();
-		ins->startx = startx;
-		ins->starty = starty;
-		computeInsertEnd(adata.buf, adata.len, startx, starty,
-				 &ins->endx, &ins->endy);
-		ins->delete = 0;
+		struct undo *ins = undoRecordNew(startx, starty, iex, iey, 0,
+						 repl, repl_len);
 		ins->append = coalesce;
 		ins->uncapped = coalesce && E.input_burst;
 		ins->paired = is_replace ? 1 : (chain_to_prev ? 1 : 0);
 		ins->pointx = pointx;
 		ins->pointy = pointy;
-		undoReplaceData(ins, adata.len + 1);
-		memcpy(ins->data, adata.buf, adata.len);
-		ins->data[adata.len] = 0;
-		ins->datalen = adata.len;
 		pushUndo(buf, ins);
-		dbuf_free(&adata);
 
 		/* bulkInsert calls adjustAllPoints internally */
 		bulkInsert(buf, startx, starty, repl, repl_len);
@@ -188,47 +186,55 @@ static void mutateReplaceEx(struct buffer *buf, int startx, int starty,
 		*out_endx = iex;
 	if (out_endy)
 		*out_endy = iey;
+	return MUTATE_DONE;
 }
 
-void mutateReplace(struct buffer *buf, int startx, int starty, int endx,
-		   int endy, const uint8_t *old_text, int old_len,
-		   const uint8_t *repl, int repl_len, int chain_to_prev,
-		   int *out_endx, int *out_endy) {
-	mutateReplaceEx(buf, startx, starty, endx, endy, old_text, old_len,
-			repl, repl_len, chain_to_prev, 0, out_endx, out_endy);
+enum mutateResult mutateReplace(struct buffer *buf, int startx, int starty,
+				int endx, int endy, const uint8_t *repl,
+				int repl_len, int chain_to_prev, int *out_endx,
+				int *out_endy) {
+	return mutateReplaceEx(buf, startx, starty, endx, endy, repl, repl_len,
+			       chain_to_prev, 0, out_endx, out_endy);
 }
 
-void mutateInsertChar(struct buffer *buf, int startx, int starty,
-		      const uint8_t *text, int len, int *out_endx,
-		      int *out_endy) {
-	mutateReplaceEx(buf, startx, starty, startx, starty, NULL, 0, text, len,
-			0, 1, out_endx, out_endy);
+enum mutateResult mutateInsertChar(struct buffer *buf, int startx, int starty,
+				   const uint8_t *text, int len, int *out_endx,
+				   int *out_endy) {
+	return mutateReplaceEx(buf, startx, starty, startx, starty, text, len,
+			       0, 1, out_endx, out_endy);
 }
 
-void mutateDeleteChar(struct buffer *buf, int startx, int starty, int endx,
-		      int endy, const uint8_t *old_text, int old_len) {
-	mutateReplaceEx(buf, startx, starty, endx, endy, old_text, old_len,
-			NULL, 0, 0, 1, NULL, NULL);
+enum mutateResult mutateDeleteChar(struct buffer *buf, int startx, int starty,
+				   int endx, int endy) {
+	return mutateReplaceEx(buf, startx, starty, endx, endy, NULL, 0, 0, 1,
+			       NULL, NULL);
 }
 
-void mutateDelete(struct buffer *buf, int startx, int starty, int endx,
-		  int endy, const uint8_t *old_text, int old_len) {
-	mutateReplace(buf, startx, starty, endx, endy, old_text, old_len, NULL,
-		      0, 0, NULL, NULL);
+enum mutateResult mutateDelete(struct buffer *buf, int startx, int starty,
+			       int endx, int endy) {
+	return mutateReplace(buf, startx, starty, endx, endy, NULL, 0, 0, NULL,
+			     NULL);
 }
 
-void mutateInsert(struct buffer *buf, int startx, int starty,
-		  const uint8_t *text, int len, int *out_endx, int *out_endy) {
-	mutateReplace(buf, startx, starty, startx, starty, NULL, 0, text, len,
-		      0, out_endx, out_endy);
+enum mutateResult mutateInsert(struct buffer *buf, int startx, int starty,
+			       const uint8_t *text, int len, int *out_endx,
+			       int *out_endy) {
+	return mutateReplace(buf, startx, starty, startx, starty, text, len, 0,
+			     out_endx, out_endy);
 }
 
-void mutateExtendRows(struct buffer *buf, int from_row, int n_rows) {
+enum mutateResult mutateExtendRows(struct buffer *buf, int from_row,
+				   int n_rows) {
 	if (rejectIfReadOnly(buf))
-		return;
+		return MUTATE_REFUSED;
 
 	if (n_rows <= 0)
-		return;
+		return MUTATE_DONE;
+
+	if (from_row != buf->numrows) {
+		setStatusMessage("Invalid edit range; nothing changed");
+		return MUTATE_INVALID;
+	}
 
 	clearRedos(buf);
 
@@ -238,33 +244,65 @@ void mutateExtendRows(struct buffer *buf, int from_row, int n_rows) {
 
 	/* A pure-insert undo record of the appended newlines, heading a
 	 * chain that a following mutateReplace may pair onto. */
-	struct undo *ext = newUndo();
-	int n_newlines;
-	if (from_row == 0) {
-		/* A rowless buffer: anchor at the origin, n-1 newlines. */
-		ext->starty = 0;
-		ext->startx = 0;
-		n_newlines = n_rows - 1;
-	} else {
-		ext->starty = from_row - 1;
-		ext->startx = buf->row[ext->starty].size;
-		n_newlines = n_rows;
-	}
-	ext->endx = 0;
-	ext->endy = buf->numrows - 1;
-	if (n_newlines + 1 > ext->datasize) {
-		ext->datasize = n_newlines + 1;
-		ext->data = xrealloc(ext->data, ext->datasize);
-	}
+	int n_newlines = from_row == 0 ? n_rows - 1 : n_rows;
+	int anchory = from_row == 0 ? 0 : from_row - 1;
+	/* A rowless buffer anchors at the origin, with one newline fewer. */
+	int anchorx = from_row == 0 ? 0 : buf->row[anchory].size;
+	struct undo *ext = undoRecordNew(anchorx, anchory, 0, buf->numrows - 1,
+					 0, NULL, 0);
+	undoRecordReserve(ext, n_newlines);
 	memset(ext->data, '\n', n_newlines);
 	ext->data[n_newlines] = 0;
 	ext->datalen = n_newlines;
-	ext->append = 0;
-	ext->delete = 0;
-	ext->paired = 0;
 	pushUndo(buf, ext);
 
 	adjustAllPoints(buf, ext->startx, ext->starty, ext->endx, ext->endy, 0);
 
 	markBufferDirty(buf);
+	return MUTATE_DONE;
+}
+
+static uint8_t *wholeText(struct buffer *buf, int *len) {
+	int last = buf->numrows - 1;
+	return collectRegionText(buf, 0, 0, buf->row[last].size, last, len);
+}
+
+struct mutateRebuild mutateRebuildBegin(struct buffer *buf) {
+	struct mutateRebuild r = { NULL, 0 };
+	if (buf->undo != NULL || buf->redo != NULL)
+		r.old_text = wholeText(buf, &r.old_len);
+	bufferResetRows(buf);
+	return r;
+}
+
+void mutateRebuildEnd(struct buffer *buf, struct mutateRebuild *r) {
+	if (r->old_text == NULL)
+		return;
+
+	bufferEnsureRow(buf);
+	int new_len;
+	uint8_t *new_text = wholeText(buf, &new_len);
+
+	/* Put the old rows back, one per newline, then replace them. */
+	bufferResetRows(buf);
+	int start = 0, row = 0;
+	for (int i = 0; i <= r->old_len; i++) {
+		if (i == r->old_len || r->old_text[i] == '\n') {
+			insertRow(buf, row++, &r->old_text[start], i - start);
+			start = i + 1;
+		}
+	}
+
+	int read_only = buf->read_only;
+	int dirty = buf->dirty;
+	int last = buf->numrows - 1;
+	buf->read_only = 0;
+	mutateReplace(buf, 0, 0, buf->row[last].size, last, new_text, new_len,
+		      0, NULL, NULL);
+	buf->read_only = read_only;
+	buf->dirty = dirty;
+
+	free(new_text);
+	free(r->old_text);
+	r->old_text = NULL;
 }

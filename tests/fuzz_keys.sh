@@ -20,7 +20,7 @@ mkdir -p "$WORK/obj" "$WORK/sandbox/sub"
 
 CFLAGS="-std=c99 -D_DEFAULT_SOURCE -D_BSD_SOURCE -g -O1 \
     -fsanitize=address,undefined -fno-sanitize-recover=all \
-    -fno-omit-frame-pointer -DEMIL_DEBUG_ROW_CACHE -DEMIL_VERSION=\"fuzz\""
+    -fno-omit-frame-pointer -DEMIL_DEBUG_ROW_CACHE -DEMIL_DEBUG_ROW_BYTES -DEMIL_VERSION=\"fuzz\""
 
 OBJS=""
 for src in "$ROOT"/*.c; do

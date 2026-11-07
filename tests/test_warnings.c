@@ -676,7 +676,7 @@ void test_user_readonly_not_lifted_by_lock_release(void) {
  * filename guard alone let it through to stat() a literal "*stdin*"
  * in the cwd every two seconds. */
 void test_special_buffer_is_not_checked(void) {
-	struct buffer *b = make_test_buffer("output\n");
+	struct buffer *b = make_test_buffer("output");
 	b->filename = xstrdup("*stdin*");
 	b->special_buffer = 1;
 	b->open_mtime = 1;

@@ -13,13 +13,29 @@
 struct buffer;
 int rejectIfReadOnly(struct buffer *buf);
 
+/* '\n' is the row separator, never a byte in a row.  EMIL_DEBUG_ROW_BYTES
+ * aborts if one is about to enter a row; every write of new bytes into a
+ * row calls this first. */
+#ifdef EMIL_DEBUG_ROW_BYTES
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+static inline void debugCheckRowBytes(const uint8_t *s, size_t len) {
+	if (len > 0 && memchr(s, '\n', len) != NULL) {
+		fprintf(stderr, "EMIL_DEBUG_ROW_BYTES: newline byte entering a row\n");
+		abort();
+	}
+}
+#else
+#define debugCheckRowBytes(s, len) ((void)0)
+#endif
+
 void insertRow(struct buffer *bufr, int at, const uint8_t *s, size_t len);
 void appendRowRaw(struct buffer *bufr, const uint8_t *s, size_t len);
 int killBufferNeedsConfirm(const struct buffer *bufr);
 void rowEnsureCap(erow *row, int needed);
 void freeRow(erow *row);
 void delRow(struct buffer *bufr, int at);
-void rowInsertChar(struct buffer *bufr, erow *row, int at, int c);
 struct buffer *newBuffer(void);
 void destroyBuffer(struct buffer *buf);
 void updateBuffer(struct buffer *buf);

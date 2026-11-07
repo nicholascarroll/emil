@@ -4,6 +4,7 @@
 #include "display.h"
 #include "edit.h"
 #include "emil.h"
+#include "mutate.h"
 #include "message.h"
 #include "keymap.h"
 #include "motion.h"
@@ -256,7 +257,7 @@ const int palette_size = sizeof(palette) / sizeof(palette[0]);
 /* Populate the palette buffer: every entry's utf8[] with a trailing
 space.  PALETTE_BREAK entries contain '\n'. */
 static void populatePaletteBuffer(struct buffer *buf) {
-	bufferResetRows(buf);
+	struct mutateRebuild rebuild = mutateRebuildBegin(buf);
 	buf->read_only = 0;
 	uint8_t flat[4096];
 	int len = 0;
@@ -274,6 +275,7 @@ static void populatePaletteBuffer(struct buffer *buf) {
 	/* Load into buffer rows.  No BLOB_FINAL_NL: the palette's last
 	 * category is a row of glyphs, not a terminated line. */
 	bufferLoadBlob(buf, flat, (size_t)len, 0);
+	mutateRebuildEnd(buf, &rebuild);
 	buf->read_only = 1;
 }
 

@@ -13,7 +13,10 @@
 #include "test.h"
 #include "test_harness.h"
 #include "dbuf.h"
+#include "keymap.h"
+#include "mutate.h"
 #include "region.h"
+#include "undo.h"
 #include <regex.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -344,8 +347,157 @@ void tearDown(void) {
 	cleanupTestEditor();
 }
 
+/* ---- replaceRegex end to end, with its history ---- */
+
+/* The text as one string, rows joined with newlines. */
+static char *buffer_text(const struct buffer *buf) {
+	struct dbuf d = DBUF_INIT;
+	for (int i = 0; i < buf->numrows; i++) {
+		if (i > 0)
+			dbuf_append(&d, (const uint8_t *)"\n", 1);
+		dbuf_append(&d, buf->row[i].chars, buf->row[i].size);
+	}
+	return (char *)dbuf_detach(&d, NULL);
+}
+
+/* The record at the head must describe the text as it stands now. */
+static void assert_record_matches(struct buffer *buf, const struct undo *u,
+				  int must_be_present) {
+	int ex, ey;
+	computeInsertEnd(u->data, u->datalen, u->startx, u->starty, &ex, &ey);
+	TEST_ASSERT_EQUAL_INT(ex, u->endx);
+	TEST_ASSERT_EQUAL_INT(ey, u->endy);
+	TEST_ASSERT_TRUE(bufferPosValid(buf, u->startx, u->starty));
+	if (must_be_present) {
+		int n;
+		TEST_ASSERT_TRUE(bufferRangeValid(buf, u->startx, u->starty,
+						  u->endx, u->endy));
+		uint8_t *t = collectRegionText(buf, u->startx, u->starty,
+					       u->endx, u->endy, &n);
+		TEST_ASSERT_EQUAL_INT(u->datalen, n);
+		TEST_ASSERT_TRUE(memcmp(t, u->data, n) == 0);
+		free(t);
+	}
+}
+
+/* Run replaceRegex, then walk the whole history back and forward,
+ * checking every record against the text before it is replayed. */
+static void check_replace(const char **lines, int nlines, const char *regex,
+			  const char *repl, const char *want, int want_groups) {
+	makeMinibuffer();
+	struct buffer *buf = make_test_buffer_lines(lines, nlines);
+	char *before = buffer_text(buf);
+
+	int keys[64], n = 0;
+	for (const char *c = regex; *c; c++)
+		keys[n++] = *c;
+	keys[n++] = '\r';
+	for (const char *c = repl; *c; c++)
+		keys[n++] = *c;
+	keys[n++] = '\r';
+	scriptKeys(keys, n);
+	muteStdout();
+	replaceRegex();
+	unmuteStdout();
+	clearKeys();
+
+	char *after = buffer_text(buf);
+	TEST_ASSERT_EQUAL_STRING(want, after);
+
+	for (int g = 0; g < want_groups; g++) {
+		TEST_ASSERT_TRUE(buf->undo != NULL);
+		/* Only the head can be checked before replaying.  The
+		 * group's other record is checked by doUndo itself. */
+		assert_record_matches(buf, buf->undo, !buf->undo->delete);
+		TEST_ASSERT_EQUAL_INT(UNDO_DONE, doUndo(buf, 1));
+	}
+	TEST_ASSERT_TRUE(buf->undo == NULL);
+	char *undone = buffer_text(buf);
+	TEST_ASSERT_EQUAL_STRING(before, undone);
+
+	for (int g = 0; g < want_groups; g++) {
+		TEST_ASSERT_TRUE(buf->redo != NULL);
+		assert_record_matches(buf, buf->redo, buf->redo->delete);
+		TEST_ASSERT_EQUAL_INT(UNDO_DONE, doRedo(buf, 1));
+	}
+	TEST_ASSERT_TRUE(buf->redo == NULL);
+	char *redone = buffer_text(buf);
+	TEST_ASSERT_EQUAL_STRING(want, redone);
+
+	free(before);
+	free(after);
+	free(undone);
+	free(redone);
+	freeMinibuffer();
+}
+
+void test_replace_regex_one_row_history(void) {
+	const char *lines[] = { "xaax yy", "" };
+	check_replace(lines, 2, "a+", "Z", "xZx yy\n\n", 1);
+}
+
+/* The record spans from the first match to the last, across rows. */
+void test_replace_regex_many_rows_history(void) {
+	const char *lines[] = { "a1", "keep", "a2 tail", "" };
+	check_replace(lines, 4, "a[0-9]", "Q", "Q\nkeep\nQ tail\n\n", 1);
+}
+
+/* An empty replacement is a pure delete, so a single record. */
+void test_replace_regex_to_nothing_history(void) {
+	const char *lines[] = { "xaay", "" };
+	check_replace(lines, 2, "aa", "", "xy\n\n", 1);
+}
+
+/* Replacing the last row's text in a file with no final newline adds a
+ * repair record, which undoes with the replacement. */
+void test_replace_regex_final_row_history(void) {
+	makeMinibuffer();
+	struct buffer *buf = make_test_buffer("abc");
+	bufferResetRows(buf);
+	insertRow(buf, 0, (const uint8_t *)"abc", 3);
+	int keys[] = { 'b', '\r', 'Z', '\r' };
+	scriptKeys(keys, 4);
+	muteStdout();
+	replaceRegex();
+	unmuteStdout();
+	clearKeys();
+
+	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
+	TEST_ASSERT_EQUAL_STRING("aZc", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(UNDO_DONE, doUndo(buf, 1));
+	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
+	TEST_ASSERT_EQUAL_STRING("abc", row_str(buf, 0));
+	TEST_ASSERT_TRUE(buf->undo == NULL);
+
+	freeMinibuffer();
+}
+
+/* No match makes no record. */
+void test_replace_regex_no_match_no_history(void) {
+	makeMinibuffer();
+	const char *lines[] = { "abc", "" };
+	struct buffer *buf = make_test_buffer_lines(lines, 2);
+	int keys[] = { 'q', '\r', 'Z', '\r' };
+	scriptKeys(keys, 4);
+	muteStdout();
+	replaceRegex();
+	unmuteStdout();
+	clearKeys();
+
+	TEST_ASSERT_EQUAL_STRING("abc", row_str(buf, 0));
+	TEST_ASSERT_TRUE(buf->undo == NULL);
+
+	freeMinibuffer();
+}
+
 int main(void) {
 	TEST_BEGIN();
+
+	RUN_TEST(test_replace_regex_one_row_history);
+	RUN_TEST(test_replace_regex_many_rows_history);
+	RUN_TEST(test_replace_regex_to_nothing_history);
+	RUN_TEST(test_replace_regex_final_row_history);
+	RUN_TEST(test_replace_regex_no_match_no_history);
 
 	RUN_TEST(test_replaces_every_match_on_a_line);
 	RUN_TEST(test_replaces_across_multiple_lines);

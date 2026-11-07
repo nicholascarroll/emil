@@ -650,8 +650,9 @@ void queryReplace(void) {
 			break;
 		case 'U':
 			if (E.buf->undo != first) {
-				while (E.buf->undo != first)
-					doUndo(E.buf, 1);
+				while (E.buf->undo != first &&
+				       doUndo(E.buf, 1) == UNDO_DONE)
+					;
 				E.buf->markx =
 					E.buf->cx +
 					strlen((const char *)replace_orig);

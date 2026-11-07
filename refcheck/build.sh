@@ -57,6 +57,6 @@ MK
 }
 mkdir -p "$OUT/cov/obj"
 write_mk "$OUT/obj" "$OUT/difffuzz" "-O1 -fsanitize=address,undefined \
-	-fno-sanitize-recover=all -fno-omit-frame-pointer -DEMIL_DEBUG_ROW_CACHE"
+	-fno-sanitize-recover=all -fno-omit-frame-pointer -DEMIL_DEBUG_ROW_CACHE -DEMIL_DEBUG_ROW_BYTES"
 write_mk "$OUT/cov/obj" "$OUT/cov/difffuzz" "-O0 --coverage"
 echo "$OUT/difffuzz"

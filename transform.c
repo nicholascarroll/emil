@@ -198,6 +198,8 @@ uint8_t *transformerTransposeChars(uint8_t *input) {
 	}
 
 	int endFirst = utf8_nBytes(input[0]);
+	if (endFirst > len)
+		endFirst = len; /* truncated sequence */
 
 	memcpy(output, input + endFirst, len - endFirst);
 	memcpy(output + (len - endFirst), input, endFirst);
