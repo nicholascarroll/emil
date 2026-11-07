@@ -480,9 +480,8 @@ void handleMinibufferCompletion(struct buffer *minibuf, enum promptType type) {
 		break;
 	}
 	if (tabOutcome(minibuf, &result, strlen(text), type)) {
-		const char *done = result.n_matches == 1 ?
-					   result.matches[0] :
-					   result.common_prefix;
+		const char *done = result.n_matches == 1 ? result.matches[0] :
+							   result.common_prefix;
 		/* A buffer's name is stored raw.  A file match stays as it
 		 * is: scanDir filtered the name, the rest is what was typed. */
 		int stored = type == PROMPT_BUFFER || type == PROMPT_SEARCH;

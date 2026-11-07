@@ -84,7 +84,8 @@ static void formatRegName(char *out, size_t outsz, int reg) {
 
 /* A buffer's name, as one line.  A filename can hold any byte, and a
  * row must not hold a newline, so these views show it as ^J. */
-static void formatBufferName(char *out, size_t outsz, const struct buffer *buf) {
+static void formatBufferName(char *out, size_t outsz,
+			     const struct buffer *buf) {
 	const char *fname = buf->filename ? buf->filename : "*scratch*";
 	utf8SanitizeLine((const uint8_t *)fname, strlen(fname), out, outsz);
 }

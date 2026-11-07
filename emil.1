@@ -497,8 +497,7 @@ adheres to the Unix convention where lines are delimited by a single linefeed (L
 A file opened without a terminating linefeed gains one when it is loaded.
 Validation at file load and inserting text in the buffer disallow  null bytes (0x00) or malformed UTF-8 sequences.
 .Pp
-Filenames that aren't valid text are displayed with substitutions, and can be opened by exact path.
-A substituted name in the minibuffer is just text, and doesn't refer to the original file.
+Filenames that contain control characters or bytes that are not valid UTF-8 are displayed within the editor with substitutions. Such files can be opened by invoking emil from the command line.
 .Ss File Persistence
 When saving,
 .Nm

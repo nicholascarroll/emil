@@ -22,7 +22,8 @@ int rejectIfReadOnly(struct buffer *buf);
 #include <string.h>
 static inline void debugCheckRowBytes(const uint8_t *s, size_t len) {
 	if (len > 0 && memchr(s, '\n', len) != NULL) {
-		fprintf(stderr, "EMIL_DEBUG_ROW_BYTES: newline byte entering a row\n");
+		fprintf(stderr,
+			"EMIL_DEBUG_ROW_BYTES: newline byte entering a row\n");
 		abort();
 	}
 }
