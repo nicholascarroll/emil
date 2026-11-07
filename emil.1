@@ -496,6 +496,9 @@ Files are loaded in their entirety into memory.
 adheres to the Unix convention where lines are delimited by a single linefeed (LF) character and files terminate with a linefeed.
 A file opened without a terminating linefeed gains one when it is loaded.
 Validation at file load and inserting text in the buffer disallow  null bytes (0x00) or malformed UTF-8 sequences.
+.Pp
+Filenames that aren't valid text are displayed with substitutions, and can be opened by exact path.
+A substituted name in the minibuffer is just text, and doesn't refer to the original file.
 .Ss File Persistence
 When saving,
 .Nm

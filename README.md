@@ -169,7 +169,7 @@ Selections larger than  74,993 bytes are not sent to the clipboard and a status 
 
 ## Internals
 
-Each buffer is an array of logical lines (`erow`) holding raw UTF-8 bytes. Every buffer contains only valid UTF-8; files that fail validation are rejected at load time. Rendering and text layout never modify the buffer.
+Each buffer is an array of logical lines (`erow`) holding raw UTF-8 bytes. Every buffer contains only valid UTF-8; files that fail validation are rejected at load time. Filenames that aren't valid text are displayed with substitutions, and can be opened by exact path. A substituted name in the minibuffer is just text, and doesn't refer to the original file. Rendering and text layout never modify the buffer.
 
 A row's display width is cached on the row and recomputed when the row is edited. The renderer calculates wrap positions only for the rows on screen, not for the whole buffer.
 

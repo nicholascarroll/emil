@@ -408,14 +408,49 @@ static int collectMatches(const char *sym, struct tagMatch **out) {
 
 /* One row: the scope padded to a column, the file and line, then the
  * definition's own text.*/
-static void menuRow(struct dbuf *d, const struct tagMatch *m, int scope_cols) {
+/* A tags file is outside text, so a field can hold bytes a row must not.
+ * Each comes back as utf8SanitizeLine leaves it, except that a tab stays
+ * a tab: definition lines often hold one.  Caller frees. */
+static char *menuField(const char *s) {
+	size_t cap = strlen(s) * 3 + 1, o = 0;
+	char *out = xmalloc(cap);
+	out[0] = '\0';
+	while (*s) {
+		size_t n = strcspn(s, "\t");
+		utf8SanitizeLine((const uint8_t *)s, n, out + o, cap - o);
+		o += strlen(out + o);
+		s += n;
+		if (*s == '\t') {
+			out[o++] = '\t';
+			out[o] = '\0';
+			s++;
+		}
+	}
+	return out;
+}
+
+/* The width a scope takes in the menu. */
+static int menuScopeWidth(const char *scope) {
+	char *s = menuField(scope);
+	int w = stringWidth((const uint8_t *)s);
+	free(s);
+	return w;
+}
+
+static void appendMenuField(struct dbuf *d, const char *field) {
+	char *s = menuField(field);
+	dbuf_append(d, (const uint8_t *)s, (int)strlen(s));
+	free(s);
+}
+
+void ctagsMenuRow(struct dbuf *d, const struct tagMatch *m, int scope_cols) {
 	if (scope_cols > 0) {
 		const char *s = m->scope ? m->scope : "";
-		dbuf_append(d, (const uint8_t *)s, (int)strlen(s));
-		dbuf_pad(d, ' ', scope_cols - stringWidth((const uint8_t *)s));
+		appendMenuField(d, s);
+		dbuf_pad(d, ' ', scope_cols - menuScopeWidth(s));
 		dbuf_append(d, (const uint8_t *)"  ", 2);
 	}
-	dbuf_append(d, (const uint8_t *)m->file, (int)strlen(m->file));
+	appendMenuField(d, m->file);
 	if (m->line > 0) {
 		char num[16];
 		int len = snprintf(num, sizeof(num), ":%d", m->line);
@@ -426,7 +461,7 @@ static void menuRow(struct dbuf *d, const struct tagMatch *m, int scope_cols) {
 		def++;
 	if (*def) {
 		dbuf_append(d, (const uint8_t *)"  ", 2);
-		dbuf_append(d, (const uint8_t *)def, (int)strlen(def));
+		appendMenuField(d, def);
 	}
 }
 
@@ -436,8 +471,7 @@ static void menuRow(struct dbuf *d, const struct tagMatch *m, int scope_cols) {
 static int pickMatch(const char *sym, const struct tagMatch *v, int n) {
 	int scope_cols = 0;
 	for (int i = 0; i < n; i++) {
-		int w = v[i].scope ? stringWidth((const uint8_t *)v[i].scope) :
-				     0;
+		int w = v[i].scope ? menuScopeWidth(v[i].scope) : 0;
 		if (w > scope_cols)
 			scope_cols = w;
 	}
@@ -449,7 +483,7 @@ static int pickMatch(const char *sym, const struct tagMatch *v, int n) {
 	for (int i = 0; i < n; i++) {
 		struct dbuf d = DBUF_INIT;
 		int len;
-		menuRow(&d, &v[i], scope_cols);
+		ctagsMenuRow(&d, &v[i], scope_cols);
 		uint8_t *row = dbuf_detach(&d, &len);
 		insertRow(pb, i, row, (size_t)len);
 		free(row);

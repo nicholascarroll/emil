@@ -559,6 +559,20 @@ static void showKeys(void) {
 
 /* ---- forking driver --------------------------------------------------- */
 
+/* Did the child write a lead?  C-x C-c ends a sequence through exit(),
+ * with status 0, so the status alone can't say. */
+static int childWroteLead(const char *errpath) {
+	FILE *f = fopen(errpath, "r");
+	char line[1024];
+	int found = 0;
+	if (!f)
+		return 0;
+	while (!found && fgets(line, sizeof(line), f))
+		found = strncmp(line, "LEAD at key", 11) == 0;
+	fclose(f);
+	return found;
+}
+
 /* Run one sequence in a child.  Returns the child's status class:
  * 0 clean, 1 sanitizer/crash, 2 hang, 3 lead only.  The child's stderr
  * goes to errpath. */
@@ -581,7 +595,7 @@ static int runChild(uint32_t seed, const char *errpath, int timeout_s) {
 			if (WIFEXITED(status)) {
 				int code = WEXITSTATUS(status);
 				if (code == 0)
-					return 0;
+					return childWroteLead(errpath) ? 3 : 0;
 				if (code == 4)
 					return 3;
 				if (code == 3)

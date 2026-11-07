@@ -266,6 +266,12 @@ static char *completionRowText(const char *name) {
 	return shown;
 }
 
+/* A match as minibuffer text.  A substituted name is just text: it no
+ * longer refers to the original.  Caller frees. */
+static char *completionMinibufText(const char *name) {
+	return nameInsertable(name) ? xstrdup(name) : completionRowText(name);
+}
+
 static void showCompletionsBuffer(char **matches, int n_matches,
 				  enum promptType type) {
 	/* Find or create completions buffer */
@@ -473,10 +479,18 @@ void handleMinibufferCompletion(struct buffer *minibuf, enum promptType type) {
 		getCommandCompletions(text, &result);
 		break;
 	}
-	if (tabOutcome(minibuf, &result, strlen(text), type))
-		replaceMinibufferText(minibuf, result.n_matches == 1 ?
-						       result.matches[0] :
-						       result.common_prefix);
+	if (tabOutcome(minibuf, &result, strlen(text), type)) {
+		const char *done = result.n_matches == 1 ?
+					   result.matches[0] :
+					   result.common_prefix;
+		/* A buffer's name is stored raw.  A file match stays as it
+		 * is: scanDir filtered the name, the rest is what was typed. */
+		int stored = type == PROMPT_BUFFER || type == PROMPT_SEARCH;
+		char *shown = stored ? completionMinibufText(done) :
+				       xstrdup(done);
+		replaceMinibufferText(minibuf, shown);
+		free(shown);
+	}
 	tabEnd(minibuf);
 	freeCompletionResult(&result);
 	free(text);
@@ -533,12 +547,12 @@ void cycleCompletion(struct buffer *minibuf, int direction) {
 	/* Update minibuffer text to the basename of the selected match */
 	const char *match = cs->matches[cs->selected];
 	const char *slash = strrchr(match, '/');
-	const char *base = slash ? slash + 1 : match;
+	char *base = completionMinibufText(slash ? slash + 1 : match);
 	replaceMinibufferText(minibuf, base);
 
 	/* Update last_completed_text so TAB doesn't reset */
 	free(cs->last_completed_text);
-	cs->last_completed_text = xstrdup(base);
+	cs->last_completed_text = base;
 	cs->completion_start_pos = minibufPointOffset(minibuf);
 
 	/* Update the completions buffer cursor to highlight the

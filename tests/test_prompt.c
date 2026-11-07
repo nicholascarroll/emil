@@ -520,6 +520,102 @@ static void check_newline_name_listed(enum promptType type) {
 	cleanupTestEditor();
 }
 
+/* A stored name goes into the minibuffer as text it can hold. */
+static const struct {
+	const char *name, *shown;
+} bad_names[] = {
+	{ "qq\nyy", "qq^Jyy" },
+	{ "qq\x1b[0my", "qq^[[0my" },
+	{ "qq\xffy", "qq\xef\xbf\xbdy" },
+};
+
+static void assert_minibuf_is(const char *want) {
+	TEST_ASSERT_EQUAL_INT(1, E.minibuf->numrows);
+	TEST_ASSERT_EQUAL_INT((int)strlen(want), E.minibuf->row[0].size);
+	TEST_ASSERT_EQUAL_INT(0, memcmp(want, E.minibuf->row[0].chars, strlen(want)));
+	TEST_ASSERT_TRUE(utf8_validate(E.minibuf->row[0].chars,
+				       E.minibuf->row[0].size));
+}
+
+void test_completion_inserts_stored_name_as_text(void) {
+	for (size_t i = 0; i < sizeof(bad_names) / sizeof(bad_names[0]); i++) {
+		initTestEditor();
+		makeMinibuffer();
+		struct buffer *cur = make_test_buffer("x");
+		E.edbuf = cur;
+		struct buffer *b = newBuffer();
+		b->filename = xstrdup(bad_names[i].name);
+		cur->next = b;
+		mutateInsert(E.minibuf, 0, 0, (const uint8_t *)"qq", 2, NULL, NULL);
+		E.minibuf->cx = 2;
+		E.minibuf->cy = 0;
+
+		muteStdout();
+		handleMinibufferCompletion(E.minibuf, PROMPT_BUFFER);
+		unmuteStdout();
+
+		assert_minibuf_is(bad_names[i].shown);
+		TEST_ASSERT_EQUAL_STRING(bad_names[i].name, b->filename);
+		freeMinibuffer();
+		cleanupTestEditor();
+	}
+}
+
+void test_completion_cycle_inserts_stored_name_as_text(void) {
+	for (size_t i = 0; i < sizeof(bad_names) / sizeof(bad_names[0]); i++) {
+		initTestEditor();
+		makeMinibuffer();
+		(void)make_test_buffer("x");
+		struct completionState *cs = &E.minibuf->completionState;
+		cs->matches = xmalloc(sizeof(char *));
+		cs->matches[0] = xstrdup(bad_names[i].name);
+		cs->n_matches = 1;
+		cs->selected = 0;
+
+		muteStdout();
+		cycleCompletion(E.minibuf, 1);
+		unmuteStdout();
+
+		assert_minibuf_is(bad_names[i].shown);
+		freeMinibuffer();
+		cleanupTestEditor();
+	}
+}
+
+/* What was typed before a file match isn't a stored name: a tab in a
+ * directory stays a tab, or the path would no longer exist. */
+void test_file_completion_keeps_typed_prefix(void) {
+	char dir[] = "/tmp/emil-prompt-XXXXXX";
+	TEST_ASSERT_NOT_NULL(mkdtemp(dir));
+	char sub[128], file[160], typed[160];
+	snprintf(sub, sizeof(sub), "%s/a\tb", dir);
+	TEST_ASSERT_EQUAL_INT(0, mkdir(sub, 0700));
+	snprintf(file, sizeof(file), "%s/file", sub);
+	FILE *f = fopen(file, "w");
+	TEST_ASSERT_NOT_NULL(f);
+	fclose(f);
+
+	initTestEditor();
+	makeMinibuffer();
+	(void)make_test_buffer("x");
+	snprintf(typed, sizeof(typed), "%s/fi", sub);
+	mutateInsert(E.minibuf, 0, 0, (const uint8_t *)typed, (int)strlen(typed),
+		     NULL, NULL);
+	E.minibuf->cx = (int)strlen(typed);
+	E.minibuf->cy = 0;
+
+	muteStdout();
+	handleMinibufferCompletion(E.minibuf, PROMPT_FILES);
+	unmuteStdout();
+
+	assert_minibuf_is(file);
+	freeMinibuffer();
+	cleanupTestEditor();
+	unlink(file);
+	rmdir(sub);
+	rmdir(dir);
+}
+
 void test_buffer_prompt_lists_newline_name_on_one_row(void) {
 	check_newline_name_listed(PROMPT_BUFFER);
 }
@@ -531,6 +627,9 @@ void test_search_prompt_lists_newline_name_on_one_row(void) {
 int main(void) {
 	TEST_BEGIN();
 
+	RUN_TEST(test_completion_inserts_stored_name_as_text);
+	RUN_TEST(test_completion_cycle_inserts_stored_name_as_text);
+	RUN_TEST(test_file_completion_keeps_typed_prefix);
 	RUN_TEST(test_buffer_prompt_lists_newline_name_on_one_row);
 	RUN_TEST(test_search_prompt_lists_newline_name_on_one_row);
 	RUN_TEST(test_nested_prompt_preserves_buffer);

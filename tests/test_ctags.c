@@ -6,6 +6,8 @@
 #include "test.h"
 #include "test_harness.h"
 #include "ctags.h"
+#include "unicode.h"
+#include "dbuf.h"
 #include "fileio.h"
 #include "keymap.h"
 #include "util.h" /* emil_strlcpy prototype — without it the call at
@@ -912,6 +914,74 @@ void test_menu_lists_current_file_first(void) {
 	leave_menu_project();
 }
 
+/* ---- a menu row holds what a row may hold ---- */
+
+static char *menu_row(const struct tagMatch *m, int scope_cols) {
+	struct dbuf d = DBUF_INIT;
+	ctagsMenuRow(&d, m, scope_cols);
+	int len;
+	uint8_t *row = dbuf_detach(&d, &len);
+	TEST_ASSERT_TRUE(utf8_validate(row, len));
+	return (char *)row;
+}
+
+void test_menu_row_replaces_invalid_bytes_in_every_field(void) {
+	struct tagMatch m = { "qq\xffy.c", "unused", "int\xc3", "Cl\xf0", 3 };
+	char *row = menu_row(&m, 6);
+	/* Cl + one replacement character is 3 wide: 3 of padding, then 2. */
+	TEST_ASSERT_EQUAL_STRING("Cl\xef\xbf\xbd   "
+				 "  qq\xef\xbf\xbdy.c:3  int\xef\xbf\xbd",
+				 row);
+	free(row);
+}
+
+void test_menu_row_keeps_valid_text_and_tabs(void) {
+	struct tagMatch m = { "\xe6\x97\xa5.c", "unused",
+			      "\t int\tfoo\xc3\xa9", NULL, 0 };
+	char *row = menu_row(&m, 0);
+	TEST_ASSERT_EQUAL_STRING("\xe6\x97\xa5.c  int\tfoo\xc3\xa9", row);
+	free(row);
+}
+
+void test_menu_row_shows_control_byte_as_caret(void) {
+	struct tagMatch m = { "a\x01.c", "unused", "x\x7f", NULL, 2 };
+	char *row = menu_row(&m, 0);
+	TEST_ASSERT_EQUAL_STRING("a^A.c:2  x^?", row);
+	free(row);
+}
+
+/* The whole path: a tags file with a bad name still gives a working
+ * menu, and choosing the row opens the real path, not what it shows. */
+void test_menu_with_invalid_name_opens_the_real_path(void) {
+	if (enter_menu_project() != 0) {
+		TEST_ASSERT(0 && "could not create temp project");
+		return;
+	}
+	write_file(menu_root, "tags",
+		   "close\tqq\xffy.py\t1;\"\tm\n"
+		   "close\ta.py\t2;\"\tm\n");
+	write_file(menu_root, "qq\xffy.py", "def close(): pass\n");
+	int keys[] = { '\r' };
+	jump_with_keys("x.close()", 2, keys, 1);
+	TEST_ASSERT(E.buf->filename && ends_with(E.buf->filename, "qq\xffy.py"));
+	TEST_ASSERT_NULL(findBufferByName("*Tags*"));
+	leave_menu_project();
+}
+
+void test_menu_with_invalid_name_still_reaches_the_valid_row(void) {
+	if (enter_menu_project() != 0) {
+		TEST_ASSERT(0 && "could not create temp project");
+		return;
+	}
+	write_file(menu_root, "tags",
+		   "close\tqq\xffy.py\t1;\"\tm\n"
+		   "close\ta.py\t2;\"\tm\n");
+	int down[] = { CTRL('n'), '\r' };
+	jump_with_keys("x.close()", 2, down, 2);
+	TEST_ASSERT(E.buf->filename && ends_with(E.buf->filename, "a.py"));
+	leave_menu_project();
+}
+
 void test_menu_cancels_when_macro_runs_out(void) {
 	if (enter_menu_project() != 0) {
 		TEST_ASSERT(0 && "could not create temp project");
@@ -1002,6 +1072,11 @@ int main(void) {
 	RUN_TEST(test_menu_end_of_list_and_clamping);
 	RUN_TEST(test_menu_cancel_leaves_reader_in_place);
 	RUN_TEST(test_menu_lists_current_file_first);
+	RUN_TEST(test_menu_row_replaces_invalid_bytes_in_every_field);
+	RUN_TEST(test_menu_row_keeps_valid_text_and_tabs);
+	RUN_TEST(test_menu_row_shows_control_byte_as_caret);
+	RUN_TEST(test_menu_with_invalid_name_opens_the_real_path);
+	RUN_TEST(test_menu_with_invalid_name_still_reaches_the_valid_row);
 	RUN_TEST(test_menu_cancels_when_macro_runs_out);
 
 	return TEST_END();
