@@ -16,11 +16,11 @@
 const PaletteEntry palette[] = {
 	/* Punctuation and Misc */
 	{ 0x2014, "EM DASH" },					  // —
+	{ 0x2013, "EN DASH" },					  // –
+	{ 0x2010, "HYPHEN" },					  // ‐
 	{ 0x00A7, "SECTION SIGN" },				  // §
 	{ 0x2713, "CHECK MARK" },				  // ✓
 	{ 0x2717, "BALLOT X" },					  // ✗
-	{ 0x2013, "EN DASH" },					  // –
-	{ 0x2010, "HYPHEN" },					  // ‐
 	{ 0x2026, "HORIZONTAL ELLIPSIS" },			  // …
 	{ 0x201C, "LEFT DOUBLE QUOTATION MARK" },		  // “
 	{ 0x201D, "RIGHT DOUBLE QUOTATION MARK" },		  // ”
@@ -36,10 +36,11 @@ const PaletteEntry palette[] = {
 	{ 0x00AA, "FEMININE ORDINAL INDICATOR" },  // ª
 	{ 0x00BA, "MASCULINE ORDINAL INDICATOR" }, // º
 	/* Quantities */
-	{ 0x00B7, "MIDDLE DOT" },   // ·
-	{ 0x2032, "PRIME" },	    // ′
-	{ 0x2033, "DOUBLE PRIME" }, // ″
-	{ 0x00B0, " DEGREE SIGN" }, // °
+	{ 0x00B7, "MIDDLE DOT" },     // ·
+	{ 0x2032, "PRIME" },	      // ′
+	{ 0x2033, "DOUBLE PRIME" },   // ″
+	{ 0x00B0, "DEGREE SIGN" },    // °
+	{ 0x2030, "PER MILLE SIGN" }, // ‰
 	/* Legal */
 	{ 0x00A9, "COPYRIGHT SIGN" },  // ©
 	{ 0x00AE, "REGISTERED SIGN" }, // ®
@@ -70,7 +71,7 @@ const PaletteEntry palette[] = {
 	{ 0x1F973, "FACE WITH PARTY HORN AND PARTY HAT" },		// 🥳
 	{ 0x1F977, "NINJA" },						// 🥷
 	{ 0x1F97A, "FACE WITH PLEADING EYES" },				// 🥺
-	{ 0x1F382, "SHORTCAKE" },					// 🎂
+	{ 0x1F382, "BIRTHDAY CAKE" },					// 🎂
 	{ 0x1F389, "PARTY POPPER" },					// 🎉
 	{ 0x1F4A1, "ELECTRIC LIGHT BULB" },				// 💡
 	{ 0x1F525, "FIRE" },						// 🔥
@@ -97,7 +98,7 @@ const PaletteEntry palette[] = {
 	{ 0x1F610, "NEUTRAL FACE" },					// 😐
 	{ 0x1F612, "UNAMUSED FACE" },					// 😒
 	{ 0x1F618, "FACE THROWING A KISS" },				// 😘
-	{ 0x1F61C, "WINKING FACE WITH STUCK-OUT TONGUE" },		// 😜
+	{ 0x1F61C, "FACE WITH STUCK-OUT TONGUE AND WINKING EYE" },	// 😜
 	{ 0x1F92A, "GRINNING FACE WITH ONE LARGE AND ONE SMALL EYE" },	// 🤪
 	{ 0x1F61F, "WORRIED FACE" },					// 😟
 	{ 0x1F620, "ANGRY FACE" },					// 😠
@@ -142,6 +143,17 @@ const PaletteEntry palette[] = {
 	{ 0x20AE, "TUGRIK SIGN" },		 // ₮
 	{ 0x20B4, "HRYVNIA SIGN" },		 // ₴
 	{ 0x20BF, "BITCOIN SIGN" },		 // ₿
+	/* Arrows */
+	{ 0x2190, "LEFTWARDS ARROW" },	// ←
+	{ 0x2192, "RIGHTWARDS ARROW" }, // →
+	{ 0x2191, "UPWARDS ARROW" },	// ↑
+	{ 0x2193, "DOWNWARDS ARROW" },	// ↓
+	{ 0x2194, "LEFT RIGHT ARROW" }, // ↔
+	{ 0x2195, "UP DOWN ARROW" },	// ↕
+	{ 0x2196, "NORTH WEST ARROW" }, // ↖
+	{ 0x2197, "NORTH EAST ARROW" }, // ↗
+	{ 0x2198, "SOUTH EAST ARROW" }, // ↘
+	{ 0x2199, "SOUTH WEST ARROW" }, // ↙
 
 	/* Greek Letters */
 	{ PALETTE_BREAK, NULL },
@@ -180,7 +192,64 @@ const PaletteEntry palette[] = {
 	{ 0x03A8, "GREEK CAPITAL LETTER PSI" },	  // Ψ
 	{ 0x03A9, "GREEK CAPITAL LETTER OMEGA" }, // Ω
 
-	/* Box Drawing - Light & Heavy */
+	/* Maths */
+	{ PALETTE_BREAK, NULL },
+	{ 0x2260, "NOT EQUAL TO" },			// ≠
+	{ 0x2264, "LESS-THAN OR EQUAL TO" },		// ≤
+	{ 0x2265, "GREATER-THAN OR EQUAL TO" },		// ≥
+	{ 0x2248, "ALMOST EQUAL TO" },			// ≈
+	{ 0x2245, "APPROXIMATELY EQUAL TO" },		// ≅
+	{ 0x00B1, "PLUS-MINUS SIGN" },			// ±
+	{ 0x00D7, "MULTIPLICATION SIGN" },		// ×
+	{ 0x00F7, "DIVISION SIGN" },			// ÷
+	{ 0x2212, "MINUS SIGN" },			// −
+	{ 0x221E, "INFINITY" },				// ∞
+	{ 0x00B2, "SUPERSCRIPT TWO" },			// ²
+	{ 0x00B3, "SUPERSCRIPT THREE" },		// ³
+	{ 0x207F, "SUPERSCRIPT LATIN SMALL LETTER N" }, // ⁿ
+	{ 0x221A, "SQUARE ROOT" },			// √
+	{ 0x2211, "N-ARY SUMMATION" },			// ∑
+	{ 0x220F, "N-ARY PRODUCT" },			// ∏
+	{ 0x222B, "INTEGRAL" },				// ∫
+	{ 0x2202, "PARTIAL DIFFERENTIAL" },		// ∂
+	{ 0x2207, "NABLA" },				// ∇
+	{ 0x230A, "LEFT FLOOR" },			// ⌊
+	{ 0x230B, "RIGHT FLOOR" },			// ⌋
+	{ 0x2308, "LEFT CEILING" },			// ⌈
+	{ 0x2309, "RIGHT CEILING" },			// ⌉
+	/* Logic and Sets */
+	{ 0x2261, "IDENTICAL TO" },			// ≡
+	{ 0x21D2, "RIGHTWARDS DOUBLE ARROW" },		// ⇒
+	{ 0x21D4, "LEFT RIGHT DOUBLE ARROW" },		// ⇔
+	{ 0x00AC, "NOT SIGN" },				// ¬
+	{ 0x2227, "LOGICAL AND" },			// ∧
+	{ 0x2228, "LOGICAL OR" },			// ∨
+	{ 0x2200, "FOR ALL" },				// ∀
+	{ 0x2203, "THERE EXISTS" },			// ∃
+	{ 0x2208, "ELEMENT OF" },			// ∈
+	{ 0x2209, "NOT AN ELEMENT OF" },		// ∉
+	{ 0x2286, "SUBSET OF OR EQUAL TO" },		// ⊆
+	{ 0x2282, "SUBSET OF" },			// ⊂
+	{ 0x222A, "UNION" },				// ∪
+	{ 0x2229, "INTERSECTION" },			// ∩
+	{ 0x2216, "SET MINUS" },			// ∖
+	{ 0x2205, "EMPTY SET" },			// ∅
+	{ 0x2115, "DOUBLE-STRUCK CAPITAL N" },		// ℕ
+	{ 0x2124, "DOUBLE-STRUCK CAPITAL Z" },		// ℤ
+	{ 0x211A, "DOUBLE-STRUCK CAPITAL Q" },		// ℚ
+	{ 0x211D, "DOUBLE-STRUCK CAPITAL R" },		// ℝ
+	{ 0x2102, "DOUBLE-STRUCK CAPITAL C" },		// ℂ
+	{ 0x22A2, "RIGHT TACK" },			// ⊢
+	{ 0x22A4, "DOWN TACK" },			// ⊤
+	{ 0x22A5, "UP TACK" },				// ⊥
+	{ 0x2218, "RING OPERATOR" },			// ∘
+	{ 0x21A6, "RIGHTWARDS ARROW FROM BAR" },	// ↦
+	{ 0x27E8, "MATHEMATICAL LEFT ANGLE BRACKET" },	// ⟨
+	{ 0x27E9, "MATHEMATICAL RIGHT ANGLE BRACKET" }, // ⟩
+	{ 0x2295, "CIRCLED PLUS" },			// ⊕
+	{ 0x25A1, "WHITE SQUARE" },			// □
+
+	/* Box Drawing - Light */
 	{ PALETTE_BREAK, NULL },
 	{ 0x2500, "BOX DRAWINGS LIGHT HORIZONTAL" },		  // ─
 	{ 0x2502, "BOX DRAWINGS LIGHT VERTICAL" },		  // │
@@ -193,13 +262,25 @@ const PaletteEntry palette[] = {
 	{ 0x252C, "BOX DRAWINGS LIGHT DOWN AND HORIZONTAL" },	  // ┬
 	{ 0x2534, "BOX DRAWINGS LIGHT UP AND HORIZONTAL" },	  // ┴
 	{ 0x253C, "BOX DRAWINGS LIGHT VERTICAL AND HORIZONTAL" }, // ┼
+	{ 0x256D, "BOX DRAWINGS LIGHT ARC DOWN AND RIGHT" },	  // ╭
+	{ 0x256E, "BOX DRAWINGS LIGHT ARC DOWN AND LEFT" },	  // ╮
+	{ 0x2570, "BOX DRAWINGS LIGHT ARC UP AND RIGHT" },	  // ╰
+	{ 0x256F, "BOX DRAWINGS LIGHT ARC UP AND LEFT" },	  // ╯
+	/* Box Drawing - Heavy */
 	{ 0x2501, "BOX DRAWINGS HEAVY HORIZONTAL" },		  // ━
 	{ 0x2503, "BOX DRAWINGS HEAVY VERTICAL" },		  // ┃
 	{ 0x250F, "BOX DRAWINGS HEAVY DOWN AND RIGHT" },	  // ┏
+	{ 0x2513, "BOX DRAWINGS HEAVY DOWN AND LEFT" },		  // ┓
+	{ 0x2517, "BOX DRAWINGS HEAVY UP AND RIGHT" },		  // ┗
 	{ 0x251B, "BOX DRAWINGS HEAVY UP AND LEFT" },		  // ┛
+	{ 0x2523, "BOX DRAWINGS HEAVY VERTICAL AND RIGHT" },	  // ┣
+	{ 0x252B, "BOX DRAWINGS HEAVY VERTICAL AND LEFT" },	  // ┫
+	{ 0x2533, "BOX DRAWINGS HEAVY DOWN AND HORIZONTAL" },	  // ┳
+	{ 0x253B, "BOX DRAWINGS HEAVY UP AND HORIZONTAL" },	  // ┻
+	{ 0x254B, "BOX DRAWINGS HEAVY VERTICAL AND HORIZONTAL" }, // ╋
 	/* Box Drawing - Double */
-	{ 0x2551, "BOX DRAWINGS DOUBLE VERTICAL" },		   // ║
 	{ 0x2550, "BOX DRAWINGS DOUBLE HORIZONTAL" },		   // ═
+	{ 0x2551, "BOX DRAWINGS DOUBLE VERTICAL" },		   // ║
 	{ 0x2554, "BOX DRAWINGS DOUBLE DOWN AND RIGHT" },	   // ╔
 	{ 0x2557, "BOX DRAWINGS DOUBLE DOWN AND LEFT" },	   // ╗
 	{ 0x255A, "BOX DRAWINGS DOUBLE UP AND RIGHT" },		   // ╚
@@ -289,6 +370,8 @@ static int skipSpacesForward(erow *row, int from) {
 before `from`, walking backwards.  Returns 0 if the row begins
 with a non-space, or the earliest non-space position found. */
 static int skipSpacesBackward(erow *row, int from) {
+	if (from >= row->size)
+		from = row->size - 1;
 	while (from > 0 && row->chars[from] == ' ')
 		from--;
 	/* If we landed on a continuation byte, back up to the lead byte. */
@@ -360,7 +443,7 @@ void expandPalette(void) {
 	struct buffer *pbuf = findOrCreateSpecialBuffer(PALETTE_BUF_NAME);
 	populatePaletteBuffer(pbuf);
 	pbuf->word_wrap = 1;
-	/* Place cursor on the first symbol (first entry with default_sel) */
+	/* Place cursor on the first symbol */
 	pbuf->cx = 0;
 	pbuf->cy = 0;
 	pbuf->markx = -1;
@@ -392,6 +475,7 @@ void expandPalette(void) {
 
 	/* Snap to the first symbol */
 	snapToSymbol(pbuf, 0);
+	setStatusMessage("%s", palette[0].name);
 
 	/* ---- Modal key loop ---- */
 	for (;;) {
