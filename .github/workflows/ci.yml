@@ -647,6 +647,12 @@ jobs:
         run: |
           git clone --depth 1 --branch "$ASTER_REF" \
             https://github.com/asterinas/asterinas "$ASTER_DIR"
+          # OSDK resolves dependencies afresh and ignores Cargo.lock, so
+          # unwinding 0.2.11 (needs a newer nightly) gets picked up.
+          # Pin the version Cargo.lock has.  asterinas#4185
+          sed -i 's/^unwinding = { version = "0.2.10"/unwinding = { version = "=0.2.10"/' \
+            "$ASTER_DIR/Cargo.toml"
+          grep -q '^unwinding = { version = "=0.2.10"' "$ASTER_DIR/Cargo.toml"
 
       - name: Build the Asterinas initramfs
         working-directory: /tmp/asterinas
