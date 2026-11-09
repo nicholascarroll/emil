@@ -280,7 +280,7 @@ wasix-test: wasix
 	WASM_OPT="$(WASM_OPT)" \
 	WASIX_ASYNCIFY="$(WASIX_ASYNCIFY)" \
 	PROGNAME=emil.wasm \
-	RUNNER="wasmer run --volume $(PWD):$(PWD) --cwd $(PWD) $(if $(wildcard $(WASIX_SANDBOX)/bin/sh),--volume $(WASIX_SANDBOX)/bin:/bin --env PATH=/bin --env TMPDIR=/tmp,)" \
+	RUNNER="wasmer run --volume $(PWD):$(PWD) --cwd $(PWD) --env TMPDIR=$(PWD)/tests/tmp $(if $(wildcard $(WASIX_SANDBOX)/bin/sh),--volume $(WASIX_SANDBOX)/bin:/bin --env PATH=/bin,)" \
 	RUNNER_SEP="--" \
 	NM="$(WASI_SDK)/bin/llvm-nm" \
 	./tests/run_tests.sh

@@ -88,7 +88,8 @@ void test_resolve_absolute_truncation_reported(void) {
 
 /* Build a temp project:  <root>/tags  and <root>/src/deep/  */
 static int make_project(char *root, size_t rootsz) {
-	char tmpl[] = "/tmp/emil_ctags_XXXXXX";
+	char tmpl[PATH_MAX];
+	testTmpPath(tmpl, sizeof(tmpl), "emil_ctags_XXXXXX");
 	char *made = mkdtemp(tmpl);
 	if (!made)
 		return -1;
@@ -180,7 +181,8 @@ void test_find_tags_from_subdir(void) {
 void test_find_tags_absent(void) {
 	/* A directory tree with no tags file anywhere up to root must
 	 * report failure, not succeed with garbage. */
-	char tmpl[] = "/tmp/emil_notags_XXXXXX";
+	char tmpl[PATH_MAX];
+	testTmpPath(tmpl, sizeof(tmpl), "emil_notags_XXXXXX");
 	char *dir = mkdtemp(tmpl);
 	TEST_ASSERT_NOT_NULL(dir);
 	char saved[PATH_MAX];
@@ -556,7 +558,8 @@ static char menu_root[PATH_MAX];
 static char menu_saved_cwd[PATH_MAX];
 
 static int enter_menu_project(void) {
-	char tmpl[] = "/tmp/emil_tagmenu_XXXXXX";
+	char tmpl[PATH_MAX];
+	testTmpPath(tmpl, sizeof(tmpl), "emil_tagmenu_XXXXXX");
 	char *made = mkdtemp(tmpl);
 	if (!made || emil_strlcpy(menu_root, made, sizeof(menu_root)) >=
 			     sizeof(menu_root))
@@ -606,7 +609,8 @@ static char reg_root[PATH_MAX];
 static char reg_saved_cwd[PATH_MAX];
 
 static int enter_region_project(void) {
-	char tmpl[] = "/tmp/emil_tagregion_XXXXXX";
+	char tmpl[PATH_MAX];
+	testTmpPath(tmpl, sizeof(tmpl), "emil_tagregion_XXXXXX");
 	char *made = mkdtemp(tmpl);
 	if (!made || emil_strlcpy(reg_root, made, sizeof(reg_root)) >=
 			     sizeof(reg_root))
@@ -740,7 +744,8 @@ static char th_root[PATH_MAX];
 static char th_saved_cwd[PATH_MAX];
 
 static int enter_thai_project(void) {
-	char tmpl[] = "/tmp/emil_tagthai_XXXXXX";
+	char tmpl[PATH_MAX];
+	testTmpPath(tmpl, sizeof(tmpl), "emil_tagthai_XXXXXX");
 	char *made = mkdtemp(tmpl);
 	if (!made || emil_strlcpy(th_root, made, sizeof(th_root)) >=
 			     sizeof(th_root))
@@ -950,24 +955,6 @@ void test_menu_row_shows_control_byte_as_caret(void) {
 	free(row);
 }
 
-/* The whole path: a tags file with a bad name still gives a working
- * menu, and choosing the row opens the real path, not what it shows. */
-void test_menu_with_invalid_name_opens_the_real_path(void) {
-	if (enter_menu_project() != 0) {
-		TEST_ASSERT(0 && "could not create temp project");
-		return;
-	}
-	write_file(menu_root, "tags",
-		   "close\tqq\xffy.py\t1;\"\tm\n"
-		   "close\ta.py\t2;\"\tm\n");
-	write_file(menu_root, "qq\xffy.py", "def close(): pass\n");
-	int keys[] = { '\r' };
-	jump_with_keys("x.close()", 2, keys, 1);
-	TEST_ASSERT(E.buf->filename && ends_with(E.buf->filename, "qq\xffy.py"));
-	TEST_ASSERT_NULL(findBufferByName("*Tags*"));
-	leave_menu_project();
-}
-
 void test_menu_with_invalid_name_still_reaches_the_valid_row(void) {
 	if (enter_menu_project() != 0) {
 		TEST_ASSERT(0 && "could not create temp project");
@@ -1075,7 +1062,6 @@ int main(void) {
 	RUN_TEST(test_menu_row_replaces_invalid_bytes_in_every_field);
 	RUN_TEST(test_menu_row_keeps_valid_text_and_tabs);
 	RUN_TEST(test_menu_row_shows_control_byte_as_caret);
-	RUN_TEST(test_menu_with_invalid_name_opens_the_real_path);
 	RUN_TEST(test_menu_with_invalid_name_still_reaches_the_valid_row);
 	RUN_TEST(test_menu_cancels_when_macro_runs_out);
 

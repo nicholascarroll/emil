@@ -12,6 +12,9 @@ unicodetest
 !/tests/test_*.h
 !/tests/test_*.sh
 
+# The suites' scratch directory (tests/run_tests.sh).
+/tests/tmp/
+
 # Linked harnesses.
 /tests/decoder_pty_test
 /tests/fuzz_undo

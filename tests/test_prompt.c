@@ -198,9 +198,8 @@ static const char *const sh_files[] = {
 };
 
 static int shFixtureUp(void) {
-	const char *tmp = getenv("TMPDIR");
 	snprintf(sh_root, sizeof(sh_root), "%s/emil_shcomp_XXXXXX",
-		 tmp && *tmp ? tmp : "/tmp");
+		 testTmpDir());
 	if (mkdtemp(sh_root) == NULL)
 		return -1;
 	shMkdir("bin");
@@ -585,12 +584,15 @@ void test_completion_cycle_inserts_stored_name_as_text(void) {
 /* What was typed before a file match isn't a stored name: a tab in a
  * directory stays a tab, or the path would no longer exist. */
 void test_file_completion_keeps_typed_prefix(void) {
-	char dir[] = "/tmp/emil-prompt-XXXXXX";
+	char dir[PATH_MAX];
+	testTmpPath(dir, sizeof(dir), "emil-prompt-XXXXXX");
 	TEST_ASSERT_NOT_NULL(mkdtemp(dir));
-	char sub[128], file[160], typed[160];
-	snprintf(sub, sizeof(sub), "%s/a\tb", dir);
+	char sub[PATH_MAX], file[PATH_MAX], typed[PATH_MAX];
+	int r = snprintf(sub, sizeof(sub), "%s/a\tb", dir);
+	TEST_ASSERT(r >= 0 && (size_t)r < sizeof(sub));
 	TEST_ASSERT_EQUAL_INT(0, mkdir(sub, 0700));
-	snprintf(file, sizeof(file), "%s/file", sub);
+	r = snprintf(file, sizeof(file), "%s/file", sub);
+	TEST_ASSERT(r >= 0 && (size_t)r < sizeof(file));
 	FILE *f = fopen(file, "w");
 	TEST_ASSERT_NOT_NULL(f);
 	fclose(f);
@@ -598,7 +600,8 @@ void test_file_completion_keeps_typed_prefix(void) {
 	initTestEditor();
 	makeMinibuffer();
 	(void)make_test_buffer("x");
-	snprintf(typed, sizeof(typed), "%s/fi", sub);
+	r = snprintf(typed, sizeof(typed), "%s/fi", sub);
+	TEST_ASSERT(r >= 0 && (size_t)r < sizeof(typed));
 	mutateInsert(E.minibuf, 0, 0, (const uint8_t *)typed, (int)strlen(typed),
 		     NULL, NULL);
 	E.minibuf->cx = (int)strlen(typed);

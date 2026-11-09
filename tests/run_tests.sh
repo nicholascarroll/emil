@@ -306,7 +306,14 @@ echo ""
 ANY_FAIL=0
 ANY_WARN=0
 BUILD_LOG=$(mktemp)
-trap 'rm -f "$BUILD_LOG"' EXIT
+
+# The suites' scratch directory: ours, made fresh for each run, removed
+# at exit.  The suites find it through TMPDIR.
+TMPDIR="$PWD/tests/tmp"
+export TMPDIR
+rm -rf "$TMPDIR"
+mkdir -p "$TMPDIR"
+trap 'rm -f "$BUILD_LOG"; rm -rf "$TMPDIR"' EXIT
 
 # Detect sanitizer build
 SANITIZER_FLAGS=""
@@ -501,22 +508,22 @@ if [ -z "$RUNNER" ] && [ -x ./emil ]; then
     for t in $PTY_TESTS; do
         printf '  %-16s ' "$t"
         if $CC $TEST_CFLAGS -Itests "tests/$t.c" -o "tests/$t" \
-            && "./tests/$t" ./emil > /tmp/pty_out 2>&1; then
-            n=$(grep -c '^  .*PASS$' /tmp/pty_out)
+            && "./tests/$t" ./emil > "$TMPDIR/pty_out" 2>&1; then
+            n=$(grep -c '^  .*PASS$' "$TMPDIR/pty_out")
             if [ "$n" -eq 0 ]; then
                 # Exit 0 having run nothing is not a pass.
                 echo "FAIL (no scenarios ran)"
-                cat /tmp/pty_out
+                cat "$TMPDIR/pty_out"
                 ANY_FAIL=1
             else
                 echo "PASS ($n scenarios)"
             fi
         else
             echo "FAIL"
-            cat /tmp/pty_out
+            cat "$TMPDIR/pty_out"
             ANY_FAIL=1
         fi
-        rm -f "tests/$t" /tmp/pty_out
+        rm -f "tests/$t" "$TMPDIR/pty_out"
     done
 fi
 

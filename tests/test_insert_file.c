@@ -27,8 +27,8 @@ void tearDown(void) {
 
 /* Write `content` to a fresh temp file; return mallocd path. */
 static char *make_temp_file(const char *content) {
-	static char tmpname[64];
-	strcpy(tmpname, "/tmp/emil_insfile_XXXXXX");
+	static char tmpname[PATH_MAX];
+	testTmpPath(tmpname, sizeof(tmpname), "emil_insfile_XXXXXX");
 	int fd = mkstemp(tmpname);
 	if (fd < 0)
 		return NULL;
@@ -110,8 +110,9 @@ void test_insert_file_nonexistent_returns_error(void) {
 	struct buffer *buf = make_test_buffer("existing");
 	TEST_ASSERT_FALSE(buf->dirty);
 
-	int rc = insertFileAtPath(buf, "/tmp/this_file_does_not_exist_xyzzy",
-				  NULL);
+	char absent[PATH_MAX];
+	testTmpPath(absent, sizeof(absent), "this_file_does_not_exist_xyzzy");
+	int rc = insertFileAtPath(buf, absent, NULL);
 	TEST_ASSERT(rc != 0);
 
 	/* Buffer untouched. */

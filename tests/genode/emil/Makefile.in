@@ -35,7 +35,7 @@ OBJS = $(SRCS:.c=.o)
 # The suites link the editor's objects minus main.o, plus the test
 # stubs.  This list is the same one tests/run_tests.sh uses; the two
 # should be changed together.
-TEST_OBJECTS = decoder.o unicode.o buffer.o region.o undo.o transform.o \
+TEST_OBJECTS = decoder.o unicode.o buffer.o region.o undo.o undorecord.o transform.o \
     find.o pipe.o register.o fileio.o display.o keymap.o \
     edit.o prompt.o util.o completion.o history.o base64.o abuf.o \
     window.o ctags.o adjust.o mutate.o wrap.o motion.o dbuf.o \

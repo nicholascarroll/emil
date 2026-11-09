@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <limits.h>
 
 /* E is defined in stubs.c (which replaces main.o) */
 extern struct config E;
@@ -178,11 +179,18 @@ static inline const char *row_str(struct buffer *buf, int row) {
  * readKey(). */
 
 /* Keys fed to readKey() by the stub in stubs.c. */
-extern int test_key_script[64];
+/* Room for a full path typed at a prompt, and a few keys more. */
+#define TEST_KEY_SCRIPT_MAX (PATH_MAX + 64)
+extern int test_key_script[TEST_KEY_SCRIPT_MAX];
 extern int test_key_count;
 extern int test_key_pos;
 
 static inline void scriptKeys(const int *keys, int n) {
+	if (n > TEST_KEY_SCRIPT_MAX) {
+		fprintf(stderr, "scriptKeys: %d keys, room for %d\n", n,
+			TEST_KEY_SCRIPT_MAX);
+		abort();
+	}
 	for (int i = 0; i < n; i++)
 		test_key_script[i] = keys[i];
 	test_key_count = n;

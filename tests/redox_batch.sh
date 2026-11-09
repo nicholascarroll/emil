@@ -23,6 +23,13 @@ if [ "$secs" -gt 0 ] 2>/dev/null && command -v timeout >/dev/null 2>&1; then
     guard="timeout $secs"
 fi
 
+# The suites' scratch directory: ours, beside them in the guest (the
+# host's tests/tmp does not exist in here).  They find it through TMPDIR.
+TMPDIR="$PWD/tmp"
+export TMPDIR
+rm -rf "$TMPDIR"
+mkdir -p "$TMPDIR"
+
 for s in "$@"; do
     echo "@@BEGIN $s"
     $guard "./test_$s"

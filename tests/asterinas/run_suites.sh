@@ -24,6 +24,13 @@ set -u
 payload=${PAYLOAD_DIR:-/emil}
 tests="$payload/tests"
 
+# The suites' scratch directory: ours, inside the guest.  They find it
+# through TMPDIR.
+TMPDIR="$payload/tmp"
+export TMPDIR
+rm -rf "$TMPDIR"
+mkdir -p "$TMPDIR"
+
 echo ""
 echo "=== emil on Asterinas ==="
 echo "uname: $(uname -a 2>/dev/null || echo unavailable)"

@@ -7,6 +7,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <limits.h>
 
 /* Test state */
 static int _tests_run = 0;
@@ -134,5 +135,19 @@ static const char *_current_test_name = NULL;
 /* setUp/tearDown — implemented by each test file */
 void setUp(void);
 void tearDown(void);
+
+/* Scratch files go in $TMPDIR, else /tmp: the POSIX convention.
+ * testTmpPath() writes "<dir>/<name>" into buf and fails the test if
+ * it doesn't fit. */
+static inline const char *testTmpDir(void) {
+	const char *d = getenv("TMPDIR");
+	return d && *d ? d : "/tmp";
+}
+
+static inline char *testTmpPath(char *buf, size_t n, const char *name) {
+	int r = snprintf(buf, n, "%s/%s", testTmpDir(), name);
+	TEST_ASSERT(r >= 0 && (size_t)r < n);
+	return buf;
+}
 
 #endif /* TEST_H */

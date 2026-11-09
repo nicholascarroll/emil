@@ -50,8 +50,8 @@ static int lockingAvailable(void) {
 
 /* Write `content` to a fresh temp file; return mallocd path. */
 static char *make_temp_file(const char *content) {
-	static char tmpname[64];
-	emil_strlcpy(tmpname, "/tmp/emil_warn_XXXXXX", sizeof(tmpname));
+	static char tmpname[PATH_MAX];
+	testTmpPath(tmpname, sizeof(tmpname), "emil_warn_XXXXXX");
 	int fd = mkstemp(tmpname);
 	if (fd < 0)
 		return NULL;
@@ -987,8 +987,8 @@ static int sameFile(const char *a, const char *b) {
 void test_no_duplicate_buffer_for_symlink_to_open_file(void) {
 	char *path = make_temp_file("content\n");
 	TEST_ASSERT_NOT_NULL(path);
-	char linkpath[80];
-	emil_strlcpy(linkpath, "/tmp/emil_warn_lnk_XXXXXX", sizeof(linkpath));
+	char linkpath[PATH_MAX];
+	testTmpPath(linkpath, sizeof(linkpath), "emil_warn_lnk_XXXXXX");
 	int lfd = mkstemp(linkpath);
 	TEST_ASSERT_TRUE(lfd >= 0);
 	close(lfd);
@@ -1026,7 +1026,7 @@ void test_distinct_files_get_distinct_buffers(void) {
 	TEST_ASSERT_NOT_NULL(bb);
 	TEST_ASSERT_TRUE(ba != bb);
 
-	char absent[80];
+	char absent[PATH_MAX];
 	snprintf(absent, sizeof(absent), "%s.absent", a);
 	int by_file = -1;
 	TEST_ASSERT_NULL(findBufferForFile(absent, &by_file));
