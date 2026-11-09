@@ -5,6 +5,7 @@
 #include "message.h"
 #include "prompt.h"
 #include "emil.h"
+#include "mutate.h"
 
 #include "region.h"
 #include "unicode.h"
@@ -81,11 +82,19 @@ static void formatRegName(char *out, size_t outsz, int reg) {
 	}
 }
 
+/* A buffer's name, as one line.  A filename can hold any byte, and a
+ * row must not hold a newline, so these views show it as ^J. */
+static void formatBufferName(char *out, size_t outsz,
+			     const struct buffer *buf) {
+	const char *fname = buf->filename ? buf->filename : "*scratch*";
+	utf8SanitizeLine((const uint8_t *)fname, strlen(fname), out, outsz);
+}
+
 /* ---- Register Preview (shown before prompt) ---- */
 
 static void showRegisterPreview(void) {
 	struct buffer *prev = findOrCreateSpecialBuffer("*Register Preview*");
-	bufferResetRows(prev);
+	struct mutateRebuild rebuild = mutateRebuildBegin(prev);
 	prev->read_only = 1;
 	prev->word_wrap = 0;
 
@@ -105,9 +114,8 @@ static void showRegisterPreview(void) {
 					 "%s: stale point (buffer closed)",
 					 name);
 			} else {
-				const char *fname = pt->buf->filename ?
-							    pt->buf->filename :
-							    "*scratch*";
+				char fname[160];
+				formatBufferName(fname, sizeof(fname), pt->buf);
 				snprintf(
 					line, sizeof(line),
 					"%s: buffer position: buffer %s, line %d col %d",
@@ -151,6 +159,7 @@ static void showRegisterPreview(void) {
 		insertRow(prev, 0, (const uint8_t *)"(no registers set)", 18);
 
 	bufferEnsureRow(prev);
+	mutateRebuildEnd(prev, &rebuild);
 	showPopupBuffer(prev);
 }
 
@@ -164,7 +173,7 @@ static void showRegisterOutput(int reg) {
 	formatRegName(name, sizeof(name), reg);
 
 	struct buffer *out = findOrCreateSpecialBuffer("*Output*");
-	bufferResetRows(out);
+	struct mutateRebuild rebuild = mutateRebuildBegin(out);
 	out->read_only = 1;
 	out->word_wrap = 0;
 
@@ -182,9 +191,8 @@ static void showRegisterOutput(int reg) {
 				 "Register %s: stale point (buffer closed)",
 				 name);
 		} else {
-			const char *fname = pt->buf->filename ?
-						    pt->buf->filename :
-						    "*scratch*";
+			char fname[160];
+			formatBufferName(fname, sizeof(fname), pt->buf);
 			snprintf(
 				header, sizeof(header),
 				"Register %s contains the buffer position: buffer %s, line %d col %d",
@@ -221,6 +229,7 @@ static void showRegisterOutput(int reg) {
 	}
 
 	bufferEnsureRow(out);
+	mutateRebuildEnd(out, &rebuild);
 	showPopupBuffer(out);
 }
 

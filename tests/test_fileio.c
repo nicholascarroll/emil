@@ -6,6 +6,8 @@
 #include "fileio.h"
 #include "util.h"
 #include "buffer.h"
+#include "mutate.h"
+#include "unicode.h"
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -502,6 +504,62 @@ void test_first_save_of_unnamed_buffer_over_existing_file_asks(void) {
 	owTeardown();
 }
 
+/* ---- a file whose name isn't valid text ---- */
+
+static void assert_rows_are_text(const struct buffer *buf) {
+	for (int i = 0; i < buf->numrows; i++) {
+		const erow *r = &buf->row[i];
+		TEST_ASSERT_TRUE(utf8_validate(r->chars, r->size));
+		TEST_ASSERT(r->size == 0 || !memchr(r->chars, '\n', r->size));
+	}
+}
+
+/* Opened by exact path, edited, saved: the real path, nothing else. */
+static void check_odd_name_existing(const char *name) {
+	owSetup();
+	char p[128];
+	owWrite(name, "old\n");
+	owPath(p, sizeof(p), name);
+	struct buffer *buf = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, editorOpen(buf, p));
+	TEST_ASSERT_EQUAL_STRING(p, buf->filename);
+	assert_rows_are_text(buf);
+
+	mutateInsert(buf, 0, 0, (const uint8_t *)"new", 3, NULL, NULL);
+	muteStdout();
+	doSave();
+	unmuteStdout();
+
+	TEST_ASSERT_EQUAL_STRING(p, buf->filename);
+	TEST_ASSERT_EQUAL_STRING("newold\n", owRead(name));
+	assert_rows_are_text(buf);
+	unlink(p);
+	owTeardown();
+}
+
+/* A new file: the first save creates that exact path. */
+static void check_odd_name_new(const char *name) {
+	owSetup();
+	char p[128];
+	owPath(p, sizeof(p), name);
+	struct buffer *buf = make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, editorOpen(buf, p));
+	mutateInsert(buf, 0, 0, (const uint8_t *)"new", 3, NULL, NULL);
+	muteStdout();
+	doSave();
+	unmuteStdout();
+	TEST_ASSERT_EQUAL_STRING("new\n", owRead(name));
+	unlink(p);
+	owTeardown();
+}
+
+void test_lf_name_existing(void) { check_odd_name_existing("x\ny"); }
+void test_esc_name_existing(void) { check_odd_name_existing("x\x1b[0my"); }
+void test_invalid_name_existing(void) { check_odd_name_existing("x\xffy"); }
+void test_lf_name_new(void) { check_odd_name_new("x\ny"); }
+void test_esc_name_new(void) { check_odd_name_new("x\x1b[0my"); }
+void test_invalid_name_new(void) { check_odd_name_new("x\xffy"); }
+
 /* Opened as "(New file)"; something else creates the file meanwhile. */
 void test_new_file_created_meanwhile_is_not_overwritten_silently(void) {
 	owSetup();
@@ -839,6 +897,12 @@ int main(void) {
 	RUN_TEST(test_save_as_over_existing_file_accepted_writes);
 	RUN_TEST(test_save_as_to_a_new_name_does_not_ask);
 	RUN_TEST(test_first_save_of_unnamed_buffer_over_existing_file_asks);
+	RUN_TEST(test_lf_name_existing);
+	RUN_TEST(test_esc_name_existing);
+	RUN_TEST(test_invalid_name_existing);
+	RUN_TEST(test_lf_name_new);
+	RUN_TEST(test_esc_name_new);
+	RUN_TEST(test_invalid_name_new);
 	RUN_TEST(test_new_file_created_meanwhile_is_not_overwritten_silently);
 
 	RUN_TEST(test_load_keeps_existing_final_newline);

@@ -338,19 +338,18 @@ void deleteRange(struct buffer *buf, int startx, int starty, int endx, int endy,
 	if (startx == endx && starty == endy)
 		return;
 
-	int old_len;
-	uint8_t *old_text =
-		collectRegionText(buf, startx, starty, endx, endy, &old_len);
-
 	/* Kill ring */
 	if (add_to_kill_ring) {
+		int old_len;
+		uint8_t *old_text = collectRegionText(buf, startx, starty, endx,
+						      endy, &old_len);
 		clearText(&E.kill);
 		E.kill.str = (uint8_t *)xstrdup((char *)old_text);
 		addToKillRing((char *)old_text, 0, 0, 0);
+		free(old_text);
 	}
 
-	mutateDelete(buf, startx, starty, endx, endy, old_text, old_len);
-	free(old_text);
+	mutateDelete(buf, startx, starty, endx, endy);
 
 	/* Set cursor to start of deleted range */
 	buf->cx = startx;
@@ -484,7 +483,8 @@ void yankPop(int uarg) {
 		return;
 	}
 
-	doUndo(E.buf, 1);
+	if (doUndo(E.buf, 1) != UNDO_DONE)
+		return;
 
 	if (uarg == UARG_REVERSE) {
 		/* M-- M-y: cycle toward newer kills. */
@@ -522,9 +522,8 @@ void transformRange(struct buffer *buf, int startx, int starty, int endx,
 
 	orderPoints(&startx, &starty, &endx, &endy);
 
-	int old_len;
 	uint8_t *old_text =
-		collectRegionText(buf, startx, starty, endx, endy, &old_len);
+		collectRegionText(buf, startx, starty, endx, endy, NULL);
 
 	uint8_t *transformed = transformer(old_text);
 	/* A transformer may fail (transformerPipeCmd returns NULL when
@@ -537,8 +536,8 @@ void transformRange(struct buffer *buf, int startx, int starty, int endx,
 	int repl_len = strlen((char *)transformed);
 
 	int ex, ey;
-	mutateReplace(buf, startx, starty, endx, endy, old_text, old_len,
-		      transformed, repl_len, 0, &ex, &ey);
+	mutateReplace(buf, startx, starty, endx, endy, transformed, repl_len, 0,
+		      &ex, &ey);
 
 	buf->cx = ex;
 	buf->cy = ey;
@@ -842,8 +841,7 @@ void replaceRegex(void) {
 	offsetToCoords(startx, starty, old_text, last_off, &lx, &ly);
 
 	int ex, ey;
-	mutateReplace(buf, fx, fy, lx, ly, old_text + first_off,
-		      last_off - first_off, out, out_len, 0, &ex, &ey);
+	mutateReplace(buf, fx, fy, lx, ly, out, out_len, 0, &ex, &ey);
 
 	buf->cx = ex;
 	buf->cy = ey;
@@ -885,10 +883,7 @@ void stringRectangleWithText(uint8_t *string) {
 	normalizeRectCols(E.buf, &topx, &topy, &botx, &boty);
 
 	/* Use full-row region so replacement text captures all content */
-	int old_len;
 	int region_endx = buf->row[boty].size;
-	uint8_t *old_text =
-		collectRegionText(buf, 0, topy, region_endx, boty, &old_len);
 
 	/* Build replacement text: for each row, replace columns [topx..botx)
 	 * with 'string', padding short rows with spaces as needed. */
@@ -929,12 +924,11 @@ void stringRectangleWithText(uint8_t *string) {
 	uint8_t *out = dbuf_detach(&d, &out_len);
 
 	int ex, ey;
-	mutateReplace(buf, 0, topy, region_endx, boty, old_text, old_len, out,
-		      out_len, 0, &ex, &ey);
+	mutateReplace(buf, 0, topy, region_endx, boty, out, out_len, 0, &ex,
+		      &ey);
 
 	rectPlaceCursor(buf, topx, topy);
 
-	free(old_text);
 	free(out);
 	E.buf->mark_active = 0;
 	restoreKill(okill);
@@ -1008,12 +1002,8 @@ void killRectangle(void) {
 	int rw = botx - topx;
 	int rh = (boty - topy) + 1;
 
-	/* Collect linear region text for undo */
-	int old_len;
 	/* Use full-row region so replacement text includes all content */
 	int region_endx = buf->row[boty].size;
-	uint8_t *old_text =
-		collectRegionText(buf, 0, topy, region_endx, boty, &old_len);
 
 	/* Extract rectangle columns into flat buffer for kill ring */
 	uint8_t *rectBuf = extractRectColumns(buf, topx, topy, rw, rh);
@@ -1056,8 +1046,8 @@ void killRectangle(void) {
 	uint8_t *out = dbuf_detach(&d, &out_len);
 
 	int ex, ey;
-	mutateReplace(buf, 0, topy, region_endx, boty, old_text, old_len, out,
-		      out_len, 0, &ex, &ey);
+	mutateReplace(buf, 0, topy, region_endx, boty, out, out_len, 0, &ex,
+		      &ey);
 
 	rectPlaceCursor(buf, topx, topy);
 
@@ -1069,7 +1059,6 @@ void killRectangle(void) {
 	E.kill.rect_height = rh;
 	addToKillRing((char *)E.kill.str, 1, rw, rh);
 
-	free(old_text);
 	free(out);
 	E.buf->mark_active = 0;
 	clearText(&saved);
@@ -1121,11 +1110,8 @@ void yankRectangle(void) {
 		needs_extension = 1;
 	}
 
-	/* Collect old text for the full-row region [0,topy]..[eol,boty] */
+	/* The full-row region [0,topy]..[eol,boty] */
 	int region_endx = buf->row[boty].size;
-	int old_len;
-	uint8_t *old_text =
-		collectRegionText(buf, 0, topy, region_endx, boty, &old_len);
 
 	/* Build new text: for each row, insert rectangle slice at topx,
 	 * padding with spaces if the row is shorter than topx. */
@@ -1166,12 +1152,11 @@ void yankRectangle(void) {
 	uint8_t *out = dbuf_detach(&d, &out_len);
 	free(slice);
 
-	mutateReplace(buf, 0, topy, region_endx, boty, old_text, old_len, out,
-		      out_len, needs_extension, NULL, NULL);
+	mutateReplace(buf, 0, topy, region_endx, boty, out, out_len,
+		      needs_extension, NULL, NULL);
 
 	rectPlaceCursor(buf, topx, topy);
 
-	free(old_text);
 	free(out);
 	E.buf->mark_active = 0;
 	clearText(&E.kill);

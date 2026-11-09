@@ -496,6 +496,8 @@ Files are loaded in their entirety into memory.
 adheres to the Unix convention where lines are delimited by a single linefeed (LF) character and files terminate with a linefeed.
 A file opened without a terminating linefeed gains one when it is loaded.
 Validation at file load and inserting text in the buffer disallow  null bytes (0x00) or malformed UTF-8 sequences.
+.Pp
+Filenames that contain control characters or bytes that are not valid UTF-8 are displayed within the editor with substitutions. Such files can be opened by invoking emil from the command line.
 .Ss File Persistence
 When saving,
 .Nm

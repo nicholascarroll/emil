@@ -34,6 +34,7 @@ path = [
   "tests/test_shell.c",
   "transform.c", "transform.h",
   "undo.c", "undo.h",
+  "undorecord.c", "undorecord.h",
   "unicode.c", "unicode.h",
   "util.c",
   "window.c",

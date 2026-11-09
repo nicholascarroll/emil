@@ -242,6 +242,14 @@ static void usage(FILE *out) {
 	      out);
 }
 
+/* A copy safe to send to the terminal.  Only for the way out: not freed. */
+static char *safeText(const char *s) {
+	size_t cap = strlen(s) * 3 + 1;
+	char *out = xmalloc(cap);
+	utf8SanitizeLine((const uint8_t *)s, strlen(s), out, cap);
+	return out;
+}
+
 int main(int argc, char *argv[]) {
 	/* Set up a UTF-8 locale so that system wcwidth() works.  The
 	 * same call the width-dependent suites make, so what they
@@ -377,8 +385,8 @@ int main(int argc, char *argv[]) {
 			if (editorOpen(newBuf, argv[i]) < 0) {
 				disableRawMode();
 
-				fprintf(stderr, "%s: %s\n", argv[i],
-					E.statusmsg);
+				fprintf(stderr, "%s: %s\n", safeText(argv[i]),
+					safeText(E.statusmsg));
 				exit(1);
 			}
 			newBuf->next = E.headbuf;

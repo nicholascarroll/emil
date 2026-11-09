@@ -17,6 +17,9 @@
 - Fixed `C-q` inserting an invalid byte, after which the buffer could not be
   saved, when a terminal resize interrupted it.
 - The advisory lock's file descriptor is no longer inherited by shell commands.
+- Fixed filenames that aren't valid text reaching rows or the terminal unchanged.
+- Filenames that aren't valid text are displayed with substitutions.
+- Fixed invalid UTF-8 from a tags file reaching the `M-.` definitions menu.
 
 ## [1.0.0] - 2026-10-12
 - `emil --help` added.

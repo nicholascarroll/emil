@@ -23,26 +23,6 @@
 
 /* Character insertion */
 
-/* Raw insertion with no undo record.  Used for minibuffer text, which
- * is not part of any undo history.  Editing a user buffer goes through
- * selfInsert below, or the mutation layer directly. */
-void insertChar(struct buffer *bufr, int c, int count) {
-	if (rejectIfReadOnly(bufr))
-		return;
-
-	bufr->mark_active = 0;
-
-	if (count <= 0)
-		count = 1;
-
-	for (int i = 0; i < count; i++) {
-		int at = bufr->cx;
-		rowInsertChar(bufr, &bufr->row[bufr->cy], at, c);
-		adjustAllPoints(bufr, at, bufr->cy, at + 1, bufr->cy, 0);
-		bufr->cx++;
-	}
-}
-
 /* Insert 'len' bytes of 'text' 'times' times at point, recording undo,
  * and leave point after the insertion. */
 static void insertRepeat(struct buffer *buf, const uint8_t *text, int len,
@@ -71,8 +51,7 @@ void insertUnicode(int count) {
 }
 
 /* Insert 'c' 'count' times at point, recording undo.  This is the
- * undoable typing path; insertChar above is the raw primitive, used
- * for minibuffer text that is not part of the undo history. */
+ * undoable typing path. */
 void selfInsert(struct buffer *bufr, int c, int count) {
 	if (rejectIfReadOnly(bufr))
 		return;
@@ -160,13 +139,7 @@ void unindent(int rept) {
 	if (trunc == 0)
 		return;
 
-	/* Build old_text for mutateDelete */
-	uint8_t *old_text = xmalloc(trunc + 1);
-	memset(old_text, '\t', trunc);
-	old_text[trunc] = 0;
-
-	mutateDelete(E.buf, 0, E.buf->cy, trunc, E.buf->cy, old_text, trunc);
-	free(old_text);
+	mutateDelete(E.buf, 0, E.buf->cy, trunc, E.buf->cy);
 
 	/* If the cursor sat inside the removed indentation (cx < trunc),
 	 * the unconditional subtraction drove cx negative, and any
@@ -194,14 +167,16 @@ void delChar(int count) {
 		if (E.buf->cx == row->size) {
 			/* Deleting the row separator joins the next row
 			 * onto this one. */
-			const uint8_t nl = '\n';
 			mutateDeleteChar(E.buf, E.buf->cx, E.buf->cy, 0,
-					 E.buf->cy + 1, &nl, 1);
+					 E.buf->cy + 1);
 		} else {
+			/* A truncated sequence at the end of the row is only
+			 * as long as what's left of the row. */
 			int n = utf8_nBytes(row->chars[E.buf->cx]);
+			if (n > row->size - E.buf->cx)
+				n = row->size - E.buf->cx;
 			mutateDeleteChar(E.buf, E.buf->cx, E.buf->cy,
-					 E.buf->cx + n, E.buf->cy,
-					 &row->chars[E.buf->cx], n);
+					 E.buf->cx + n, E.buf->cy);
 		}
 	}
 }
@@ -237,17 +212,14 @@ void backSpace(int count) {
 			do {
 				from--;
 			} while (from > 0 && utf8_isCont(row->chars[from]));
-			mutateDeleteChar(E.buf, from, E.buf->cy, to, E.buf->cy,
-					 &row->chars[from], to - from);
+			mutateDeleteChar(E.buf, from, E.buf->cy, to, E.buf->cy);
 			E.buf->cx = from;
 		} else {
 			/* Joining onto the previous row deletes the
 			 * separator between them. */
-			const uint8_t nl = '\n';
 			int prevy = E.buf->cy - 1;
 			int prevx = E.buf->row[prevy].size;
-			mutateDeleteChar(E.buf, prevx, prevy, 0, E.buf->cy, &nl,
-					 1);
+			mutateDeleteChar(E.buf, prevx, prevy, 0, E.buf->cy);
 			E.buf->cx = prevx;
 			E.buf->cy = prevy;
 		}
@@ -500,6 +472,8 @@ void transposeChars(int uarg) {
 
 	/* Find the end of the character after point. */
 	int endx = E.buf->cx + utf8_nBytes(row->chars[E.buf->cx]);
+	if (endx > row->size)
+		endx = row->size; /* truncated sequence at the end of the row */
 
 	transformRange(E.buf, startx, E.buf->cy, endx, E.buf->cy,
 		       transformerTransposeChars);
@@ -696,10 +670,6 @@ static void transposeSentencesBackward(void) {
 	uint8_t *b_text = collectRegionText(E.buf, a_end_x, a_end_y, b_end_x,
 					    b_end_y, &b_len);
 
-	int old_len;
-	uint8_t *old_text = collectRegionText(E.buf, a_start_x, a_start_y,
-					      b_end_x, b_end_y, &old_len);
-
 	/* Build replacement: B + A */
 	int repl_len = b_len + a_len;
 	uint8_t *repl = xmalloc(repl_len + 1);
@@ -708,8 +678,8 @@ static void transposeSentencesBackward(void) {
 	repl[repl_len] = 0;
 
 	int ex, ey;
-	mutateReplace(E.buf, a_start_x, a_start_y, b_end_x, b_end_y, old_text,
-		      old_len, repl, repl_len, 0, &ex, &ey);
+	mutateReplace(E.buf, a_start_x, a_start_y, b_end_x, b_end_y, repl,
+		      repl_len, 0, &ex, &ey);
 
 	/* Point after the dragged sentence, now first in the region. */
 	E.buf->cx = a_start_x;
@@ -718,7 +688,6 @@ static void transposeSentencesBackward(void) {
 
 	free(a_text);
 	free(b_text);
-	free(old_text);
 	free(repl);
 }
 
@@ -782,10 +751,6 @@ void transposeSentences(int uarg) {
 					    b_end_y, &b_len);
 
 	/* Collect old text for entire range */
-	int old_len;
-	uint8_t *old_text = collectRegionText(E.buf, a_start_x, a_start_y,
-					      b_end_x, b_end_y, &old_len);
-
 	/* Build replacement: B + A */
 	int repl_len = b_len + a_len;
 	uint8_t *repl = xmalloc(repl_len + 1);
@@ -794,15 +759,14 @@ void transposeSentences(int uarg) {
 	repl[repl_len] = 0;
 
 	int ex, ey;
-	mutateReplace(E.buf, a_start_x, a_start_y, b_end_x, b_end_y, old_text,
-		      old_len, repl, repl_len, 0, &ex, &ey);
+	mutateReplace(E.buf, a_start_x, a_start_y, b_end_x, b_end_y, repl,
+		      repl_len, 0, &ex, &ey);
 
 	E.buf->cx = ex;
 	E.buf->cy = ey;
 
 	free(a_text);
 	free(b_text);
-	free(old_text);
 	free(repl);
 }
 

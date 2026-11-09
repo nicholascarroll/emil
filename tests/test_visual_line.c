@@ -453,10 +453,7 @@ void test_ctdc_empty_row(void) {
  * continuously instead of on a rare path.
  *
  * So assert what the protocol promises rather than what the cache
- * contains.  selfInsert()/delChar() rather than insertChar(): the
- * latter is a raw primitive that calls rowInsertChar() directly and
- * invalidates on the line below its own memmove, which is hard to get
- * wrong.  A keystroke goes through the mutation layer to
+ * contains.  selfInsert()/delChar(): a keystroke goes through the mutation layer to
  * bulkInsert/bulkDelete, which is where an invalidation would actually
  * go missing, and that is the path worth pinning. */
 void test_ctdc_width_follows_a_mutation(void) {

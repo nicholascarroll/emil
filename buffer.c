@@ -105,6 +105,7 @@ static void bufEnsureRowCap(struct buffer *bufr) {
 }
 
 void insertRow(struct buffer *bufr, int at, const uint8_t *s, size_t len) {
+	debugCheckRowBytes(s, len);
 	if (at < 0 || at > bufr->numrows)
 		return;
 
@@ -134,6 +135,7 @@ void insertRow(struct buffer *bufr, int at, const uint8_t *s, size_t len) {
  * buffer is being populated from disk.
  */
 void appendRowRaw(struct buffer *bufr, const uint8_t *s, size_t len) {
+	debugCheckRowBytes(s, len);
 	if (len > (size_t)INT_MAX - 1)
 		abort();
 
@@ -167,21 +169,6 @@ void delRow(struct buffer *bufr, int at) {
 		bufr->numrows--;
 	}
 	markBufferDirty(bufr);
-}
-
-void rowInsertChar(struct buffer *bufr, erow *row, int at, int c) {
-	if (at < 0 || at > row->size)
-		at = row->size;
-
-	if (row->size > INT_MAX - 2)
-		abort();
-	int needed = row->size + 2;
-	rowEnsureCap(row, needed);
-	memmove(&row->chars[at + 1], &row->chars[at], row->size - at + 1);
-	row->size++;
-	row->chars[at] = c;
-	markBufferDirty(bufr);
-	row->cached_width = -1;
 }
 
 struct buffer *newBuffer(void) {

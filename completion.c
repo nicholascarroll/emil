@@ -255,11 +255,28 @@ void replaceMinibufferText(struct buffer *minibuf, const char *text) {
 	}
 }
 
+/* A match as one line of *Completions*.  A buffer name is a filename,
+ * which can hold any byte, and a row must not hold a newline, so it
+ * shows as ^J.  The match itself stays as it is for M-n and M-p. */
+static char *completionRowText(const char *name) {
+	size_t len = strlen(name);
+	/* The worst case is a byte becoming U+FFFD: three bytes. */
+	char *shown = xmalloc(len * 3 + 1);
+	utf8SanitizeLine((const uint8_t *)name, len, shown, len * 3 + 1);
+	return shown;
+}
+
+/* A match as minibuffer text.  A substituted name is just text: it no
+ * longer refers to the original.  Caller frees. */
+static char *completionMinibufText(const char *name) {
+	return nameInsertable(name) ? xstrdup(name) : completionRowText(name);
+}
+
 static void showCompletionsBuffer(char **matches, int n_matches,
 				  enum promptType type) {
 	/* Find or create completions buffer */
 	struct buffer *comp_buf = findOrCreateSpecialBuffer("*Completions*");
-	bufferResetRows(comp_buf);
+	struct mutateRebuild rebuild = mutateRebuildBegin(comp_buf);
 	comp_buf->read_only = 1;
 	comp_buf->word_wrap = 0;
 
@@ -287,9 +304,10 @@ static void showCompletionsBuffer(char **matches, int n_matches,
 					break;
 				}
 			}
-			int len = (int)strlen(show);
+			char *shown = completionRowText(show);
 			insertRow(comp_buf, comp_buf->numrows,
-				  (const uint8_t *)show, len);
+				  (const uint8_t *)shown, strlen(shown));
+			free(shown);
 		}
 
 		/* Store match list for M-n/M-p navigation. */
@@ -313,8 +331,11 @@ static void showCompletionsBuffer(char **matches, int n_matches,
 
 		/* Build truncated copies for display. */
 		char **display = xmalloc(n_matches * sizeof(char *));
-		for (int i = 0; i < n_matches; i++)
-			display[i] = leftTruncate(matches[i], term_width - 2);
+		for (int i = 0; i < n_matches; i++) {
+			char *cut = leftTruncate(matches[i], term_width - 2);
+			display[i] = completionRowText(cut);
+			free(cut);
+		}
 
 		int max_width = 0;
 		for (int i = 0; i < n_matches; i++) {
@@ -372,6 +393,7 @@ static void showCompletionsBuffer(char **matches, int n_matches,
 		free(display);
 	}
 
+	mutateRebuildEnd(comp_buf, &rebuild);
 	showPopupBuffer(comp_buf);
 	refreshScreen();
 }
@@ -457,10 +479,17 @@ void handleMinibufferCompletion(struct buffer *minibuf, enum promptType type) {
 		getCommandCompletions(text, &result);
 		break;
 	}
-	if (tabOutcome(minibuf, &result, strlen(text), type))
-		replaceMinibufferText(minibuf, result.n_matches == 1 ?
-						       result.matches[0] :
-						       result.common_prefix);
+	if (tabOutcome(minibuf, &result, strlen(text), type)) {
+		const char *done = result.n_matches == 1 ? result.matches[0] :
+							   result.common_prefix;
+		/* A buffer's name is stored raw.  A file match stays as it
+		 * is: scanDir filtered the name, the rest is what was typed. */
+		int stored = type == PROMPT_BUFFER || type == PROMPT_SEARCH;
+		char *shown = stored ? completionMinibufText(done) :
+				       xstrdup(done);
+		replaceMinibufferText(minibuf, shown);
+		free(shown);
+	}
 	tabEnd(minibuf);
 	freeCompletionResult(&result);
 	free(text);
@@ -517,12 +546,12 @@ void cycleCompletion(struct buffer *minibuf, int direction) {
 	/* Update minibuffer text to the basename of the selected match */
 	const char *match = cs->matches[cs->selected];
 	const char *slash = strrchr(match, '/');
-	const char *base = slash ? slash + 1 : match;
+	char *base = completionMinibufText(slash ? slash + 1 : match);
 	replaceMinibufferText(minibuf, base);
 
 	/* Update last_completed_text so TAB doesn't reset */
 	free(cs->last_completed_text);
-	cs->last_completed_text = xstrdup(base);
+	cs->last_completed_text = base;
 	cs->completion_start_pos = minibufPointOffset(minibuf);
 
 	/* Update the completions buffer cursor to highlight the

@@ -22,6 +22,7 @@
 #include "register.h"
 #include "keymap.h"
 #include <string.h>
+#include "buffer.h"
 
 /* "ab" then 25 x U+65E5: the 60-byte cut falls one byte into the 20th
  * character. */
@@ -100,9 +101,58 @@ void setUp(void) {
 void tearDown(void) {
 }
 
+/* C-x r V showed a point register's filename raw.  A filename can hold a
+ * newline, and '\\n' is emil's row separator, never a byte in a row. */
+void test_register_point_filename_newline(void) {
+	initTestEditor();
+	makeMinibuffer();
+	const char *lines[] = { "text" };
+	struct buffer *buf = make_test_buffer_lines(lines, 1);
+	free(buf->filename);
+	buf->filename = xstrdup("a\nb\xe6\x97\xa5");
+
+	E.registers['a'].rtype = REGISTER_POINT;
+	E.registers['a'].data.point.buf = buf;
+	E.registers['a'].data.point.cx = 0;
+	E.registers['a'].data.point.cy = 0;
+
+	/* The preview, drawn while the prompt waits. */
+	int quit[] = { CTRL('g') };
+	scriptKeys(quit, 1);
+	muteStdout();
+	viewRegister();
+	unmuteStdout();
+	clearKeys();
+	TEST_ASSERT(E.render_buf.len > 0);
+	static const char want[] = "a^Jb\xe6\x97\xa5";
+	int found = 0;
+	for (int i = 0; i + 7 <= E.render_buf.len; i++)
+		if (memcmp(E.render_buf.b + i, want, 7) == 0)
+			found = 1;
+	TEST_ASSERT(found);
+
+	/* The output: a real newline would have been inside row 0. */
+	int pick[] = { 'a' };
+	scriptKeys(pick, 1);
+	muteStdout();
+	viewRegister();
+	unmuteStdout();
+	clearKeys();
+	struct buffer *out = findOrCreateSpecialBuffer("*Output*");
+	TEST_ASSERT(out->numrows >= 1);
+	const char *row = (const char *)out->row[0].chars;
+	TEST_ASSERT(memchr(row, '\n', out->row[0].size) == NULL);
+	TEST_ASSERT(strstr(row, "buffer a^Jb\xe6\x97\xa5, line 1") != NULL);
+
+	E.registers['a'].rtype = REGISTER_NULL;
+	freeMinibuffer();
+	cleanupTestEditor();
+}
+
 int main(void) {
 	TEST_BEGIN();
 	RUN_TEST(test_register_preview_cuts_on_character_boundary);
+	RUN_TEST(test_register_point_filename_newline);
 	RUN_TEST(test_render_incomplete_sequence_at_row_end);
 	RUN_TEST(test_cols_to_bytes_stops_at_span_end);
 	return TEST_END();

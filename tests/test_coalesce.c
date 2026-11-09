@@ -557,7 +557,7 @@ void test_typing_is_capped_into_several_runs(void) {
  *
  * E.input_burst is what the drain loop sets when it finds bytes
  * already waiting; the mutation layer copies it onto each record and
- * undoMerge honours it.  Set directly here because the unit suites
+ * undoMergeDecision honours it.  Set directly here because the unit suites
  * have no terminal -- the end-to-end path is covered by the pty
  * scenarios. */
 void test_burst_lifts_the_cap(void) {
@@ -595,8 +595,77 @@ void test_burst_run_undoes_whole(void) {
 	TEST_ASSERT_EQUAL_STRING("keep", (char *)buf->row[0].chars);
 }
 
+/* ---- The merge decision, on its own ---- */
+
+static struct undo decision_rec(int sx, int sy, int ex, int ey, int del) {
+	struct undo u;
+	memset(&u, 0, sizeof u);
+	u.startx = sx;
+	u.starty = sy;
+	u.endx = ex;
+	u.endy = ey;
+	u.delete = del;
+	u.append = 1;
+	u.datalen = 1;
+	return u;
+}
+
+void test_merge_decision_shapes(void) {
+	struct undo typed = decision_rec(0, 0, 3, 0, 0);
+	struct undo next = decision_rec(3, 0, 4, 0, 0);
+	struct undo apart = decision_rec(9, 0, 10, 0, 0);
+	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_APPEND, undoMergeDecision(&typed, &next));
+	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_NONE, undoMergeDecision(&typed, &apart));
+
+	struct undo deleted = decision_rec(5, 0, 6, 0, 1);
+	struct undo cd = decision_rec(5, 0, 6, 0, 1);
+	struct undo bs = decision_rec(4, 0, 5, 0, 1);
+	struct undo elsewhere = decision_rec(0, 0, 1, 0, 1);
+	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_APPEND, undoMergeDecision(&deleted, &cd));
+	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_PREPEND, undoMergeDecision(&deleted, &bs));
+	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_NONE, undoMergeDecision(&deleted, &elsewhere));
+}
+
+void test_merge_decision_rejections(void) {
+	struct undo prev = decision_rec(0, 0, 3, 0, 0);
+	struct undo next = decision_rec(3, 0, 4, 0, 0);
+	struct undo del = decision_rec(3, 0, 4, 0, 1);
+
+	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_NONE, undoMergeDecision(NULL, &next));
+	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_NONE, undoMergeDecision(&prev, &del));
+
+	prev.append = 0;
+	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_NONE, undoMergeDecision(&prev, &next));
+	prev.append = 1;
+
+	prev.paired = 1;
+	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_NONE, undoMergeDecision(&prev, &next));
+	prev.paired = 0;
+
+	next.paired = 1;
+	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_NONE, undoMergeDecision(&prev, &next));
+	next.paired = 0;
+
+	next.datalen = 0;
+	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_NONE, undoMergeDecision(&prev, &next));
+	next.datalen = 1;
+
+	prev.nmerges = 19;
+	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_APPEND, undoMergeDecision(&prev, &next));
+	prev.nmerges = 20;
+	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_NONE, undoMergeDecision(&prev, &next));
+	next.uncapped = 1;
+	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_APPEND, undoMergeDecision(&prev, &next));
+	next.uncapped = 0;
+	prev.uncapped = 1;
+	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_APPEND, undoMergeDecision(&prev, &next));
+}
+
 int main(void) {
 	TEST_BEGIN();
+
+	RUN_TEST(test_merge_decision_shapes);
+	RUN_TEST(test_merge_decision_rejections);
 
 	RUN_TEST(test_typing_a_word_is_one_record);
 	RUN_TEST(test_typing_at_end_of_buffer_costs_one_record);

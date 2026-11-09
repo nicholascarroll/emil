@@ -32,6 +32,7 @@
 #include "buffer.h"
 #include "dbuf.h"
 #include "emil.h"
+#include "mutate.h"
 #include "display.h"
 #include "message.h"
 #include "fileio.h"
@@ -485,7 +486,7 @@ uint8_t *editorPipe(int useRegion) {
 static void showOutputBuffer(const char *name, const uint8_t *data, size_t len,
 			     int read_only) {
 	struct buffer *buf = findOrCreateSpecialBuffer(name);
-	bufferResetRows(buf);
+	struct mutateRebuild rebuild = mutateRebuildBegin(buf);
 	buf->cx = 0;
 	buf->cy = 0;
 	buf->markx = -1;
@@ -495,6 +496,7 @@ static void showOutputBuffer(const char *name, const uint8_t *data, size_t len,
 		buf->read_only = 1;
 
 	bufferLoadBlob(buf, data, len, 0);
+	mutateRebuildEnd(buf, &rebuild);
 	if (len > 0)
 		markBufferDirty(buf);
 	updateBuffer(buf);

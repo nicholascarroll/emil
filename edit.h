@@ -6,7 +6,6 @@
 #include "motion.h"
 
 /* Character insertion */
-void insertChar(struct buffer *bufr, int c, int count);
 void selfInsert(struct buffer *bufr, int c, int count);
 void insertUnicode(int count);
 

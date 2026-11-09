@@ -246,6 +246,13 @@ void test_transpose_words_two_words(void) {
 	free(r);
 }
 
+/* The first character's lead byte claims more bytes than the input has. */
+void test_transpose_chars_truncated_lead(void) {
+	uint8_t *r = transformerTransposeChars((uint8_t *)"\xF0" "a");
+	TEST_ASSERT_EQUAL_STRING("\xF0" "a", (char *)r);
+	free(r);
+}
+
 void test_transpose_chars_empty(void) {
 	uint8_t *r = transformerTransposeChars((uint8_t *)"");
 	TEST_ASSERT_EQUAL_STRING("", (char *)r);
@@ -308,6 +315,7 @@ int main(void) {
 	RUN_TEST(test_transpose_words_single_word);
 	RUN_TEST(test_transpose_words_two_words);
 	RUN_TEST(test_transpose_chars_empty);
+	RUN_TEST(test_transpose_chars_truncated_lead);
 	RUN_TEST(test_transform_region_null_transformer);
 
 	return TEST_END();
