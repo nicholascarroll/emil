@@ -206,6 +206,32 @@ static inline void clearKeys(void) {
  * which writes escape sequences straight to fd 1.  That would corrupt
  * the test runner's view of stdout, so redirect it for the duration of
  * the call under test. */
+#ifdef __wasi__
+/* Under wasmer, a descriptor for the host's stdout or stderr held at
+ * fd 3 or above makes every posix_spawn() child exit 71 before it
+ * runs, close-on-exec or not.  Saving stdout with dup() while muted
+ * therefore failed every shell command a test typed, even `true`, and
+ * the suites blamed the commands.  Restoring fd 1 by reopening
+ * /dev/stdout is no way out either: after a spawn, nothing written
+ * through it reaches the host.
+ *
+ * So nothing is saved.  fd 1 comes back as a copy of fd 2, which means
+ * that from the first mute on the suite reports on stderr instead of
+ * stdout; run_tests.sh reads the two together. */
+static inline void muteStdout(void) {
+	fflush(stdout);
+	int devnull = open("/dev/null", O_WRONLY);
+	if (devnull >= 0) {
+		dup2(devnull, STDOUT_FILENO);
+		close(devnull);
+	}
+}
+
+static inline void unmuteStdout(void) {
+	fflush(stdout);
+	dup2(STDERR_FILENO, STDOUT_FILENO);
+}
+#else
 static int saved_stdout = -1;
 
 static inline void muteStdout(void) {
@@ -226,6 +252,7 @@ static inline void unmuteStdout(void) {
 		saved_stdout = -1;
 	}
 }
+#endif
 
 /* editorPrompt needs a minibuffer; main.c builds one at startup and
  * initTestEditor does not. */
