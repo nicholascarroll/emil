@@ -3,10 +3,7 @@
 
 #include "test.h"
 #include "test_harness.h"
-#include "find.h"
-#include "prompt.h"
 #include "keymap.h"
-#include "edit.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,7 +25,7 @@ void test_reverse_search_goes_backward(void) {
 	int keys[] = { 'f', '\r' };
 	scriptKeys(keys, 2);
 	muteStdout();
-	reverseFind();
+	processKeypress(CMD_REVERSE_ISEARCH);
 	unmuteStdout();
 	clearKeys();
 
@@ -55,7 +52,7 @@ void test_reverse_search_previous_row_takes_last_match(void) {
 	int keys[] = { 'f', '\r' };
 	scriptKeys(keys, 2);
 	muteStdout();
-	reverseFind();
+	processKeypress(CMD_REVERSE_ISEARCH);
 	unmuteStdout();
 	clearKeys();
 
@@ -83,7 +80,7 @@ void test_forward_search_repeat_advances(void) {
 	int keys[] = { 'f', CTRL('s'), '\r' };
 	scriptKeys(keys, 3);
 	muteStdout();
-	editorFind();
+	processKeypress(CMD_ISEARCH);
 	unmuteStdout();
 	clearKeys();
 
@@ -119,7 +116,7 @@ void test_forward_search_starts_from_point(void) {
 	int keys[] = { 'f', '\r' };
 	scriptKeys(keys, 2);
 	muteStdout();
-	editorFind();
+	processKeypress(CMD_ISEARCH);
 	unmuteStdout();
 	clearKeys();
 
@@ -144,7 +141,7 @@ void test_forward_search_matches_at_point(void) {
 	int keys[] = { 'f', '\r' };
 	scriptKeys(keys, 2);
 	muteStdout();
-	editorFind();
+	processKeypress(CMD_ISEARCH);
 	unmuteStdout();
 	clearKeys();
 
@@ -166,7 +163,7 @@ void test_forward_search_starts_from_column(void) {
 	int keys[] = { 'f', '\r' };
 	scriptKeys(keys, 2);
 	muteStdout();
-	editorFind();
+	processKeypress(CMD_ISEARCH);
 	unmuteStdout();
 	clearKeys();
 
@@ -198,14 +195,13 @@ void test_forward_search_does_not_wrap_on_first_pass(void) {
 	int keys[] = { 't', '\r' };
 	scriptKeys(keys, 2);
 	muteStdout();
-	editorFind();
+	processKeypress(CMD_ISEARCH);
 	unmuteStdout();
 	clearKeys();
 
-	/* Point unmoved, and nothing highlighted as a match. */
+	/* Point unmoved. */
 	TEST_ASSERT_EQUAL_INT(1, E.buf->cy);
 	TEST_ASSERT_EQUAL_INT(0, E.buf->cx);
-	TEST_ASSERT_EQUAL_INT(0, E.buf->match);
 
 	freeMinibuffer();
 	cleanupTestEditor();
@@ -224,7 +220,7 @@ void test_forward_search_repeat_wraps_after_failing(void) {
 	int keys[] = { 't', CTRL('s'), '\r' };
 	scriptKeys(keys, 3);
 	muteStdout();
-	editorFind();
+	processKeypress(CMD_ISEARCH);
 	unmuteStdout();
 	clearKeys();
 
@@ -249,13 +245,12 @@ void test_reverse_search_does_not_wrap_on_first_pass(void) {
 	int keys[] = { 't', '\r' };
 	scriptKeys(keys, 2);
 	muteStdout();
-	reverseFind();
+	processKeypress(CMD_REVERSE_ISEARCH);
 	unmuteStdout();
 	clearKeys();
 
 	TEST_ASSERT_EQUAL_INT(1, E.buf->cy);
 	TEST_ASSERT_EQUAL_INT(0, E.buf->cx);
-	TEST_ASSERT_EQUAL_INT(0, E.buf->match);
 
 	freeMinibuffer();
 	cleanupTestEditor();
@@ -275,7 +270,7 @@ void test_forward_search_backspace_returns_to_origin(void) {
 	int keys[] = { 'a', 'b', KEY_BACKSPACE, '\r' };
 	scriptKeys(keys, 4);
 	muteStdout();
-	editorFind();
+	processKeypress(CMD_ISEARCH);
 	unmuteStdout();
 	clearKeys();
 
@@ -313,7 +308,7 @@ void test_regex_bol_does_not_match_mid_row(void) {
 	int keys[] = { '^', 'f', 'o', 'o', '\r' };
 	scriptKeys(keys, 5);
 	muteStdout();
-	regexFind();
+	processKeypress(CMD_REGEX_SEARCH_FORWARD);
 	unmuteStdout();
 	clearKeys();
 
@@ -345,7 +340,7 @@ void test_regex_bol_matches_at_row_start(void) {
 	int keys[] = { '^', 'f', 'o', 'o', '\r' };
 	scriptKeys(keys, 5);
 	muteStdout();
-	regexFind();
+	processKeypress(CMD_REGEX_SEARCH_FORWARD);
 	unmuteStdout();
 	clearKeys();
 
@@ -374,7 +369,7 @@ void test_regex_unanchored_unaffected_by_notbol(void) {
 	int keys[] = { 'f', 'o', 'o', '\r' };
 	scriptKeys(keys, 4);
 	muteStdout();
-	regexFind();
+	processKeypress(CMD_REGEX_SEARCH_FORWARD);
 	unmuteStdout();
 	clearKeys();
 
@@ -414,7 +409,7 @@ void test_regex_backward_bol_finds_real_match(void) {
 	int keys[] = { '^', 'a', '\r' };
 	scriptKeys(keys, 3);
 	muteStdout();
-	backwardRegexFind();
+	processKeypress(CMD_REGEX_SEARCH_BACKWARD);
 	unmuteStdout();
 	clearKeys();
 

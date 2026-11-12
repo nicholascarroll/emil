@@ -1,5 +1,10 @@
 /* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
-/* test_insert_file.c: characterisation for M-x insert-file.
+/* test_insert_file.c: characterisation for insert-file (C-x i).
+ *
+ * Each test issues the command, types the file's path and RET at the
+ * prompt it opens, and reads the buffer text, cursor and modified
+ * flag.  Nothing here names the function that does the loading, so
+ * the loaders can be merged without touching this file.
  */
 
 #include "test.h"
@@ -7,8 +12,7 @@
 #include "emil.h"
 #include "buffer.h"
 #include "fileio.h"
-#include "undo.h"
-#include "edit.h"
+#include "keymap.h"
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,10 +24,21 @@
 
 void setUp(void) {
 	initTestEditor();
+	makeMinibuffer();
 }
 void tearDown(void) {
+	freeMinibuffer();
 	cleanupTestEditor();
 }
+
+/* The whole buffer as the bytes a save would write. */
+#define ASSERT_TEXT(expected, buf)                           \
+	do {                                                 \
+		size_t _len;                                 \
+		char *_text = rowsToString((buf), &_len);    \
+		TEST_ASSERT_EQUAL_STRING((expected), _text); \
+		free(_text);                                 \
+	} while (0)
 
 /* Write `content` to a fresh temp file; return mallocd path. */
 static char *make_temp_file(const char *content) {
@@ -38,7 +53,32 @@ static char *make_temp_file(const char *content) {
 	return strdup(tmpname);
 }
 
-/* --- 1. insertFile dirties and is undoable ------------------------ */
+/* C-x i, with `path` and RET waiting at the prompt.  Returns how many
+ * of those keys were read: all of them when the command prompted,
+ * none when it refused first. */
+static int insert_file_typing(const char *path) {
+	int keys[PATH_MAX + 1];
+	int n = 0;
+	for (const char *p = path; *p; p++)
+		keys[n++] = (unsigned char)*p;
+	keys[n++] = '\r';
+
+	scriptKeys(keys, n);
+	muteStdout();
+	processKeypress(CMD_INSERT_FILE);
+	unmuteStdout();
+	int used = test_key_pos;
+	clearKeys();
+	return used;
+}
+
+/* Type one character at point. */
+static void type_char(int ch) {
+	E.self_insert_key = ch;
+	processKeypress(CMD_SELF_INSERT);
+}
+
+/* --- 1. insert-file dirties and is undoable ----------------------- */
 
 void test_insert_file_is_dirty_and_undoable(void) {
 	char *path = make_temp_file("aaa\nbbb\n");
@@ -48,63 +88,51 @@ void test_insert_file_is_dirty_and_undoable(void) {
 	 * push-down-existing-row case. */
 	struct buffer *buf = make_test_buffer("existing");
 	TEST_ASSERT_FALSE(buf->dirty);
-	TEST_ASSERT_NULL(buf->undo);
 
 	buf->cx = 0;
 	buf->cy = 0;
-	int rc = insertFileAtPath(buf, path, path);
-	TEST_ASSERT_EQUAL_INT(0, rc);
+	int used = insert_file_typing(path);
+	TEST_ASSERT_EQUAL_INT((int)strlen(path) + 1, used);
 
-	/* Buffer is dirty, rows match, cursor at end of "bbb". */
+	/* Buffer is dirty, the file's lines sit above the old one,
+	 * cursor at end of "bbb". */
 	TEST_ASSERT_TRUE(buf->dirty);
-	TEST_ASSERT_EQUAL_INT(4, buf->numrows);
-	TEST_ASSERT_EQUAL_STRING("aaa", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_STRING("bbb", row_str(buf, 1));
-	TEST_ASSERT_EQUAL_STRING("existing", row_str(buf, 2));
+	ASSERT_TEXT("aaa\nbbb\nexisting\n", buf);
 	TEST_ASSERT_EQUAL_INT(1, buf->cy);
 	TEST_ASSERT_EQUAL_INT(3, buf->cx);
 
-	/* Undo stack is populated — insert-file left something to undo. */
-	TEST_ASSERT_NOT_NULL(buf->undo);
-
-	/* C-_ reverts the insertion.  After undo: original single row,
+	/* C-_ reverts the insertion.  After undo: the original text,
 	 * no extra content. */
-	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
-	TEST_ASSERT_EQUAL_STRING("existing", row_str(buf, 0));
+	processKeypress(CMD_UNDO);
+	ASSERT_TEXT("existing\n", buf);
 
 	unlink(path);
 	free(path);
 }
 
-/* --- 2. insertFile into empty buffer does not manufacture rows ---- */
+/* --- 2. insert-file into empty buffer does not manufacture rows --- */
 
 void test_insert_file_empty_buffer_no_trailing_row(void) {
 	char *path = make_temp_file("aaa\nbbb\n");
 	TEST_ASSERT_NOT_NULL(path);
 
-	/* Fresh buffer: one empty row, which is what the empty buffer
-	 * is under the #105 representation. */
+	/* Fresh buffer: nothing in it. */
 	struct buffer *buf = make_test_buffer(NULL);
-	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
+	ASSERT_TEXT("", buf);
 
 	buf->cx = 0;
 	buf->cy = 0;
-	int rc = insertFileAtPath(buf, path, path);
-	TEST_ASSERT_EQUAL_INT(0, rc);
+	insert_file_typing(path);
 
-	/* The file's two lines, plus the final empty row that carries
-	 * its trailing newline -- "aaa\nbbb\n" exactly.  No spurious
-	 * row beyond that. */
-	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
-	TEST_ASSERT_EQUAL_STRING("aaa", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_STRING("bbb", row_str(buf, 1));
+	/* The buffer now holds exactly the file's bytes: its two
+	 * lines and its trailing newline, nothing beyond that. */
+	ASSERT_TEXT("aaa\nbbb\n", buf);
 
 	unlink(path);
 	free(path);
 }
 
-/* --- 3. insertFile rejects nonexistent files ---------------------- */
+/* --- 3. insert-file rejects nonexistent files --------------------- */
 
 void test_insert_file_nonexistent_returns_error(void) {
 	struct buffer *buf = make_test_buffer("existing");
@@ -112,16 +140,17 @@ void test_insert_file_nonexistent_returns_error(void) {
 
 	char absent[PATH_MAX];
 	testTmpPath(absent, sizeof(absent), "this_file_does_not_exist_xyzzy");
-	int rc = insertFileAtPath(buf, absent, NULL);
-	TEST_ASSERT(rc != 0);
+	int used = insert_file_typing(absent);
 
-	/* Buffer untouched. */
+	/* The prompt was answered... */
+	TEST_ASSERT_EQUAL_INT((int)strlen(absent) + 1, used);
+
+	/* ...and the buffer is untouched. */
 	TEST_ASSERT_FALSE(buf->dirty);
-	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
-	TEST_ASSERT_EQUAL_STRING("existing", row_str(buf, 0));
+	ASSERT_TEXT("existing\n", buf);
 }
 
-/* --- 4. insertFile refuses read-only buffers ---------------------- */
+/* --- 4. insert-file refuses read-only buffers --------------------- */
 
 void test_insert_file_readonly(void) {
 	char *path = make_temp_file("aaa\nbbb\n");
@@ -130,17 +159,16 @@ void test_insert_file_readonly(void) {
 	struct buffer *buf = make_test_buffer("existing");
 	buf->read_only = 1;
 
-	int rc = insertFileAtPath(buf, path, path);
-	TEST_ASSERT_EQUAL_INT(1, rc);
-	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
-	TEST_ASSERT_EQUAL_STRING("existing", row_str(buf, 0));
+	/* Refused before the prompt: the path is never asked for. */
+	int used = insert_file_typing(path);
+	TEST_ASSERT_EQUAL_INT(0, used);
+	ASSERT_TEXT("existing\n", buf);
+	TEST_ASSERT_FALSE(buf->dirty);
 
 	buf->read_only = 0;
 	unlink(path);
 	free(path);
 }
-
-/* --- runner ------------------------------------------------------- */
 
 /* --- 5. insert-file undo round-trips wherever point is ----------- */
 
@@ -149,36 +177,32 @@ void test_insert_file_readonly(void) {
  * so it is pinned from both sides of the anchoring rule. */
 void test_insert_file_undo_round_trips(void) {
 	const char *lines[] = { "one", "two" };
-
-	struct buffer *mid = make_test_buffer_lines(lines, 2);
 	char *path = make_temp_file("aaa\nbbb\n");
 	TEST_ASSERT_NOT_NULL(path);
+
+	struct buffer *mid = make_test_buffer_lines(lines, 2);
 	mid->cy = 0;
 	mid->cx = 0;
-	insertFileAtPath(mid, path, NULL);
-	TEST_ASSERT_EQUAL_INT(5, mid->numrows);
-	while (mid->undo)
-		doUndo(mid, 1);
-	TEST_ASSERT_EQUAL_INT(3, mid->numrows);
-	TEST_ASSERT_EQUAL_STRING("one", row_str(mid, 0));
-	TEST_ASSERT_EQUAL_STRING("two", row_str(mid, 1));
+	insert_file_typing(path);
+	ASSERT_TEXT("aaa\nbbb\none\ntwo\n", mid);
+	processKeypress(CMD_UNDO);
+	ASSERT_TEXT("one\ntwo\n", mid);
 
 	struct buffer *eof = make_test_buffer_lines(lines, 2);
 	eof->next = mid; /* keep both reachable for cleanup */
 	eof->cy = 2;	 /* virtual EOF line */
 	eof->cx = 0;
-	insertFileAtPath(eof, path, NULL);
-	TEST_ASSERT_EQUAL_INT(5, eof->numrows);
-	while (eof->undo)
-		doUndo(eof, 1);
-	TEST_ASSERT_EQUAL_INT(3, eof->numrows);
-	TEST_ASSERT_EQUAL_STRING("one", row_str(eof, 0));
-	TEST_ASSERT_EQUAL_STRING("two", row_str(eof, 1));
+	insert_file_typing(path);
+	ASSERT_TEXT("one\ntwo\naaa\nbbb\n", eof);
+	processKeypress(CMD_UNDO);
+	ASSERT_TEXT("one\ntwo\n", eof);
 
+	unlink(path);
 	free(path);
 }
 
-/* Typing either side of a file insertion must not fold across it. */
+/* Typing either side of a file insertion must not fold across it:
+ * each of the three comes back out with its own undo. */
 void test_insert_file_does_not_join_a_typing_run(void) {
 	const char *lines[] = { "one", "two" };
 	struct buffer *buf = make_test_buffer_lines(lines, 2);
@@ -187,24 +211,27 @@ void test_insert_file_does_not_join_a_typing_run(void) {
 
 	buf->cy = 0;
 	buf->cx = 3;
-	E.buf = buf;
-	clearUndosAndRedos(buf);
+	type_char('X');
+	ASSERT_TEXT("oneX\ntwo\n", buf);
 
-	selfInsert(buf, 'X', 1);
 	buf->cy = 0;
 	buf->cx = 0;
-	insertFileAtPath(buf, path, NULL);
+	insert_file_typing(path);
+	ASSERT_TEXT("zzz\noneX\ntwo\n", buf);
+
 	buf->cy = 1;
 	buf->cx = buf->row[1].size;
-	selfInsert(buf, 'Y', 1);
+	type_char('Y');
+	ASSERT_TEXT("zzz\noneXY\ntwo\n", buf);
 
-	while (buf->undo)
-		doUndo(buf, 1);
+	processKeypress(CMD_UNDO); /* the Y */
+	ASSERT_TEXT("zzz\noneX\ntwo\n", buf);
+	processKeypress(CMD_UNDO); /* the file */
+	ASSERT_TEXT("oneX\ntwo\n", buf);
+	processKeypress(CMD_UNDO); /* the X */
+	ASSERT_TEXT("one\ntwo\n", buf);
 
-	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
-	TEST_ASSERT_EQUAL_STRING("one", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_STRING("two", row_str(buf, 1));
-
+	unlink(path);
 	free(path);
 }
 

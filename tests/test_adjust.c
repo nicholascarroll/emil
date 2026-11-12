@@ -471,48 +471,106 @@ void test_mark_stays_before_typed_text(void) {
 	TEST_ASSERT_EQUAL_INT(1, buf->markx);
 	TEST_ASSERT_EQUAL_INT(0, buf->marky);
 	TEST_ASSERT_EQUAL_INT(3, buf->cx);
+
+	/* So C-w takes exactly what was typed... */
 	processKeypress(CMD_KILL_REGION);
 	TEST_ASSERT_EQUAL_STRING("xy", (char *)buf->row[0].chars);
-	TEST_ASSERT_EQUAL_STRING("ab", (char *)E.kill.str);
-	clearText(&E.kill);
+
+	/* ...and C-y gives it back. */
+	buf->cx = 2;
+	processKeypress(CMD_YANK);
+	TEST_ASSERT_EQUAL_STRING("xyab", (char *)buf->row[0].chars);
 }
 
 /* Spec 05 P2: another window's cursor, a register point and a ring
  * entry at the place where text is inserted all stay before it, as in
  * Emacs (window-point, point-to-register and the mark ring are all
- * markers there). */
+ * markers there).
+ *
+ * Each is read back the way a user reaches it: C-u C-SPC through the
+ * ring, C-x r j to the register, C-x o to the other window. */
+
+/* Run `cmd` with one key waiting for it. */
+static void pressWithKey(int cmd, int key) {
+	int keys[] = { key };
+	scriptKeys(keys, 1);
+	muteStdout();
+	processKeypress(cmd);
+	unmuteStdout();
+	TEST_ASSERT_EQUAL_INT(1, test_key_pos);
+	clearKeys();
+}
+
+static void assertPoint(struct buffer *buf, int cx, int cy) {
+	TEST_ASSERT_EQUAL_INT(cx, buf->cx);
+	TEST_ASSERT_EQUAL_INT(cy, buf->cy);
+}
+
 void test_other_points_stay_before_inserted_text(void) {
+	/* "b\nc" on the kill ring, copied with M-w out of a scratch
+	 * buffer that is gone again before the test proper starts. */
+	const char *bc[] = { "b", "c" };
+	struct buffer *scratch = make_test_buffer_lines(bc, 2);
+	scratch->markx = 0;
+	scratch->marky = 0;
+	scratch->mark_active = 1;
+	scratch->cx = 1;
+	scratch->cy = 1;
+	processKeypress(CMD_COPY);
+	destroyBuffer(scratch);
+	E.buf = NULL;
+	E.headbuf = NULL;
+	E.windows[0]->buf = NULL;
+
+	makeMinibuffer();
 	const char *lines[] = { "xy", "" };
 	struct buffer *buf = make_test_buffer_lines(lines, 2);
 	buf->cx = 1;
 	buf->cy = 0;
-	processKeypress(CMD_CREATE_WINDOW); /* window 1 saves (1,0) */
-	push_mark_at(buf, 1, 0);
-	push_mark_at(buf, 0, 0); /* ring gets (1,0) */
+	processKeypress(CMD_CREATE_WINDOW); /* window 1 keeps (1,0) */
+	processKeypress(CMD_SET_MARK);	    /* mark at (1,0) */
+	buf->cx = 0;
+	processKeypress(CMD_SET_MARK); /* the ring gets (1,0) */
 	buf->cx = 1;
-	buf->cy = 0;
-	E.registers['q'].rtype = REGISTER_POINT;
-	E.registers['q'].data.point.buf = buf;
-	E.registers['q'].data.point.cx = 1;
-	E.registers['q'].data.point.cy = 0;
+	pressWithKey(CMD_POINT_REGISTER, 'q'); /* register q: (1,0) */
+
+	/* Type at (1,0), then yank two lines after it. */
 	E.self_insert_key = 'a';
 	processKeypress(CMD_SELF_INSERT);
-	clearText(&E.kill);
-	E.kill.str = (uint8_t *)xstrdup("b\nc");
 	processKeypress(CMD_YANK);
 	TEST_ASSERT_EQUAL_STRING("xab", (char *)buf->row[0].chars);
 	TEST_ASSERT_EQUAL_STRING("cy", (char *)buf->row[1].chars);
-	TEST_ASSERT_EQUAL_INT(1, E.windows[1]->cx);
-	TEST_ASSERT_EQUAL_INT(0, E.windows[1]->cy);
-	TEST_ASSERT_EQUAL_INT(1, buf->mark_ring[0].cx);
-	TEST_ASSERT_EQUAL_INT(0, buf->mark_ring[0].cy);
-	TEST_ASSERT_EQUAL_INT(1, E.registers['q'].data.point.cx);
-	TEST_ASSERT_EQUAL_INT(0, E.registers['q'].data.point.cy);
 	/* The typing cursor itself is moved by the command. */
-	TEST_ASSERT_EQUAL_INT(1, buf->cx);
-	TEST_ASSERT_EQUAL_INT(1, buf->cy);
-	E.registers['q'].rtype = REGISTER_NULL;
-	clearText(&E.kill);
+	assertPoint(buf, 1, 1);
+
+	/* C-u C-SPC three times: the mark the yank set where its text
+	 * went in, the mark from before the yank, then the ring entry.
+	 * Had the entry moved with the text it would now be at (1,1),
+	 * after the yanked newline. */
+	E.uarg = 4;
+	processKeypress(CMD_SET_MARK);
+	assertPoint(buf, 2, 0);
+	E.uarg = 4;
+	processKeypress(CMD_SET_MARK);
+	assertPoint(buf, 0, 0);
+	E.uarg = 4;
+	processKeypress(CMD_SET_MARK);
+	assertPoint(buf, 1, 0);
+
+	/* C-x r j q: the register point did not move either. */
+	buf->cx = 0;
+	buf->cy = 1;
+	pressWithKey(CMD_JUMP_REGISTER, 'q');
+	assertPoint(buf, 1, 0);
+
+	/* C-x o: the other window's cursor is where it was. */
+	buf->cx = 0;
+	buf->cy = 1;
+	processKeypress(CMD_OTHER_WINDOW);
+	TEST_ASSERT(E.buf == buf);
+	assertPoint(buf, 1, 0);
+
+	freeMinibuffer();
 }
 
 int main(void) {

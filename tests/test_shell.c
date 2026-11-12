@@ -1,6 +1,18 @@
 /* Copyright (c) 2021 chameleon, 2026 Nicholas Carroll.
  * SPDX-License-Identifier: MIT */
-/* test_shell.c: Integration tests for pipe.c shell operations.*/
+/* test_shell.c: Shell commands and diff-buffer-with-file.
+ *
+ * M-! (shell-command), M-| (shell-command-on-region), C-u M-| (replace
+ * the region with the output) and M-x diff-buffer-with-file are run
+ * the way a user runs them: the command token goes through
+ * processKeypress(), the command line is typed at the prompt it
+ * opens, and the test reads the buffer the editor ends up showing.
+ * Nothing here copies the editor's own logic, so a break in the shell
+ * commands turns a test red.
+ *
+ * The three C-g tests at the end are the exception.  They need an
+ * interrupt source the test controls, which only
+ * pipeCommandCaptureIntr() offers short of a real terminal. */
 
 #include "test.h"
 #include "test_harness.h"
@@ -10,12 +22,11 @@
 #include "emil_subprocess.h"
 #include "emil.h"
 #include "buffer.h"
-#include "display.h"
 #include "fileio.h"
+#include "keymap.h"
 #include "pipe.h"
-#include "region.h"
-#include "unicode.h"
 #include "util.h"
+#include <fcntl.h>
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -51,124 +62,6 @@ static char *make_tmp_template(const char *prefix) {
 	return tmpl;
 }
 
-/* ---- Helper: read all of stdout from a subprocess into a malloc'd
- *      string.  Returns NULL on alloc failure. ---- */
-static char *read_stdout(FILE *p_stdout) {
-	int bsiz = BUFSIZ + 1;
-	char *buf = calloc(1, bsiz);
-	if (!buf)
-		return NULL;
-	int c = fgetc(p_stdout);
-	int i = 0;
-	while (c != EOF) {
-		buf[i++] = c;
-		buf[i] = 0;
-		if (i >= bsiz - 10) {
-			bsiz <<= 1;
-			buf = realloc(buf, bsiz);
-		}
-		c = fgetc(p_stdout);
-	}
-	return buf;
-}
-
-/* ---- Helper: replicate the subprocess + read pattern from
- *      transformerPipeCmd, returning a malloc'd string.
- *      Returns NULL on failure (caller must handle). ---- */
-static char *run_shell(const char *shell_cmd, const char *input) {
-	const char *command_line[4] = { "/bin/sh", "-c", shell_cmd, NULL };
-	struct subprocess_s proc;
-	int rc = subprocess_create(command_line,
-				   subprocess_option_inherit_environment,
-				   &proc);
-	if (rc != 0) {
-		fprintf(stderr, "    run_shell: subprocess_create failed for '%s'\n",
-			shell_cmd);
-		return NULL;
-	}
-
-	FILE *p_stdin = subprocess_stdin(&proc);
-	FILE *p_stdout = subprocess_stdout(&proc);
-
-	if (input && p_stdin) {
-		for (int i = 0; input[i]; i++)
-			fputc(input[i], p_stdin);
-	}
-
-	int sub_ret;
-	if (subprocess_join(&proc, &sub_ret) != 0) {
-		fprintf(stderr, "    run_shell: subprocess_join failed for '%s'\n",
-			shell_cmd);
-		subprocess_destroy(&proc);
-		return NULL;
-	}
-
-	if (!p_stdout) {
-		fprintf(stderr, "    run_shell: stdout is NULL for '%s'\n",
-			shell_cmd);
-		subprocess_destroy(&proc);
-		return NULL;
-	}
-
-	char *buf = read_stdout(p_stdout);
-	subprocess_destroy(&proc);
-	return buf;
-}
-
-/* ---- Helper: run a direct command with PATH search (no shell).
- *      This matches how diffBufferWithFile spawns diff.
- *      Returns NULL on failure (caller must handle). ---- */
-static char *run_command(const char *const argv[], int *exit_code) {
-	struct subprocess_s proc;
-	int rc = subprocess_create(argv,
-				   subprocess_option_inherit_environment |
-				   subprocess_option_search_user_path,
-				   &proc);
-	if (rc != 0) {
-		fprintf(stderr, "    run_command: subprocess_create failed for '%s'"
-			" (rc=%d, errno=%d: %s)\n",
-			argv[0], rc, errno, strerror(errno));
-		return NULL;
-	}
-
-	int sub_ret = -1;
-	if (subprocess_join(&proc, &sub_ret) != 0) {
-		fprintf(stderr, "    run_command: subprocess_join failed for '%s'\n",
-			argv[0]);
-		subprocess_destroy(&proc);
-		return NULL;
-	}
-	if (exit_code)
-		*exit_code = sub_ret;
-
-	FILE *p_stdout = subprocess_stdout(&proc);
-	if (!p_stdout) {
-		fprintf(stderr, "    run_command: stdout is NULL for '%s'\n",
-			argv[0]);
-		subprocess_destroy(&proc);
-		return NULL;
-	}
-
-	char *buf = read_stdout(p_stdout);
-	subprocess_destroy(&proc);
-	return buf;
-}
-
-/* ---- Helper: replicate the row-splitting logic from pipeCmd,
- *      creating a buffer from shell output. ---- */
-static struct buffer *output_to_buffer(const char *output) {
-	struct buffer *buf = newBuffer();
-	buf->filename = xstrdup("*Shell Output*");
-	buf->special_buffer = 1;
-	bufferResetRows(buf); /* rows built from scratch below */
-	/* The same loader the shell-output path uses.  This helper was
-	 * a sixth copy of the split (#117 S-3 counted five, all in
-	 * production); a test mirroring the code under test is one
-	 * edit away from mirroring it wrongly. */
-	bufferLoadBlob(buf, (const uint8_t *)output, strlen(output), 0);
-	return buf;
-}
-
 /* ---- Helper: write a string to a temporary file, return path. ---- */
 static char *write_temp_file(const char *content) {
 	char *path = make_tmp_template("emil-test-");
@@ -199,128 +92,188 @@ static char *write_temp_file(const char *content) {
 	return path;
 }
 
+/* ---- Watchdog ------------------------------------------------------
+ * alarm() shares ITIMER_REAL with fileio.c's
+ * timed_stat/timed_lockFile machinery, and the harness installs
+ * fileCheckAlarm as the SIGALRM handler — which only sets a flag and
+ * would NOT terminate a deadlocked test (the pump loop retries on
+ * EINTR).  So the watchdog temporarily restores the default SIGALRM
+ * disposition, which kills the test binary and turns a regressed
+ * deadlock into a suite FAILURE instead of a hang, then reinstalls
+ * the harness handler afterwards. */
+
+static void (*watchdog_saved_handler)(int);
+
+static void watchdogStart(unsigned sec) {
+	watchdog_saved_handler = signal(SIGALRM, SIG_DFL);
+	alarm(sec);
+}
+
+static void watchdogStop(void) {
+	alarm(0);
+	signal(SIGALRM, watchdog_saved_handler);
+}
+
+/* ---- Helper: issue a command and answer the prompt it opens ----
+ * `typed` and RET are waiting when `cmd` is dispatched.  Under the
+ * watchdog, so a command that never comes back fails the suite
+ * rather than hanging it. */
+static void run_typing(int cmd, const char *typed) {
+	int keys[256];
+	int n = 0;
+	while (typed[n] && n < 255) {
+		keys[n] = (unsigned char)typed[n];
+		n++;
+	}
+	keys[n++] = '\r';
+
+	scriptKeys(keys, n);
+	muteStdout();
+	watchdogStart(300);
+	processKeypress(cmd);
+	watchdogStop();
+	unmuteStdout();
+	clearKeys();
+}
+
+/* M-! command RET */
+static void shell_command(const char *command) {
+	run_typing(CMD_SHELL_CMD, command);
+}
+
+/* M-| command RET, on the region between mark and point */
+static void shell_command_on_region(const char *command) {
+	run_typing(CMD_PIPE_CMD, command);
+}
+
+/* C-u M-| command RET: the output replaces the region */
+static void shell_command_replacing_region(const char *command) {
+	E.uarg = 4;
+	run_typing(CMD_PIPE_CMD, command);
+}
+
+/* M-x name RET */
+static void meta_x(const char *name) {
+	run_typing(CMD_EXEC_CMD, name);
+}
+
+/* ---- Helper: mark at (mx, my), point at (px, py) ---- */
+static void set_region(struct buffer *buf, int mx, int my, int px, int py) {
+	buf->markx = mx;
+	buf->marky = my;
+	buf->mark_active = 1;
+	buf->cx = px;
+	buf->cy = py;
+}
+
+/* ---- Helper: is the buffer now in front of the user called `name`? */
+static int showing(const char *name) {
+	return E.buf && E.buf->filename &&
+	       strcmp(E.buf->filename, name) == 0 &&
+	       E.windows[0]->buf == E.buf;
+}
+
+/* The whole buffer as the bytes a save would write. */
+#define ASSERT_TEXT(expected, buf)                           \
+	do {                                                 \
+		size_t _len;                                 \
+		char *_text = rowsToString((buf), &_len);    \
+		TEST_ASSERT_EQUAL_STRING((expected), _text); \
+		free(_text);                                 \
+	} while (0)
+
 /* ================================================================
- * 1. Shell command (no region): run command, capture output
+ * 1. Shell command (no region): run command, show its output
  * ================================================================ */
 
-void test_shell_echo_to_buffer(void) {
-	make_test_buffer("");
-	char *output = run_shell("echo hello world", NULL);
-	if (!output) { TEST_ASSERT_NOT_NULL(output); return; }
-	TEST_ASSERT_EQUAL_STRING("hello world\n", output);
-
-	struct buffer *outbuf = output_to_buffer(output);
-	TEST_ASSERT_EQUAL_INT(1, outbuf->numrows);
-	TEST_ASSERT_EQUAL_STRING("hello world", row_str(outbuf, 0));
-
-	E.headbuf->next = outbuf;
-	free(output);
-}
-
 void test_shell_multiline_to_buffer(void) {
-	make_test_buffer("");
-	char *output = run_shell("printf 'line1\\nline2\\nline3\\n'", NULL);
-	if (!output) { TEST_ASSERT_NOT_NULL(output); return; }
+	struct buffer *buf = make_test_buffer("untouched");
 
-	struct buffer *outbuf = output_to_buffer(output);
-	TEST_ASSERT_EQUAL_INT(3, outbuf->numrows);
-	TEST_ASSERT_EQUAL_STRING("line1", row_str(outbuf, 0));
-	TEST_ASSERT_EQUAL_STRING("line2", row_str(outbuf, 1));
-	TEST_ASSERT_EQUAL_STRING("line3", row_str(outbuf, 2));
+	shell_command("printf 'line1\\nline2\\nline3\\n'");
 
-	E.headbuf->next = outbuf;
-	free(output);
-}
+	/* The output is in front of the user, in its own buffer: one
+	 * row per line.  The newline that ends the last line does not
+	 * become an empty row after it. */
+	TEST_ASSERT(showing("*Shell Output*"));
+	TEST_ASSERT(E.buf != buf);
+	TEST_ASSERT_EQUAL_INT(3, E.buf->numrows);
+	TEST_ASSERT_EQUAL_STRING("line1", row_str(E.buf, 0));
+	TEST_ASSERT_EQUAL_STRING("line2", row_str(E.buf, 1));
+	TEST_ASSERT_EQUAL_STRING("line3", row_str(E.buf, 2));
 
-void test_shell_pipeline_to_buffer(void) {
-	make_test_buffer("");
-	char *output = run_shell("echo hello | tr h H", NULL);
-	if (!output) { TEST_ASSERT_NOT_NULL(output); return; }
-
-	struct buffer *outbuf = output_to_buffer(output);
-	TEST_ASSERT_EQUAL_INT(1, outbuf->numrows);
-	TEST_ASSERT_EQUAL_STRING("Hello", row_str(outbuf, 0));
-
-	E.headbuf->next = outbuf;
-	free(output);
+	/* The buffer the command was run from is as it was. */
+	ASSERT_TEXT("untouched\n", buf);
+	TEST_ASSERT_EQUAL_INT(0, buf->dirty);
 }
 
 void test_shell_utf8_output(void) {
 	make_test_buffer("");
-	const char *utf8_input = "caf\xc3\xa9\n";
-	char *output = run_shell("cat", utf8_input);
-	if (!output) { TEST_ASSERT_NOT_NULL(output); return; }
 
-	int valid = utf8_validate((uint8_t *)output, (int)strlen(output));
-	TEST_ASSERT(valid);
+	/* "café" and a newline; the é is written as octal escapes so
+	 * that only ASCII is typed at the prompt. */
+	shell_command("printf 'caf\\303\\251\\n'");
 
-	struct buffer *outbuf = output_to_buffer(output);
-	TEST_ASSERT_EQUAL_INT(1, outbuf->numrows);
-	TEST_ASSERT_EQUAL_STRING("caf\xc3\xa9", row_str(outbuf, 0));
+	TEST_ASSERT(showing("*Shell Output*"));
+	TEST_ASSERT_EQUAL_INT(1, E.buf->numrows);
+	TEST_ASSERT_EQUAL_STRING("caf\xc3\xa9", row_str(E.buf, 0));
+}
 
-	E.headbuf->next = outbuf;
-	free(output);
+/* Output that is not UTF-8 is refused rather than loaded: no output
+ * buffer appears and the user stays where they were. */
+void test_shell_invalid_utf8_output_refused(void) {
+	struct buffer *buf = make_test_buffer("untouched");
+
+	shell_command("printf '\\377\\376\\n'");
+
+	TEST_ASSERT(E.buf == buf);
+	TEST_ASSERT(E.windows[0]->buf == buf);
+	TEST_ASSERT(strlen(E.statusmsg) > 0);
+	ASSERT_TEXT("untouched\n", buf);
 }
 
 /* ================================================================
- * 2. Shell command piping region: feed selected text, capture output
+ * 2. Shell command on region: feed selected text, show the output
+ * ================================================================ */
+
+void test_shell_pipe_multiline_region(void) {
+	const char *lines[] = { "banana", "apple", "cherry" };
+	struct buffer *buf = make_test_buffer_lines(lines, 3);
+
+	/* The three lines, each with its newline. */
+	set_region(buf, 0, 0, 0, 3);
+	shell_command_on_region("sort");
+
+	TEST_ASSERT(showing("*Shell Output*"));
+	TEST_ASSERT_EQUAL_INT(3, E.buf->numrows);
+	TEST_ASSERT_EQUAL_STRING("apple", row_str(E.buf, 0));
+	TEST_ASSERT_EQUAL_STRING("banana", row_str(E.buf, 1));
+	TEST_ASSERT_EQUAL_STRING("cherry", row_str(E.buf, 2));
+
+	/* Without C-u the region itself is left alone. */
+	ASSERT_TEXT("banana\napple\ncherry\n", buf);
+	TEST_ASSERT_EQUAL_INT(0, buf->dirty);
+}
+
+/* ================================================================
+ * 3. Shell command replacing region: C-u M-|
  * ================================================================ */
 
 void test_shell_pipe_region(void) {
-	make_test_buffer("");
-	char *output = run_shell("tr a-z A-Z", "hello world");
-	if (!output) { TEST_ASSERT_NOT_NULL(output); return; }
-	TEST_ASSERT_EQUAL_STRING("HELLO WORLD", output);
-	free(output);
-}
+	struct buffer *buf = make_test_buffer("hello world");
 
-void test_shell_pipe_multiline_region(void) {
-	make_test_buffer("");
-	char *output = run_shell("sort", "banana\napple\ncherry\n");
-	if (!output) { TEST_ASSERT_NOT_NULL(output); return; }
+	/* Only "world" is selected. */
+	set_region(buf, 6, 0, 11, 0);
+	shell_command_replacing_region("tr a-z A-Z");
 
-	struct buffer *outbuf = output_to_buffer(output);
-	TEST_ASSERT_EQUAL_INT(3, outbuf->numrows);
-	TEST_ASSERT_EQUAL_STRING("apple", row_str(outbuf, 0));
-	TEST_ASSERT_EQUAL_STRING("banana", row_str(outbuf, 1));
-	TEST_ASSERT_EQUAL_STRING("cherry", row_str(outbuf, 2));
+	/* The output went into the buffer in place of the region, and
+	 * no output buffer was opened. */
+	TEST_ASSERT(E.buf == buf);
+	ASSERT_TEXT("hello WORLD\n", buf);
+	TEST_ASSERT_TRUE(buf->dirty);
 
-	E.headbuf->next = outbuf;
-	free(output);
-}
-
-/* ================================================================
- * 3. Shell command replacing region: feed region, replace in buffer
- * ================================================================ */
-
-void test_shell_region_replacement_text(void) {
-	make_test_buffer("hello world");
-	char *output = run_shell("tr a-z A-Z", "hello world");
-	if (!output) { TEST_ASSERT_NOT_NULL(output); return; }
-
-	struct buffer *outbuf = output_to_buffer(output);
-	TEST_ASSERT_EQUAL_INT(1, outbuf->numrows);
-	TEST_ASSERT_EQUAL_STRING("HELLO WORLD", row_str(outbuf, 0));
-
-	E.headbuf->next = outbuf;
-	free(output);
-}
-
-void test_shell_region_replace_multiline(void) {
-	const char *lines[] = { "3", "1", "2" };
-	make_test_buffer_lines(lines, 3);
-
-	char *output = run_shell("sort -n", "3\n1\n2\n");
-	if (!output) { TEST_ASSERT_NOT_NULL(output); return; }
-
-	struct buffer *outbuf = output_to_buffer(output);
-	TEST_ASSERT_EQUAL_INT(3, outbuf->numrows);
-	TEST_ASSERT_EQUAL_STRING("1", row_str(outbuf, 0));
-	TEST_ASSERT_EQUAL_STRING("2", row_str(outbuf, 1));
-	TEST_ASSERT_EQUAL_STRING("3", row_str(outbuf, 2));
-
-	E.headbuf->next = outbuf;
-	free(output);
+	/* One undo takes the whole replacement back. */
+	processKeypress(CMD_UNDO);
+	ASSERT_TEXT("hello world\n", buf);
 }
 
 /* ================================================================
@@ -353,17 +306,16 @@ static int diffAvailable(void) {
 }
 
 void test_diff_no_filename(void) {
-	make_test_buffer("some content");
-	diffBufferWithFile();
-	TEST_ASSERT(strlen(E.statusmsg) > 0);
-}
+	struct buffer *buf = make_test_buffer("some content");
 
-void test_diff_not_dirty(void) {
-	make_test_buffer("some content");
-	E.buf->filename = make_tmp_template("emil-noexist-");
-	E.buf->dirty = 0;
-	diffBufferWithFile();
+	meta_x("diff-buffer-with-file");
+
+	/* Nothing to compare with: the user is told so and no diff
+	 * buffer is opened. */
 	TEST_ASSERT(strlen(E.statusmsg) > 0);
+	TEST_ASSERT(E.buf == buf);
+	TEST_ASSERT(E.windows[0]->buf == buf);
+	ASSERT_TEXT("some content\n", buf);
 }
 
 void test_diff_identical(void) {
@@ -372,11 +324,11 @@ void test_diff_identical(void) {
 	if (!path) { TEST_ASSERT_NOT_NULL(path); return; }
 
 	const char *lines[] = { "line one", "line two" };
-	make_test_buffer_lines(lines, 2);
+	struct buffer *buf = make_test_buffer_lines(lines, 2);
 	E.buf->filename = xstrdup(path);
 	E.buf->dirty = 1;
 
-	diffBufferWithFile();
+	meta_x("diff-buffer-with-file");
 
 	/* Both outcomes are asserted, so this cannot pass by the status
 	 * line merely being non-empty -- which is what it used to check,
@@ -386,96 +338,62 @@ void test_diff_identical(void) {
 	else
 		TEST_ASSERT_EQUAL_STRING("Diff failed: cannot create subprocess",
 					 E.statusmsg);
-	TEST_ASSERT_NULL(E.headbuf->next);
+
+	/* Either way no diff buffer is opened. */
+	TEST_ASSERT(E.buf == buf);
+	TEST_ASSERT(E.windows[0]->buf == buf);
 
 	unlink(path);
 	free(path);
 }
 
-/* These two cover run_command plus output_to_buffer: a command that
- * exits non-zero, whose stdout is captured whole and split into buffer
- * rows.  They used to invoke `diff -u` on two temp files, which meant
- * they also required diff to be installed -- and on Redox, whose image
- * does not carry it, both failed at subprocess_create with output NULL.
- * That is the test asserting a property of the host.
+/* The file says "old line", the buffer says "new line": the command
+ * opens a read-only *Diff* buffer holding diff's output.
  *
- * `sh` produces the same shape of output with no such dependency, and
- * the suite already spawns /bin/sh elsewhere and passes on Redox doing
- * it.  It is named without a slash on purpose: run_command passes
- * subprocess_option_search_user_path, and the old `diff` argv was the
- * only thing exercising that PATH search.
- *
- * Emil's own diff (editorDiff in pipe.c) does shell out to diff, and
- * already handles its absence -- "Diff failed: cannot create
- * subprocess".  That path is untested; it needs diff to be missing,
- * which is awkward to arrange here. */
+ * This needs diff to be installed.  The Redox image does not carry
+ * it, and the editor has an answer for that case ("Diff failed:
+ * cannot create subprocess"), so that answer is asserted there
+ * instead, as in test_diff_identical. */
 void test_command_output_becomes_buffer_rows(void) {
-	make_test_buffer("");
+	char *path = write_temp_file("old line\n");
+	if (!path) { TEST_ASSERT_NOT_NULL(path); return; }
 
-	const char *argv[] = { "sh", "-c",
-			       "printf '%s\\n' '--- old' '+++ new' "
-			       "'-old line' '+new line'; exit 1",
-			       NULL };
-	int cmd_exit;
-	char *output = run_command(argv, &cmd_exit);
-	if (!output) {
-		TEST_ASSERT_NOT_NULL(output);
+	struct buffer *buf = make_test_buffer("new line");
+	E.buf->filename = xstrdup(path);
+	E.buf->dirty = 1;
+
+	meta_x("diff-buffer-with-file");
+
+	if (!diffAvailable()) {
+		TEST_ASSERT_EQUAL_STRING("Diff failed: cannot create subprocess",
+					 E.statusmsg);
+		TEST_ASSERT(E.buf == buf);
+		unlink(path);
+		free(path);
 		return;
 	}
 
-	TEST_ASSERT_EQUAL_INT(1, cmd_exit);
-	TEST_ASSERT(strlen(output) > 0);
+	TEST_ASSERT(showing("*Diff*"));
+	TEST_ASSERT(E.buf != buf);
+	TEST_ASSERT_TRUE(E.buf->read_only);
 
-	struct buffer *diff_buf = output_to_buffer(output);
-	TEST_ASSERT(diff_buf->numrows > 0);
-
+	/* One line removed, one added, each on a row of its own. */
 	int found_old = 0, found_new = 0;
-	for (int i = 0; i < diff_buf->numrows; i++) {
-		const char *r = row_str(diff_buf, i);
-		if (strstr(r, "old line"))
-			found_old = 1;
-		if (strstr(r, "new line"))
-			found_new = 1;
+	for (int i = 0; i < E.buf->numrows; i++) {
+		const char *r = row_str(E.buf, i);
+		if (strcmp(r, "-old line") == 0)
+			found_old++;
+		if (strcmp(r, "+new line") == 0)
+			found_new++;
 	}
-	TEST_ASSERT(found_old);
-	TEST_ASSERT(found_new);
+	TEST_ASSERT_EQUAL_INT(1, found_old);
+	TEST_ASSERT_EQUAL_INT(1, found_new);
 
-	E.headbuf->next = diff_buf;
-	free(output);
-}
+	/* The buffer that was compared is as it was. */
+	ASSERT_TEXT("new line\n", buf);
 
-void test_command_multiline_output_rows(void) {
-	make_test_buffer("");
-
-	const char *argv[] = { "sh", "-c",
-			       "printf '%s\\n' ' alpha' '-beta' '+CHANGED' "
-			       "' gamma'; exit 1",
-			       NULL };
-	int cmd_exit;
-	char *output = run_command(argv, &cmd_exit);
-	if (!output) {
-		TEST_ASSERT_NOT_NULL(output);
-		return;
-	}
-
-	TEST_ASSERT_EQUAL_INT(1, cmd_exit);
-
-	struct buffer *diff_buf = output_to_buffer(output);
-	TEST_ASSERT(diff_buf->numrows > 0);
-
-	int found_beta = 0, found_changed = 0;
-	for (int i = 0; i < diff_buf->numrows; i++) {
-		const char *r = row_str(diff_buf, i);
-		if (strstr(r, "beta"))
-			found_beta = 1;
-		if (strstr(r, "CHANGED"))
-			found_changed = 1;
-	}
-	TEST_ASSERT(found_beta);
-	TEST_ASSERT(found_changed);
-
-	E.headbuf->next = diff_buf;
-	free(output);
+	unlink(path);
+	free(path);
 }
 
 #endif /* EMIL_DISABLE_SHELL */
@@ -484,54 +402,60 @@ void test_command_multiline_output_rows(void) {
 
 void setUp(void) {
 	initTestEditor();
+	makeMinibuffer();
+	setupCommands();
 }
 void tearDown(void) {
+	freeMinibuffer();
 	cleanupTestEditor();
 }
 
 
 /* ---- Pipe deadlock regressions ------------------------------------ */
-/*  Watchdog note: alarm() shares ITIMER_REAL with fileio.c's
- * timed_stat/timed_lockFile machinery, and the harness installs
- * fileCheckAlarm as the SIGALRM handler — which only sets a flag and
- * would NOT terminate a deadlocked test (the pump loop retries on
- * EINTR).  So the watchdog temporarily restores the default SIGALRM
- * disposition, which kills the test binary and turns a regressed
- * deadlock into a suite FAILURE instead of a hang, then reinstalls
- * the harness handler afterwards. */
-
-static void (*watchdog_saved_handler)(int);
-
-static void watchdogStart(unsigned sec) {
-	watchdog_saved_handler = signal(SIGALRM, SIG_DFL);
-	alarm(sec);
-}
-
-static void watchdogStop(void) {
-	alarm(0);
-	signal(SIGALRM, watchdog_saved_handler);
-}
+/* Output, input, or both larger than a pipe holds (~64 KB).  Each
+ * runs under the watchdog in run_typing(), so a regressed deadlock is
+ * a failure, not a hang. */
 
 void test_pipe_large_output_no_deadlock(void) {
-	watchdogStart(300);
-	uint8_t *r = pipeCommandCapture((const uint8_t *)"seq 1 60000", NULL);
-	watchdogStop();
-	TEST_ASSERT_NOT_NULL(r);
-	TEST_ASSERT_TRUE(strlen((char *)r) > 65536);
-	free(r);
+	make_test_buffer("");
+
+	shell_command("seq 1 60000");
+
+	/* All 60000 lines arrived, in order.  Their digits come to
+	 * 288894 bytes (9 + 180 + 2700 + 36000 + 250005), far more than
+	 * a pipe holds. */
+	TEST_ASSERT(showing("*Shell Output*"));
+	TEST_ASSERT_EQUAL_INT(60000, E.buf->numrows);
+	TEST_ASSERT_EQUAL_STRING("1", row_str(E.buf, 0));
+	TEST_ASSERT_EQUAL_STRING("60000", row_str(E.buf, 59999));
+	size_t digits = 0;
+	for (int i = 0; i < E.buf->numrows; i++)
+		digits += (size_t)E.buf->row[i].size;
+	TEST_ASSERT_EQUAL_UINT(288894, digits);
+}
+
+/* A buffer holding one line of n 'x' characters, all of it selected. */
+static char *make_big_region(struct buffer **out, size_t n) {
+	char *in = xmalloc(n + 1);
+	memset(in, 'x', n);
+	in[n] = 0;
+	struct buffer *buf = make_test_buffer(in);
+	set_region(buf, 0, 0, (int)n, 0);
+	*out = buf;
+	return in;
 }
 
 void test_pipe_large_region_roundtrip_no_deadlock(void) {
 	size_t n = 200 * 1024;
-	uint8_t *in = xmalloc(n + 1);
-	memset(in, 'x', n);
-	in[n] = 0;
-	watchdogStart(300);
-	uint8_t *r = pipeCommandCapture((const uint8_t *)"cat", in);
-	watchdogStop();
-	TEST_ASSERT_NOT_NULL(r);
-	TEST_ASSERT_EQUAL_INT((int)n, (int)strlen((char *)r));
-	free(r);
+	struct buffer *buf;
+	char *in = make_big_region(&buf, n);
+
+	shell_command_on_region("cat");
+
+	/* cat hands back exactly what it was sent. */
+	TEST_ASSERT(showing("*Shell Output*"));
+	TEST_ASSERT(E.buf != buf);
+	ASSERT_TEXT(in, E.buf);
 	free(in);
 }
 
@@ -540,10 +464,9 @@ void test_pipe_child_exits_early(void) {
 	 * child fail with EPIPE instead of killing the test. */
 	signal(SIGPIPE, SIG_IGN);
 	size_t n = 200 * 1024;
-	uint8_t *in = xmalloc(n + 1);
-	memset(in, 'x', n);
-	in[n] = 0;
-	watchdogStart(300);
+	struct buffer *buf;
+	char *in = make_big_region(&buf, n);
+
 	/* dd, not `head -c 10`: -c is a GNU/BSD extension and POSIX head
 	 * takes only -n, so a strictly conforming head rejects it, writes
 	 * nothing, and the assertion below fails for a reason that has
@@ -551,12 +474,11 @@ void test_pipe_child_exits_early(void) {
 	 * (§1.2 commits emil to POSIX.1-2001, so the suite should not
 	 * assume extensions either).  What the test needs is a child that
 	 * takes 10 bytes and exits while the parent is still writing. */
-	uint8_t *r = pipeCommandCapture(
-		(const uint8_t *)"dd bs=1 count=10 2>/dev/null", in);
-	watchdogStop();
-	TEST_ASSERT_NOT_NULL(r);
-	TEST_ASSERT_EQUAL_INT(10, (int)strlen((char *)r));
-	free(r);
+	shell_command_on_region("dd bs=1 count=10 2>/dev/null");
+
+	TEST_ASSERT(showing("*Shell Output*"));
+	TEST_ASSERT(E.buf != buf);
+	ASSERT_TEXT("xxxxxxxxxx", E.buf);
 	free(in);
 }
 
@@ -650,11 +572,21 @@ int main(void) {
 	TEST_BEGIN();
 
 #ifndef EMIL_DISABLE_SHELL
+	/* While a shell command runs the editor watches the terminal,
+	 * fd 0, for C-g.  Give the suite an fd 0 with nothing on it, so
+	 * that it neither reads its caller's input nor changes the
+	 * settings of the terminal it was started from. */
+	int devnull = open("/dev/null", O_RDONLY);
+	if (devnull >= 0) {
+		dup2(devnull, STDIN_FILENO);
+		if (devnull != STDIN_FILENO)
+			close(devnull);
+	}
+
 	/* 1. Shell command, no region */
-	RUN_TEST(test_shell_echo_to_buffer);
 	RUN_TEST(test_shell_multiline_to_buffer);
-	RUN_TEST(test_shell_pipeline_to_buffer);
 	RUN_TEST(test_shell_utf8_output);
+	RUN_TEST(test_shell_invalid_utf8_output_refused);
 
 	RUN_TEST(test_pipe_large_output_no_deadlock);
 	RUN_TEST(test_pipe_large_region_roundtrip_no_deadlock);
@@ -663,20 +595,16 @@ int main(void) {
 	RUN_TEST(test_pipe_cancel_escalates_to_sigkill);
 	RUN_TEST(test_pipe_intr_ignores_other_bytes);
 
-	/* 2. Shell command piping region */
-	RUN_TEST(test_shell_pipe_region);
+	/* 2. Shell command on region */
 	RUN_TEST(test_shell_pipe_multiline_region);
 
 	/* 3. Shell command replacing region */
-	RUN_TEST(test_shell_region_replacement_text);
-	RUN_TEST(test_shell_region_replace_multiline);
+	RUN_TEST(test_shell_pipe_region);
 
 	/* 4. Diff buffer with file */
 	RUN_TEST(test_diff_no_filename);
-	RUN_TEST(test_diff_not_dirty);
 	RUN_TEST(test_diff_identical);
 	RUN_TEST(test_command_output_becomes_buffer_rows);
-	RUN_TEST(test_command_multiline_output_rows);
 #endif
 
 	return TEST_END();

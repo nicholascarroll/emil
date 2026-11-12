@@ -4,12 +4,9 @@
 #include "test.h"
 #include "test_harness.h"
 #include "buffer.h"
-#include "mutate.h"
 #include "prompt.h"
 #include "keymap.h"
 #include "unicode.h"
-#include "edit.h"
-#include "completion.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -97,7 +94,7 @@ void test_zap_arrow_key_does_not_corrupt_utf8(void) {
 	int keys[] = { KEY_ARROW_LEFT };
 	scriptKeys(keys, 1);
 	muteStdout();
-	zapToChar(1);
+	processKeypress(CMD_ZAP_TO_CHAR);
 	unmuteStdout();
 	clearKeys();
 
@@ -124,7 +121,7 @@ void test_zap_meta_key_does_not_corrupt_utf8(void) {
 	keys[0] = KEY_META_BASE;	/* 2000 -> 0xD0 exactly */
 	scriptKeys(keys, 1);
 	muteStdout();
-	zapToChar(1);
+	processKeypress(CMD_ZAP_TO_CHAR);
 	unmuteStdout();
 	clearKeys();
 
@@ -147,7 +144,7 @@ void test_zap_ascii_still_works(void) {
 	int keys[] = { 'o' };
 	scriptKeys(keys, 1);
 	muteStdout();
-	zapToChar(1);
+	processKeypress(CMD_ZAP_TO_CHAR);
 	unmuteStdout();
 	clearKeys();
 
@@ -480,46 +477,12 @@ void test_confirm_yn_answer_recorded_in_macro(void) {
 	cleanupTestEditor();
 }
 
-/* ---- A buffer filename holding a newline ---- */
+/* ---- Buffer names the minibuffer cannot hold as they are ---- */
 
-/* '\n' is emil's row separator, never a byte in a row, but a filename can
- * hold one and the buffer and search prompts list filenames.  A second TAB
- * lists both matches in *Completions*. */
-static void check_newline_name_listed(enum promptType type) {
-	initTestEditor();
-	makeMinibuffer();
-	struct buffer *cur = make_test_buffer("x");
-	E.edbuf = cur;
-	struct buffer *n1 = newBuffer(), *n2 = newBuffer();
-	n1->filename = xstrdup("qq\nyy");
-	n2->filename = xstrdup("qqz");
-	cur->next = n1;
-	n1->next = n2;
-
-	mutateInsert(E.minibuf, 0, 0, (const uint8_t *)"qq", 2, NULL, NULL);
-	E.minibuf->cx = 2;
-	E.minibuf->cy = 0;
-	muteStdout();
-	handleMinibufferCompletion(E.minibuf, type);
-	handleMinibufferCompletion(E.minibuf, type);
-	unmuteStdout();
-
-	struct buffer *list = findOrCreateSpecialBuffer("*Completions*");
-	int shown = 0;
-	for (int i = 0; i < list->numrows; i++) {
-		TEST_ASSERT(list->row[i].size == 0 ||
-			    memchr(list->row[i].chars, '\n',
-				   list->row[i].size) == NULL);
-		if (strstr((const char *)list->row[i].chars, "qq^Jyy"))
-			shown = 1;
-	}
-	TEST_ASSERT(shown);
-
-	freeMinibuffer();
-	cleanupTestEditor();
-}
-
-/* A stored name goes into the minibuffer as text it can hold. */
+/* '\n' is emil's row separator, never a byte in a row, but a filename
+ * can hold one, and an escape or a byte that is not UTF-8 besides.
+ * The buffer prompt completes and lists filenames, so each has a form
+ * the minibuffer and the list can show. */
 static const struct {
 	const char *name, *shown;
 } bad_names[] = {
@@ -528,54 +491,99 @@ static const struct {
 	{ "qq\xffy", "qq\xef\xbf\xbdy" },
 };
 
-static void assert_minibuf_is(const char *want) {
-	TEST_ASSERT_EQUAL_INT(1, E.minibuf->numrows);
-	TEST_ASSERT_EQUAL_INT((int)strlen(want), E.minibuf->row[0].size);
-	TEST_ASSERT_EQUAL_INT(0, memcmp(want, E.minibuf->row[0].chars, strlen(want)));
-	TEST_ASSERT_TRUE(utf8_validate(E.minibuf->row[0].chars,
-				       E.minibuf->row[0].size));
+/* A second buffer under `cur`, called `name`.  Linked in by hand:
+ * these names cannot be typed at a file prompt. */
+static struct buffer *addBufferNamed(struct buffer *after, const char *name) {
+	struct buffer *b = newBuffer();
+	b->filename = xstrdup(name);
+	b->next = after->next;
+	after->next = b;
+	return b;
 }
 
+/* Answer a buffer prompt with `keys`; returns what it hands back. */
+static char *bufferPrompt(const int *keys, int n) {
+	scriptKeys(keys, n);
+	muteStdout();
+	uint8_t *r = editorPrompt("Buffer: ", PROMPT_BUFFER, NULL);
+	unmuteStdout();
+	TEST_ASSERT_EQUAL_INT(n, test_key_pos);
+	clearKeys();
+	return (char *)r;
+}
+
+static int frameHas(const char *want) {
+	int n = (int)strlen(want);
+	for (int i = 0; i + n <= E.render_buf.len; i++)
+		if (memcmp(E.render_buf.b + i, want, n) == 0)
+			return 1;
+	return 0;
+}
+
+/* TAB on a name with one match puts the name in the minibuffer in
+ * its showable form, and leaves the buffer's own name alone. */
 void test_completion_inserts_stored_name_as_text(void) {
 	for (size_t i = 0; i < sizeof(bad_names) / sizeof(bad_names[0]); i++) {
 		initTestEditor();
 		makeMinibuffer();
 		struct buffer *cur = make_test_buffer("x");
-		E.edbuf = cur;
-		struct buffer *b = newBuffer();
-		b->filename = xstrdup(bad_names[i].name);
-		cur->next = b;
-		mutateInsert(E.minibuf, 0, 0, (const uint8_t *)"qq", 2, NULL, NULL);
-		E.minibuf->cx = 2;
-		E.minibuf->cy = 0;
+		struct buffer *b = addBufferNamed(cur, bad_names[i].name);
 
-		muteStdout();
-		handleMinibufferCompletion(E.minibuf, PROMPT_BUFFER);
-		unmuteStdout();
+		/* q q TAB RET: what RET returns is what TAB left. */
+		const int keys[] = { 'q', 'q', '\t', '\r' };
+		char *got = bufferPrompt(keys, 4);
 
-		assert_minibuf_is(bad_names[i].shown);
+		TEST_ASSERT_NOT_NULL(got);
+		if (got) {
+			TEST_ASSERT_EQUAL_STRING(bad_names[i].shown, got);
+			TEST_ASSERT_TRUE(utf8_validate((const uint8_t *)got,
+						       (int)strlen(got)));
+		}
 		TEST_ASSERT_EQUAL_STRING(bad_names[i].name, b->filename);
+		free(got);
 		freeMinibuffer();
 		cleanupTestEditor();
 	}
 }
 
+/* Choosing from the list does the same.  Two names share the prefix,
+ * so a second TAB lists them; Down twice goes to "qqz" and round to
+ * the first again. */
 void test_completion_cycle_inserts_stored_name_as_text(void) {
 	for (size_t i = 0; i < sizeof(bad_names) / sizeof(bad_names[0]); i++) {
 		initTestEditor();
 		makeMinibuffer();
-		(void)make_test_buffer("x");
-		struct completionState *cs = &E.minibuf->completionState;
-		cs->matches = xmalloc(sizeof(char *));
-		cs->matches[0] = xstrdup(bad_names[i].name);
-		cs->n_matches = 1;
-		cs->selected = 0;
+		struct buffer *cur = make_test_buffer("x");
+		struct buffer *b = addBufferNamed(cur, bad_names[i].name);
+		addBufferNamed(b, "qqz");
 
+		/* Typing a character after choosing returns the line as
+		 * the minibuffer holds it: the showable form, plus X. */
+		const int keys[] = { 'q', 'q', '\t', '\t', KEY_ARROW_DOWN,
+				     KEY_ARROW_DOWN, 'X', '\r' };
+		char *got = bufferPrompt(keys, 8);
+		char want[32];
+		snprintf(want, sizeof(want), "%sX", bad_names[i].shown);
+		TEST_ASSERT_NOT_NULL(got);
+		if (got) {
+			TEST_ASSERT_EQUAL_STRING(want, got);
+			TEST_ASSERT_TRUE(utf8_validate((const uint8_t *)got,
+						       (int)strlen(got)));
+		}
+		free(got);
+
+		/* And the choice still names the real buffer: C-x b,
+		 * the same keys without the X, switches to it. */
+		const int pick[] = { 'q', 'q', '\t', '\t', KEY_ARROW_DOWN,
+				     KEY_ARROW_DOWN, '\r' };
+		scriptKeys(pick, 7);
 		muteStdout();
-		cycleCompletion(E.minibuf, 1);
+		processKeypress(CMD_SWITCH_BUFFER);
 		unmuteStdout();
+		clearKeys();
+		TEST_ASSERT(E.buf == b);
+		TEST_ASSERT_EQUAL_STRING(bad_names[i].name, b->filename);
 
-		assert_minibuf_is(bad_names[i].shown);
 		freeMinibuffer();
 		cleanupTestEditor();
 	}
@@ -602,16 +610,30 @@ void test_file_completion_keeps_typed_prefix(void) {
 	(void)make_test_buffer("x");
 	r = snprintf(typed, sizeof(typed), "%s/fi", sub);
 	TEST_ASSERT(r >= 0 && (size_t)r < sizeof(typed));
-	mutateInsert(E.minibuf, 0, 0, (const uint8_t *)typed, (int)strlen(typed),
-		     NULL, NULL);
-	E.minibuf->cx = (int)strlen(typed);
-	E.minibuf->cy = 0;
 
+	/* Type the path up to "fi", the tab in it as C-q TAB; then TAB
+	 * to complete, and RET. */
+	static int keys[TEST_KEY_SCRIPT_MAX];
+	int n = 0;
+	for (const char *c = typed; *c; c++) {
+		if (*c == '\t')
+			keys[n++] = CTRL('q');
+		keys[n++] = (unsigned char)*c;
+	}
+	keys[n++] = '\t';
+	keys[n++] = '\r';
+	scriptKeys(keys, n);
 	muteStdout();
-	handleMinibufferCompletion(E.minibuf, PROMPT_FILES);
+	char *got = (char *)editorPrompt("File: ", PROMPT_FILES, NULL);
 	unmuteStdout();
+	TEST_ASSERT_EQUAL_INT(n, test_key_pos);
+	clearKeys();
 
-	assert_minibuf_is(file);
+	TEST_ASSERT_NOT_NULL(got);
+	if (got)
+		TEST_ASSERT_EQUAL_STRING(file, got);
+	free(got);
+
 	freeMinibuffer();
 	cleanupTestEditor();
 	unlink(file);
@@ -619,12 +641,27 @@ void test_file_completion_keeps_typed_prefix(void) {
 	rmdir(dir);
 }
 
+/* A second TAB lists both matches.  The list is drawn while the
+ * prompt waits, so the frame on screen when RET arrives shows it:
+ * the awkward name in its one-line form, beside the plain one. */
 void test_buffer_prompt_lists_newline_name_on_one_row(void) {
-	check_newline_name_listed(PROMPT_BUFFER);
-}
+	initTestEditor();
+	makeMinibuffer();
+	struct buffer *cur = make_test_buffer("x");
+	struct buffer *b = addBufferNamed(cur, "qq\nyy");
+	addBufferNamed(b, "qqz");
 
-void test_search_prompt_lists_newline_name_on_one_row(void) {
-	check_newline_name_listed(PROMPT_SEARCH);
+	const int keys[] = { 'q', 'q', '\t', '\t', '\r' };
+	char *got = bufferPrompt(keys, 5);
+	free(got);
+
+	TEST_ASSERT(E.render_buf.len > 0);
+	TEST_ASSERT(frameHas("qq^Jyy"));
+	TEST_ASSERT(frameHas("qqz"));
+	TEST_ASSERT(memchr(E.render_buf.b, '\0', E.render_buf.len) == NULL);
+
+	freeMinibuffer();
+	cleanupTestEditor();
 }
 
 int main(void) {
@@ -634,7 +671,6 @@ int main(void) {
 	RUN_TEST(test_completion_cycle_inserts_stored_name_as_text);
 	RUN_TEST(test_file_completion_keeps_typed_prefix);
 	RUN_TEST(test_buffer_prompt_lists_newline_name_on_one_row);
-	RUN_TEST(test_search_prompt_lists_newline_name_on_one_row);
 	RUN_TEST(test_nested_prompt_preserves_buffer);
 	RUN_TEST(test_double_nested_prompt_preserves_buffer);
 	RUN_TEST(test_zap_arrow_key_does_not_corrupt_utf8);

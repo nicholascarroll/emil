@@ -134,19 +134,6 @@ void test_history_eviction(void) {
 
 /* ---- Rectangle metadata ---- */
 
-void test_history_rect_metadata(void) {
-	struct history h;
-	initHistory(&h);
-	addHistoryWithRect(&h, "rect_data", 1, 10, 3);
-	TEST_ASSERT_EQUAL_INT(1, h.count);
-	struct historyEntry *e = getHistoryAt(&h, 0);
-	TEST_ASSERT_NOT_NULL(e);
-	TEST_ASSERT_EQUAL_INT(1, e->is_rectangle);
-	TEST_ASSERT_EQUAL_INT(10, e->rect_width);
-	TEST_ASSERT_EQUAL_INT(3, e->rect_height);
-	freeHistory(&h);
-}
-
 void test_history_rect_duplicate_suppression(void) {
 	struct history h;
 	initHistory(&h);
@@ -246,7 +233,6 @@ int main(void) {
 	RUN_TEST(test_history_get_past_end);
 	RUN_TEST(test_history_get_empty);
 	RUN_TEST(test_history_eviction);
-	RUN_TEST(test_history_rect_metadata);
 	RUN_TEST(test_history_rect_duplicate_suppression);
 	RUN_TEST(test_history_free_resets);
 

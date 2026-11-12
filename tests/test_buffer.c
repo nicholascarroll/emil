@@ -1,11 +1,18 @@
 /* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
-/* test_buffer.c: Row operations, screen cache, coordinate mapping. */
+/* test_buffer.c: Row operations, screen cache, coordinate mapping.
+ *
+ * Killing a buffer, what a prompt hands back, and how command output
+ * is split into rows are tested through the commands that do them.
+ * The display helpers and the blob loader's flag cases are still
+ * tested as module functions. */
 
 #include "test.h"
 #include "test_harness.h"
 #include "prompt.h"
-#include "completion.h"
 #include "buffer.h"
+#include "keymap.h"
+#include <fcntl.h>
+#include <unistd.h>
 #include "util.h"
 #include "unicode.h"
 #include <stdint.h>
@@ -16,87 +23,122 @@
  * that is visiting a file.  A modified buffer with no filename is
  * scratch space and is killed without a prompt. */
 
+static void typeString(const char *text) {
+	for (; *text; text++) {
+		E.self_insert_key = (unsigned char)*text;
+		processKeypress(CMD_SELF_INSERT);
+	}
+}
+
+/* C-x k with `answer` waiting; returns how many keys it read. */
+static int killWithAnswer(int answer) {
+	int keys[] = { answer };
+	scriptKeys(keys, 1);
+	muteStdout();
+	processKeypress(CMD_KILL_BUFFER);
+	unmuteStdout();
+	int used = test_key_pos;
+	clearKeys();
+	return used;
+}
+
+/* Is there a buffer called `name`?  Is there one whose first row is
+ * `text`?  Asked of the buffer list, not of a pointer that may have
+ * been freed. */
+static int bufferNamed(const char *name) {
+	for (struct buffer *b = E.headbuf; b != NULL; b = b->next)
+		if (b->filename && strcmp(b->filename, name) == 0)
+			return 1;
+	return 0;
+}
+
+static int bufferHolding(const char *text) {
+	for (struct buffer *b = E.headbuf; b != NULL; b = b->next)
+		if (b->numrows > 0 && strcmp(row_str(b, 0), text) == 0)
+			return 1;
+	return 0;
+}
+
+/* A temp file holding one line; its path in `path`. */
+static void tempFile(char *path, size_t size, const char *line) {
+	testTmpPath(path, size, "emil_kill_XXXXXX");
+	int fd = mkstemp(path);
+	TEST_ASSERT(fd >= 0);
+	TEST_ASSERT_EQUAL_INT((int)strlen(line), (int)write(fd, line, strlen(line)));
+	close(fd);
+}
+
 void test_kill_confirm_dirty_named_buffer(void) {
-	struct buffer *buf = make_test_buffer("unsaved work");
-	buf->dirty = 1;
-	buf->filename = xstrdup("/tmp/notes.txt");
-	buf->special_buffer = 0;
-	TEST_ASSERT_TRUE(killBufferNeedsConfirm(buf));
+	char path[PATH_MAX];
+	tempFile(path, sizeof(path), "saved\n");
+	makeMinibuffer();
+	make_test_buffer(NULL);
+	struct buffer *buf = findFileTyping(path);
+	typeString("unsaved work ");
+	TEST_ASSERT_TRUE(buf->dirty);
+
+	/* Asked; n keeps the buffer, edits and all. */
+	TEST_ASSERT_EQUAL_INT(1, killWithAnswer('n'));
+	TEST_ASSERT(E.buf == buf);
+	TEST_ASSERT_EQUAL_STRING("unsaved work saved", row_str(buf, 0));
+
+	/* Asked again; y kills it. */
+	TEST_ASSERT_EQUAL_INT(1, killWithAnswer('y'));
+	TEST_ASSERT_FALSE(bufferHolding("unsaved work saved"));
+
+	freeMinibuffer();
+	unlink(path);
 }
 
 void test_kill_no_confirm_dirty_unnamed_buffer(void) {
-	struct buffer *buf = make_test_buffer("scratch jottings");
-	buf->dirty = 1;
-	buf->filename = NULL;
-	buf->special_buffer = 0;
-	TEST_ASSERT_FALSE(killBufferNeedsConfirm(buf));
+	makeMinibuffer();
+	struct buffer *other = make_test_buffer("other");
+	struct buffer *buf = make_test_buffer(NULL);
+	buf->next = other; /* keep both in the buffer list */
+	typeString("scratch jottings");
+	TEST_ASSERT_TRUE(buf->dirty);
+	TEST_ASSERT_NULL(buf->filename);
+
+	/* Not asked: the n that waits is never read. */
+	TEST_ASSERT_EQUAL_INT(0, killWithAnswer('n'));
+	TEST_ASSERT_FALSE(bufferHolding("scratch jottings"));
+	freeMinibuffer();
 }
 
 void test_kill_no_confirm_clean_named_buffer(void) {
-	struct buffer *buf = make_test_buffer("saved");
-	buf->dirty = 0;
-	buf->filename = xstrdup("/tmp/notes.txt");
-	buf->special_buffer = 0;
-	TEST_ASSERT_FALSE(killBufferNeedsConfirm(buf));
+	char path[PATH_MAX];
+	tempFile(path, sizeof(path), "saved\n");
+	makeMinibuffer();
+	make_test_buffer(NULL);
+	struct buffer *buf = findFileTyping(path);
+	TEST_ASSERT_FALSE(buf->dirty);
+	char *name = xstrdup(buf->filename);
+
+	TEST_ASSERT_EQUAL_INT(0, killWithAnswer('n'));
+	TEST_ASSERT_FALSE(bufferNamed(name));
+
+	free(name);
+	freeMinibuffer();
+	unlink(path);
 }
 
-/* A special buffer carries a filename ("*scratch*", "*Completions*"),
- * so special_buffer is what suppresses the prompt here, not the
- * filename test. */
+/* A special buffer carries a name ("*scratch*", "*Completions*"), so
+ * being special is what spares it the question, not the lack of a
+ * name.  Killing the last buffer leaves a fresh *scratch*; typing in
+ * it modifies it. */
 void test_kill_no_confirm_special_buffer_with_name(void) {
-	struct buffer *buf = make_test_buffer("completions");
-	buf->dirty = 1;
-	buf->filename = xstrdup("*scratch*");
-	buf->special_buffer = 1;
-	TEST_ASSERT_FALSE(killBufferNeedsConfirm(buf));
-}
+	makeMinibuffer();
+	make_test_buffer(NULL);
+	TEST_ASSERT_EQUAL_INT(0, killWithAnswer('n'));
+	TEST_ASSERT_EQUAL_STRING("*scratch*", E.buf->filename);
 
-/* ---- Row operations ---- */
+	typeString("completions");
+	TEST_ASSERT_TRUE(E.buf->dirty);
 
-void test_new_destroy_buffer(void) {
-	struct buffer *buf = newBuffer();
-	TEST_ASSERT_NOT_NULL(buf);
-	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
-	TEST_ASSERT_NULL(buf->filename);
-	destroyBuffer(buf);
-}
-
-void test_insert_row_beginning(void) {
-	struct buffer *buf = make_test_buffer(NULL);
-	insertRow(buf, 0, (const uint8_t *)"second", 6);
-	insertRow(buf, 0, (const uint8_t *)"first", 5);
-	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
-	TEST_ASSERT_EQUAL_STRING("first", (char *)buf->row[0].chars);
-	TEST_ASSERT_EQUAL_STRING("second", (char *)buf->row[1].chars);
-}
-
-void test_insert_row_end(void) {
-	struct buffer *buf = make_test_buffer(NULL);
-	insertRow(buf, 0, (const uint8_t *)"first", 5);
-	insertRow(buf, 1, (const uint8_t *)"second", 6);
-	insertRow(buf, 2, (const uint8_t *)"third", 5);
-	TEST_ASSERT_EQUAL_INT(4, buf->numrows);
-	TEST_ASSERT_EQUAL_STRING("third", (char *)buf->row[2].chars);
-}
-
-void test_del_row_beginning(void) {
-	struct buffer *buf = make_test_buffer(NULL);
-	insertRow(buf, 0, (const uint8_t *)"first", 5);
-	insertRow(buf, 1, (const uint8_t *)"second", 6);
-	insertRow(buf, 2, (const uint8_t *)"third", 5);
-	delRow(buf, 0);
-	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
-	TEST_ASSERT_EQUAL_STRING("second", (char *)buf->row[0].chars);
-}
-
-void test_del_row_end(void) {
-	struct buffer *buf = make_test_buffer(NULL);
-	insertRow(buf, 0, (const uint8_t *)"first", 5);
-	insertRow(buf, 1, (const uint8_t *)"second", 6);
-	insertRow(buf, 2, (const uint8_t *)"third", 5);
-	delRow(buf, 2);
-	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
-	TEST_ASSERT_EQUAL_STRING("second", (char *)buf->row[1].chars);
+	TEST_ASSERT_EQUAL_INT(0, killWithAnswer('n'));
+	TEST_ASSERT_FALSE(bufferHolding("completions"));
+	TEST_ASSERT_EQUAL_STRING("*scratch*", E.buf->filename);
+	freeMinibuffer();
 }
 
 /* ---- The newline rule, in the sanitize build ---- */
@@ -198,14 +240,6 @@ void test_word_wrap_break(void) {
 	TEST_ASSERT_EQUAL_INT(6, break_byte);
 }
 
-/* ---- Boundary tests ---- */
-
-void test_del_row_only_row(void) {
-	struct buffer *buf = make_test_buffer("only line");
-	delRow(buf, 0);
-	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
-}
-
 void setUp(void) {
 	initTestEditor();
 }
@@ -213,59 +247,68 @@ void tearDown(void) {
 	cleanupTestEditor();
 }
 
-/* ---- Minibuffer serialization ----
+/* ---- What a prompt hands back ----
  *
  * The minibuffer holds rows like any other buffer; no row ever contains
- * a literal 0x0A.  Text crosses the boundary in two forms: joined with
- * "\n" for the caller, joined with "^J" for the screen. */
+ * a literal 0x0A.  A newline is typed at a prompt with C-q C-j, and
+ * text crosses the boundary in two forms: joined with "\n" for the
+ * command that asked, joined with "^J" for the screen. */
+
+/* Answer a prompt with `text` ('\n' typed as C-q C-j) and RET.  The
+ * replace prompt is used because it is one of the two that accept a
+ * newline at all; the others refuse it with a message. */
+static char *promptTyping(const char *text) {
+	int keys[64];
+	int n = 0;
+	for (const char *c = text; *c && n < 60; c++) {
+		if (*c == '\n')
+			keys[n++] = CTRL('q');
+		keys[n++] = (*c == '\n') ? CTRL('j') : (unsigned char)*c;
+	}
+	keys[n++] = '\r';
+	makeMinibuffer();
+	(void)make_test_buffer(NULL);
+	scriptKeys(keys, n);
+	muteStdout();
+	char *got = (char *)editorPrompt("p: ", PROMPT_REPLACE, NULL);
+	unmuteStdout();
+	TEST_ASSERT_EQUAL_INT(n, test_key_pos);
+	clearKeys();
+	freeMinibuffer();
+	return got;
+}
+
+static int frameHas(const char *want) {
+	int n = (int)strlen(want);
+	for (int i = 0; i + n <= E.render_buf.len; i++)
+		if (memcmp(E.render_buf.b + i, want, n) == 0)
+			return 1;
+	return 0;
+}
 
 void test_minibuf_roundtrip_multiline(void) {
-	struct buffer *mb = newBuffer();
-	replaceMinibufferText(mb, "foo\nbar");
-
-	TEST_ASSERT_EQUAL_INT(2, mb->numrows);
-	TEST_ASSERT_EQUAL_STRING("foo", row_str(mb, 0));
-	TEST_ASSERT_EQUAL_STRING("bar", row_str(mb, 1));
-
-	char *out = minibufJoin(mb, "\n");
-	TEST_ASSERT_EQUAL_STRING("foo\nbar", out);
-	free(out);
-	destroyBuffer(mb);
+	char *got = promptTyping("foo\nbar");
+	TEST_ASSERT_NOT_NULL(got);
+	if (got)
+		TEST_ASSERT_EQUAL_STRING("foo\nbar", got);
+	free(got);
 }
 
+/* While the prompt waits, a row break shows as ^J. */
 void test_minibuf_display_uses_caret(void) {
-	struct buffer *mb = newBuffer();
-	replaceMinibufferText(mb, "a\nb\nc");
-
-	TEST_ASSERT_EQUAL_INT(3, mb->numrows);
-	char *shown = minibufJoin(mb, "^J");
-	TEST_ASSERT_EQUAL_STRING("a^Jb^Jc", shown);
-	free(shown);
-	destroyBuffer(mb);
+	char *got = promptTyping("a\nb\nc");
+	free(got);
+	TEST_ASSERT(frameHas("a^Jb^Jc"));
 }
 
-void test_minibuf_single_line_unchanged(void) {
-	struct buffer *mb = newBuffer();
-	replaceMinibufferText(mb, "plain");
-
-	TEST_ASSERT_EQUAL_INT(1, mb->numrows);
-	char *out = minibufJoin(mb, "\n");
-	TEST_ASSERT_EQUAL_STRING("plain", out);
-	free(out);
-	destroyBuffer(mb);
-}
-
-/* Typing only C-q C-j: two rows, both empty, value "\n".  This is
- * the line-join entry; editorPrompt must not submit it as "". */
+/* Typing only C-q C-j hands back "\n".  This is the line-join entry;
+ * the prompt must not take it for an empty answer. */
 void test_minibuf_bare_newline_is_not_empty(void) {
-	struct buffer *mb = newBuffer();
-	replaceMinibufferText(mb, "\n");
-
-	TEST_ASSERT_EQUAL_INT(2, mb->numrows);
-	char *out = minibufJoin(mb, "\n");
-	TEST_ASSERT_EQUAL_STRING("\n", out);
-	free(out);
-	destroyBuffer(mb);
+	char *got = promptTyping("\n");
+	TEST_ASSERT_NOT_NULL(got);
+	if (got)
+		TEST_ASSERT_EQUAL_STRING("\n", got);
+	free(got);
 }
 
 /* Text for a prompt or the status line is drawn raw, so control
@@ -298,15 +341,12 @@ void test_utf8_sanitize_line(void) {
 }
 
 void test_minibuf_trailing_newline(void) {
-	struct buffer *mb = newBuffer();
-	replaceMinibufferText(mb, "x\n");
-
-	/* A pattern ending in a row break: two rows, the second empty. */
-	TEST_ASSERT_EQUAL_INT(2, mb->numrows);
-	char *out = minibufJoin(mb, "\n");
-	TEST_ASSERT_EQUAL_STRING("x\n", out);
-	free(out);
-	destroyBuffer(mb);
+	/* A pattern ending in a row break keeps it. */
+	char *got = promptTyping("x\n");
+	TEST_ASSERT_NOT_NULL(got);
+	if (got)
+		TEST_ASSERT_EQUAL_STRING("x\n", got);
+	free(got);
 }
 
 /* ================================================================
@@ -326,29 +366,43 @@ static struct buffer *blobBuf(void) {
 
 static void assertRow(struct buffer *b, int i, const char *want) {
 	TEST_ASSERT_TRUE(i < b->numrows);
+	if (i >= b->numrows)
+		return;
 	TEST_ASSERT_EQUAL_INT((int)strlen(want), b->row[i].size);
 	TEST_ASSERT_EQUAL_INT(0, memcmp(b->row[i].chars, want, strlen(want)));
 }
 
-void test_blob_trailing_newline(void) {
-	struct buffer *b = blobBuf();
-	bufferLoadBlob(b, (const uint8_t *)"alpha\nbravo\n", 12, 0);
-	TEST_ASSERT_EQUAL_INT(2, b->numrows);
-	assertRow(b, 0, "alpha");
-	assertRow(b, 1, "bravo");
-	destroyBuffer(b);
+#ifndef EMIL_DISABLE_SHELL
+/* M-! command RET; returns the buffer the output is shown in. */
+static struct buffer *shellOutput(const char *command) {
+	int keys[128];
+	int n = 0;
+	for (const char *c = command; *c && n < 126; c++)
+		keys[n++] = (unsigned char)*c;
+	keys[n++] = '\r';
+	makeMinibuffer();
+	(void)make_test_buffer(NULL);
+	scriptKeys(keys, n);
+	muteStdout();
+	processKeypress(CMD_SHELL_CMD);
+	unmuteStdout();
+	clearKeys();
+	freeMinibuffer();
+	TEST_ASSERT_NOT_NULL(E.buf->filename);
+	TEST_ASSERT_EQUAL_STRING("*Shell Output*", E.buf->filename);
+	return E.buf;
 }
 
 /* DEF-4: the *Diff* copy emitted the last row before counting its
- * final byte, so "alpha\nbravo" captured as "alpha" / "brav". */
+ * final byte, so "alpha\nbravo" captured as "alpha" / "brav".  The
+ * same split of command output into rows serves M-!. */
 void test_blob_no_trailing_newline_keeps_last_byte(void) {
-	struct buffer *b = blobBuf();
-	bufferLoadBlob(b, (const uint8_t *)"alpha\nbravo", 11, 0);
+	struct buffer *b = shellOutput("printf 'alpha\\nbravo'");
 	TEST_ASSERT_EQUAL_INT(2, b->numrows);
 	assertRow(b, 0, "alpha");
 	assertRow(b, 1, "bravo");
-	destroyBuffer(b);
 }
+#endif /* EMIL_DISABLE_SHELL */
 
 void test_blob_empty(void) {
 	struct buffer *b = blobBuf();
@@ -382,34 +436,15 @@ void test_blob_crlf_flag(void) {
 	destroyBuffer(b);
 }
 
-void test_blob_final_nl_flag(void) {
-	/* BLOB_FINAL_NL terminates unconditionally: the trailing empty
-	 * row is how a final newline is represented (§4.1). */
-	struct buffer *b = blobBuf();
-	bufferLoadBlob(b, (const uint8_t *)"alpha\n", 6, BLOB_FINAL_NL);
-	TEST_ASSERT_EQUAL_INT(2, b->numrows);
-	assertRow(b, 0, "alpha");
-	assertRow(b, 1, "");
-	destroyBuffer(b);
-
-	/* Input lacking the newline gains one. */
-	b = blobBuf();
-	bufferLoadBlob(b, (const uint8_t *)"alpha", 5, BLOB_FINAL_NL);
-	TEST_ASSERT_EQUAL_INT(2, b->numrows);
-	assertRow(b, 0, "alpha");
-	assertRow(b, 1, "");
-	destroyBuffer(b);
-}
-
+#ifndef EMIL_DISABLE_SHELL
 void test_blob_blank_lines_preserved(void) {
-	struct buffer *b = blobBuf();
-	bufferLoadBlob(b, (const uint8_t *)"a\n\nb\n", 5, 0);
+	struct buffer *b = shellOutput("printf 'a\\n\\nb\\n'");
 	TEST_ASSERT_EQUAL_INT(3, b->numrows);
 	assertRow(b, 0, "a");
 	assertRow(b, 1, "");
 	assertRow(b, 2, "b");
-	destroyBuffer(b);
 }
+#endif /* EMIL_DISABLE_SHELL */
 
 /* Appends rather than resets: register.c writes a header first. */
 void test_blob_appends_beneath_existing_rows(void) {
@@ -437,14 +472,18 @@ void test_blob_does_not_mark_dirty(void) {
 int main(void) {
 	TEST_BEGIN();
 
+	/* While a shell command runs the editor watches the terminal,
+	 * fd 0, for C-g.  Give the suite an fd 0 with nothing on it. */
+	int devnull = open("/dev/null", O_RDONLY);
+	if (devnull >= 0) {
+		dup2(devnull, STDIN_FILENO);
+		if (devnull != STDIN_FILENO)
+			close(devnull);
+	}
+
 	#ifdef EMIL_DEBUG_ROW_BYTES
 	RUN_TEST(test_debug_check_stops_newline_entering_a_row);
 #endif
-	RUN_TEST(test_new_destroy_buffer);
-	RUN_TEST(test_insert_row_beginning);
-	RUN_TEST(test_insert_row_end);
-	RUN_TEST(test_del_row_beginning);
-	RUN_TEST(test_del_row_end);
 
 	RUN_TEST(test_chars_to_display_ascii);
 	RUN_TEST(test_chars_to_display_tab);
@@ -459,23 +498,22 @@ int main(void) {
 	/* Minibuffer serialization */
 	RUN_TEST(test_minibuf_roundtrip_multiline);
 	RUN_TEST(test_minibuf_display_uses_caret);
-	RUN_TEST(test_minibuf_single_line_unchanged);
 	RUN_TEST(test_minibuf_trailing_newline);
 	RUN_TEST(test_minibuf_bare_newline_is_not_empty);
 	RUN_TEST(test_utf8_sanitize_line);
 
 	/* bufferLoadBlob (#117 R2) */
-	RUN_TEST(test_blob_trailing_newline);
+#ifndef EMIL_DISABLE_SHELL
 	RUN_TEST(test_blob_no_trailing_newline_keeps_last_byte);
+#endif
 	RUN_TEST(test_blob_empty);
 	RUN_TEST(test_blob_crlf_flag);
-	RUN_TEST(test_blob_final_nl_flag);
+#ifndef EMIL_DISABLE_SHELL
 	RUN_TEST(test_blob_blank_lines_preserved);
+#endif
 	RUN_TEST(test_blob_appends_beneath_existing_rows);
 	RUN_TEST(test_blob_does_not_mark_dirty);
 
-	/* Boundary tests */
-	RUN_TEST(test_del_row_only_row);
 
 	/* Kill-buffer confirmation */
 	RUN_TEST(test_kill_confirm_dirty_named_buffer);

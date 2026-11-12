@@ -455,16 +455,17 @@ void test_sentence_khmer_khan(void) {
 		"\xE1\x9E\x80\xE1\x9E\x81\xE1\x9F\x94"
 		"\xE1\x9E\x82\xE1\x9E\x83");
 
-	int cx = 0, cy = 0;
-	TEST_ASSERT_EQUAL_INT(0, forwardSentenceEnd(buf, &cx, &cy));
-	TEST_ASSERT_EQUAL_INT(9, cx); /* just past ។ */
-	TEST_ASSERT_EQUAL_INT(0, cy);
+	buf->cx = 0;
+	buf->cy = 0;
+	processKeypress(CMD_SENTENCE_FORWARD);
+	TEST_ASSERT_EQUAL_INT(9, buf->cx); /* just past ។ */
+	TEST_ASSERT_EQUAL_INT(0, buf->cy);
 
-	cx = 15;
-	cy = 0;
-	TEST_ASSERT_EQUAL_INT(0, backwardSentenceStart(buf, &cx, &cy));
-	TEST_ASSERT_EQUAL_INT(9, cx); /* sentence starts after ។ */
-	TEST_ASSERT_EQUAL_INT(0, cy);
+	buf->cx = 15;
+	buf->cy = 0;
+	processKeypress(CMD_SENTENCE_BACKWARD);
+	TEST_ASSERT_EQUAL_INT(9, buf->cx); /* sentence starts after ។ */
+	TEST_ASSERT_EQUAL_INT(0, buf->cy);
 }
 
 /* ZERO WIDTH SPACE is the explicit word separator of digital
@@ -499,16 +500,17 @@ void test_word_motion_zwsp(void) {
 		"\xE2\x80\x8B"
 		"\xE0\xB8\x87\xE0\xB8\x88");
 
-	int dx = 0, dy = 0;
-	forwardWordEnd(buf, &dx, &dy);
-	TEST_ASSERT_EQUAL_INT(6, dx); /* stops at the ZWSP */
-	TEST_ASSERT_EQUAL_INT(0, dy);
+	buf->cx = 0;
+	buf->cy = 0;
+	processKeypress(CMD_FORWARD_WORD);
+	TEST_ASSERT_EQUAL_INT(6, buf->cx); /* stops at the ZWSP */
+	TEST_ASSERT_EQUAL_INT(0, buf->cy);
 
-	dx = 15;
-	dy = 0;
-	backwardWordEnd(buf, &dx, &dy);
-	TEST_ASSERT_EQUAL_INT(9, dx); /* stops just after the ZWSP */
-	TEST_ASSERT_EQUAL_INT(0, dy);
+	buf->cx = 15;
+	buf->cy = 0;
+	processKeypress(CMD_BACKWARD_WORD);
+	TEST_ASSERT_EQUAL_INT(9, buf->cx); /* stops just after the ZWSP */
+	TEST_ASSERT_EQUAL_INT(0, buf->cy);
 }
 
 /* Preposed vowels (เ แ โ ใ ไ) are written before their consonant; the

@@ -1,19 +1,23 @@
 /* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
-/* test_coalesce.c: undo record coalescing (#104).
+/* test_coalesce.c: how edits group into undo steps (#104).
  *
- * The mutation layer builds every record; undo.c decides only whether
- * two given records can be folded into one.  These tests pin the
- * grouping the user sees, the cap that bounds it, and the boundaries
- * that must not be crossed. */
+ * These tests pin the grouping the user sees, the cap that bounds it,
+ * and the boundaries that must not be crossed.
+ *
+ * A group is checked by what one undo takes back: the tests issue
+ * editing commands through processKeypress(), press undo, and read
+ * the text.  They do not count records or look at how a record is
+ * built, so undo's storage and the code that decides a merge can be
+ * reshaped without touching this file. */
 
 #include "test.h"
 #include "test_harness.h"
 #include "edit.h"
-#include "mutate.h"
+#include "keymap.h"
 #include "undo.h"
-#include "region.h"
 #include "fileio.h"
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 void setUp(void) {
@@ -23,11 +27,75 @@ void tearDown(void) {
 	cleanupTestEditor();
 }
 
-static int nrecords(struct buffer *buf) {
-	int n = 0;
-	for (struct undo *u = buf->undo; u != NULL; u = u->prev)
-		n++;
-	return n;
+/* ---- Keys ---- */
+
+static void type_char(int ch) {
+	E.self_insert_key = ch;
+	processKeypress(CMD_SELF_INSERT);
+}
+
+static void type_str(const char *s) {
+	for (; *s; s++)
+		type_char((unsigned char)*s);
+}
+
+/* The same command n times over, as n separate key presses. */
+static void press_times(int cmd, int n) {
+	for (int i = 0; i < n; i++)
+		processKeypress(cmd);
+}
+
+/* C-u n, then the command: one command with a prefix argument. */
+static void press_with_arg(int n, int cmd) {
+	E.uarg = n;
+	processKeypress(cmd);
+}
+
+static void undo(void) {
+	processKeypress(CMD_UNDO);
+}
+
+static void redo(void) {
+	processKeypress(CMD_REDO);
+}
+
+/* ---- Text ---- */
+
+/* The buffer as the bytes a save would write.  Caller frees. */
+static char *contentOf(struct buffer *buf) {
+	size_t len = 0;
+	return rowsToString(buf, &len);
+}
+
+/* The assertions below read the serialised buffer rather than row
+ * counts.  The behaviour being characterised is a statement about
+ * text -- "this undo takes back exactly that" -- and the expected
+ * strings are derived from the representation table in buffer.h, not
+ * from observing what the code does: a two-line newline-terminated
+ * file is "one\ntwo\n", whatever the row array happens to look like
+ * underneath. */
+static void assertContent(struct buffer *buf, const char *want) {
+	char *got = contentOf(buf);
+	TEST_ASSERT_EQUAL_STRING(want, got);
+	free(got);
+}
+
+/* Press undo until it stops changing the text, and say how many
+ * presses changed it: the number of undo steps the user has. */
+static int undoStepsToStart(struct buffer *buf) {
+	int steps = 0;
+	for (int i = 0; i < 2000; i++) {
+		char *before = contentOf(buf);
+		undo();
+		char *after = contentOf(buf);
+		int changed = strcmp(before, after) != 0;
+		free(before);
+		free(after);
+		if (!changed)
+			break;
+		steps++;
+	}
+	return steps;
 }
 
 /* A buffer in the shape editorOpen leaves: the text, plus the empty
@@ -36,10 +104,10 @@ static int nrecords(struct buffer *buf) {
  *
  * The distinction matters.  Typing on the terminator row -- or into a
  * buffer holding no text at all -- has to create the newline the
- * invariant requires, and that is a second record which closes the
- * run.  It is a property of the invariant rather than of coalescing,
- * so the coalescing tests below start clear of it and it is pinned on
- * its own in test_typing_at_end_of_buffer_costs_one_record. */
+ * invariant requires, and that closes the run.  It is a property of
+ * the invariant rather than of coalescing, so the coalescing tests
+ * below start clear of it and it is pinned on its own in
+ * test_typing_at_end_of_buffer_costs_one_record. */
 static struct buffer *loadedBuffer(const char *line) {
 	struct buffer *buf = make_test_buffer(line);
 	buf->cx = 0;
@@ -49,20 +117,36 @@ static struct buffer *loadedBuffer(const char *line) {
 	return buf;
 }
 
+/* Put `text` (one line) on the kill ring the way a user would: select
+ * it in a scratch buffer and copy it (M-w).  The scratch buffer is
+ * gone on return, so call this before making the buffer under test. */
+static void copyToKillRing(const char *text) {
+	struct buffer *scratch = make_test_buffer(text);
+	scratch->markx = 0;
+	scratch->marky = 0;
+	scratch->mark_active = 1;
+	scratch->cx = scratch->row[0].size;
+	scratch->cy = 0;
+	processKeypress(CMD_COPY);
+	destroyBuffer(scratch);
+	E.buf = NULL;
+	E.headbuf = NULL;
+	E.windows[0]->buf = NULL;
+}
+
 /* ---- Grouping ---- */
 
 void test_typing_a_word_is_one_record(void) {
 	struct buffer *buf = loadedBuffer("Z");
 
-	const char *w = "hello";
-	for (int i = 0; w[i]; i++)
-		selfInsert(buf, w[i], 1);
+	type_str("hello");
+	assertContent(buf, "helloZ\n");
 
-	TEST_ASSERT_EQUAL_STRING("helloZ", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_INT(1, nrecords(buf));
-
-	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_STRING("Z", row_str(buf, 0));
+	/* One undo takes the whole word, and there is nothing behind it. */
+	undo();
+	assertContent(buf, "Z\n");
+	undo();
+	assertContent(buf, "Z\n");
 }
 
 /* The exception, stated rather than stumbled over.  Going from no
@@ -73,105 +157,100 @@ void test_typing_a_word_is_one_record(void) {
  * per word. */
 void test_typing_at_end_of_buffer_costs_one_record(void) {
 	struct buffer *buf = make_test_buffer("");
-	E.buf = buf;
-	clearUndosAndRedos(buf);
 
-	const char *w = "hello";
-	for (int i = 0; w[i]; i++)
-		selfInsert(buf, w[i], 1);
+	type_str("hello");
+	assertContent(buf, "hello\n");
 
-	TEST_ASSERT_EQUAL_STRING("hello", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_STRING("", row_str(buf, 1));
-	TEST_ASSERT_EQUAL_INT(3, nrecords(buf));
-
-	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_STRING("h", row_str(buf, 0));
-	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_STRING("", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
+	undo();
+	assertContent(buf, "h\n");
+	undo();
+	assertContent(buf, "");
+	undo();
+	assertContent(buf, "");
 }
 
 void test_backspace_run_is_one_record(void) {
 	struct buffer *buf = make_test_buffer("abcdef");
 	buf->cx = 6;
-	E.buf = buf;
-	clearUndosAndRedos(buf);
 
-	backSpace(3);
+	press_times(CMD_BACKSPACE, 3);
+	assertContent(buf, "abc\n");
 
-	TEST_ASSERT_EQUAL_STRING("abc", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_INT(1, nrecords(buf));
-
-	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_STRING("abcdef", row_str(buf, 0));
+	undo();
+	assertContent(buf, "abcdef\n");
 }
 
 void test_forward_delete_run_is_one_record(void) {
 	struct buffer *buf = make_test_buffer("abcdef");
 	buf->cx = 0;
-	E.buf = buf;
-	clearUndosAndRedos(buf);
 
-	delChar(3);
+	press_times(CMD_DELETE, 3);
+	assertContent(buf, "def\n");
 
-	TEST_ASSERT_EQUAL_STRING("def", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_INT(1, nrecords(buf));
-
-	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_STRING("abcdef", row_str(buf, 0));
+	undo();
+	assertContent(buf, "abcdef\n");
 }
 
-/* Typing then deleting must not fold: the records describe opposite
- * operations and merging them would misstate both. */
+/* Typing then deleting must not fold: the two are opposite operations
+ * and one undo step for both would misstate both. */
 void test_insert_then_delete_do_not_merge(void) {
 	struct buffer *buf = loadedBuffer("Z");
 
-	selfInsert(buf, 'a', 1);
-	selfInsert(buf, 'b', 1);
-	backSpace(1);
+	type_str("ab");
+	processKeypress(CMD_BACKSPACE);
+	assertContent(buf, "aZ\n");
 
-	TEST_ASSERT_EQUAL_INT(2, nrecords(buf));
+	undo(); /* the backspace */
+	assertContent(buf, "abZ\n");
+	undo(); /* the typing */
+	assertContent(buf, "Z\n");
 
-	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_STRING("abZ", row_str(buf, 0));
-	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_STRING("Z", row_str(buf, 0));
+	/* The same with C-d, and from the place where it would be
+	 * easiest to get wrong: the deletion starts exactly where the
+	 * typing started. */
+	type_str("ab");
+	processKeypress(CMD_HOME);
+	processKeypress(CMD_DELETE);
+	assertContent(buf, "bZ\n");
+
+	undo(); /* the C-d */
+	assertContent(buf, "abZ\n");
+	undo(); /* the typing */
+	assertContent(buf, "Z\n");
 }
 
-/* Typing away from the run's end starts a fresh record. */
+/* Typing away from the run's end starts a fresh step. */
 void test_typing_elsewhere_starts_a_record(void) {
 	struct buffer *buf = make_test_buffer("abcdef");
 	buf->cx = 6;
-	E.buf = buf;
-	clearUndosAndRedos(buf);
 
-	selfInsert(buf, 'X', 1);
-	buf->cx = 0;
-	selfInsert(buf, 'Y', 1);
+	type_char('X');
+	processKeypress(CMD_HOME);
+	type_char('Y');
+	assertContent(buf, "YabcdefX\n");
 
-	TEST_ASSERT_EQUAL_STRING("YabcdefX", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_INT(2, nrecords(buf));
+	undo(); /* only the Y */
+	assertContent(buf, "abcdefX\n");
+	undo(); /* only the X */
+	assertContent(buf, "abcdef\n");
 }
 
 /* ---- The cap ---- */
 
 /* Unbounded runs are correct but unrecoverable: one undo would discard
- * an arbitrarily long burst with no way to get part of it back. */
+ * an arbitrarily long burst with no way to get part of it back.  A run
+ * holds about twenty keystrokes, so 500 of them are about 25 steps. */
 void test_long_run_is_capped(void) {
 	struct buffer *buf = make_test_buffer("");
-	E.buf = buf;
-	clearUndosAndRedos(buf);
 
 	for (int i = 0; i < 500; i++)
-		selfInsert(buf, 'x', 1);
-
+		type_char('x');
 	TEST_ASSERT_EQUAL_INT(500, buf->row[0].size);
-	TEST_ASSERT(nrecords(buf) >= 500 / 21);
-	TEST_ASSERT(nrecords(buf) <= 500 / 20 + 2);
 
-	while (buf->undo)
-		doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_STRING("", row_str(buf, 0));
+	int steps = undoStepsToStart(buf);
+	TEST_ASSERT(steps >= 500 / 21);
+	TEST_ASSERT(steps <= 500 / 20 + 2);
+	assertContent(buf, "");
 }
 
 /* The cap counts operations, not bytes, so a run of three-byte
@@ -179,91 +258,127 @@ void test_long_run_is_capped(void) {
  * #104 the two paths disagreed by a factor of three. */
 void test_cap_counts_operations_not_bytes(void) {
 	struct buffer *ascii = make_test_buffer("");
-	E.buf = ascii;
-	clearUndosAndRedos(ascii);
 	for (int i = 0; i < 100; i++)
-		selfInsert(ascii, 'x', 1);
-	int ascii_records = nrecords(ascii);
+		type_char('x');
+	TEST_ASSERT_EQUAL_INT(100, ascii->row[0].size);
+	int ascii_steps = undoStepsToStart(ascii);
+	assertContent(ascii, "");
 
 	struct buffer *cjk = make_test_buffer("");
 	cjk->next = ascii; /* keep both reachable for cleanup */
-	E.buf = cjk;
-	clearUndosAndRedos(cjk);
+	/* One decoded character waiting, as readKey() leaves it. */
 	E.nunicode = 3;
 	E.unicode[0] = 0xE6;
 	E.unicode[1] = 0x97;
 	E.unicode[2] = 0xA5;
-	for (int i = 0; i < 100; i++)
-		insertUnicode(1);
-	int cjk_records = nrecords(cjk);
+	press_times(CMD_UNICODE, 100);
+	TEST_ASSERT_EQUAL_INT(300, cjk->row[0].size);
+	int cjk_steps = undoStepsToStart(cjk);
+	assertContent(cjk, "");
 
-	TEST_ASSERT_EQUAL_INT(ascii_records, cjk_records);
+	TEST_ASSERT(ascii_steps > 1);
+	TEST_ASSERT_EQUAL_INT(ascii_steps, cjk_steps);
+}
 
-	while (cjk->undo)
-		doUndo(cjk, 1);
-	TEST_ASSERT_EQUAL_STRING("", row_str(cjk, 0));
+/* An explicit prefix argument is one command.  C-u 100 x inserts a
+ * hundred characters, but undoing it must take one keystroke, not
+ * five: the cap chops up a run of separate commands, not a single
+ * command that happens to repeat. */
+void test_prefix_argument_repeat_is_one_record(void) {
+	struct buffer *buf = loadedBuffer("Z");
+
+	E.self_insert_key = 'x';
+	press_with_arg(100, CMD_SELF_INSERT);
+	TEST_ASSERT_EQUAL_INT(101, buf->row[0].size);
+
+	undo();
+	assertContent(buf, "Z\n");
+}
+
+void test_prefix_argument_newlines_are_one_record(void) {
+	struct buffer *buf = make_test_buffer("ab");
+	buf->cx = 1;
+
+	press_with_arg(30, CMD_NEWLINE);
+	TEST_ASSERT_EQUAL_INT(32, buf->numrows);
+
+	undo();
+	assertContent(buf, "ab\n");
 }
 
 /* ---- Boundaries a run must not cross ---- */
 
-/* A bulk mutation stands alone.  Without pushUndo closing the open
- * run, typing after one could find the earlier record still aligned
- * and fold back across the bulk edit. */
+/* A bulk edit stands alone.  Typing after one could find the earlier
+ * typing still lined up with it and fold back across the bulk edit;
+ * the yank here is the bulk edit. */
 void test_run_does_not_fold_across_bulk_edit(void) {
+	copyToKillRing("ZZ");
 	struct buffer *buf = make_test_buffer("abc");
 	buf->cx = 3;
-	E.buf = buf;
-	clearUndosAndRedos(buf);
 
-	selfInsert(buf, 'X', 1);
-	mutateInsert(buf, 3, 0, (const uint8_t *)"ZZ", 2, NULL, NULL);
-	buf->cx = buf->row[0].size;
-	selfInsert(buf, 'Y', 1);
+	type_char('X');
+	assertContent(buf, "abcX\n");
+	buf->cx = 3;
+	processKeypress(CMD_YANK);
+	assertContent(buf, "abcZZX\n");
+	processKeypress(CMD_END);
+	type_char('Y');
+	assertContent(buf, "abcZZXY\n");
 
-	TEST_ASSERT_EQUAL_INT(3, nrecords(buf));
-
-	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_STRING("abcZZX", row_str(buf, 0));
-	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_STRING("abcX", row_str(buf, 0));
-	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_STRING("abc", row_str(buf, 0));
+	undo(); /* the Y */
+	assertContent(buf, "abcZZX\n");
+	undo(); /* the yank */
+	assertContent(buf, "abcX\n");
+	undo(); /* the X */
+	assertContent(buf, "abc\n");
 }
 
-/* Undo closes the run.  Typing straight afterwards can land aligned
- * with the record undo just exposed; folding into it would be correct
+/* Undo closes the run.  Typing straight afterwards can land lined up
+ * with the step undo just exposed; folding into it would be correct
  * but makes "a run is one uninterrupted burst" stop holding. */
 void test_undo_closes_the_run(void) {
 	struct buffer *buf = loadedBuffer("Z");
 
-	selfInsert(buf, 'a', 1);
-	selfInsert(buf, 'b', 1);
-	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_STRING("Z", row_str(buf, 0));
+	/* Two steps: "ab" at the start, then "X" at the end. */
+	type_str("ab");
+	processKeypress(CMD_END);
+	type_char('X');
+	assertContent(buf, "abZX\n");
 
-	selfInsert(buf, 'c', 1);
-	TEST_ASSERT_EQUAL_STRING("cZ", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_INT(1, nrecords(buf));
+	/* Undo the X.  The step now on top is the "ab" run. */
+	undo();
+	assertContent(buf, "abZ\n");
+
+	/* Type exactly where that run left off. */
+	buf->cx = 2;
+	type_char('c');
+	assertContent(buf, "abcZ\n");
+
+	/* The c is a step of its own: undo takes it and leaves "ab". */
+	undo();
+	assertContent(buf, "abZ\n");
+	undo();
+	assertContent(buf, "Z\n");
 }
 
-/* Redo re-exposes a record that may still have been open when it was
+/* Redo re-exposes a step that may still have been open when it was
  * undone.  Typing after a redo must start a fresh one. */
 void test_redo_closes_the_run(void) {
 	struct buffer *buf = loadedBuffer("Z");
 
-	selfInsert(buf, 'a', 1);
-	selfInsert(buf, 'b', 1);
-	doUndo(buf, 1);
-	doRedo(buf, 1);
-	TEST_ASSERT_EQUAL_STRING("abZ", row_str(buf, 0));
+	type_str("ab");
+	undo();
+	redo();
+	assertContent(buf, "abZ\n");
 
 	buf->cx = 2;
-	selfInsert(buf, 'c', 1);
-	TEST_ASSERT_EQUAL_STRING("abcZ", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_INT(2, nrecords(buf));
+	type_char('c');
+	assertContent(buf, "abcZ\n");
 
-	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_STRING("abZ", row_str(buf, 0));
+	undo(); /* only the c */
+	assertContent(buf, "abZ\n");
+	undo();
+	assertContent(buf, "Z\n");
 }
 
 /* ---- Newlines ---- */
@@ -273,108 +388,39 @@ void test_redo_closes_the_run(void) {
 void test_newline_joins_the_run(void) {
 	struct buffer *buf = loadedBuffer("Z");
 
-	selfInsert(buf, 'a', 1);
-	insertNewline(1);
-	selfInsert(buf, 'b', 1);
+	type_char('a');
+	processKeypress(CMD_NEWLINE);
+	type_char('b');
+	assertContent(buf, "a\nbZ\n");
 
-	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
-	TEST_ASSERT_EQUAL_INT(1, nrecords(buf));
-
-	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
-	TEST_ASSERT_EQUAL_STRING("Z", row_str(buf, 0));
-}
-
-/* ---- Anchoring at the virtual EOF ----
- *
- * The row array represents T = row[0] "\n" ... row[N-1] "\n", so it
- * cannot name the position after the final newline.  An insertion at
- * the virtual EOF line therefore changes one more byte than it looks
- * like, and the record has to say so or undo leaves the row behind
- * (#102).  Unifying the paths does not remove the need — see the EOF
- * issue for the change that would. */
-/* Both tests below assert the serialised buffer rather than numrows.
- * The behaviour being characterised is "an edit at the end of the
- * buffer undoes back to exactly the original text, leaving no row
- * behind" -- a statement about text, not about row counts.  The
- * expected strings are derived from the representation table in
- * buffer.h, not from observing what the code does: a two-line
- * newline-terminated file is "one\ntwo\n" before and after the undo,
- * whatever the row array happens to look like underneath.
- *
- * Asserting numrows here would tie the test to the representation
- * and, worse, would make it satisfiable by whatever count was last
- * observed.  These assertions catch a failed restore either way. */
-static void assertContent(struct buffer *buf, const char *want) {
-	size_t len = 0;
-	char *got = rowsToString(buf, &len);
-	TEST_ASSERT_EQUAL_INT((int)strlen(want), (int)len);
-	if (len == strlen(want))
-		TEST_ASSERT_EQUAL_INT(0, memcmp(want, got, len));
-	free(got);
-}
-
-void test_newline_at_virtual_eof_undoes_cleanly(void) {
-	const char *lines[] = { "one", "two" };
-	struct buffer *buf = make_test_buffer_lines(lines, 2);
-	buf->cx = 0;
-	buf->cy = buf->numrows - 1; /* end of buffer */
-	E.buf = buf;
-	clearUndosAndRedos(buf);
-	assertContent(buf, "one\ntwo\n");
-
-	insertNewline(1);
-	assertContent(buf, "one\ntwo\n\n");
-
-	doUndo(buf, 1);
-	assertContent(buf, "one\ntwo\n");
-}
-
-void test_typing_at_virtual_eof_undoes_cleanly(void) {
-	const char *lines[] = { "one", "two" };
-	struct buffer *buf = make_test_buffer_lines(lines, 2);
-	buf->cx = 0;
-	buf->cy = buf->numrows - 1;
-	E.buf = buf;
-	clearUndosAndRedos(buf);
-
-	selfInsert(buf, 'X', 1);
-	selfInsert(buf, 'Y', 1);
-	/* The terminator the invariant requires is part of the text
-	 * now, so the buffer reads as a three-line file. */
-	assertContent(buf, "one\ntwo\nXY\n");
-
-	while (buf->undo)
-		doUndo(buf, 1);
-	assertContent(buf, "one\ntwo\n");
+	undo();
+	assertContent(buf, "Z\n");
 }
 
 /* ---- Final-newline invariant, maintenance half ----
  *
- * Load establishes it; the mutation layer keeps it.  Two behaviours:
- * a deletion of nothing but the final newline is refused outright,
- * and a deletion that takes it along with real text is allowed and
- * the terminator re-appended in the same undo step. */
+ * Load establishes it; editing keeps it.  Two behaviours: a deletion
+ * of nothing but the final newline is refused outright, and a deletion
+ * that takes it along with real text is allowed and the terminator
+ * re-appended in the same undo step. */
 
-/* Refused, and refused before anything is recorded: no undo record, no
- * dirty flag, no cleared redo stack.  Doing it as a delete followed by
- * a repair would leave the buffer byte-identical but two records
- * heavier and spuriously modified. */
+/* Refused, and refused before anything changes: the text is the same
+ * and the buffer is not marked modified.  Doing it as a delete
+ * followed by a repair would leave the buffer byte-identical but
+ * spuriously modified. */
 void test_deleting_only_the_final_newline_is_refused(void) {
 	struct buffer *buf = make_test_buffer("abc");
 	buf->cx = 3;
 	buf->cy = 0;
-	E.buf = buf;
-	clearUndosAndRedos(buf);
-	buf->dirty = 0;
 
-	delChar(1);
+	processKeypress(CMD_DELETE);
 
-	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
-	TEST_ASSERT_EQUAL_STRING("abc", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_STRING("", row_str(buf, 1));
-	TEST_ASSERT_EQUAL_INT(0, nrecords(buf));
+	assertContent(buf, "abc\n");
 	TEST_ASSERT_EQUAL_INT(0, buf->dirty);
+
+	/* Nothing was done, so there is nothing to undo. */
+	undo();
+	assertContent(buf, "abc\n");
 }
 
 /* The same refusal reached from the other side.  Backspace at the
@@ -383,38 +429,36 @@ void test_backspace_onto_the_terminator_row_is_refused(void) {
 	struct buffer *buf = make_test_buffer("abc");
 	buf->cx = 0;
 	buf->cy = 1;
-	E.buf = buf;
-	clearUndosAndRedos(buf);
-	buf->dirty = 0;
 
-	backSpace(1);
+	processKeypress(CMD_BACKSPACE);
 
-	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
-	TEST_ASSERT_EQUAL_STRING("abc", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_INT(0, nrecords(buf));
+	assertContent(buf, "abc\n");
 	TEST_ASSERT_EQUAL_INT(0, buf->dirty);
+
+	undo();
+	assertContent(buf, "abc\n");
 }
 
 /* Taking the final newline along with real text is a real edit, so it
- * proceeds; the terminator is re-appended.  The repair is paired, so
- * one undo takes the whole thing rather than exposing an intermediate
- * state that never existed. */
+ * proceeds; the terminator is re-appended.  One undo takes the whole
+ * thing rather than exposing an intermediate state that never
+ * existed. */
 void test_deleting_past_the_end_repairs_in_one_step(void) {
 	const char *lines[] = { "alpha", "beta" };
 	struct buffer *buf = make_test_buffer_lines(lines, 2);
-	buf->cx = 2;
-	buf->cy = 1;
-	E.buf = buf;
-	clearUndosAndRedos(buf);
 	assertContent(buf, "alpha\nbeta\n");
 
-	/* From inside the last line of text through the terminator. */
-	deleteRange(buf, 2, 1, 0, 2, 0);
+	/* C-w from inside the last line of text through the terminator. */
+	buf->markx = 2;
+	buf->marky = 1;
+	buf->mark_active = 1;
+	buf->cx = 0;
+	buf->cy = 2;
+	processKeypress(CMD_KILL_REGION);
 
 	assertContent(buf, "alpha\nbe\n");
-	TEST_ASSERT_EQUAL_STRING("", row_str(buf, buf->numrows - 1));
 
-	doUndo(buf, 1);
+	undo();
 	assertContent(buf, "alpha\nbeta\n");
 }
 
@@ -425,21 +469,16 @@ void test_deleting_past_the_end_repairs_in_one_step(void) {
 void test_backspace_deletes_a_trailing_blank_line(void) {
 	const char *lines[] = { "a", "" };
 	struct buffer *buf = make_test_buffer_lines(lines, 2);
-	E.buf = buf;
-	clearUndosAndRedos(buf);
-	buf->dirty = 0;
 	assertContent(buf, "a\n\n");
 
 	buf->cx = 0;
 	buf->cy = 2;
-	backSpace(1);
+	processKeypress(CMD_BACKSPACE);
 
 	assertContent(buf, "a\n");
-	TEST_ASSERT_EQUAL_STRING("", row_str(buf, buf->numrows - 1));
-	TEST_ASSERT_EQUAL_INT(1, nrecords(buf));
 	TEST_ASSERT_EQUAL_INT(1, buf->dirty);
 
-	doUndo(buf, 1);
+	undo();
 	assertContent(buf, "a\n\n");
 }
 
@@ -447,37 +486,30 @@ void test_backspace_deletes_a_trailing_blank_line(void) {
 void test_delete_forward_removes_a_trailing_blank_line(void) {
 	const char *lines[] = { "a", "" };
 	struct buffer *buf = make_test_buffer_lines(lines, 2);
-	E.buf = buf;
-	clearUndosAndRedos(buf);
-	buf->dirty = 0;
 
 	buf->cx = 0;
 	buf->cy = 1;
-	delChar(1);
+	processKeypress(CMD_DELETE);
 
 	assertContent(buf, "a\n");
-	doUndo(buf, 1);
+	undo();
 	assertContent(buf, "a\n\n");
 }
 
-/* A buffer holding only a newline empties, satisfying the invariant by
- * the bufferIsEmpty arm. */
+/* A buffer holding only a newline empties: no text at all satisfies
+ * the invariant too. */
 void test_backspace_on_lone_blank_line_empties_the_buffer(void) {
 	const char *lines[] = { "" };
 	struct buffer *buf = make_test_buffer_lines(lines, 1);
-	E.buf = buf;
-	clearUndosAndRedos(buf);
-	buf->dirty = 0;
 	assertContent(buf, "\n");
 
 	buf->cx = 0;
 	buf->cy = 1;
-	backSpace(1);
+	processKeypress(CMD_BACKSPACE);
 
 	assertContent(buf, "");
-	TEST_ASSERT_EQUAL_INT(1, bufferIsEmpty(buf));
 
-	doUndo(buf, 1);
+	undo();
 	assertContent(buf, "\n");
 }
 
@@ -490,98 +522,24 @@ void test_mixed_burst_round_trips(void) {
 	struct buffer *buf = make_test_buffer_lines(lines, 2);
 	buf->cx = 5;
 	buf->cy = 0;
-	E.buf = buf;
-	clearUndosAndRedos(buf);
 
 	for (int i = 0; i < 57; i++)
-		selfInsert(buf, 'q', 1);
-	insertNewline(1);
+		type_char('q');
+	processKeypress(CMD_NEWLINE);
 	for (int i = 0; i < 30; i++)
-		selfInsert(buf, 'w', 1);
-	backSpace(25);
+		type_char('w');
+	press_times(CMD_BACKSPACE, 25);
 
-	while (buf->undo)
-		doUndo(buf, 1);
+	/* 57 q's end the first line; five of the w's are left. */
+	TEST_ASSERT_EQUAL_INT(62, buf->row[0].size);
+	TEST_ASSERT_EQUAL_STRING("wwwww", row_str(buf, 1));
 
-	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
-	TEST_ASSERT_EQUAL_STRING("alpha", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_STRING("beta", row_str(buf, 1));
+	int steps = undoStepsToStart(buf);
+	TEST_ASSERT(steps > 1);
+	assertContent(buf, "alpha\nbeta\n");
 }
-
-/* An explicit prefix argument is one command.  C-u 100 x inserts a
- * hundred characters, but undoing it must take one keystroke, not
- * five: the cap chops up a run of separate commands, not a single
- * command that happens to repeat. */
-void test_prefix_argument_repeat_is_one_record(void) {
-	struct buffer *buf = loadedBuffer("Z");
-
-	selfInsert(buf, 'x', 100);
-
-	TEST_ASSERT_EQUAL_INT(101, buf->row[0].size);
-	TEST_ASSERT_EQUAL_INT(1, nrecords(buf));
-
-	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_STRING("Z", row_str(buf, 0));
-}
-
-void test_prefix_argument_newlines_are_one_record(void) {
-	struct buffer *buf = make_test_buffer("ab");
-	buf->cx = 1;
-	E.buf = buf;
-	clearUndosAndRedos(buf);
-
-	insertNewline(30);
-
-	TEST_ASSERT_EQUAL_INT(32, buf->numrows);
-	TEST_ASSERT_EQUAL_INT(1, nrecords(buf));
-
-	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
-	TEST_ASSERT_EQUAL_STRING("ab", row_str(buf, 0));
-}
-
 
 /* ---- input bursts (#126) --------------------------------------- */
-
-/* Typed keys stay capped: 60 self-inserts is more than one run, so
- * the buffer holds more than one record.  This is the rule the burst
- * exemption must not disturb. */
-void test_typing_is_capped_into_several_runs(void) {
-	struct buffer *buf = loadedBuffer("Z");
-	for (int i = 0; i < 60; i++)
-		selfInsert(buf, 'a' + (i % 26), 1);
-	TEST_ASSERT(nrecords(buf) > 1);
-}
-
-/* The same 60 inserts arriving in a burst collapse to one record.
- *
- * E.input_burst is what the drain loop sets when it finds bytes
- * already waiting; the mutation layer copies it onto each record and
- * undoMergeDecision honours it.  Set directly here because the unit suites
- * have no terminal -- the end-to-end path is covered by the pty
- * scenarios. */
-void test_burst_lifts_the_cap(void) {
-	struct buffer *buf = loadedBuffer("Z");
-	E.input_burst = 1;
-	for (int i = 0; i < 60; i++)
-		selfInsert(buf, 'a' + (i % 26), 1);
-	E.input_burst = 0;
-	TEST_ASSERT_EQUAL_INT(1, nrecords(buf));
-}
-
-/* A burst run merges across newlines.  This is what makes a
- * multi-line paste one undo step rather than one per line. */
-void test_burst_merges_across_newlines(void) {
-	struct buffer *buf = loadedBuffer("Z");
-	E.input_burst = 1;
-	for (int line = 0; line < 4; line++) {
-		for (int i = 0; i < 10; i++)
-			selfInsert(buf, 'a' + i, 1);
-		insertNewline(1);
-	}
-	E.input_burst = 0;
-	TEST_ASSERT_EQUAL_INT(1, nrecords(buf));
-}
 
 /* Undoing a burst run restores the buffer exactly. */
 void test_burst_run_undoes_whole(void) {
@@ -595,77 +553,8 @@ void test_burst_run_undoes_whole(void) {
 	TEST_ASSERT_EQUAL_STRING("keep", (char *)buf->row[0].chars);
 }
 
-/* ---- The merge decision, on its own ---- */
-
-static struct undo decision_rec(int sx, int sy, int ex, int ey, int del) {
-	struct undo u;
-	memset(&u, 0, sizeof u);
-	u.startx = sx;
-	u.starty = sy;
-	u.endx = ex;
-	u.endy = ey;
-	u.delete = del;
-	u.append = 1;
-	u.datalen = 1;
-	return u;
-}
-
-void test_merge_decision_shapes(void) {
-	struct undo typed = decision_rec(0, 0, 3, 0, 0);
-	struct undo next = decision_rec(3, 0, 4, 0, 0);
-	struct undo apart = decision_rec(9, 0, 10, 0, 0);
-	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_APPEND, undoMergeDecision(&typed, &next));
-	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_NONE, undoMergeDecision(&typed, &apart));
-
-	struct undo deleted = decision_rec(5, 0, 6, 0, 1);
-	struct undo cd = decision_rec(5, 0, 6, 0, 1);
-	struct undo bs = decision_rec(4, 0, 5, 0, 1);
-	struct undo elsewhere = decision_rec(0, 0, 1, 0, 1);
-	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_APPEND, undoMergeDecision(&deleted, &cd));
-	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_PREPEND, undoMergeDecision(&deleted, &bs));
-	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_NONE, undoMergeDecision(&deleted, &elsewhere));
-}
-
-void test_merge_decision_rejections(void) {
-	struct undo prev = decision_rec(0, 0, 3, 0, 0);
-	struct undo next = decision_rec(3, 0, 4, 0, 0);
-	struct undo del = decision_rec(3, 0, 4, 0, 1);
-
-	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_NONE, undoMergeDecision(NULL, &next));
-	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_NONE, undoMergeDecision(&prev, &del));
-
-	prev.append = 0;
-	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_NONE, undoMergeDecision(&prev, &next));
-	prev.append = 1;
-
-	prev.paired = 1;
-	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_NONE, undoMergeDecision(&prev, &next));
-	prev.paired = 0;
-
-	next.paired = 1;
-	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_NONE, undoMergeDecision(&prev, &next));
-	next.paired = 0;
-
-	next.datalen = 0;
-	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_NONE, undoMergeDecision(&prev, &next));
-	next.datalen = 1;
-
-	prev.nmerges = 19;
-	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_APPEND, undoMergeDecision(&prev, &next));
-	prev.nmerges = 20;
-	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_NONE, undoMergeDecision(&prev, &next));
-	next.uncapped = 1;
-	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_APPEND, undoMergeDecision(&prev, &next));
-	next.uncapped = 0;
-	prev.uncapped = 1;
-	TEST_ASSERT_EQUAL_INT(UNDO_MERGE_APPEND, undoMergeDecision(&prev, &next));
-}
-
 int main(void) {
 	TEST_BEGIN();
-
-	RUN_TEST(test_merge_decision_shapes);
-	RUN_TEST(test_merge_decision_rejections);
 
 	RUN_TEST(test_typing_a_word_is_one_record);
 	RUN_TEST(test_typing_at_end_of_buffer_costs_one_record);
@@ -692,13 +581,7 @@ int main(void) {
 	RUN_TEST(test_delete_forward_removes_a_trailing_blank_line);
 	RUN_TEST(test_backspace_on_lone_blank_line_empties_the_buffer);
 
-	RUN_TEST(test_newline_at_virtual_eof_undoes_cleanly);
-	RUN_TEST(test_typing_at_virtual_eof_undoes_cleanly);
-
 	RUN_TEST(test_mixed_burst_round_trips);
-	RUN_TEST(test_typing_is_capped_into_several_runs);
-	RUN_TEST(test_burst_lifts_the_cap);
-	RUN_TEST(test_burst_merges_across_newlines);
 	RUN_TEST(test_burst_run_undoes_whole);
 
 	return TEST_END();

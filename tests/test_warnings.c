@@ -1,10 +1,20 @@
 /* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
-/* test_warnings.c: persistent status-bar warning state. */
+/* test_warnings.c: persistent status-bar warning state.
+ *
+ * The tests of what the user does -- opening, editing, undoing,
+ * saving, reverting, inserting a file -- issue those commands through
+ * processKeypress() and read the result where the user would: the
+ * status line of a redrawn frame, the bytes on disk, and, for locks,
+ * the view from another process.  The tests of the locking machinery
+ * itself still call it by name: a rival process holding the lock, or a
+ * lock dropped at an exact moment, cannot be arranged with keys. */
 
 #include "test.h"
 #include "test_harness.h"
 #include "buffer.h"
+#include "display.h"
 #include "fileio.h"
+#include "keymap.h"
 #include "region.h"
 #include "util.h"
 #include <fcntl.h>
@@ -97,6 +107,104 @@ static void modify_externally(const char *path) {
  * within the same test or across consecutive tests. */
 static void resetThrottle(void) {
 	resetFileCheckThrottle();
+}
+
+/* ---- the editor as the user drives it ---- */
+
+/* Redraw the screen, as the editor does after every command.  The
+ * redraw is also when the editor looks at the file on disk; the
+ * throttle is reset first so that it does look. */
+static void redraw(void) {
+	resetThrottle();
+	muteStdout();
+	refreshScreen();
+	unmuteStdout();
+}
+
+/* Redraw without resetting the throttle: if the file was looked at in
+ * the last two seconds, it is not looked at again, so the frame shows
+ * only what the editor already knew. */
+static void redrawWithoutLooking(void) {
+	muteStdout();
+	refreshScreen();
+	unmuteStdout();
+}
+
+/* Is `want` somewhere in the frame last drawn? */
+static int frameShows(const char *want) {
+	int n = (int)strlen(want);
+	for (int i = 0; i + n <= E.render_buf.len; i++)
+		if (memcmp(E.render_buf.b + i, want, n) == 0)
+			return 1;
+	return 0;
+}
+
+static void typeChar(int c) {
+	E.self_insert_key = c;
+	processKeypress(CMD_SELF_INSERT);
+}
+
+/* Issue a command with `keys` waiting; returns how many it read. */
+static int pressWithKeys(int cmd, const int *keys, int n) {
+	scriptKeys(keys, n);
+	muteStdout();
+	processKeypress(cmd);
+	unmuteStdout();
+	int used = test_key_pos;
+	clearKeys();
+	return used;
+}
+
+/* Issue a command that prompts, with `text` and RET typed at the
+ * prompt and `after` (0 for none) waiting behind them. */
+static int pressTyping(int cmd, const char *text, int after) {
+	static int keys[TEST_KEY_SCRIPT_MAX];
+	int n = 0;
+	for (const char *c = text; *c && n < TEST_KEY_SCRIPT_MAX - 3; c++)
+		keys[n++] = (unsigned char)*c;
+	keys[n++] = '\r';
+	if (after)
+		keys[n++] = after;
+	return pressWithKeys(cmd, keys, n);
+}
+
+/* The file's bytes, or NULL if it cannot be read. */
+static char *slurp(const char *path) {
+	FILE *fp = fopen(path, "r");
+	if (!fp)
+		return NULL;
+	static char buf[512];
+	size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
+	buf[n] = '\0';
+	fclose(fp);
+	return buf;
+}
+
+/* Rewrite the file as another program would. */
+static void rewrite_externally(const char *path, const char *content) {
+	FILE *fp = fopen(path, "w");
+	TEST_ASSERT_NOT_NULL(fp);
+	if (fp) {
+		fputs(content, fp);
+		fclose(fp);
+	}
+}
+
+/* Is the file locked, asked from another process?  Defined below. */
+#ifndef EMIL_NO_FILE_LOCKING
+static int lock_held_on(const char *path);
+#endif
+
+/* Where the platform can lock, the lock on `path` is held (1) or not
+ * (0), by the other process's account.  Where it cannot, nothing to
+ * check. */
+static void assertLockOn(const char *path, int want) {
+#ifndef EMIL_NO_FILE_LOCKING
+	TEST_ASSERT_EQUAL_INT(want, lock_held_on(path));
+#else
+	(void)path;
+	(void)want;
+#endif
 }
 
 /* ---- external_mod / checkFileModified ---- */
@@ -363,29 +471,33 @@ void test_lock_blocked_cleared_on_successful_acquire(void) {
 void test_external_mod_persists_through_undo_to_clean(void) {
 	char *path = make_temp_file("original\n");
 	TEST_ASSERT_NOT_NULL(path);
+	struct buffer *scratch = make_test_buffer(NULL);
+	struct buffer *b = findFileTyping(path);
+	TEST_ASSERT(b != scratch);
 
-	struct buffer *b = make_test_buffer(NULL);
-	TEST_ASSERT_EQUAL_INT(0, editorOpen(b, path));
-
-	/* User dirties the buffer — acquires lock. */
-	markBufferDirty(b);
+	/* The user types: the buffer is modified and the file locked. */
+	typeChar('x');
 	TEST_ASSERT_TRUE(b->dirty);
-	ASSERT_LOCK_HELD(b->lock_fd);
+	assertLockOn(path, 1);
 
-	/* File changes on disk (external edit that ignored our lock). */
+	/* File changes on disk (external edit that ignored our lock), and
+	 * the next redraw notices. */
 	modify_externally(path);
+	redraw();
+	TEST_ASSERT_TRUE(frameShows("FILE MODIFIED"));
 
-	/* Refresh notices the drift. */
-	resetThrottle();
-	checkFileModified();
-	TEST_ASSERT_TRUE(b->external_mod);
-
-	/* User undoes all their edits back to clean.  This calls
-	 * markBufferClean → releaseLock.  external_mod must survive. */
-	markBufferClean(b);
+	/* The user undoes all their edits back to clean.  The buffer is
+	 * marked unmodified by the undo that finds nothing left to undo,
+	 * so it takes one press more than there were edits.  The lock is
+	 * let go, but the warning stays: it is a latch. */
+	processKeypress(CMD_UNDO);
+	TEST_ASSERT_EQUAL_STRING("original", row_str(b, 0));
+	processKeypress(CMD_UNDO);
 	TEST_ASSERT_FALSE(b->dirty);
-	TEST_ASSERT_EQUAL_INT(-1, b->lock_fd);
-	TEST_ASSERT_TRUE(b->external_mod); /* the flag is a latch */
+	TEST_ASSERT_EQUAL_STRING("original", row_str(b, 0));
+	assertLockOn(path, 0);
+	redraw();
+	TEST_ASSERT_TRUE(frameShows("FILE MODIFIED"));
 
 	unlink(path);
 	free(path);
@@ -487,77 +599,63 @@ void test_checkFileModified_does_not_reacquire_if_file_changed(void) {
 
 /* ---- save / revert clearing external_mod ---- */
 
-/* save(0) clears external_mod after writing.  We can't easily call
- * save(0) in the test harness (it needs terminal I/O for prompts),
- * so we simulate the flag-clearing sequence that save(0) performs
- * after a successful write:
- *   markBufferClean → stat → open_mtime update → external_mod = 0
- * The point of this test is that the latch is cleared by the save
- * path but NOT by markBufferClean alone. */
-
+/* C-x C-s clears the warning: the user has chosen their version, and
+ * the file on disk is now it. */
 void test_save_clears_external_mod(void) {
 	char *path = make_temp_file("original\n");
 	TEST_ASSERT_NOT_NULL(path);
+	struct buffer *scratch = make_test_buffer(NULL);
+	struct buffer *b = findFileTyping(path);
+	TEST_ASSERT(b != scratch);
 
-	struct buffer *b = make_test_buffer(NULL);
-	TEST_ASSERT_EQUAL_INT(0, editorOpen(b, path));
-
-	/* User dirties the buffer. */
-	markBufferDirty(b);
+	typeChar('x');
 	TEST_ASSERT_TRUE(b->dirty);
 
 	/* File changes on disk. */
 	modify_externally(path);
-	resetThrottle();
-	checkFileModified();
-	TEST_ASSERT_TRUE(b->external_mod);
+	redraw();
+	TEST_ASSERT_TRUE(frameShows("FILE MODIFIED"));
 
-	/* Simulate save's post-write sequence.  Both fields, because
-	 * checkFileModified() compares both and recording only the
-	 * mtime would leave open_size stale. */
-	markBufferClean(b);
-	struct stat st;
-	if (stat(path, &st) == 0) {
-		b->open_mtime = st.st_mtime;
-		b->open_size = st.st_size;
-	}
-	b->external_mod = 0;
-
-	TEST_ASSERT_FALSE(b->external_mod);
+	/* Save, answering y to "changed on disk; save anyway?". */
+	int yes[] = { 'y' };
+	TEST_ASSERT_EQUAL_INT(1, pressWithKeys(CMD_SAVE, yes, 1));
+	TEST_ASSERT_EQUAL_STRING("xoriginal\n", slurp(path));
 	TEST_ASSERT_FALSE(b->dirty);
 
-	/* Subsequent checkFileModified should not re-fire —
-	 * open_mtime now matches the file. */
-	resetThrottle();
-	checkFileModified();
-	TEST_ASSERT_FALSE(b->external_mod);
+	/* The warning is gone, and the next look at the file does not
+	 * raise it again: what is on disk is what was saved. */
+	redraw();
+	TEST_ASSERT_FALSE(frameShows("FILE MODIFIED"));
 
 	unlink(path);
 	free(path);
 }
 
-/* revert() replaces the buffer with a fresh editorOpen, which
- * initializes external_mod to 0.  Simulate by opening a new
- * buffer on the same path after external_mod was set. */
-
+/* M-x revert-buffer clears the warning: the user has taken the
+ * version on disk. */
 void test_revert_clears_external_mod(void) {
 	char *path = make_temp_file("original\n");
 	TEST_ASSERT_NOT_NULL(path);
-
-	struct buffer *b = make_test_buffer(NULL);
-	TEST_ASSERT_EQUAL_INT(0, editorOpen(b, path));
+	setupCommands();
+	struct buffer *scratch = make_test_buffer(NULL);
+	TEST_ASSERT(findFileTyping(path) != scratch);
 
 	modify_externally(path);
-	resetThrottle();
-	checkFileModified();
-	TEST_ASSERT_TRUE(b->external_mod);
+	redraw();
+	TEST_ASSERT_TRUE(frameShows("FILE MODIFIED"));
 
-	/* Simulate revert: open a fresh buffer on the same file. */
-	destroyBuffer(b);
-	struct buffer *fresh = make_test_buffer(NULL);
-	TEST_ASSERT_EQUAL_INT(0, editorOpen(fresh, path));
-	TEST_ASSERT_FALSE(fresh->external_mod);
-	TEST_ASSERT_FALSE(fresh->dirty);
+	pressTyping(CMD_EXEC_CMD, "revert-buffer", 0);
+
+	/* The buffer holds what is on disk now, unmodified... */
+	size_t len;
+	char *text = rowsToString(E.buf, &len);
+	TEST_ASSERT_EQUAL_STRING("original\n\n", text);
+	free(text);
+	TEST_ASSERT_FALSE(E.buf->dirty);
+
+	/* ...and the warning is gone. */
+	redraw();
+	TEST_ASSERT_FALSE(frameShows("FILE MODIFIED"));
 
 	unlink(path);
 	free(path);
@@ -691,52 +789,41 @@ void test_special_buffer_is_not_checked(void) {
 
 /* ---- pre-save confirmation ---- */
 
-/* Read the file back so the test can tell whether the write landed. */
-static char *slurp(const char *path) {
-	FILE *fp = fopen(path, "r");
-	if (!fp)
-		return NULL;
-	static char buf[512];
-	size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
-	buf[n] = '\0';
-	fclose(fp);
-	return buf;
-}
-
 /* The authoritative check: an external write that the background poll
  * never saw must still be caught at save time, and answering "n" must
  * leave the file alone. */
 void test_presave_prompt_refused_leaves_file(void) {
 	char *path = make_temp_file("original\n");
 	TEST_ASSERT_NOT_NULL(path);
+	struct buffer *scratch = make_test_buffer(NULL);
+	struct buffer *b = findFileTyping(path);
+	TEST_ASSERT(b != scratch);
+	typeChar('x');
 
-	struct buffer *b = make_test_buffer(NULL);
-	TEST_ASSERT_EQUAL_INT(0, editorOpen(b, path));
-	markBufferDirty(b);
+	/* A redraw now looks at the file, finds it unchanged, and starts
+	 * the two-second wait before it looks again. */
+	redraw();
+	TEST_ASSERT_FALSE(frameShows("FILE MODIFIED"));
 
-	/* Someone else rewrites the file.  No poll runs, so the status
-	 * bar never lit: external_mod is still clear. */
-	FILE *fp = fopen(path, "w");
-	TEST_ASSERT_NOT_NULL(fp);
-	fputs("theirs\n", fp);
-	fclose(fp);
-	/* The rewrite is the external modification; nothing further is
-	 * needed to trip the size comparison, and appending here would
-	 * corrupt the content the assertions below check. */
-	TEST_ASSERT_FALSE(b->external_mod);
+	/* Someone else rewrites the file.  No look is due, so the status
+	 * bar has not lit. */
+	rewrite_externally(path, "theirs\n");
 
-	int keys[] = { 'n' };
-	scriptKeys(keys, 1);
-	muteStdout();
-	save(0);
-	unmuteStdout();
-	clearKeys();
+	/* C-x C-s asks; n refuses. */
+	int no[] = { 'n' };
+	TEST_ASSERT_EQUAL_INT(1, pressWithKeys(CMD_SAVE, no, 1));
 
 	/* Refused: their content survives, ours stays unsaved. */
 	TEST_ASSERT_EQUAL_STRING("theirs\n", slurp(path));
 	TEST_ASSERT_TRUE(b->dirty);
-	/* ...and the indicator is now lit, so the next save won't ask. */
-	TEST_ASSERT_TRUE(b->external_mod);
+
+	/* ...and the indicator is now lit by the save itself.  This redraw
+	 * does not look at the file: the last look was moments ago.  (On
+	 * a machine slow enough to take two seconds over the lines above
+	 * it would look, and light the indicator itself; the assertion
+	 * would still hold, it would just prove less.) */
+	redrawWithoutLooking();
+	TEST_ASSERT_TRUE(frameShows("FILE MODIFIED"));
 
 	unlink(path);
 	free(path);
@@ -746,30 +833,20 @@ void test_presave_prompt_refused_leaves_file(void) {
 void test_presave_prompt_accepted_writes(void) {
 	char *path = make_temp_file("original\n");
 	TEST_ASSERT_NOT_NULL(path);
-
-	struct buffer *b = make_test_buffer(NULL);
-	TEST_ASSERT_EQUAL_INT(0, editorOpen(b, path));
+	struct buffer *scratch = make_test_buffer(NULL);
+	struct buffer *b = findFileTyping(path);
+	TEST_ASSERT(b != scratch);
 	b->cx = 0;
 	b->cy = 0;
-	insertRow(b, 0, (const uint8_t *)"ours", 4);
-	markBufferDirty(b);
+	for (const char *c = "ours "; *c; c++)
+		typeChar(*c);
 
-	FILE *fp = fopen(path, "w");
-	TEST_ASSERT_NOT_NULL(fp);
-	fputs("theirs\n", fp);
-	fclose(fp);
-	/* The rewrite is the external modification; nothing further is
-	 * needed to trip the size comparison, and appending here would
-	 * corrupt the content the assertions below check. */
+	rewrite_externally(path, "theirs\n");
 
-	int keys[] = { 'y' };
-	scriptKeys(keys, 1);
-	muteStdout();
-	save(0);
-	unmuteStdout();
-	clearKeys();
+	int yes[] = { 'y' };
+	TEST_ASSERT_EQUAL_INT(1, pressWithKeys(CMD_SAVE, yes, 1));
 
-	TEST_ASSERT(strstr(slurp(path), "ours") != NULL);
+	TEST_ASSERT_EQUAL_STRING("ours original\n", slurp(path));
 	TEST_ASSERT_FALSE(b->dirty);
 
 	unlink(path);
@@ -781,18 +858,19 @@ void test_presave_prompt_accepted_writes(void) {
 void test_presave_no_prompt_when_unchanged(void) {
 	char *path = make_temp_file("original\n");
 	TEST_ASSERT_NOT_NULL(path);
+	struct buffer *scratch = make_test_buffer(NULL);
+	struct buffer *b = findFileTyping(path);
+	TEST_ASSERT(b != scratch);
+	typeChar('x');
 
-	struct buffer *b = make_test_buffer(NULL);
-	TEST_ASSERT_EQUAL_INT(0, editorOpen(b, path));
-	markBufferDirty(b);
+	/* An n waits, and must not be read: there is nothing to ask. */
+	int no[] = { 'n' };
+	TEST_ASSERT_EQUAL_INT(0, pressWithKeys(CMD_SAVE, no, 1));
 
-	clearKeys();
-	muteStdout();
-	save(0);
-	unmuteStdout();
-
+	TEST_ASSERT_EQUAL_STRING("xoriginal\n", slurp(path));
 	TEST_ASSERT_FALSE(b->dirty);
-	TEST_ASSERT_FALSE(b->external_mod);
+	redraw();
+	TEST_ASSERT_FALSE(frameShows("FILE MODIFIED"));
 
 	unlink(path);
 	free(path);
@@ -835,26 +913,30 @@ static int lock_held_on(const char *path) {
 
 /* C-x i on the file the buffer is already visiting.
  *
- * insertFileAtPath fopen()s the path and fclose()s it.  POSIX drops
- * every lock a process holds on an inode when it closes *any*
- * descriptor referring to it, so that fclose silently released the
- * lock taken by markBufferDirty -- while lock_fd stayed open, so emil
- * went on believing it held one.  The two assertions at the end are
- * the whole defect: emil's belief, and the truth. */
+ * insert-file fopen()s the path and fclose()s it.  POSIX drops every
+ * lock a process holds on an inode when it closes *any* descriptor
+ * referring to it, so that fclose silently released the lock taken
+ * when the buffer was first modified -- while emil went on believing
+ * it held one.  Asked from another process, the lock must still be
+ * there. */
 #ifndef EMIL_NO_FILE_LOCKING
 void test_insert_file_keeps_our_lock(void) {
 	char *path = make_temp_file("content\n");
 	TEST_ASSERT_NOT_NULL(path);
-
-	struct buffer *buf = make_test_buffer(NULL);
-	TEST_ASSERT_EQUAL_INT(0, editorOpen(buf, path));
-	markBufferDirty(buf);
-	ASSERT_LOCK_HELD(buf->lock_fd);
+	struct buffer *scratch = make_test_buffer(NULL);
+	struct buffer *buf = findFileTyping(path);
+	TEST_ASSERT(buf != scratch);
+	typeChar('x');
 	TEST_ASSERT_EQUAL_INT(1, lock_held_on(path)); /* baseline */
 
-	TEST_ASSERT_EQUAL_INT(0, insertFileAtPath(buf, path, path));
+	/* C-x i, the same file's path, RET. */
+	int used = pressTyping(CMD_INSERT_FILE, path, 0);
+	TEST_ASSERT_EQUAL_INT((int)strlen(path) + 1, used);
+	size_t len;
+	char *text = rowsToString(buf, &len);
+	TEST_ASSERT_EQUAL_STRING("content\nxcontent\n", text);
+	free(text);
 
-	ASSERT_LOCK_HELD(buf->lock_fd);
 	TEST_ASSERT_EQUAL_INT(1, lock_held_on(path));
 
 	unlink(path);
@@ -995,16 +1077,23 @@ void test_no_duplicate_buffer_for_symlink_to_open_file(void) {
 	unlink(linkpath);
 	TEST_ASSERT_EQUAL_INT(0, symlink(path, linkpath));
 
-	struct buffer *first = switchToFile(path);
-	TEST_ASSERT_NOT_NULL(first);
+	struct buffer *scratch = make_test_buffer(NULL);
+	struct buffer *first = findFileTyping(path);
+	TEST_ASSERT(first != scratch);
 
 	/* Second open, through the symlink: a different absolute path. */
-	struct buffer *second = switchToFile(linkpath);
-	TEST_ASSERT_NOT_NULL(second);
-	if (sameFile(path, linkpath))
+	struct buffer *second = findFileTyping(linkpath);
+	TEST_ASSERT(second != scratch);
+	int buffers = 0;
+	for (struct buffer *bb = E.headbuf; bb != NULL; bb = bb->next)
+		buffers++;
+	if (sameFile(path, linkpath)) {
 		TEST_ASSERT_TRUE(first == second);
-	else
+		TEST_ASSERT_EQUAL_INT(2, buffers);
+	} else {
 		TEST_ASSERT_TRUE(first != second);
+		TEST_ASSERT_EQUAL_INT(3, buffers);
+	}
 
 	unlink(linkpath);
 	unlink(path);
@@ -1016,21 +1105,30 @@ void test_no_duplicate_buffer_for_symlink_to_open_file(void) {
  * platform whose stat() gives different files the same identity. */
 void test_distinct_files_get_distinct_buffers(void) {
 	char *a = make_temp_file("a\n");
-	char *b = make_temp_file("b\n");
 	TEST_ASSERT_NOT_NULL(a);
+	char *b = make_temp_file("b\n");
 	TEST_ASSERT_NOT_NULL(b);
 
-	struct buffer *ba = switchToFile(a);
-	struct buffer *bb = switchToFile(b);
-	TEST_ASSERT_NOT_NULL(ba);
-	TEST_ASSERT_NOT_NULL(bb);
+	struct buffer *scratch = make_test_buffer(NULL);
+	struct buffer *ba = findFileTyping(a);
+	struct buffer *bb = findFileTyping(b);
+	TEST_ASSERT(ba != scratch);
+	TEST_ASSERT(bb != scratch);
 	TEST_ASSERT_TRUE(ba != bb);
+	TEST_ASSERT_EQUAL_STRING("a", row_str(ba, 0));
+	TEST_ASSERT_EQUAL_STRING("b", row_str(bb, 0));
 
+	/* A path that does not exist yet matches neither: C-x C-f on it
+	 * gives a new, empty buffer, and creates no file. */
 	char absent[PATH_MAX];
 	snprintf(absent, sizeof(absent), "%s.absent", a);
-	int by_file = -1;
-	TEST_ASSERT_NULL(findBufferForFile(absent, &by_file));
-	TEST_ASSERT_EQUAL_INT(0, by_file);
+	struct buffer *bc = findFileTyping(absent);
+	TEST_ASSERT(bc != scratch && bc != ba && bc != bb);
+	size_t len;
+	char *text = rowsToString(bc, &len);
+	TEST_ASSERT_EQUAL_STRING("", text);
+	free(text);
+	TEST_ASSERT_EQUAL_INT(-1, access(absent, F_OK));
 
 	unlink(a);
 	unlink(b);
@@ -1042,8 +1140,10 @@ void test_distinct_files_get_distinct_buffers(void) {
 
 void setUp(void) {
 	initTestEditor();
+	makeMinibuffer();
 }
 void tearDown(void) {
+	freeMinibuffer();
 	cleanupTestEditor();
 }
 

@@ -243,6 +243,36 @@ static inline void freeMinibuffer(void) {
 	}
 }
 
+/* ---- Opening a file the way a user does ----
+ *
+ * C-x C-f, with `path` and RET typed at its prompt.  Needs a
+ * minibuffer (makeMinibuffer) and a current buffer to start from.
+ * Returns the buffer the editor is showing afterwards: the file's
+ * buffer when it opened, the buffer that was current when it did not.
+ *
+ * A C-g waits behind the RET.  The file prompt stays open when the
+ * path names a directory, and without the C-g the script would run
+ * out there and the prompt would wait for ever.  When the prompt has
+ * already returned, the C-g is never read.
+ *
+ * The path is typed a byte at a time, so it must be ASCII, and a
+ * `*`, `?` or `[` in it is a wildcard to find-file, as it is to a
+ * user. */
+static inline struct buffer *findFileTyping(const char *path) {
+	static int keys[TEST_KEY_SCRIPT_MAX];
+	int n = 0;
+	for (const char *p = path; *p && n < TEST_KEY_SCRIPT_MAX - 2; p++)
+		keys[n++] = (unsigned char)*p;
+	keys[n++] = '\r';
+	keys[n++] = CTRL('g');
+	scriptKeys(keys, n);
+	muteStdout();
+	processKeypress(CMD_FIND_FILE);
+	unmuteStdout();
+	clearKeys();
+	return E.buf;
+}
+
 /* Columns a wide (CJK) character occupies on this platform.
  *
  * Two under a UTF-8 locale.  One where the platform has only the C

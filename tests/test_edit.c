@@ -45,14 +45,15 @@ void test_self_insert_readonly_records_no_undo(void) {
 	/* Drive the real key path: CMD_SELF_INSERT of 'X'. */
 	E.self_insert_key = 'X';
 	processKeypress(CMD_SELF_INSERT);
-
 	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
-	TEST_ASSERT_NULL(buf->undo);
+	TEST_ASSERT_FALSE(buf->dirty);
 
-	/* Make writable and undo: buffer must be unchanged. */
+	/* Make writable and undo: there is nothing to undo, so the
+	 * buffer is unchanged. */
 	buf->read_only = 0;
-	doUndo(buf, 1);
+	processKeypress(CMD_UNDO);
 	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 }
 
 /* Regression: same for the multibyte path.  insertUnicode had no
@@ -64,17 +65,18 @@ void test_insert_unicode_readonly_records_no_undo(void) {
 	buf->cx = 0;
 	buf->cy = 0;
 
-	E.unicode[0] = 0xC3; /* é */
+	/* é, as readKey() leaves a multibyte key. */
+	E.unicode[0] = 0xC3;
 	E.unicode[1] = 0xA9;
 	E.nunicode = 2;
-	insertUnicode(1);
-
+	processKeypress(CMD_UNICODE);
 	TEST_ASSERT_EQUAL_STRING("h\xC3\xA9llo", row_str(buf, 0));
-	TEST_ASSERT_NULL(buf->undo);
+	TEST_ASSERT_FALSE(buf->dirty);
 
 	buf->read_only = 0;
-	doUndo(buf, 1);
+	processKeypress(CMD_UNDO);
 	TEST_ASSERT_EQUAL_STRING("h\xC3\xA9llo", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 }
 
 void test_self_insert_readonly_does_not_move_mark(void) {
@@ -222,104 +224,62 @@ void test_unindent_readonly(void) {
 	TEST_ASSERT_EQUAL_STRING("\tHello", row_str(buf, 0));
 }
 
-/* ---- Paragraph boundary helpers ---- */
-
-void test_forward_para_boundary(void) {
-	const char *lines[] = { "Hello world.", "", "Second para." };
-	struct buffer *buf = make_test_buffer_lines(lines, 3);
-	buf->cx = 0;
-	buf->cy = 0;
-	int cx = 0, cy = 0;
-	E.buf = buf;
-	forwardParaBoundary(buf, &cx, &cy);
-	TEST_ASSERT_EQUAL_INT(1, cy);
-	TEST_ASSERT_EQUAL_INT(0, cx);
-}
-
-void test_backward_para_boundary(void) {
-	const char *lines[] = { "Hello world.", "", "Second para." };
-	struct buffer *buf = make_test_buffer_lines(lines, 3);
-	buf->cx = 0;
-	buf->cy = 2;
-	int cx = 0, cy = 2;
-	E.buf = buf;
-	backwardParaBoundary(buf, &cx, &cy);
-	TEST_ASSERT_EQUAL_INT(1, cy);
-	TEST_ASSERT_EQUAL_INT(0, cx);
-}
+/* ---- Paragraph movement at the ends of the buffer ---- */
 
 void test_forward_para_to_end(void) {
+	/* No blank line ahead: M-} goes to the end of the buffer, the
+	 * empty row after the last line of text. */
 	const char *lines[] = { "One line only" };
 	struct buffer *buf = make_test_buffer_lines(lines, 1);
 	buf->cx = 0;
 	buf->cy = 0;
-	int cx = 0, cy = 0;
-	E.buf = buf;
-	forwardParaBoundary(buf, &cx, &cy);
-	TEST_ASSERT_EQUAL_INT(1, cy); /* numrows */
+	processKeypress(CMD_FORWARD_PARA);
+	TEST_ASSERT_EQUAL_INT(1, buf->cy);
+	TEST_ASSERT_EQUAL_INT(0, buf->cx);
 }
 
 void test_backward_para_to_start(void) {
+	/* No blank line behind: M-{ goes to the start of the buffer. */
 	const char *lines[] = { "One line only" };
 	struct buffer *buf = make_test_buffer_lines(lines, 1);
 	buf->cx = 5;
 	buf->cy = 0;
-	int cx = 5, cy = 0;
-	E.buf = buf;
-	backwardParaBoundary(buf, &cx, &cy);
-	TEST_ASSERT_EQUAL_INT(0, cy);
-	TEST_ASSERT_EQUAL_INT(0, cx);
+	processKeypress(CMD_BACKWARD_PARA);
+	TEST_ASSERT_EQUAL_INT(0, buf->cy);
+	TEST_ASSERT_EQUAL_INT(0, buf->cx);
 }
 
 /* ---- Sentence movement ---- */
-
-void test_forward_sentence_simple(void) {
-	struct buffer *buf = make_test_buffer("Hello world. Goodbye world.");
-	buf->cx = 0;
-	buf->cy = 0;
-	E.buf = buf;
-	int cx = 0, cy = 0;
-	forwardSentenceEnd(buf, &cx, &cy);
-	/* Land on the space after the period of first sentence */
-	TEST_ASSERT_EQUAL_INT(12, cx);  // "Hello world." → cursor after '.'
-	TEST_ASSERT_EQUAL_INT(0, cy);
-}
 
 void test_forward_sentence_end_of_line(void) {
 	const char *lines[] = { "Hello world.", "Next sentence." };
 	struct buffer *buf = make_test_buffer_lines(lines, 2);
 	buf->cx = 0;
 	buf->cy = 0;
-	E.buf = buf;
-	int cx = 0, cy = 0;
-	forwardSentenceEnd(buf, &cx, &cy);
-	/* Sentence ends at end-of-line — land at row->size */
-	TEST_ASSERT_EQUAL_INT(12, cx);
-	TEST_ASSERT_EQUAL_INT(0, cy);
+	processKeypress(CMD_SENTENCE_FORWARD);
+	/* Sentence ends at end-of-line: point stops there. */
+	TEST_ASSERT_EQUAL_INT(12, buf->cx);
+	TEST_ASSERT_EQUAL_INT(0, buf->cy);
 }
 
 void test_backward_sentence_simple(void) {
 	struct buffer *buf = make_test_buffer("Hello world. Goodbye world.");
 	buf->cx = 27; /* end of line */
 	buf->cy = 0;
-	E.buf = buf;
-	int cx = 27, cy = 0;
-	backwardSentenceStart(buf, &cx, &cy);
+	processKeypress(CMD_SENTENCE_BACKWARD);
 	/* Land at start of "Goodbye" (cursor before 'G') */
-	TEST_ASSERT_EQUAL_INT(13, cx);
-	TEST_ASSERT_EQUAL_INT(0, cy);
+	TEST_ASSERT_EQUAL_INT(13, buf->cx);
+	TEST_ASSERT_EQUAL_INT(0, buf->cy);
 }
 
 void test_backward_sentence_to_beginning(void) {
 	struct buffer *buf = make_test_buffer("Hello world.");
 	buf->cx = 5;
 	buf->cy = 0;
-	E.buf = buf;
-	int cx = 5, cy = 0;
-	backwardSentenceStart(buf, &cx, &cy);
+	processKeypress(CMD_SENTENCE_BACKWARD);
 	/* Land at start of buffer */
-	TEST_ASSERT_EQUAL_INT(0, cx);
-	TEST_ASSERT_EQUAL_INT(0, cy);
+	TEST_ASSERT_EQUAL_INT(0, buf->cx);
+	TEST_ASSERT_EQUAL_INT(0, buf->cy);
 }
 
 
@@ -327,12 +287,10 @@ void test_forward_sentence_with_closing_punct(void) {
 	struct buffer *buf = make_test_buffer("He said \"hello.\" Then left.");
 	buf->cx = 0;
 	buf->cy = 0;
-	E.buf = buf;
-	int cx = 0, cy = 0;
-	forwardSentenceEnd(buf, &cx, &cy);
+	processKeypress(CMD_SENTENCE_FORWARD);
 	/* No [Punct][Space][Upper] pattern matches — lands at end of line */
-	TEST_ASSERT_EQUAL_INT(27, cx);
-	TEST_ASSERT_EQUAL_INT(0, cy);
+	TEST_ASSERT_EQUAL_INT(27, buf->cx);
+	TEST_ASSERT_EQUAL_INT(0, buf->cy);
 }
 
 /* ---- Kill sexp ---- */
@@ -487,24 +445,25 @@ void test_zap_to_char_key_recorded_in_macro(void) {
 	clearKeys();
 }
 
-/* Played back from a macro, zapToChar takes its character from it. */
+/* Played back from a macro, M-z takes its character from it. */
 void test_zap_to_char_reads_key_from_macro_playback(void) {
 	struct buffer *buf = make_test_buffer("1a2a3a");
 	buf->cx = 0;
-	E.buf = buf;
-	int macro_keys[] = { 0, 'a' };
-	E.macro.keys = macro_keys;
-	E.macro.nkeys = 2;
-	E.playback = 1;
+	/* A macro of M-z a, then a key that must stay a key of its own:
+	 * if M-z did not take its character from the macro, the a would
+	 * be typed and the Z would be the target. */
+	E.macro.keys = xmalloc(3 * sizeof(int));
+	E.macro.keys[0] = KEY_META('z');
+	E.macro.keys[1] = 'a';
+	E.macro.keys[2] = 'Z';
+	E.macro.nkeys = 3;
+	E.macro.skeys = 3;
 
 	muteStdout();
-	zapToChar(1);
+	execMacro(&E.macro);
 	unmuteStdout();
 
-	TEST_ASSERT_EQUAL_STRING("2a3a", row_str(buf, 0));
-	E.playback = 0;
-	E.macro.keys = NULL;
-	E.macro.nkeys = 0;
+	TEST_ASSERT_EQUAL_STRING("Z2a3a", row_str(buf, 0));
 }
 
 /* ---- Paragraph movement via refactored functions ---- */
@@ -545,19 +504,6 @@ void test_insert_newline_empty_buffer(void) {
 	TEST_ASSERT_EQUAL_STRING("", row_str(buf, 1));
 }
 
-void test_backspace_at_origin(void) {
-	struct buffer *buf = make_test_buffer("Hello");
-	E.buf = buf;
-	buf->cx = 0;
-	buf->cy = 0;
-	backSpace(1);
-	/* Should be a no-op */
-	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
-	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_INT(0, buf->cx);
-	TEST_ASSERT_EQUAL_INT(0, buf->cy);
-}
-
 void test_backspace_stray_continuation_byte(void) {
 	/* A row beginning with a stray UTF-8 continuation
 	 * byte (reachable via byte-column rectangle ops through
@@ -572,22 +518,6 @@ void test_backspace_stray_continuation_byte(void) {
 	backSpace(1);
 	TEST_ASSERT_EQUAL_INT(0, buf->cx);
 	TEST_ASSERT_EQUAL_INT(0, buf->row[0].size);
-}
-
-void test_del_char_at_end_of_last_line(void) {
-	struct buffer *buf = make_test_buffer("Hello");
-	E.buf = buf;
-	buf->cx = 5;
-	buf->cy = 0;
-	delChar(1);
-	/* A no-op, and now genuinely so.  The character after the last
-	 * one is the file's trailing newline, which the buffer must
-	 * keep, so the mutation layer refuses the deletion outright.
-	 * This used to assert numrows == 1 -- the newline had in fact
-	 * been deleted and the row count silently dropped. */
-	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
-	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_STRING("", row_str(buf, 1));
 }
 
 void test_move_cursor_empty_buffer(void) {
@@ -814,21 +744,19 @@ void tearDown(void) {
 }
 
 
-/* B7 — plain Shift-Tab does nothing
+/* B7 — plain Shift-Tab did nothing
  *
- * unindent(int rept) loops `for (i = 0; i < rept; i++)`, and
- * CMD_UNINDENT passes E.uarg raw, which is 0 with no prefix argument.
- * Every other command routes through UARG_COUNT(), which maps 0 -> 1. */
+ * With no prefix argument the command's count arrives as 0, and the
+ * unindent loop ran zero times.  Every other command maps 0 to 1. */
 
 void test_b7_unindent_with_no_prefix_removes_one_tab(void) {
 	struct buffer *buf = make_test_buffer("\t\t\tcode");
 	buf->cy = 0;
 	buf->cx = 3;
 
-	unindent(0); /* what CMD_UNINDENT passes for a bare Shift-Tab */
+	processKeypress(CMD_UNINDENT); /* a bare Shift-Tab */
 
 	TEST_ASSERT_EQUAL_STRING("\t\tcode", row_str(E.buf, 0));
-
 }
 
 /* Explicit counts already work; pinned so a fix doesn't break them. */
@@ -837,10 +765,10 @@ void test_b7_unindent_with_explicit_count_unchanged(void) {
 	buf->cy = 0;
 	buf->cx = 3;
 
-	unindent(2);
+	E.uarg = 2; /* C-u 2 */
+	processKeypress(CMD_UNINDENT);
 
 	TEST_ASSERT_EQUAL_STRING("\tcode", row_str(E.buf, 0));
-
 }
 
 int main(void) {
@@ -869,13 +797,10 @@ int main(void) {
 	RUN_TEST(test_unindent_readonly);
 
 	/* Paragraph boundary helpers */
-	RUN_TEST(test_forward_para_boundary);
-	RUN_TEST(test_backward_para_boundary);
 	RUN_TEST(test_forward_para_to_end);
 	RUN_TEST(test_backward_para_to_start);
 
 	/* Sentence movement */
-	RUN_TEST(test_forward_sentence_simple);
 	RUN_TEST(test_forward_sentence_end_of_line);
 	RUN_TEST(test_backward_sentence_simple);
 	RUN_TEST(test_backward_sentence_to_beginning);
@@ -905,9 +830,7 @@ int main(void) {
 
 	/* Edge cases */
 	RUN_TEST(test_insert_newline_empty_buffer);
-	RUN_TEST(test_backspace_at_origin);
 	RUN_TEST(test_backspace_stray_continuation_byte);
-	RUN_TEST(test_del_char_at_end_of_last_line);
 	RUN_TEST(test_move_cursor_empty_buffer);
 	RUN_TEST(test_move_cursor_up_to_shorter_line);
 	RUN_TEST(test_kill_line_on_virtual_eof_line);

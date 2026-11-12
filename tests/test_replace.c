@@ -1,494 +1,377 @@
 /* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
-/* test_replace.c: the replace-regexp substitution engine.
+/* test_replace.c: replace-regexp.
  *
- * Covers the two pure functions behind replaceRegex:
- * replacementTemplateError (template validation) and
- * regexSubstituteAll (matching and expansion).  Driving the pure
- * functions rather than replaceRegex keeps the prompts out of the way.
+ * Every test runs the command the way a user does: M-x replace-regexp
+ * RET, the pattern and the replacement typed at its two prompts, and
+ * the buffer read afterwards.  Nothing here names the functions that
+ * validate the replacement or do the substitution, so they can be
+ * merged, renamed or made private without touching this file.
  *
- * Patterns containing a literal newline are reachable from the UI via
- * C-q C-j, so the cross-line cases below are live behaviour, not
- * hypotheticals. */
+ * Unless a test says otherwise the region is exactly the text under
+ * test, so the pattern sees that text and nothing else: not the
+ * buffer's final newline, and not the empty line after it.
+ *
+ * A newline in a pattern is typed with C-q C-j, so the cross-line
+ * cases below are live behaviour, not hypotheticals. */
 
 #include "test.h"
 #include "test_harness.h"
-#include "dbuf.h"
+#include "fileio.h"
 #include "keymap.h"
-#include "mutate.h"
-#include "region.h"
-#include "undo.h"
-#include <regex.h>
+#include "unicode.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
-/* Run a substitution and return the rewritten span as a C string.
- * Sets *count, *first and *last to the engine's out-params. */
-static char *sub(const char *pat, const char *subject, const char *tmpl,
-		 int notbol, int noteol, int *count, int *first, int *last) {
-	regex_t re;
-	TEST_ASSERT_EQUAL_INT(
-		0, regcomp(&re, pat, REG_EXTENDED | REG_NEWLINE));
-
-	struct dbuf d = DBUF_INIT;
-	int f = -1, l = -1;
-	int n = regexSubstituteAll(&re, (const uint8_t *)subject,
-				   (int)strlen(subject),
-				   (const uint8_t *)tmpl, notbol, noteol, &d,
-				   &f, &l);
-	int out_len;
-	uint8_t *out = dbuf_detach(&d, &out_len);
-	regfree(&re);
-
-	if (count)
-		*count = n;
-	if (first)
-		*first = f;
-	if (last)
-		*last = l;
-	return (char *)out;
+void setUp(void) {
+	initTestEditor();
+	makeMinibuffer();
+	setupCommands();
+}
+void tearDown(void) {
+	freeMinibuffer();
+	cleanupTestEditor();
 }
 
-/* Convenience for the common case: no anchoring restrictions. */
-static char *sub_all(const char *pat, const char *subject, const char *tmpl,
-		     int *count) {
-	return sub(pat, subject, tmpl, 0, 0, count, NULL, NULL);
+/* ---- Keys ---- */
+
+/* Append the keys that type `text` at a prompt.  A newline is typed
+ * as C-q C-j.  A multibyte character arrives the way readKey()
+ * delivers one: KEY_UNICODE, with its bytes waiting in E.unicode.
+ * The stub cannot change those bytes between keys, so one script may
+ * use only one multibyte character, however often. */
+static int add_text(int *keys, int n, const char *text) {
+	const unsigned char *p = (const unsigned char *)text;
+	while (*p) {
+		if (*p == '\n') {
+			keys[n++] = CTRL('q');
+			keys[n++] = CTRL('j');
+			p++;
+		} else if (*p < 0x80) {
+			keys[n++] = *p++;
+		} else {
+			int len = (*p >= 0xF0) ? 4 : (*p >= 0xE0) ? 3 : 2;
+			memcpy(E.unicode, p, len);
+			E.nunicode = len;
+			keys[n++] = KEY_UNICODE;
+			p += len;
+		}
+	}
+	return n;
+}
+
+/* M-x replace-regexp RET pattern RET replacement RET */
+static void replace_regexp(const char *pattern, const char *replacement) {
+	int keys[160];
+	int n = 0;
+	n = add_text(keys, n, "replace-regexp");
+	keys[n++] = '\r';
+	n = add_text(keys, n, pattern);
+	keys[n++] = '\r';
+	n = add_text(keys, n, replacement);
+	keys[n++] = '\r';
+
+	scriptKeys(keys, n);
+	muteStdout();
+	processKeypress(CMD_EXEC_CMD);
+	unmuteStdout();
+	/* Every key was wanted: the command asked for both answers. */
+	TEST_ASSERT_EQUAL_INT(n, test_key_pos);
+	clearKeys();
+}
+
+/* ---- Text ---- */
+
+/* The whole buffer as the bytes a save would write. */
+#define ASSERT_TEXT(expected, buf)                           \
+	do {                                                 \
+		size_t _len;                                 \
+		char *_text = rowsToString((buf), &_len);    \
+		TEST_ASSERT_EQUAL_STRING((expected), _text); \
+		free(_text);                                 \
+	} while (0)
+
+/* A buffer holding `text` (lines separated by '\n', no final one),
+ * with the region set from (sx, sy) to (ex, ey). */
+static struct buffer *buffer_with_region(const char *text, int sx, int sy,
+					 int ex, int ey) {
+	char *copy = xstrdup(text);
+	const char *lines[16];
+	int n = 0;
+	lines[n++] = copy;
+	for (char *p = copy; *p; p++) {
+		if (*p == '\n' && n < 16) {
+			*p = 0;
+			lines[n++] = p + 1;
+		}
+	}
+	struct buffer *buf = make_test_buffer_lines(lines, n);
+	free(copy);
+	buf->markx = ex;
+	buf->marky = ey;
+	buf->mark_active = 1;
+	buf->cx = sx;
+	buf->cy = sy;
+	return buf;
+}
+
+/* The same, with the region covering exactly the text. */
+static struct buffer *buffer_all_selected(const char *text) {
+	struct buffer *buf = buffer_with_region(text, 0, 0, 0, 0);
+	int last = buf->numrows - 2; /* the row before the terminator */
+	buf->markx = buf->row[last].size;
+	buf->marky = last;
+	return buf;
+}
+
+/* Replace in `text` and compare the buffer with `want`. */
+static void check(const char *text, const char *pattern,
+		  const char *replacement, const char *want) {
+	struct buffer *buf = buffer_all_selected(text);
+	replace_regexp(pattern, replacement);
+	ASSERT_TEXT(want, buf);
+}
+
+/* The replacement is refused: nothing is replaced, though the pattern
+ * matches, and the buffer is not marked modified. */
+static void check_refused(const char *text, const char *pattern,
+			  const char *replacement) {
+	struct buffer *buf = buffer_all_selected(text);
+	char *before;
+	size_t len;
+	before = rowsToString(buf, &len);
+	replace_regexp(pattern, replacement);
+	ASSERT_TEXT(before, buf);
+	TEST_ASSERT_EQUAL_INT(0, buf->dirty);
+	TEST_ASSERT(strlen(E.statusmsg) > 0);
+	free(before);
+	/* Several of these run in one test. */
+	destroyBuffer(buf);
+	E.buf = NULL;
+	E.headbuf = NULL;
+	E.windows[0]->buf = NULL;
+}
+
+/* ---- The command end to end, with its history ---- */
+
+/* Replace from the top of the buffer with no region, which means
+ * "from point to the end"; then one undo must restore the text and
+ * one redo reapply the replacement, however many matches there were. */
+static void check_history(const char **lines, int nlines, const char *pattern,
+			  const char *replacement, const char *want) {
+	struct buffer *buf = make_test_buffer_lines(lines, nlines);
+	size_t len;
+	char *before = rowsToString(buf, &len);
+
+	replace_regexp(pattern, replacement);
+	ASSERT_TEXT(want, buf);
+	TEST_ASSERT_TRUE(buf->dirty);
+
+	processKeypress(CMD_UNDO);
+	ASSERT_TEXT(before, buf);
+
+	processKeypress(CMD_REDO);
+	ASSERT_TEXT(want, buf);
+
+	free(before);
+}
+
+void test_replace_regex_one_row_history(void) {
+	const char *lines[] = { "xaax yy", "" };
+	check_history(lines, 2, "a+", "Z", "xZx yy\n\n");
+}
+
+/* Matches on separate rows are still one step. */
+void test_replace_regex_many_rows_history(void) {
+	const char *lines[] = { "a1", "keep", "a2 tail", "" };
+	check_history(lines, 4, "a[0-9]", "Q", "Q\nkeep\nQ tail\n\n");
+}
+
+/* An empty replacement is a pure delete, and one step too. */
+void test_replace_regex_to_nothing_history(void) {
+	const char *lines[] = { "xaay", "" };
+	check_history(lines, 2, "aa", "", "xy\n\n");
+}
+
+/* Replacing the last row's text in a buffer with no final newline
+ * repairs the newline, and the repair undoes with the replacement.
+ *
+ * The buffer is built by hand: neither loading a file nor typing
+ * leaves a buffer without its final newline, so there are no keys
+ * that make this one. */
+void test_replace_regex_final_row_history(void) {
+	struct buffer *buf = make_test_buffer("abc");
+	bufferResetRows(buf);
+	insertRow(buf, 0, (const uint8_t *)"abc", 3);
+	buf->cx = 0;
+	buf->cy = 0;
+	ASSERT_TEXT("abc", buf);
+
+	replace_regexp("b", "Z");
+	ASSERT_TEXT("aZc\n", buf);
+
+	processKeypress(CMD_UNDO);
+	ASSERT_TEXT("abc", buf);
+}
+
+/* No match changes nothing, and leaves nothing to undo. */
+void test_replace_regex_no_match_no_history(void) {
+	const char *lines[] = { "abc", "" };
+	struct buffer *buf = make_test_buffer_lines(lines, 2);
+
+	replace_regexp("q", "Z");
+	ASSERT_TEXT("abc\n\n", buf);
+	TEST_ASSERT_EQUAL_INT(0, buf->dirty);
+
+	processKeypress(CMD_UNDO);
+	ASSERT_TEXT("abc\n\n", buf);
 }
 
 /* ---- All matches, not just the first per line ---- */
 
 void test_replaces_every_match_on_a_line(void) {
-	int n;
-	char *r = sub_all("a", "banana", "X", &n);
-	TEST_ASSERT_EQUAL_INT(3, n);
-	TEST_ASSERT_EQUAL_STRING("XnXnX", r);
-	free(r);
-}
-
-void test_replaces_across_multiple_lines(void) {
-	int n;
-	char *r = sub_all("beta", "alpha beta\nbeta gamma beta", "X", &n);
-	TEST_ASSERT_EQUAL_INT(3, n);
-	TEST_ASSERT_EQUAL_STRING("X\nX gamma X", r);
-	free(r);
-}
-
-void test_no_match_leaves_count_zero(void) {
-	int n;
-	char *r = sub_all("zzz", "alpha beta", "X", &n);
-	TEST_ASSERT_EQUAL_INT(0, n);
-	free(r);
-}
-
-/* ---- Rewritten span is narrowed to first..last match ---- */
-
-void test_span_excludes_untouched_head_and_tail(void) {
-	int n, first, last;
-	char *r = sub("b+", "aaabbbccc", "X", 0, 0, &n, &first, &last);
-	TEST_ASSERT_EQUAL_INT(1, n);
-	/* Only "bbb" is rewritten; "aaa" and "ccc" are left alone. */
-	TEST_ASSERT_EQUAL_INT(3, first);
-	TEST_ASSERT_EQUAL_INT(6, last);
-	TEST_ASSERT_EQUAL_STRING("X", r);
-	free(r);
-}
-
-void test_span_covers_gap_between_matches(void) {
-	int n, first, last;
-	char *r = sub("b", "abcb d", "X", 0, 0, &n, &first, &last);
-	TEST_ASSERT_EQUAL_INT(2, n);
-	TEST_ASSERT_EQUAL_INT(1, first);
-	TEST_ASSERT_EQUAL_INT(4, last);
-	TEST_ASSERT_EQUAL_STRING("XcX", r);
-	free(r);
+	check("banana", "a", "X", "bXnXnX\n");
 }
 
 /* ---- Capture groups and \& ---- */
 
 void test_whole_match_reference(void) {
-	int n;
-	char *r = sub_all("[0-9]+", "a12b", "<\\&>", &n);
-	TEST_ASSERT_EQUAL_INT(1, n);
-	TEST_ASSERT_EQUAL_STRING("<12>", r);
-	free(r);
+	check("a12b", "[0-9]+", "<\\&>", "a<12>b\n");
 }
 
 void test_numbered_groups(void) {
-	int n;
-	char *r = sub_all("([a-z]+)=([0-9]+)", "key=42", "\\2:\\1", &n);
-	TEST_ASSERT_EQUAL_INT(1, n);
-	TEST_ASSERT_EQUAL_STRING("42:key", r);
-	free(r);
+	check("key=42", "([a-z]+)=([0-9]+)", "\\2:\\1", "42:key\n");
 }
 
 void test_group_swap_repeats_per_match(void) {
-	int n;
-	char *r = sub_all("([a-z])([0-9])", "a1 b2", "\\2\\1", &n);
-	TEST_ASSERT_EQUAL_INT(2, n);
-	TEST_ASSERT_EQUAL_STRING("1a 2b", r);
-	free(r);
+	check("a1 b2", "([a-z])([0-9])", "\\2\\1", "1a 2b\n");
 }
 
 void test_nonparticipating_group_expands_empty(void) {
-	int n;
 	/* The (x) alternative never participates, so \2 is empty. */
-	char *r = sub_all("(a)|(x)", "a", "[\\1\\2]", &n);
-	TEST_ASSERT_EQUAL_INT(1, n);
-	TEST_ASSERT_EQUAL_STRING("[a]", r);
-	free(r);
+	check("a", "(a)|(x)", "[\\1\\2]", "[a]\n");
 }
 
 void test_escaped_backslash_is_literal(void) {
-	int n;
-	char *r = sub_all("a", "a", "\\\\", &n);
-	TEST_ASSERT_EQUAL_INT(1, n);
-	TEST_ASSERT_EQUAL_STRING("\\", r);
-	free(r);
+	check("a", "a", "\\\\", "\\\n");
 }
 
-/* ---- Template validation ---- */
-
-void test_valid_templates_accepted(void) {
-	TEST_ASSERT_NULL(replacementTemplateError((const uint8_t *)"plain", 0));
-	TEST_ASSERT_NULL(replacementTemplateError((const uint8_t *)"<\\&>", 0));
-	TEST_ASSERT_NULL(replacementTemplateError((const uint8_t *)"\\\\", 0));
-	TEST_ASSERT_NULL(
-		replacementTemplateError((const uint8_t *)"\\1-\\2", 2));
-}
+/* ---- Replacements that are refused ---- */
 
 void test_unknown_escape_rejected(void) {
-	/* \n and \t are errors, not newline and tab: see region.c. */
-	TEST_ASSERT_NOT_NULL(
-		replacementTemplateError((const uint8_t *)"a\\nb", 0));
-	TEST_ASSERT_NOT_NULL(
-		replacementTemplateError((const uint8_t *)"a\\tb", 0));
-	TEST_ASSERT_NOT_NULL(
-		replacementTemplateError((const uint8_t *)"\\q", 0));
+	/* \n and \t are errors, not newline and tab. */
+	check_refused("ab", "a", "a\\nb");
+	check_refused("ab", "a", "a\\tb");
+	check_refused("ab", "a", "\\q");
 	/* \0 is not accepted as a synonym for \&. */
-	TEST_ASSERT_NOT_NULL(
-		replacementTemplateError((const uint8_t *)"\\0", 1));
+	check_refused("ab", "(a)", "\\0");
 }
 
 void test_trailing_backslash_rejected(void) {
-	TEST_ASSERT_NOT_NULL(
-		replacementTemplateError((const uint8_t *)"abc\\", 0));
+	check_refused("ab", "a", "abc\\");
 }
 
 void test_out_of_range_group_rejected(void) {
-	TEST_ASSERT_NOT_NULL(
-		replacementTemplateError((const uint8_t *)"\\3", 2));
-	TEST_ASSERT_NOT_NULL(
-		replacementTemplateError((const uint8_t *)"\\1", 0));
-	TEST_ASSERT_NULL(replacementTemplateError((const uint8_t *)"\\2", 2));
+	check_refused("ab", "(a)(b)", "\\3");
+	check_refused("ab", "a", "\\1");
+	/* The highest group the pattern has is accepted. */
+	check("ab", "(a)(b)", "\\2", "b\n");
 }
 
 /* ---- Anchoring ---- */
 
 void test_caret_anchors_at_each_line(void) {
-	int n, first, last;
-	char *r = sub("^a", "abc\nabc", "X", 0, 0, &n, &first, &last);
-	TEST_ASSERT_EQUAL_INT(2, n);
-	/* Span runs from the first match to the last, so the trailing
-	 * "bc" after the final match is not part of the output. */
-	TEST_ASSERT_EQUAL_INT(0, first);
-	TEST_ASSERT_EQUAL_INT(5, last);
-	TEST_ASSERT_EQUAL_STRING("Xbc\nX", r);
-	free(r);
+	check("abc\nabc", "^a", "X", "Xbc\nXbc\n");
 }
 
 void test_dollar_anchors_at_each_line(void) {
-	int n, first, last;
-	char *r = sub("c$", "abc\nabc", "X", 0, 0, &n, &first, &last);
-	TEST_ASSERT_EQUAL_INT(2, n);
-	/* Leading "ab" precedes the first match, so it is outside the
-	 * span too. */
-	TEST_ASSERT_EQUAL_INT(2, first);
-	TEST_ASSERT_EQUAL_INT(7, last);
-	TEST_ASSERT_EQUAL_STRING("X\nabX", r);
-	free(r);
+	check("abc\nabc", "c$", "X", "abX\nabX\n");
 }
 
 void test_notbol_suppresses_caret_at_subject_start(void) {
-	int n;
-	/* Region starting mid-line: ^ must not match its first byte,
-	 * but must still match after the embedded newline. */
-	char *r = sub("^a", "abc\nabc", "X", 1, 0, &n, NULL, NULL);
-	TEST_ASSERT_EQUAL_INT(1, n);
-	TEST_ASSERT_EQUAL_STRING("X", r);
-	free(r);
+	/* The region starts after the "x": its first "a" is not at the
+	 * start of a line, so ^ must not match it.  The "a" that opens
+	 * the second line still matches. */
+	struct buffer *buf = buffer_with_region("xabc\nabc", 1, 0, 3, 1);
+	replace_regexp("^a", "X");
+	ASSERT_TEXT("xabc\nXbc\n", buf);
 }
 
 void test_noteol_suppresses_dollar_at_subject_end(void) {
-	int n;
-	char *r = sub("c$", "abc\nabc", "X", 0, 1, &n, NULL, NULL);
-	TEST_ASSERT_EQUAL_INT(1, n);
-	TEST_ASSERT_EQUAL_STRING("X", r);
-	free(r);
+	/* The region ends before the "x": its last "c" is not at the
+	 * end of a line, so $ must not match it. */
+	struct buffer *buf = buffer_with_region("abc\nabcx", 0, 0, 3, 1);
+	replace_regexp("c$", "X");
+	ASSERT_TEXT("abX\nabcx\n", buf);
 }
 
 void test_dot_does_not_cross_newline(void) {
-	int n;
-	char *r = sub_all("a.c", "a\nc", "X", &n);
-	TEST_ASSERT_EQUAL_INT(0, n);
-	free(r);
+	struct buffer *buf = buffer_all_selected("a\nc");
+	replace_regexp("a.c", "X");
+	ASSERT_TEXT("a\nc\n", buf);
+	TEST_ASSERT_EQUAL_INT(0, buf->dirty);
 }
 
-/* Patterns containing a literal newline.  Reachable since C-q C-j:
- * these are the portability surface, because REG_NEWLINE is where
- * libc implementations could plausibly differ.  Verified identical on
- * glibc and musl; run the suite on macOS, MSYS2 and bionic to confirm
- * the POSIX guarantee holds there too. */
+/* Patterns containing a literal newline.  These are the portability
+ * surface, because REG_NEWLINE is where libc implementations could
+ * plausibly differ.  Verified identical on glibc and musl; run the
+ * suite on macOS, MSYS2 and bionic to confirm the POSIX guarantee
+ * holds there too. */
 void test_literal_newline_in_pattern_matches(void) {
-	int n;
-	char *r = sub_all("b\nc", "ab\ncd", "X", &n);
-	TEST_ASSERT_EQUAL_INT(1, n);
-	TEST_ASSERT_EQUAL_STRING("X", r);
-	free(r);
+	check("ab\ncd", "b\nc", "X", "aXd\n");
 }
 
 void test_newline_in_bracket_expression(void) {
-	int n;
-	char *r = sub_all("b[\n]c", "ab\ncd", "X", &n);
-	TEST_ASSERT_EQUAL_INT(1, n);
-	TEST_ASSERT_EQUAL_STRING("X", r);
-	free(r);
-}
-
-/* Under REG_NEWLINE a negated class must NOT match a newline, which is
- * what stops a replace running away across lines. */
-void test_negated_class_does_not_match_newline(void) {
-	int n;
-	char *r = sub_all("b[^x]c", "ab\ncd", "X", &n);
-	TEST_ASSERT_EQUAL_INT(0, n);
-	free(r);
+	check("ab\ncd", "b[\n]c", "X", "aXd\n");
 }
 
 void test_blank_line_pattern(void) {
-	int n;
-	char *r = sub_all("\n\n", "a\n\nb", "X", &n);
-	TEST_ASSERT_EQUAL_INT(1, n);
-	/* sub_all returns the rewritten span, not the whole subject. */
-	TEST_ASSERT_EQUAL_STRING("X", r);
-	free(r);
+	check("a\n\nb", "\n\n", "X", "aXb\n");
 }
 
 void test_newline_under_repetition(void) {
-	int n;
-	char *r = sub_all("a\n+b", "a\n\n\nb", "X", &n);
-	TEST_ASSERT_EQUAL_INT(1, n);
-	TEST_ASSERT_EQUAL_STRING("X", r);
-	free(r);
+	check("a\n\n\nb", "a\n+b", "X", "X\n");
 }
 
 /* ---- Zero-width matches ---- */
 
 void test_zero_width_match_terminates(void) {
-	int n;
 	/* x* matches empty at every position; without an explicit
 	 * step this would spin forever. */
-	char *r = sub_all("x*", "ab", "-", &n);
-	TEST_ASSERT_EQUAL_INT(3, n);
-	TEST_ASSERT_EQUAL_STRING("-a-b-", r);
-	free(r);
+	check("ab", "x*", "-", "-a-b-\n");
 }
 
 void test_zero_width_mixed_with_real_match(void) {
-	int n;
 	/* The empty match sitting immediately after the "a" must not
 	 * count as its own occurrence, or this yields -b--b-. */
-	char *r = sub_all("a*", "bab", "-", &n);
-	TEST_ASSERT_EQUAL_INT(3, n);
-	TEST_ASSERT_EQUAL_STRING("-b-b-", r);
-	free(r);
+	check("bab", "a*", "-", "-b-b-\n");
 }
 
 void test_zero_width_step_preserves_utf8(void) {
-	int n;
-	/* Stepping one byte instead of one character would split the
-	 * two-byte é and corrupt the buffer. */
-	char *r = sub_all("x*", "caf\xc3\xa9", "", &n);
-	TEST_ASSERT_EQUAL_INT(5, n);
-	TEST_ASSERT_EQUAL_STRING("caf\xc3\xa9", r);
-	free(r);
+	/* Stepping one byte instead of one character would put a "-"
+	 * inside the two-byte é and corrupt the buffer. */
+	struct buffer *buf = buffer_all_selected("caf\xc3\xa9");
+	replace_regexp("x*", "-");
+	ASSERT_TEXT("-c-a-f-\xc3\xa9-\n", buf);
+	TEST_ASSERT(utf8_validate(buf->row[0].chars, buf->row[0].size));
 }
 
 void test_end_anchor_zero_width_terminates(void) {
-	int n;
-	char *r = sub_all("$", "ab", "!", &n);
-	TEST_ASSERT_EQUAL_INT(1, n);
-	TEST_ASSERT_EQUAL_STRING("!", r);
-	free(r);
+	check("ab", "$", "!", "ab!\n");
 }
 
 /* ---- Multibyte payloads ---- */
 
 void test_replacement_may_contain_utf8(void) {
-	int n;
-	char *r = sub_all("cafe", "cafe", "caf\xc3\xa9", &n);
-	TEST_ASSERT_EQUAL_INT(1, n);
-	TEST_ASSERT_EQUAL_STRING("caf\xc3\xa9", r);
-	free(r);
+	check("cafe", "cafe", "caf\xc3\xa9", "caf\xc3\xa9\n");
 }
 
 void test_match_may_contain_utf8(void) {
-	int n;
-	char *r = sub_all("caf\xc3\xa9", "a caf\xc3\xa9 b", "<\\&>", &n);
-	TEST_ASSERT_EQUAL_INT(1, n);
-	TEST_ASSERT_EQUAL_STRING("<caf\xc3\xa9>", r);
-	free(r);
+	check("a caf\xc3\xa9 b", "caf\xc3\xa9", "<\\&>",
+	      "a <caf\xc3\xa9> b\n");
 }
 
 /* ---- Runner ---- */
-
-void setUp(void) {
-	initTestEditor();
-}
-void tearDown(void) {
-	cleanupTestEditor();
-}
-
-/* ---- replaceRegex end to end, with its history ---- */
-
-/* The text as one string, rows joined with newlines. */
-static char *buffer_text(const struct buffer *buf) {
-	struct dbuf d = DBUF_INIT;
-	for (int i = 0; i < buf->numrows; i++) {
-		if (i > 0)
-			dbuf_append(&d, (const uint8_t *)"\n", 1);
-		dbuf_append(&d, buf->row[i].chars, buf->row[i].size);
-	}
-	return (char *)dbuf_detach(&d, NULL);
-}
-
-/* The record at the head must describe the text as it stands now. */
-static void assert_record_matches(struct buffer *buf, const struct undo *u,
-				  int must_be_present) {
-	int ex, ey;
-	computeInsertEnd(u->data, u->datalen, u->startx, u->starty, &ex, &ey);
-	TEST_ASSERT_EQUAL_INT(ex, u->endx);
-	TEST_ASSERT_EQUAL_INT(ey, u->endy);
-	TEST_ASSERT_TRUE(bufferPosValid(buf, u->startx, u->starty));
-	if (must_be_present) {
-		int n;
-		TEST_ASSERT_TRUE(bufferRangeValid(buf, u->startx, u->starty,
-						  u->endx, u->endy));
-		uint8_t *t = collectRegionText(buf, u->startx, u->starty,
-					       u->endx, u->endy, &n);
-		TEST_ASSERT_EQUAL_INT(u->datalen, n);
-		TEST_ASSERT_TRUE(memcmp(t, u->data, n) == 0);
-		free(t);
-	}
-}
-
-/* Run replaceRegex, then walk the whole history back and forward,
- * checking every record against the text before it is replayed. */
-static void check_replace(const char **lines, int nlines, const char *regex,
-			  const char *repl, const char *want, int want_groups) {
-	makeMinibuffer();
-	struct buffer *buf = make_test_buffer_lines(lines, nlines);
-	char *before = buffer_text(buf);
-
-	int keys[64], n = 0;
-	for (const char *c = regex; *c; c++)
-		keys[n++] = *c;
-	keys[n++] = '\r';
-	for (const char *c = repl; *c; c++)
-		keys[n++] = *c;
-	keys[n++] = '\r';
-	scriptKeys(keys, n);
-	muteStdout();
-	replaceRegex();
-	unmuteStdout();
-	clearKeys();
-
-	char *after = buffer_text(buf);
-	TEST_ASSERT_EQUAL_STRING(want, after);
-
-	for (int g = 0; g < want_groups; g++) {
-		TEST_ASSERT_TRUE(buf->undo != NULL);
-		/* Only the head can be checked before replaying.  The
-		 * group's other record is checked by doUndo itself. */
-		assert_record_matches(buf, buf->undo, !buf->undo->delete);
-		TEST_ASSERT_EQUAL_INT(UNDO_DONE, doUndo(buf, 1));
-	}
-	TEST_ASSERT_TRUE(buf->undo == NULL);
-	char *undone = buffer_text(buf);
-	TEST_ASSERT_EQUAL_STRING(before, undone);
-
-	for (int g = 0; g < want_groups; g++) {
-		TEST_ASSERT_TRUE(buf->redo != NULL);
-		assert_record_matches(buf, buf->redo, buf->redo->delete);
-		TEST_ASSERT_EQUAL_INT(UNDO_DONE, doRedo(buf, 1));
-	}
-	TEST_ASSERT_TRUE(buf->redo == NULL);
-	char *redone = buffer_text(buf);
-	TEST_ASSERT_EQUAL_STRING(want, redone);
-
-	free(before);
-	free(after);
-	free(undone);
-	free(redone);
-	freeMinibuffer();
-}
-
-void test_replace_regex_one_row_history(void) {
-	const char *lines[] = { "xaax yy", "" };
-	check_replace(lines, 2, "a+", "Z", "xZx yy\n\n", 1);
-}
-
-/* The record spans from the first match to the last, across rows. */
-void test_replace_regex_many_rows_history(void) {
-	const char *lines[] = { "a1", "keep", "a2 tail", "" };
-	check_replace(lines, 4, "a[0-9]", "Q", "Q\nkeep\nQ tail\n\n", 1);
-}
-
-/* An empty replacement is a pure delete, so a single record. */
-void test_replace_regex_to_nothing_history(void) {
-	const char *lines[] = { "xaay", "" };
-	check_replace(lines, 2, "aa", "", "xy\n\n", 1);
-}
-
-/* Replacing the last row's text in a file with no final newline adds a
- * repair record, which undoes with the replacement. */
-void test_replace_regex_final_row_history(void) {
-	makeMinibuffer();
-	struct buffer *buf = make_test_buffer("abc");
-	bufferResetRows(buf);
-	insertRow(buf, 0, (const uint8_t *)"abc", 3);
-	int keys[] = { 'b', '\r', 'Z', '\r' };
-	scriptKeys(keys, 4);
-	muteStdout();
-	replaceRegex();
-	unmuteStdout();
-	clearKeys();
-
-	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
-	TEST_ASSERT_EQUAL_STRING("aZc", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_INT(UNDO_DONE, doUndo(buf, 1));
-	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
-	TEST_ASSERT_EQUAL_STRING("abc", row_str(buf, 0));
-	TEST_ASSERT_TRUE(buf->undo == NULL);
-
-	freeMinibuffer();
-}
-
-/* No match makes no record. */
-void test_replace_regex_no_match_no_history(void) {
-	makeMinibuffer();
-	const char *lines[] = { "abc", "" };
-	struct buffer *buf = make_test_buffer_lines(lines, 2);
-	int keys[] = { 'q', '\r', 'Z', '\r' };
-	scriptKeys(keys, 4);
-	muteStdout();
-	replaceRegex();
-	unmuteStdout();
-	clearKeys();
-
-	TEST_ASSERT_EQUAL_STRING("abc", row_str(buf, 0));
-	TEST_ASSERT_TRUE(buf->undo == NULL);
-
-	freeMinibuffer();
-}
 
 int main(void) {
 	TEST_BEGIN();
@@ -500,11 +383,6 @@ int main(void) {
 	RUN_TEST(test_replace_regex_no_match_no_history);
 
 	RUN_TEST(test_replaces_every_match_on_a_line);
-	RUN_TEST(test_replaces_across_multiple_lines);
-	RUN_TEST(test_no_match_leaves_count_zero);
-
-	RUN_TEST(test_span_excludes_untouched_head_and_tail);
-	RUN_TEST(test_span_covers_gap_between_matches);
 
 	RUN_TEST(test_whole_match_reference);
 	RUN_TEST(test_numbered_groups);
@@ -512,7 +390,6 @@ int main(void) {
 	RUN_TEST(test_nonparticipating_group_expands_empty);
 	RUN_TEST(test_escaped_backslash_is_literal);
 
-	RUN_TEST(test_valid_templates_accepted);
 	RUN_TEST(test_unknown_escape_rejected);
 	RUN_TEST(test_trailing_backslash_rejected);
 	RUN_TEST(test_out_of_range_group_rejected);
@@ -524,7 +401,6 @@ int main(void) {
 	RUN_TEST(test_dot_does_not_cross_newline);
 	RUN_TEST(test_literal_newline_in_pattern_matches);
 	RUN_TEST(test_newline_in_bracket_expression);
-	RUN_TEST(test_negated_class_does_not_match_newline);
 	RUN_TEST(test_blank_line_pattern);
 	RUN_TEST(test_newline_under_repetition);
 

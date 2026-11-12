@@ -8,6 +8,8 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 /* ---- Upcase ---- */
 
@@ -260,24 +262,42 @@ void test_transpose_chars_empty(void) {
 }
 
 
-/* Regression: a transformer returning NULL (transformerPipeCmd does,
- * when the subprocess can't be spawned or joined) crashed
- * transformRange with strlen(NULL).  The buffer must stay untouched. */
-static uint8_t *nullTransformer(uint8_t *in) {
-	(void)in;
-	return NULL;
-}
-
+/* Regression: a transformer returning NULL crashed transformRange with
+ * strlen(NULL).  The buffer must stay untouched.  C-u M-| reaches it
+ * when the command's output is refused: here, because it holds a NUL
+ * byte. */
+#ifndef EMIL_DISABLE_SHELL
 void test_transform_region_null_transformer(void) {
+	makeMinibuffer();
 	struct buffer *buf = make_test_buffer("hello world");
 	buf->cx = 0;
 	buf->cy = 0;
 	buf->markx = 5;
 	buf->marky = 0;
 	buf->mark_active = 1;
-	transformRegion(nullTransformer);
+
+	/* C-u M-| printf 'a\000b' RET */
+	const char *command = "printf 'a\\000b'";
+	int keys[64];
+	int n = 0;
+	for (const char *c = command; *c; c++)
+		keys[n++] = (unsigned char)*c;
+	keys[n++] = '\r';
+	scriptKeys(keys, n);
+	E.uarg = 4;
+	muteStdout();
+	processKeypress(CMD_PIPE_CMD);
+	unmuteStdout();
+	TEST_ASSERT_EQUAL_INT(n, test_key_pos);
+	clearKeys();
+
+	TEST_ASSERT(E.buf == buf);
 	TEST_ASSERT_EQUAL_STRING("hello world", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
+	TEST_ASSERT_FALSE(buf->dirty);
+	freeMinibuffer();
 }
+#endif
 
 int main(void) {
 	TEST_BEGIN();
@@ -316,7 +336,19 @@ int main(void) {
 	RUN_TEST(test_transpose_words_two_words);
 	RUN_TEST(test_transpose_chars_empty);
 	RUN_TEST(test_transpose_chars_truncated_lead);
+#ifndef EMIL_DISABLE_SHELL
+	/* While a shell command runs the editor watches the terminal,
+	 * fd 0, for C-g.  Give it an fd 0 with nothing on it. */
+	{
+		int devnull = open("/dev/null", O_RDONLY);
+		if (devnull >= 0) {
+			dup2(devnull, STDIN_FILENO);
+			if (devnull != STDIN_FILENO)
+				close(devnull);
+		}
+	}
 	RUN_TEST(test_transform_region_null_transformer);
+#endif
 
 	return TEST_END();
 }

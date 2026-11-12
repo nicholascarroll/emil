@@ -22,8 +22,6 @@
 
 #include "test.h"
 #include "test_harness.h"
-#include "find.h"
-#include "region.h"
 #include "keymap.h"
 #include <string.h>
 
@@ -40,7 +38,7 @@ void test_repeat_search_starts_from_point(void) {
 	int first[] = { 'f', 'o', 'o', CTRL('s'), '\r' };
 	scriptKeys(first, 5);
 	muteStdout();
-	editorFind();
+	processKeypress(CMD_ISEARCH);
 	unmuteStdout();
 	clearKeys();
 	TEST_ASSERT_EQUAL_INT(7, buf->cy);
@@ -53,7 +51,7 @@ void test_repeat_search_starts_from_point(void) {
 	int second[] = { CTRL('s'), '\r' };
 	scriptKeys(second, 2);
 	muteStdout();
-	editorFind();
+	processKeypress(CMD_ISEARCH);
 	unmuteStdout();
 	clearKeys();
 	TEST_ASSERT_EQUAL_INT(1, buf->cy);
@@ -75,20 +73,21 @@ void test_new_search_does_not_resume_stale_row(void) {
 	int first[] = { 'f', 'o', 'o', '\r' };
 	scriptKeys(first, 4);
 	muteStdout();
-	editorFind();
+	processKeypress(CMD_ISEARCH);
 	unmuteStdout();
 	clearKeys();
 	TEST_ASSERT_EQUAL_INT(7, buf->cy);
 
 	/* C-x h, C-w: the buffer shrinks to a single empty row. */
-	markBuffer();
-	killRegion();
-	TEST_ASSERT(bufferIsEmpty(buf));
+	processKeypress(CMD_MARK_BUFFER);
+	processKeypress(CMD_KILL_REGION);
+	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
+	TEST_ASSERT_EQUAL_STRING("", row_str(buf, 0));
 
 	int second[] = { CTRL('s'), CTRL('g') };
 	scriptKeys(second, 2);
 	muteStdout();
-	editorFind();
+	processKeypress(CMD_ISEARCH);
 	unmuteStdout();
 	clearKeys();
 
@@ -114,7 +113,7 @@ void test_new_search_in_smaller_buffer(void) {
 	int first[] = { 'f', 'o', 'o', '\r' };
 	scriptKeys(first, 4);
 	muteStdout();
-	editorFind();
+	processKeypress(CMD_ISEARCH);
 	unmuteStdout();
 	clearKeys();
 	TEST_ASSERT_EQUAL_INT(38, big->cy);
@@ -126,7 +125,7 @@ void test_new_search_in_smaller_buffer(void) {
 	int second[] = { CTRL('s'), CTRL('g') };
 	scriptKeys(second, 2);
 	muteStdout();
-	editorFind();
+	processKeypress(CMD_ISEARCH);
 	unmuteStdout();
 	clearKeys();
 

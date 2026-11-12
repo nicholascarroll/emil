@@ -22,8 +22,6 @@
 
 #include "test.h"
 #include "test_harness.h"
-#include "find.h"
-#include "region.h"
 #include "keymap.h"
 #include <string.h>
 
@@ -41,7 +39,7 @@ void test_cms_repeats_regex_search(void) {
 		       '\r' };
 	scriptKeys(keys, 10);
 	muteStdout();
-	regexFind();
+	processKeypress(CMD_REGEX_SEARCH_FORWARD);
 	unmuteStdout();
 	clearKeys();
 
@@ -68,7 +66,7 @@ void test_cmr_repeats_backward_regex_search(void) {
 		       '\r' };
 	scriptKeys(keys, 10);
 	muteStdout();
-	backwardRegexFind();
+	processKeypress(CMD_REGEX_SEARCH_BACKWARD);
 	unmuteStdout();
 	clearKeys();
 
@@ -92,15 +90,16 @@ void test_cms_with_multirow_minibuffer(void) {
 
 	/* C-x h C-w: the buffer is left as one empty row and the
 	 * four-line text is on the kill ring. */
-	markBuffer();
-	killRegion();
-	TEST_ASSERT(bufferIsEmpty(buf));
+	processKeypress(CMD_MARK_BUFFER);
+	processKeypress(CMD_KILL_REGION);
+	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
+	TEST_ASSERT_EQUAL_STRING("", row_str(buf, 0));
 
 	/* C-y grows the minibuffer to five rows; C-M-s; C-g. */
 	int keys[] = { CTRL('y'), KEY_META(CTRL('s')), CTRL('g') };
 	scriptKeys(keys, 3);
 	muteStdout();
-	backwardRegexFind();
+	processKeypress(CMD_REGEX_SEARCH_BACKWARD);
 	unmuteStdout();
 	clearKeys();
 
@@ -131,7 +130,7 @@ void test_macro_search_inside_search_is_refused(void) {
 	int keys[] = { 'f', 'o', 'o', CTRL('x'), 'e', '\r' };
 	scriptKeys(keys, 6);
 	muteStdout();
-	editorFind();
+	processKeypress(CMD_ISEARCH);
 	unmuteStdout();
 	clearKeys();
 

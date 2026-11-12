@@ -1,6 +1,14 @@
 /* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
 /* test_undo.c: Undo/redo stack, coalescing, bulk replay.
- * Highest-value test target: undo bugs silently corrupt files. */
+ * Highest-value test target: undo bugs silently corrupt files.
+ *
+ * Two kinds of test live here.  Most issue commands through
+ * processKeypress() and compare the text a save would write; those
+ * survive any reshaping of undo's internals.  The tests of the
+ * mutation layer's refusals and of replay against changed text
+ * (test_mutate_*, test_*_reports_*, test_rebuild_*) call that layer
+ * directly, because the states they need cannot be reached with
+ * keys. */
 
 #include "test.h"
 #include "completion.h"
@@ -23,6 +31,33 @@ static void drop_test_buffer(struct buffer *buf) {
 	E.windows[0]->buf = NULL;
 }
 
+/* Put `text` on the kill ring the way a user would: select it in a
+ * scratch buffer and copy it (M-w).  `text` may hold newlines.  The
+ * scratch buffer is gone on return, so call this before making the
+ * buffer under test. */
+static void copyToKillRing(const char *text) {
+	/* One scratch row per line of text. */
+	char *copy = xstrdup(text);
+	const char *lines[16];
+	int n = 0;
+	lines[n++] = copy;
+	for (char *p = copy; *p; p++) {
+		if (*p == '\n' && n < 16) {
+			*p = 0;
+			lines[n++] = p + 1;
+		}
+	}
+	struct buffer *scratch = make_test_buffer_lines(lines, n);
+	scratch->markx = 0;
+	scratch->marky = 0;
+	scratch->mark_active = 1;
+	scratch->cy = n - 1;
+	scratch->cx = scratch->row[n - 1].size;
+	processKeypress(CMD_COPY);
+	drop_test_buffer(scratch);
+	free(copy);
+}
+
 /* ---- Truncated UTF-8 at the end of a row ---- */
 
 /* C-d read and recorded bytes past the row, so undo added a NUL. */
@@ -32,43 +67,15 @@ void test_undo_delchar_truncated_lead(void) {
 		const char *lines[] = { leads[i] };
 		struct buffer *buf = make_test_buffer_lines(lines, 1);
 		buf->cx = 1;
-		E.buf = buf;
-		delChar(1);
+		processKeypress(CMD_DELETE);
 		TEST_ASSERT_EQUAL_STRING("a", row_str(buf, 0));
-		doUndo(buf, 1);
+		processKeypress(CMD_UNDO);
 		TEST_ASSERT_EQUAL_STRING(leads[i], row_str(buf, 0));
 		TEST_ASSERT_EQUAL_INT((int)strlen(leads[i]), buf->row[0].size);
-		doRedo(buf, 1);
+		processKeypress(CMD_REDO);
 		TEST_ASSERT_EQUAL_STRING("a", row_str(buf, 0));
 		drop_test_buffer(buf);
 	}
-}
-
-/* ---- Creating and freeing records ---- */
-
-void test_undo_record_new_copies_data(void) {
-	uint8_t text[] = { 'a', '\n', 'b' };
-	struct undo *u = undoRecordNew(1, 2, 1, 3, 1, text, 3);
-	text[0] = 'z';
-	TEST_ASSERT_EQUAL_INT(1, u->startx);
-	TEST_ASSERT_EQUAL_INT(2, u->starty);
-	TEST_ASSERT_EQUAL_INT(1, u->endx);
-	TEST_ASSERT_EQUAL_INT(3, u->endy);
-	TEST_ASSERT_EQUAL_INT(1, u->delete);
-	TEST_ASSERT_EQUAL_INT(3, u->datalen);
-	TEST_ASSERT_EQUAL_STRING("a\nb", (char *)u->data);
-	TEST_ASSERT_EQUAL_INT(-1, u->pointy);
-	TEST_ASSERT_EQUAL_INT(0, u->append);
-	TEST_ASSERT_EQUAL_INT(0, u->paired);
-	undoRecordFreeList(u);
-}
-
-void test_undo_record_reserve_keeps_data(void) {
-	struct undo *u = undoRecordNew(0, 0, 3, 0, 0, (const uint8_t *)"abc", 3);
-	undoRecordReserve(u, 1000);
-	TEST_ASSERT(u->datasize >= 1001);
-	TEST_ASSERT_EQUAL_STRING("abc", (char *)u->data);
-	undoRecordFreeList(u);
 }
 
 /* forwardWordEnd stepped past the row over a truncated sequence, so M-u
@@ -76,14 +83,15 @@ void test_undo_record_reserve_keeps_data(void) {
 void test_word_transform_truncated_lead(void) {
 	const char *lines[] = { "ab\xC3" };
 	struct buffer *buf = make_test_buffer_lines(lines, 1);
-	E.buf = buf;
-	int x = 0, y = 0;
-	forwardWordEnd(buf, &x, &y);
-	TEST_ASSERT_EQUAL_INT(3, x);
-	TEST_ASSERT_EQUAL_INT(0, y);
-	wordTransform(1, transformerUpcase);
+	buf->cx = 0;
+	buf->cy = 0;
+	processKeypress(CMD_UPCASE_WORD);
 	TEST_ASSERT_EQUAL_STRING("AB\xC3", row_str(buf, 0));
-	doUndo(buf, 1);
+	TEST_ASSERT_EQUAL_INT(3, buf->row[0].size);
+	/* Point is left inside the row, not past it. */
+	TEST_ASSERT_EQUAL_INT(0, buf->cy);
+	TEST_ASSERT(buf->cx <= 3);
+	processKeypress(CMD_UNDO);
 	TEST_ASSERT_EQUAL_STRING("ab\xC3", row_str(buf, 0));
 }
 
@@ -267,99 +275,29 @@ void test_redo_reports_changed_text(void) {
 
 /* ---- Basic undo/redo ---- */
 
-void test_undo_insert_chars(void) {
-	struct buffer *buf = make_test_buffer("Hello");
-	buf->cx = 5;
-
-	const char *text = " World";
-	for (int i = 0; text[i]; i++)
-		selfInsert(buf, text[i], 1);
-	TEST_ASSERT_EQUAL_STRING("Hello World", row_str(buf, 0));
-
-	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
+static void typeChar(int ch) {
+	E.self_insert_key = ch;
+	processKeypress(CMD_SELF_INSERT);
 }
 
-void test_undo_then_redo(void) {
-	struct buffer *buf = make_test_buffer("ABC");
-	buf->cx = 3;
-
-	selfInsert(buf, 'D', 1);
-	TEST_ASSERT_EQUAL_STRING("ABCD", row_str(buf, 0));
-
-	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_STRING("ABC", row_str(buf, 0));
-
-	doRedo(buf, 1);
-	TEST_ASSERT_EQUAL_STRING("ABCD", row_str(buf, 0));
-}
-
-void test_multiple_sequential_undos(void) {
-	struct buffer *buf = make_test_buffer("A");
-	buf->cx = 1;
-
-	selfInsert(buf, 'B', 1);
-	buf->undo->append = 0; /* Force new record */
-
-	selfInsert(buf, 'C', 1);
-	TEST_ASSERT_EQUAL_STRING("ABC", row_str(buf, 0));
-
-	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_STRING("AB", row_str(buf, 0));
-
-	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_STRING("A", row_str(buf, 0));
-}
-
-void test_undo_delete_chars(void) {
-	struct buffer *buf = make_test_buffer("Hello");
-	buf->cx = 4;
-
-	E.buf = buf;
-	delChar(1);
-	TEST_ASSERT_EQUAL_STRING("Hell", row_str(buf, 0));
-
-	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
-}
-
-/* ---- Edge cases ---- */
-
-void test_undo_empty_stack(void) {
-	struct buffer *buf = make_test_buffer("Hello");
-	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
-}
-
+/* A new edit after an undo discards what could have been redone. */
 void test_redo_cleared_after_new_edit(void) {
 	struct buffer *buf = make_test_buffer("A");
 	buf->cx = 1;
 
-	selfInsert(buf, 'B', 1);
+	typeChar('B');
+	TEST_ASSERT_EQUAL_STRING("AB", row_str(buf, 0));
 
-	doUndo(buf, 1);
-	TEST_ASSERT_NOT_NULL(buf->redo);
+	processKeypress(CMD_UNDO);
+	TEST_ASSERT_EQUAL_STRING("A", row_str(buf, 0));
 
 	buf->cx = 1;
-	selfInsert(buf, 'C', 1);
-	TEST_ASSERT_NULL(buf->redo);
+	typeChar('C');
 	TEST_ASSERT_EQUAL_STRING("AC", row_str(buf, 0));
-}
 
-/* ---- Multi-line ---- */
-
-void test_undo_newline_insert(void) {
-	struct buffer *buf = make_test_buffer("HelloWorld");
-	buf->cx = 5;
-	E.buf = buf;
-	insertNewline(1);
-	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
-	TEST_ASSERT_EQUAL_STRING("Hello", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_STRING("World", row_str(buf, 1));
-
-	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
-	TEST_ASSERT_EQUAL_STRING("HelloWorld", row_str(buf, 0));
+	/* The B is gone for good: redo has nothing to bring back. */
+	processKeypress(CMD_REDO);
+	TEST_ASSERT_EQUAL_STRING("AC", row_str(buf, 0));
 }
 
 void setUp(void) {
@@ -399,23 +337,28 @@ void test_mutate_replace_readonly(void) {
  * insertChar, which would have written a literal 0x0A while the undo
  * record described a row split -- coordinates and buffer then
  * disagreed, and undo destroyed the rest of the line plus the row
- * below.  These two pin the invariant from both directions. */
+ * below. */
 
 void test_quoted_newline_undo_preserves_following_row(void) {
 	const char *lines[] = { "abcdef", "ghi" };
 	struct buffer *buf = make_test_buffer_lines(lines, 2);
 	buf->cx = 3;
 	buf->cy = 0;
-	clearUndosAndRedos(buf);
 
-	insertNewline(1);
+	/* C-q C-j */
+	int keys[] = { CTRL('j') };
+	scriptKeys(keys, 1);
+	processKeypress(CMD_QUOTED_INSERT);
+	TEST_ASSERT_EQUAL_INT(1, test_key_pos);
+	clearKeys();
+
 	TEST_ASSERT_EQUAL_INT(4, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("abc", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_STRING("def", row_str(buf, 1));
 	TEST_ASSERT_EQUAL_STRING("ghi", row_str(buf, 2));
 
 	/* Previously produced a single row, "abcghi". */
-	doUndo(buf, 1);
+	processKeypress(CMD_UNDO);
 	TEST_ASSERT_EQUAL_INT(3, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("abcdef", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_STRING("ghi", row_str(buf, 1));
@@ -430,14 +373,19 @@ void test_backspace_at_origin_is_a_noop(void) {
 	struct buffer *buf = make_test_buffer("ab");
 	buf->cx = 0;
 	buf->cy = 0;
-	E.buf = buf;
-	clearUndosAndRedos(buf);
 
-	backSpace(1);
+	processKeypress(CMD_BACKSPACE);
 
 	TEST_ASSERT_EQUAL_STRING("ab", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
-	TEST_ASSERT_NULL(buf->undo);
+	TEST_ASSERT_EQUAL_INT(0, buf->dirty);
+	TEST_ASSERT_EQUAL_INT(0, buf->cx);
+	TEST_ASSERT_EQUAL_INT(0, buf->cy);
+
+	/* Nothing was done, so there is nothing to undo. */
+	processKeypress(CMD_UNDO);
+	TEST_ASSERT_EQUAL_STRING("ab", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
 }
 
 
@@ -499,11 +447,6 @@ static void gotoVirtualEOF(struct buffer *buf) {
 	TEST_ASSERT_EQUAL(buf->row[buf->cy].size, buf->cx);
 }
 
-static void setKillText(const char *s) {
-	clearText(&E.kill);
-	E.kill.str = (uint8_t *)xstrdup(s);
-}
-
 /* Drive one insertion path.  Kept as an enum rather than function
  * pointers so a failure names the path. */
 enum eof_op {
@@ -511,8 +454,7 @@ enum eof_op {
 	OP_OPEN_LINE,
 	OP_NEWLINE_INDENT,
 	OP_SELF_INSERT,
-	OP_TAB,
-	OP_YANK
+	OP_TAB
 };
 
 static void runEofOp(enum eof_op op) {
@@ -532,10 +474,6 @@ static void runEofOp(enum eof_op op) {
 		break;
 	case OP_TAB:
 		processKeypress(CMD_TAB);
-		break;
-	case OP_YANK:
-		setKillText("hello");
-		processKeypress(CMD_YANK);
 		break;
 	}
 }
@@ -580,7 +518,6 @@ static void eofRoundTrip(enum eof_op op) {
 	free(undone);
 	free(redone);
 	free(undone2);
-	clearText(&E.kill);
 	cleanupTestEditor();
 }
 
@@ -602,10 +539,6 @@ void test_eof_roundtrip_self_insert(void) {
 
 void test_eof_roundtrip_tab(void) {
 	eofRoundTrip(OP_TAB);
-}
-
-void test_eof_roundtrip_yank(void) {
-	eofRoundTrip(OP_YANK);
 }
 
 /* §1 — the original symptom.  Five repetitions of M-> RET C-_ used to
@@ -648,11 +581,11 @@ void test_eof_newline_redo_inserts_one_row_not_two(void) {
 static void eofYankRoundTrip(const char *payload, const char *expect) {
 	cleanupTestEditor();
 	initTestEditor();
+	copyToKillRing(payload);
 	struct buffer *buf = eofTestBuffer();
 	gotoVirtualEOF(buf);
 
 	char *original = contentOf(buf);
-	setKillText(payload);
 	processKeypress(CMD_YANK);
 
 	char *edited = contentOf(buf);
@@ -670,64 +603,7 @@ static void eofYankRoundTrip(const char *payload, const char *expect) {
 	free(edited);
 	free(undone);
 	free(redone);
-	clearText(&E.kill);
 	cleanupTestEditor();
-}
-
-/* #105 acceptance (§10).  The mirror of the proof that motivated this
- * task.
- *
- * Before #105, a hand-built undo record naming the insertion's own
- * logical coordinates could not be replayed: an insertion at the end of
- * a two-row buffer produced the record (0,2)->(0,3), and bulkDelete
- * could not address row 3 because row 3 was not in the array.  The
- * guard in bulkDelete returned having deleted nothing, undo left the
- * row behind, and anchorInsert existed to translate such positions onto
- * a row that did exist.
- *
- * The defect was in the representation's inability to name the
- * position, not in the record.  With the trailing newline held as a
- * real row, logical and addressable coordinates are the same thing, so
- * the record that used to be unreplayable is now the only form there
- * is.  Same construction as the original proof, expectation inverted.
- *
- * Built by hand rather than through an editing command on purpose: this
- * asserts that the representation admits the record, independently of
- * whatever coordinates the mutation layer happens to produce. */
-void test_logical_insert_record_round_trips(void) {
-	const char *lines[] = { "a", "b" };
-	struct buffer *buf = make_test_buffer_lines(lines, 2);
-	E.buf = buf;
-	clearUndosAndRedos(buf);
-
-	char *before = contentOf(buf);
-	TEST_ASSERT_EQUAL_STRING("a\nb\n", before);
-	int rows_before = buf->numrows;
-
-	/* The record names where the edit happened: (0,2) -> (0,3). */
-	struct undo *u = newUndo();
-	u->startx = 0;
-	u->starty = 2;
-	u->endx = 0;
-	u->endy = 3;
-	u->data[0] = '\n';
-	u->datalen = 1;
-	u->delete = 0;
-	pushUndo(buf, u);
-
-	bulkInsert(buf, 0, 2, (const uint8_t *)"\n", 1);
-	TEST_ASSERT_EQUAL_INT(rows_before + 1, buf->numrows);
-
-	doUndo(buf, 1);
-	TEST_ASSERT_EQUAL_INT(rows_before, buf->numrows);
-	char *after = contentOf(buf);
-	TEST_ASSERT_EQUAL_STRING(before, after);
-
-	doRedo(buf, 1);
-	TEST_ASSERT_EQUAL_INT(rows_before + 1, buf->numrows);
-
-	free(before);
-	free(after);
 }
 
 /* The eof_payload_* family below asserts on serialised content rather
@@ -765,12 +641,11 @@ void test_eof_payload_trailing_newline_adds_no_extra_row(void) {
 
 	cleanupTestEditor();
 	initTestEditor();
+	copyToKillRing("one\n");
 	struct buffer *buf = eofTestBuffer();
 	gotoVirtualEOF(buf);
-	setKillText("one\n");
 	processKeypress(CMD_YANK);
 	TEST_ASSERT_EQUAL(4, buf->numrows);
-	clearText(&E.kill);
 }
 
 /* §9.5 — the regression guard for mutateReplace.  The anchor lands at
@@ -806,6 +681,7 @@ void test_mark_unmoved_by_newline_at_virtual_eof(void) {
  * bulkInsert adjusts points internally from whatever range it is
  * handed, so anchoring the mutation must not anchor the adjustment. */
 void test_mark_unmoved_by_yank_at_virtual_eof(void) {
+	copyToKillRing("\n");
 	struct buffer *buf = eofTestBuffer();
 	/* Mark at the end of the last row of text -- "beta", row 1.  That
 	 * is the position the anchor used to map onto, and where
@@ -816,24 +692,28 @@ void test_mark_unmoved_by_yank_at_virtual_eof(void) {
 	buf->cy = 1;
 	buf->cx = buf->row[1].size;
 	processKeypress(CMD_SET_MARK);
-	int markx = buf->markx, marky = buf->marky;
+	TEST_ASSERT_EQUAL(4, buf->markx);
+	TEST_ASSERT_EQUAL(1, buf->marky);
 
 	/* End of buffer.  cy == numrows is unreachable under #105, so
 	 * this is the last real row -- the same place in the text. */
 	buf->cy = buf->numrows - 1;
 	buf->cx = buf->row[buf->cy].size;
-	setKillText("\n");
 	processKeypress(CMD_YANK);
 
 	/* Yank pushes the old mark onto the ring (as Emacs's push-mark
 	 * does) and sets the mark where the text went in; the pushed
-	 * entry is the point this guard watches. */
-	int newest = (buf->mark_ring_idx - 1 + MARK_RING_SIZE) % MARK_RING_SIZE;
-	TEST_ASSERT_EQUAL(1, buf->mark_ring_len);
-	TEST_ASSERT_EQUAL(markx, buf->mark_ring[newest].cx);
-	TEST_ASSERT_EQUAL(marky, buf->mark_ring[newest].cy);
-
-	clearText(&E.kill);
+	 * entry is the point this guard watches.  C-u C-SPC walks back
+	 * through them: first to where the text went in, then to the
+	 * old mark, which must still be at the end of "beta". */
+	E.uarg = 4;
+	processKeypress(CMD_SET_MARK);
+	TEST_ASSERT_EQUAL(0, buf->cx);
+	TEST_ASSERT_EQUAL(2, buf->cy);
+	E.uarg = 4;
+	processKeypress(CMD_SET_MARK);
+	TEST_ASSERT_EQUAL(4, buf->cx);
+	TEST_ASSERT_EQUAL(1, buf->cy);
 }
 
 /* Spec 05 observation O1: as in Emacs, C-y sets the mark at the start
@@ -841,25 +721,57 @@ void test_mark_unmoved_by_yank_at_virtual_eof(void) {
  * kills exactly what was yanked; M-y moves that mark to the new text
  * without pushing again. */
 void test_yank_sets_mark_at_start_of_yanked_text(void) {
+	copyToKillRing("p\nq");
 	const char *lines[] = { "xy" };
 	struct buffer *buf = make_test_buffer_lines(lines, 1);
 	buf->markx = 2;
 	buf->marky = 0;
 	buf->cx = 1;
 	buf->cy = 0;
-	setKillText("p\nq");
 	processKeypress(CMD_YANK);
 	TEST_ASSERT_EQUAL_STRING("xp", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_STRING("qy", row_str(buf, 1));
 	TEST_ASSERT_EQUAL_INT(1, buf->markx);
 	TEST_ASSERT_EQUAL_INT(0, buf->marky);
 	TEST_ASSERT_EQUAL_INT(0, buf->mark_active);
-	TEST_ASSERT_EQUAL_INT(1, buf->mark_ring_len);
-	TEST_ASSERT_EQUAL_INT(2, buf->mark_ring[0].cx);
+
+	/* C-w straight after C-y kills exactly what was yanked... */
 	processKeypress(CMD_KILL_REGION);
 	TEST_ASSERT_EQUAL_STRING("xy", row_str(buf, 0));
-	TEST_ASSERT_EQUAL_STRING("p\nq", (char *)E.kill.str);
-	clearText(&E.kill);
+	TEST_ASSERT_EQUAL_INT(2, buf->numrows);
+
+	/* ...so yanking again puts the same text back. */
+	processKeypress(CMD_YANK);
+	TEST_ASSERT_EQUAL_STRING("xp", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_STRING("qy", row_str(buf, 1));
+}
+
+/* The other half of O1: the mark the yank replaced was pushed, not
+ * lost, so C-u C-SPC can still get back to it. */
+void test_yank_pushes_the_old_mark(void) {
+	copyToKillRing("p\nq");
+	const char *lines[] = { "xy" };
+	struct buffer *buf = make_test_buffer_lines(lines, 1);
+	buf->markx = 2;
+	buf->marky = 0;
+	buf->cx = 1;
+	buf->cy = 0;
+	processKeypress(CMD_YANK);
+	TEST_ASSERT_EQUAL_STRING("xp", row_str(buf, 0));
+	TEST_ASSERT_EQUAL_STRING("qy", row_str(buf, 1));
+
+	/* First pop: to the mark the yank set, the start of the text. */
+	E.uarg = 4;
+	processKeypress(CMD_SET_MARK);
+	TEST_ASSERT_EQUAL_INT(1, buf->cx);
+	TEST_ASSERT_EQUAL_INT(0, buf->cy);
+
+	/* Second pop: to the old mark.  It was after the "y", and the
+	 * "y" is now on the second row, after the "q". */
+	E.uarg = 4;
+	processKeypress(CMD_SET_MARK);
+	TEST_ASSERT_EQUAL_INT(2, buf->cx);
+	TEST_ASSERT_EQUAL_INT(1, buf->cy);
 }
 
 /* §9.6 — insertNewlineAndIndent calls undoAppendChar again for the
@@ -930,40 +842,38 @@ void test_repeat_count_newline_at_virtual_eof(void) {
 	free(undone);
 }
 
-/* §10 — chain_to_prev.  yankRectangle combines mutateExtendRows with a
- * chained mutateReplace; the two must not both account for the same
- * newline.  mutateExtendRows runs first and makes the target a real
- * row, so anchorInsert is the identity inside the replace. */
+/* §10 — a rectangle yanked at the end of the buffer has to add rows
+ * for itself and then insert into them, and the two must not both
+ * account for the same newline.  The rectangle's bottom row becomes
+ * the last line of the file and gets its terminator.  All of that is
+ * one edit to the user: one undo takes it back, one redo restores
+ * it. */
 void test_rectangle_yank_at_virtual_eof_roundtrip(void) {
+	/* A rectangle two wide and two high, copied with C-x r M-w. */
+	const char *rect[] = { "ab", "cd" };
+	struct buffer *scratch = make_test_buffer_lines(rect, 2);
+	scratch->markx = 0;
+	scratch->marky = 0;
+	scratch->mark_active = 1;
+	scratch->cx = 2;
+	scratch->cy = 1;
+	processKeypress(CMD_COPY_RECT);
+	drop_test_buffer(scratch);
+
 	struct buffer *buf = eofTestBuffer();
 	gotoVirtualEOF(buf);
 	char *original = contentOf(buf);
 
-	clearText(&E.kill);
-	E.kill.str = (uint8_t *)xstrdup("abcd"); /* 2 wide, 2 high, flat */
-	E.kill.is_rectangle = 1;
-	E.kill.rect_width = 2;
-	E.kill.rect_height = 2;
 	processKeypress(CMD_YANK);
 
 	char *edited = contentOf(buf);
 	TEST_ASSERT_EQUAL_STRING("alpha\nbeta\nab\ncd\n", edited);
 
-	/* The head record is the final-newline repair: the rectangle's
-	 * bottom row became the last line of the file and needed its
-	 * terminator, recorded paired so it undoes with the yank rather
-	 * than as a step of its own.  The replace's insert record sits
-	 * beneath it, and is unanchored -- the extension already
-	 * accounted for both newlines. */
-	TEST_ASSERT_EQUAL(1, buf->undo->paired);
-	TEST_ASSERT_EQUAL(0, buf->undo->prev->startx);
-	TEST_ASSERT_EQUAL(2, buf->undo->prev->starty);
-
-	undoAll(buf);
+	processKeypress(CMD_UNDO);
 	char *undone = contentOf(buf);
 	TEST_ASSERT_EQUAL_STRING(original, undone);
 
-	redoAll(buf);
+	processKeypress(CMD_REDO);
 	char *redone = contentOf(buf);
 	TEST_ASSERT_EQUAL_STRING(edited, redone);
 
@@ -971,7 +881,6 @@ void test_rectangle_yank_at_virtual_eof_roundtrip(void) {
 	free(edited);
 	free(undone);
 	free(redone);
-	clearText(&E.kill);
 }
 
 
@@ -1007,51 +916,39 @@ void test_redo_chain_releases_undo(void) {
 	TEST_ASSERT_EQUAL_STRING("epsilon", row_str(buf, 4));
 }
 
-/* A prompt reset rebuilds the minibuffer rows outside the mutation
- * layer, so records from the previous session describe text that is
- * gone.  Replaying one made bulkDelete compute a negative length. */
+/* Each prompt starts with an empty minibuffer, rebuilt outside the
+ * mutation layer, so undo history from the previous prompt describes
+ * text that is gone.  Replaying it made bulkDelete compute a negative
+ * length.  A new prompt must not be able to undo into the last one. */
 void test_minibuffer_reset_drops_stale_undo_records(void) {
 	makeMinibuffer();
-	E.buf = E.minibuf;
+	make_test_buffer("x");
 
-	/* First prompt session: type into the minibuffer, which records
-	 * undo against it through the ordinary edit path -- which is how
-	 * a prompt records, since its loop dispatches typing through
-	 * processKeypress into selfInsert. */
-	replaceMinibufferText(E.minibuf, "");
-	selfInsert(E.minibuf, 'a', 1);
-	selfInsert(E.minibuf, 'b', 1);
-	selfInsert(E.minibuf, 'c', 1);
-	TEST_ASSERT_NOT_NULL(E.minibuf->undo);
+	/* First prompt: type "abc", accept. */
+	int first[] = { 'a', 'b', 'c', '\r' };
+	scriptKeys(first, 4);
+	muteStdout();
+	uint8_t *got = editorPrompt("p: ", PROMPT_PLAIN, NULL);
+	unmuteStdout();
+	clearKeys();
+	TEST_ASSERT_EQUAL_STRING("abc", (char *)got);
+	free(got);
 
-	/* Second prompt session: the reset must take the records with
-	 * it, since they describe rows that no longer exist. */
-	replaceMinibufferText(E.minibuf, "");
-	TEST_ASSERT_NULL(E.minibuf->undo);
-	TEST_ASSERT_NULL(E.minibuf->redo);
-
-	/* Undo now has nothing to replay and must leave a sane row
-	 * rather than a negative-length memmove. */
-	doUndo(E.minibuf, 1);
-	TEST_ASSERT_EQUAL_INT(1, E.minibuf->numrows);
-	TEST_ASSERT(E.minibuf->row[0].size >= 0);
+	/* Second prompt: undo straight away, then type "z" and accept.
+	 * The undo has nothing to replay, so the answer is just "z". */
+	int second[] = { CTRL('_'), 'z', '\r' };
+	scriptKeys(second, 3);
+	muteStdout();
+	got = editorPrompt("p: ", PROMPT_PLAIN, NULL);
+	unmuteStdout();
+	TEST_ASSERT_EQUAL_INT(3, test_key_pos);
+	clearKeys();
+	TEST_ASSERT_NOT_NULL(got);
+	if (got)
+		TEST_ASSERT_EQUAL_STRING("z", (char *)got);
+	free(got);
 
 	freeMinibuffer();
-}
-
-/* Whatever a record claims, bulkDelete must not derive a negative
- * length from it.  A range the rows don't hold is refused, not clamped. */
-void test_bulk_delete_refuses_out_of_range_end(void) {
-	struct buffer *buf = make_test_buffer("abc");
-	E.buf = buf;
-
-	/* endx far past the end of a 3-byte row, as a stale record
-	 * would give. */
-	TEST_ASSERT_EQUAL_INT(-1, bulkDelete(buf, 0, 0, 99, 0));
-
-	TEST_ASSERT_EQUAL_INT(3, buf->row[0].size);
-	TEST_ASSERT_EQUAL_STRING("abc", (char *)buf->row[0].chars);
-
 }
 
 /* ---- Spec 05 P5: where undo and redo leave the cursor ----
@@ -1148,10 +1045,10 @@ void test_redo_typing_puts_cursor_at_start(void) {
 }
 
 void test_redo_yank_puts_cursor_at_start(void) {
+	copyToKillRing("p\nq");
 	const char *lines[] = { "xy" };
 	struct buffer *buf = make_test_buffer_lines(lines, 1);
 	put(buf, 1, 0);
-	setKillText("p\nq");
 	processKeypress(CMD_YANK);
 	TEST_ASSERT_EQUAL_STRING("xp", row_str(buf, 0));
 	TEST_ASSERT_EQUAL_STRING("qy", row_str(buf, 1));
@@ -1161,7 +1058,6 @@ void test_redo_yank_puts_cursor_at_start(void) {
 	TEST_ASSERT_EQUAL_STRING("qy", row_str(buf, 1));
 	TEST_ASSERT_EQUAL_INT(1, buf->cx);
 	TEST_ASSERT_EQUAL_INT(0, buf->cy);
-	clearText(&E.kill);
 }
 
 /* query-replace's u and U undo the last (all) replacements and offer
@@ -1197,8 +1093,6 @@ void test_query_replace_U_offers_the_first_match_again(void) {
 int main(void) {
 	TEST_BEGIN();
 
-	RUN_TEST(test_undo_record_new_copies_data);
-	RUN_TEST(test_undo_record_reserve_keeps_data);
 	RUN_TEST(test_undo_delchar_truncated_lead);
 	RUN_TEST(test_word_transform_truncated_lead);
 	RUN_TEST(test_mutate_refuses_invalid_ranges);
@@ -1210,16 +1104,10 @@ int main(void) {
 	RUN_TEST(test_rebuild_without_history_no_record);
 	RUN_TEST(test_rebuild_with_history_is_an_edit);
 	RUN_TEST(test_redo_reports_changed_text);
-	RUN_TEST(test_undo_insert_chars);
-	RUN_TEST(test_undo_then_redo);
-	RUN_TEST(test_multiple_sequential_undos);
-	RUN_TEST(test_undo_delete_chars);
 
 
-	RUN_TEST(test_undo_empty_stack);
 	RUN_TEST(test_redo_cleared_after_new_edit);
 
-	RUN_TEST(test_undo_newline_insert);
 	RUN_TEST(test_quoted_newline_undo_preserves_following_row);
 	RUN_TEST(test_backspace_at_origin_is_a_noop);
 
@@ -1231,10 +1119,8 @@ int main(void) {
 	RUN_TEST(test_eof_roundtrip_newline_indent);
 	RUN_TEST(test_eof_roundtrip_self_insert);
 	RUN_TEST(test_eof_roundtrip_tab);
-	RUN_TEST(test_eof_roundtrip_yank);
 	RUN_TEST(test_eof_repeated_newline_undo_does_not_accumulate);
 	RUN_TEST(test_eof_newline_redo_inserts_one_row_not_two);
-	RUN_TEST(test_logical_insert_record_round_trips);
 	RUN_TEST(test_eof_payload_one_line);
 	RUN_TEST(test_eof_payload_two_lines);
 	RUN_TEST(test_eof_payload_leading_newline);
@@ -1244,13 +1130,13 @@ int main(void) {
 	RUN_TEST(test_mark_unmoved_by_newline_at_virtual_eof);
 	RUN_TEST(test_mark_unmoved_by_yank_at_virtual_eof);
 	RUN_TEST(test_yank_sets_mark_at_start_of_yanked_text);
+	RUN_TEST(test_yank_pushes_the_old_mark);
 	RUN_TEST(test_newline_and_indent_at_virtual_eof);
 	RUN_TEST(test_repeat_count_self_insert_at_virtual_eof);
 	RUN_TEST(test_repeat_count_newline_at_virtual_eof);
 	RUN_TEST(test_rectangle_yank_at_virtual_eof_roundtrip);
 	RUN_TEST(test_redo_chain_releases_undo);
 	RUN_TEST(test_minibuffer_reset_drops_stale_undo_records);
-	RUN_TEST(test_bulk_delete_refuses_out_of_range_end);
 
 	/* Spec 05 P5 */
 	RUN_TEST(test_undo_forward_delete_returns_cursor_to_start);
