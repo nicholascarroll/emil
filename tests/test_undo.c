@@ -210,7 +210,7 @@ void test_undo_reports_changed_text(void) {
 void test_prompt_tab_undoes(void) {
 	makeMinibuffer();
 	make_test_buffer("x");
-	int keys[] = { 'a', 'b', CTRL('a'), '\t', CTRL('_'), '\r' };
+	int keys[] = { 'a', 'b', KEY_CTRL('a'), '\t', KEY_CTRL('_'), '\r' };
 	scriptKeys(keys, 6);
 	muteStdout();
 	uint8_t *got = editorPrompt("p: ", PROMPT_PLAIN, NULL);
@@ -346,7 +346,7 @@ void test_quoted_newline_undo_preserves_following_row(void) {
 	buf->cy = 0;
 
 	/* C-q C-j */
-	int keys[] = { CTRL('j') };
+	int keys[] = { KEY_CTRL('j') };
 	scriptKeys(keys, 1);
 	processKeypress(CMD_QUOTED_INSERT);
 	TEST_ASSERT_EQUAL_INT(1, test_key_pos);
@@ -936,7 +936,7 @@ void test_minibuffer_reset_drops_stale_undo_records(void) {
 
 	/* Second prompt: undo straight away, then type "z" and accept.
 	 * The undo has nothing to replay, so the answer is just "z". */
-	int second[] = { CTRL('_'), 'z', '\r' };
+	int second[] = { KEY_CTRL('_'), 'z', '\r' };
 	scriptKeys(second, 3);
 	muteStdout();
 	got = editorPrompt("p: ", PROMPT_PLAIN, NULL);

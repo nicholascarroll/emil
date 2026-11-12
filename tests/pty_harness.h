@@ -7,7 +7,7 @@
  *
  *   pty_input_test    needs a pty.  Runs wherever posix_openpt works.
  *   pty_signals_test  needs a pty whose master reports the slave's
- *                     termios, and real job control.  Linux and macOS.
+ *                     termios, and real job control.  Linux, macOS, AIX.
  *
  *
  * Both are driven by run_tests.sh at the end of `make test`.  Exit
@@ -22,6 +22,11 @@
 #ifdef __sun
 /* Solaris/illumos hide the STREAMS declarations behind this. */
 #define __EXTENSIONS__ 1
+#endif
+#if defined(_AIX) && !defined(_ALL_SOURCE)
+/* AIX hides struct winsize and ioctl(), neither of which is POSIX,
+ * once _XOPEN_SOURCE is defined. */
+#define _ALL_SOURCE 1
 #endif
 
 #include <errno.h>

@@ -35,7 +35,7 @@ void test_repeat_search_starts_from_point(void) {
 	struct buffer *buf = make_test_buffer_lines(lines, 8);
 
 	/* foo, C-s, RET: the second match, on row 7. */
-	int first[] = { 'f', 'o', 'o', CTRL('s'), '\r' };
+	int first[] = { 'f', 'o', 'o', KEY_CTRL('s'), '\r' };
 	scriptKeys(first, 5);
 	muteStdout();
 	processKeypress(CMD_ISEARCH);
@@ -48,7 +48,7 @@ void test_repeat_search_starts_from_point(void) {
 
 	/* C-s on the empty prompt recalls "foo"; the next one after
 	 * point is on row 1. */
-	int second[] = { CTRL('s'), '\r' };
+	int second[] = { KEY_CTRL('s'), '\r' };
 	scriptKeys(second, 2);
 	muteStdout();
 	processKeypress(CMD_ISEARCH);
@@ -84,7 +84,7 @@ void test_new_search_does_not_resume_stale_row(void) {
 	TEST_ASSERT_EQUAL_INT(1, buf->numrows);
 	TEST_ASSERT_EQUAL_STRING("", row_str(buf, 0));
 
-	int second[] = { CTRL('s'), CTRL('g') };
+	int second[] = { KEY_CTRL('s'), KEY_CTRL('g') };
 	scriptKeys(second, 2);
 	muteStdout();
 	processKeypress(CMD_ISEARCH);
@@ -122,7 +122,7 @@ void test_new_search_in_smaller_buffer(void) {
 	struct buffer *small = make_test_buffer_lines(smalllines, 2);
 	small->next = big; /* keep both in the list for cleanup */
 
-	int second[] = { CTRL('s'), CTRL('g') };
+	int second[] = { KEY_CTRL('s'), KEY_CTRL('g') };
 	scriptKeys(second, 2);
 	muteStdout();
 	processKeypress(CMD_ISEARCH);

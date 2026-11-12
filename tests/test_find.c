@@ -77,7 +77,7 @@ void test_forward_search_repeat_advances(void) {
 	buf->cy = 1;
 	buf->cx = 0;
 
-	int keys[] = { 'f', CTRL('s'), '\r' };
+	int keys[] = { 'f', KEY_CTRL('s'), '\r' };
 	scriptKeys(keys, 3);
 	muteStdout();
 	processKeypress(CMD_ISEARCH);
@@ -217,7 +217,7 @@ void test_forward_search_repeat_wraps_after_failing(void) {
 	lbuf->cy = 1;
 	lbuf->cx = 0;
 
-	int keys[] = { 't', CTRL('s'), '\r' };
+	int keys[] = { 't', KEY_CTRL('s'), '\r' };
 	scriptKeys(keys, 3);
 	muteStdout();
 	processKeypress(CMD_ISEARCH);

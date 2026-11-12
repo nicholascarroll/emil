@@ -2,10 +2,14 @@
 #ifndef EMIL_KEYMAP_H
 #define EMIL_KEYMAP_H
 
-/* Key constants */
-#ifndef CTRL
-#define CTRL(x) ((x) & 0x1f)
-#endif
+/* Key constants.
+ *
+ * Not called CTRL: system headers define a CTRL of their own, after
+ * this one and unconditionally, and they do not agree with it.  AIX's
+ * <sys/ttychars.h> has the pre-ANSI ('c'&037), which ignores its
+ * argument and is 3 for every key; the BSD <sys/ttydefaults.h> that
+ * Genode ships differs from this one for ' ', '?' and the digits. */
+#define KEY_CTRL(x) ((x) & 0x1f)
 
 /* Key tokens. */
 enum keyToken {

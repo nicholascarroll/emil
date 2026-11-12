@@ -44,8 +44,8 @@ static int add_text(int *keys, int n, const char *text) {
 	const unsigned char *p = (const unsigned char *)text;
 	while (*p) {
 		if (*p == '\n') {
-			keys[n++] = CTRL('q');
-			keys[n++] = CTRL('j');
+			keys[n++] = KEY_CTRL('q');
+			keys[n++] = KEY_CTRL('j');
 			p++;
 		} else if (*p < 0x80) {
 			keys[n++] = *p++;

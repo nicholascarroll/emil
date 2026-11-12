@@ -71,7 +71,7 @@ void test_register_preview_cuts_on_character_boundary(void) {
 
 	/* C-x r v, then C-g at the register prompt.  The last frame
 	 * drawn is the one showing the preview. */
-	int quit[] = { CTRL('g') };
+	int quit[] = { KEY_CTRL('g') };
 	pressWithKeys(CMD_VIEW_REGISTER, quit, 1);
 
 	/* Before the fix the frame carried the row's NUL terminator
@@ -140,7 +140,7 @@ void test_register_point_filename_newline(void) {
 	pressWithKeys(CMD_POINT_REGISTER, name, 1);
 
 	/* The preview, drawn while the prompt waits. */
-	int quit[] = { CTRL('g') };
+	int quit[] = { KEY_CTRL('g') };
 	pressWithKeys(CMD_VIEW_REGISTER, quit, 1);
 	TEST_ASSERT(E.render_buf.len > 0);
 	static const char want[] = "a^Jb\xe6\x97\xa5";

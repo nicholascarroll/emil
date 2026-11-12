@@ -23,17 +23,17 @@ void tearDown(void) {
 void test_ctrl_x_ctrl_s_resolves_to_save(void) {
 	/* First key: C-x.  The prefix state machine enters PREFIX_CTRL_X
 	 * and returns CMD_NONE (waiting for the next key). */
-	int cmd1 = resolveBinding(CTRL('x'));
+	int cmd1 = resolveBinding(KEY_CTRL('x'));
 	TEST_ASSERT_EQUAL_INT(CMD_NONE, cmd1);
 
 	/* Second key: C-s.  With the prefix armed, this resolves to
 	 * CMD_SAVE (not CMD_ISEARCH, which is the unprefixed binding). */
-	int cmd2 = resolveBinding(CTRL('s'));
+	int cmd2 = resolveBinding(KEY_CTRL('s'));
 	TEST_ASSERT_EQUAL_INT(CMD_SAVE, cmd2);
 
 	/* Sanity: after dispatch the prefix has cleared — a fresh C-s
 	 * now resolves to CMD_ISEARCH. */
-	int cmd3 = resolveBinding(CTRL('s'));
+	int cmd3 = resolveBinding(KEY_CTRL('s'));
 	TEST_ASSERT_EQUAL_INT(CMD_ISEARCH, cmd3);
 }
 
@@ -45,7 +45,7 @@ void test_universal_arg_accumulates_then_resets(void) {
 
 	/* C-u: resolveBinding returns CMD_UNIVERSAL_ARG.  processKeypress
 	 * acts on it — sets E.uarg = 4 and returns without clearing it. */
-	int cmd = resolveBinding(CTRL('u'));
+	int cmd = resolveBinding(KEY_CTRL('u'));
 	TEST_ASSERT_EQUAL_INT(CMD_UNIVERSAL_ARG, cmd);
 	processKeypress(cmd);
 	TEST_ASSERT_EQUAL_INT(4, E.uarg);
@@ -84,7 +84,7 @@ void test_universal_arg_four_then_two_is_42(void) {
 	 * not be confused with it.  The first digit after a bare C-u
 	 * replaces the seed, every later digit accumulates — so
 	 * C-u 4 2 is 42, not 2. */
-	int cmd = resolveBinding(CTRL('u'));
+	int cmd = resolveBinding(KEY_CTRL('u'));
 	processKeypress(cmd);
 	TEST_ASSERT_EQUAL_INT(4, E.uarg);
 
@@ -119,7 +119,7 @@ void test_negative_arg_refuses_digits(void) {
 	TEST_ASSERT_EQUAL_INT(UARG_REVERSE, E.uarg);
 
 	/* Last modifier typed wins: C-u overwrites a pending M--. */
-	cmd = resolveBinding(CTRL('u'));
+	cmd = resolveBinding(KEY_CTRL('u'));
 	processKeypress(cmd);
 	TEST_ASSERT_EQUAL_INT(4, E.uarg);
 
@@ -196,7 +196,7 @@ void test_quoted_insert_at_end_of_macro_inserts_nothing(void) {
 	buf->cx = 1;
 	buf->cy = 0;
 	E.macro.keys = xmalloc(sizeof(int));
-	E.macro.keys[0] = CTRL('q');
+	E.macro.keys[0] = KEY_CTRL('q');
 	E.macro.nkeys = 1;
 	E.macro.skeys = 1;
 

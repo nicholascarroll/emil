@@ -195,10 +195,10 @@ uint8_t *editorPrompt(const char *prompt, enum promptType t,
 		recordKey(c);
 
 		/* Repeat search forward/backward */
-		if (t == PROMPT_SEARCH && c == KEY_META(CTRL('s')))
-			c = CTRL('s');
-		else if (t == PROMPT_SEARCH && c == KEY_META(CTRL('r')))
-			c = CTRL('r');
+		if (t == PROMPT_SEARCH && c == KEY_META(KEY_CTRL('s')))
+			c = KEY_CTRL('s');
+		else if (t == PROMPT_SEARCH && c == KEY_META(KEY_CTRL('r')))
+			c = KEY_CTRL('r');
 
 		int callback_key = c;
 
@@ -247,7 +247,7 @@ uint8_t *editorPrompt(const char *prompt, enum promptType t,
 		/* Handle special minibuffer keys */
 		switch (c) {
 		case '\r':
-		case CTRL('j'): {
+		case KEY_CTRL('j'): {
 			/* C-j submits: minibuffer-local-map binds both \r
 			 * and \n to exit-minibuffer.  Emacs's RET/C-j
 			 * divergence exists only in completion maps, and
@@ -340,8 +340,8 @@ uint8_t *editorPrompt(const char *prompt, enum promptType t,
 			goto done;
 		}
 
-		case CTRL('g'):
-		case CTRL('c'):
+		case KEY_CTRL('g'):
+		case KEY_CTRL('c'):
 			result = NULL;
 			goto done;
 
@@ -357,8 +357,8 @@ uint8_t *editorPrompt(const char *prompt, enum promptType t,
 			}
 			break;
 
-		case CTRL('s'):
-		case CTRL('r'):
+		case KEY_CTRL('s'):
+		case KEY_CTRL('r'):
 			/* C-s C-s or C-r C-r: populate empty search with
 			 * the last search string. */
 			if (t == PROMPT_SEARCH && E.minibuf->row[0].size == 0) {

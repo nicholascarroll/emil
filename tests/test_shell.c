@@ -419,7 +419,10 @@ void tearDown(void) {
 void test_pipe_large_output_no_deadlock(void) {
 	make_test_buffer("");
 
-	shell_command("seq 1 60000");
+	/* awk, not `seq 1 60000`: seq is not in POSIX, and AIX does not
+	 * have it, so the shell printed "not found" and the test failed
+	 * for a reason that has nothing to do with the pipe. */
+	shell_command("awk 'BEGIN { for (i = 1; i <= 60000; i++) print i }'");
 
 	/* All 60000 lines arrived, in order.  Their digits come to
 	 * 288894 bytes (9 + 180 + 2700 + 36000 + 250005), far more than

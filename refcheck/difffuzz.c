@@ -375,13 +375,16 @@ static const char PRINTABLE[] =
 	"ABCXYZbcdfghjkmpqvwxyz";
 
 static const int CONTROLS[] = {
-	'\r', '\r', '\r', '\t', '\t', CTRL('g'), CTRL('g'), CTRL('a'),
-	CTRL('b'), CTRL('c'), CTRL('d'), CTRL('e'), CTRL('f'), CTRL('h'),
-	CTRL('j'), CTRL('k'), CTRL('k'), CTRL('l'), CTRL('n'), CTRL('o'),
-	CTRL('p'), CTRL('q'), CTRL('r'), CTRL('s'), CTRL('s'), CTRL('t'),
-	CTRL('u'), CTRL('u'), CTRL('v'), CTRL('w'), CTRL('w'), CTRL('y'),
-	CTRL('y'), CTRL('z'), CTRL('_'), CTRL('_'), 0, 0, 033, 127, 127,
-	CTRL('x'), CTRL('x'), CTRL('i'), CTRL('m'), 0x1c, 0x1d, 0x1e,
+	'\r', '\r', '\r', '\t', '\t', KEY_CTRL('g'), KEY_CTRL('g'),
+	KEY_CTRL('a'), KEY_CTRL('b'), KEY_CTRL('c'), KEY_CTRL('d'),
+	KEY_CTRL('e'), KEY_CTRL('f'), KEY_CTRL('h'), KEY_CTRL('j'),
+	KEY_CTRL('k'), KEY_CTRL('k'), KEY_CTRL('l'), KEY_CTRL('n'),
+	KEY_CTRL('o'), KEY_CTRL('p'), KEY_CTRL('q'), KEY_CTRL('r'),
+	KEY_CTRL('s'), KEY_CTRL('s'), KEY_CTRL('t'), KEY_CTRL('u'),
+	KEY_CTRL('u'), KEY_CTRL('v'), KEY_CTRL('w'), KEY_CTRL('w'),
+	KEY_CTRL('y'), KEY_CTRL('y'), KEY_CTRL('z'), KEY_CTRL('_'),
+	KEY_CTRL('_'), 0, 0, 033, 127, 127, KEY_CTRL('x'), KEY_CTRL('x'),
+	KEY_CTRL('i'), KEY_CTRL('m'), 0x1c, 0x1d, 0x1e,
 };
 #define NCONTROLS ((int)(sizeof(CONTROLS) / sizeof(CONTROLS[0])))
 
@@ -452,13 +455,13 @@ static void genKey(struct fkey *out, int *n, int cap) {
 	} else if (r < 900) {
 		PUSH(KEY_ALT_0 + pick(10));
 	} else if (r < 930) {
-		PUSH(CTRL('x'));
+		PUSH(KEY_CTRL('x'));
 		PUSH((unsigned char)CX_SUB[pick((int)sizeof(CX_SUB) - 1)]);
 	} else if (r < 950) {
 		/* A file command with a real file name typed in full. */
-		static const int FILE_CMDS[] = { CTRL('f'), CTRL('f'), 'i', 'i',
-						 'i', CTRL('w') };
-		PUSH(CTRL('x'));
+		static const int FILE_CMDS[] = { KEY_CTRL('f'), KEY_CTRL('f'),
+						 'i', 'i', 'i', KEY_CTRL('w') };
+		PUSH(KEY_CTRL('x'));
 		PUSH(FILE_CMDS[pick((int)(sizeof(FILE_CMDS) /
 					   sizeof(FILE_CMDS[0])))]);
 		const char *name = FILE_NAMES[pick(NFILE_NAMES)];
@@ -466,7 +469,7 @@ static void genKey(struct fkey *out, int *n, int cap) {
 			PUSH((unsigned char)*c);
 		PUSH('\r');
 	} else if (r < 990) {
-		PUSH(CTRL('x'));
+		PUSH(KEY_CTRL('x'));
 		PUSH('r');
 		PUSH((unsigned char)CXR_SUB[pick((int)sizeof(CXR_SUB) - 1)]);
 		PUSH((unsigned char)REGNAMES[pick((int)sizeof(REGNAMES) - 1)]);
@@ -954,7 +957,7 @@ int readKey(void) {
 						"after 5000 C-g\n");
 				_exit(3);
 			}
-			return CTRL('g');
+			return KEY_CTRL('g');
 		}
 		if (fk.key == FK_RESIZE) {
 			win_rows = fk.rows;

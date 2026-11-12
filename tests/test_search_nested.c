@@ -35,7 +35,7 @@ void test_cms_repeats_regex_search(void) {
 
 	int keys[] = { 'f', 'o', 'o',
 		       '[', '0', '-',
-		       '9', ']', KEY_META(CTRL('s')),
+		       '9', ']', KEY_META(KEY_CTRL('s')),
 		       '\r' };
 	scriptKeys(keys, 10);
 	muteStdout();
@@ -62,7 +62,7 @@ void test_cmr_repeats_backward_regex_search(void) {
 
 	int keys[] = { 'f', 'o', 'o',
 		       '[', '0', '-',
-		       '9', ']', KEY_META(CTRL('r')),
+		       '9', ']', KEY_META(KEY_CTRL('r')),
 		       '\r' };
 	scriptKeys(keys, 10);
 	muteStdout();
@@ -96,7 +96,7 @@ void test_cms_with_multirow_minibuffer(void) {
 	TEST_ASSERT_EQUAL_STRING("", row_str(buf, 0));
 
 	/* C-y grows the minibuffer to five rows; C-M-s; C-g. */
-	int keys[] = { CTRL('y'), KEY_META(CTRL('s')), CTRL('g') };
+	int keys[] = { KEY_CTRL('y'), KEY_META(KEY_CTRL('s')), KEY_CTRL('g') };
 	scriptKeys(keys, 3);
 	muteStdout();
 	processKeypress(CMD_REGEX_SEARCH_BACKWARD);
@@ -122,12 +122,12 @@ void test_macro_search_inside_search_is_refused(void) {
 	struct buffer *buf = make_test_buffer_lines(lines, 3);
 
 	E.macro.keys = xmalloc(sizeof(int));
-	E.macro.keys[0] = KEY_META(CTRL('s'));
+	E.macro.keys[0] = KEY_META(KEY_CTRL('s'));
 	E.macro.nkeys = 1;
 	E.macro.skeys = 1;
 
 	/* foo, then C-x e (run the macro), then RET. */
-	int keys[] = { 'f', 'o', 'o', CTRL('x'), 'e', '\r' };
+	int keys[] = { 'f', 'o', 'o', KEY_CTRL('x'), 'e', '\r' };
 	scriptKeys(keys, 6);
 	muteStdout();
 	processKeypress(CMD_ISEARCH);
@@ -150,7 +150,7 @@ void test_macro_ending_in_prompt_cancels_it(void) {
 	struct buffer *buf = make_test_buffer_lines(lines, 1);
 
 	E.macro.keys = xmalloc(2 * sizeof(int));
-	E.macro.keys[0] = CTRL('s');
+	E.macro.keys[0] = KEY_CTRL('s');
 	E.macro.keys[1] = 'a';
 	E.macro.nkeys = 2;
 	E.macro.skeys = 2;

@@ -101,8 +101,8 @@ void insertNewlineAndIndent(int count) {
 		insertNewline(1);
 		erow *prev = &E.buf->row[E.buf->cy - 1];
 		int i = 0;
-		while (i < prev->size &&
-		       (prev->chars[i] == ' ' || prev->chars[i] == CTRL('i'))) {
+		while (i < prev->size && (prev->chars[i] == ' ' ||
+					  prev->chars[i] == KEY_CTRL('i'))) {
 			uint8_t c = prev->chars[i];
 			int ex, ey;
 			mutateInsertChar(E.buf, E.buf->cx, E.buf->cy, &c, 1,

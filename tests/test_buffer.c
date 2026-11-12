@@ -262,8 +262,8 @@ static char *promptTyping(const char *text) {
 	int n = 0;
 	for (const char *c = text; *c && n < 60; c++) {
 		if (*c == '\n')
-			keys[n++] = CTRL('q');
-		keys[n++] = (*c == '\n') ? CTRL('j') : (unsigned char)*c;
+			keys[n++] = KEY_CTRL('q');
+		keys[n++] = (*c == '\n') ? KEY_CTRL('j') : (unsigned char)*c;
 	}
 	keys[n++] = '\r';
 	makeMinibuffer();

@@ -245,10 +245,10 @@ void findCallback(struct buffer *bufr, uint8_t *query, int key) {
 
 	/* editorPrompt handles C-g, C-c and RET itself and never passes
 	 * them here; searchInteractive resets the per-search state. */
-	if (key == CTRL('s')) {
+	if (key == KEY_CTRL('s')) {
 		direction = 1;
 		allow_wrap = search_failing;
-	} else if (key == CTRL('r')) {
+	} else if (key == KEY_CTRL('r')) {
 		direction = -1;
 		allow_wrap = search_failing;
 	} else {
@@ -611,7 +611,7 @@ void queryReplace(void) {
 			if (!findNextMatch(replace_orig, 1))
 				goto QR_CLEANUP;
 			break;
-		case CTRL('h'):
+		case KEY_CTRL('h'):
 		case KEY_BACKSPACE:
 		case KEY_DEL:
 		case 'n':
@@ -622,7 +622,7 @@ void queryReplace(void) {
 		case '\r':
 		case 'q':
 		case 'N':
-		case CTRL('g'):
+		case KEY_CTRL('g'):
 			goto QR_CLEANUP;
 		case '.':
 			transformRegion(transformerReplaceString);
@@ -659,7 +659,7 @@ void queryReplace(void) {
 				E.buf->marky = E.buf->cy;
 			}
 			break;
-		case CTRL('r'): {
+		case KEY_CTRL('r'): {
 			char rprompt[192];
 			snprintf(rprompt, sizeof(rprompt),
 				 "Replace this %.78s with: ", replace_orig);
@@ -697,7 +697,7 @@ void queryReplace(void) {
 			prompt = qrStatusPrompt();
 			break;
 		}
-		case CTRL('l'):
+		case KEY_CTRL('l'):
 			recenter(currentWindow);
 			break;
 		}

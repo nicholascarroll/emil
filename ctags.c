@@ -517,12 +517,12 @@ static int pickMatch(const char *sym, const struct tagMatch *v, int n) {
 		if (key == -1) {
 			if (!E.playback)
 				continue;
-			key = CTRL('g');
+			key = KEY_CTRL('g');
 		}
 		recordKey(key);
-		if (key == '\r' || key == CTRL('j'))
+		if (key == '\r' || key == KEY_CTRL('j'))
 			break;
-		if (key == CTRL('g')) {
+		if (key == KEY_CTRL('g')) {
 			sel = -1;
 			break;
 		}

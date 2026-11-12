@@ -31,7 +31,8 @@ void test_nested_prompt_preserves_buffer(void) {
 
 	/* Inside the outer prompt: C-x C-f opens a nested Find File
 	 * prompt, C-g cancels it, C-g cancels the outer one. */
-	int keys[] = { CTRL('x'), CTRL('f'), CTRL('g'), CTRL('g') };
+	int keys[] = { KEY_CTRL('x'), KEY_CTRL('f'), KEY_CTRL('g'),
+		       KEY_CTRL('g') };
 	scriptKeys(keys, 4);
 
 	muteStdout();
@@ -54,8 +55,9 @@ void test_double_nested_prompt_preserves_buffer(void) {
 	makeMinibuffer();
 	struct buffer *file = make_test_buffer("real file contents");
 
-	int keys[] = { CTRL('x'), CTRL('f'), CTRL('x'), CTRL('f'),
-		       CTRL('g'), CTRL('g'), CTRL('g') };
+	int keys[] = { KEY_CTRL('x'), KEY_CTRL('f'), KEY_CTRL('x'),
+		       KEY_CTRL('f'), KEY_CTRL('g'), KEY_CTRL('g'),
+		       KEY_CTRL('g') };
 	scriptKeys(keys, 7);
 
 	muteStdout();
@@ -393,8 +395,8 @@ void test_shell_tab_mid_line(void) {
 	TEST_ASSERT_EQUAL_INT(0, shFixtureUp());
 	shellCompletionSetUp();
 
-	const int keys[] = { CTRL('b'), CTRL('b'), CTRL('b'), CTRL('b'),
-			     CTRL('b'), '\t', 'X', 0 };
+	const int keys[] = { KEY_CTRL('b'), KEY_CTRL('b'), KEY_CTRL('b'),
+			     KEY_CTRL('b'), KEY_CTRL('b'), '\t', 'X', 0 };
 	SHELL_CASE("cat no | wc", keys, "cat notes.txt X| wc");
 
 	shellCompletionTearDown();
@@ -406,10 +408,10 @@ void test_shell_tab_quoted_insert_and_undo(void) {
 	TEST_ASSERT_EQUAL_INT(0, shFixtureUp());
 	shellCompletionSetUp();
 
-	const int quoted[] = { CTRL('q'), '\t', 0 };
+	const int quoted[] = { KEY_CTRL('q'), '\t', 0 };
 	SHELL_CASE("a", quoted, "a\t");
 
-	const int undo[] = { '\t', CTRL('_'), 0 };
+	const int undo[] = { '\t', KEY_CTRL('_'), 0 };
 	SHELL_CASE("cat no", undo, "cat no");
 
 	shellCompletionTearDown();
@@ -422,7 +424,8 @@ void test_history_up_drops_stale_mark(void) {
 	make_test_buffer("");
 	addHistory(&E.search_history, ")\xE3\x80\x82");
 
-	int keys[] = { 'o', '6', CTRL('@'), KEY_ARROW_UP, CTRL('w'), '\r' };
+	int keys[] = { 'o', '6', KEY_CTRL('@'), KEY_ARROW_UP, KEY_CTRL('w'),
+		       '\r' };
 	scriptKeys(keys, 6);
 	muteStdout();
 	char *got = (char *)editorPrompt("Search: ", PROMPT_SEARCH, NULL);
@@ -617,7 +620,7 @@ void test_file_completion_keeps_typed_prefix(void) {
 	int n = 0;
 	for (const char *c = typed; *c; c++) {
 		if (*c == '\t')
-			keys[n++] = CTRL('q');
+			keys[n++] = KEY_CTRL('q');
 		keys[n++] = (unsigned char)*c;
 	}
 	keys[n++] = '\t';

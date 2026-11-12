@@ -246,9 +246,11 @@ LEAF_OBJECTS="abuf.o backup.o base64.o dbuf.o decoder.o \
 # report it, the leaf check is skipped.
 LEAF_CONTROL=keymap.o
 
-# Mach-O prefixes symbols with an underscore; ELF does not.
+# Mach-O prefixes symbols with an underscore; ELF does not.  AIX's nm
+# puts the name first ("E U -") where the others print "U E".
 refs_E() {
-    $NM -u "$1" 2>/dev/null | grep -qE '^[[:space:]]*U[[:space:]]+_?E$'
+    $NM -u "$1" 2>/dev/null |
+        grep -qE '^[[:space:]]*U[[:space:]]+_?E$|^_?E[[:space:]]+U([[:space:]]|$)'
 }
 
 if [ ! -f "$LEAF_CONTROL" ]; then
@@ -305,7 +307,9 @@ echo ""
 
 ANY_FAIL=0
 ANY_WARN=0
-BUILD_LOG=$(mktemp)
+# Not mktemp: it is not in POSIX, and AIX does not have it.  Beside the
+# scratch directory rather than in it, so the suites never see it.
+BUILD_LOG="$PWD/tests/build.log"
 
 # The suites' scratch directory: ours, made fresh for each run, removed
 # at exit.  The suites find it through TMPDIR.
@@ -496,11 +500,11 @@ rm -f tests/stubs.o tests/backup_faked.c
 #   pty_input_test    needs a pty.  Escape sequences, key batching,
 #                     burst detection.  Runs wherever posix_openpt does.
 #   pty_signals_test  needs a pty whose master reports the slave's
-#                     termios, and real job control.  Linux and macOS.
+#                     termios, and real job control.  Linux, macOS, AIX.
 #
 PTY_TESTS="pty_input_test"
 case "$(uname -s)" in
-Linux|Darwin) PTY_TESTS="$PTY_TESTS pty_signals_test" ;;
+Linux|Darwin|AIX) PTY_TESTS="$PTY_TESTS pty_signals_test" ;;
 NetBSD) PTY_TESTS="" ;;
 esac
 

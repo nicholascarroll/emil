@@ -264,7 +264,7 @@ static inline struct buffer *findFileTyping(const char *path) {
 	for (const char *p = path; *p && n < TEST_KEY_SCRIPT_MAX - 2; p++)
 		keys[n++] = (unsigned char)*p;
 	keys[n++] = '\r';
-	keys[n++] = CTRL('g');
+	keys[n++] = KEY_CTRL('g');
 	scriptKeys(keys, n);
 	muteStdout();
 	processKeypress(CMD_FIND_FILE);

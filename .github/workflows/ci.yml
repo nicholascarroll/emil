@@ -254,6 +254,68 @@ jobs:
             echo "--- Running Tests ---"
             gmake CC=$CC CFLAGS="$CFLAGS" test
 
+  # AIX 7.2 on QEMU's pseries machine (POWER8, big-endian, XCOFF), built
+  # natively with GCC from IBM's AIX Toolbox and the system make.  Held
+  # to the same bar as every other target: -Werror, every suite and both
+  # pty tests pass, and a skipped check fails the job.
+  #
+  # The guest is fully emulated (TCG), so it is slow but self-contained:
+  # the image boots in about four minutes and the job takes about
+  # twenty.  The payload -- source tree, pinned GCC RPMs and
+  # tests/aix/guest.sh -- goes in on the CD-ROM, and tests/aix/console.py
+  # logs in on the serial console, runs guest.sh and exits with its
+  # status.  See tests/aix/README.md.
+  aix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      AIX_CACHE: ${{ github.workspace }}/.aix-cache
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install host tools
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y lzip genisoimage python3-pexpect
+
+      # ~580 MB: the image archive, the RPMs and IBM's key.  Keyed on the
+      # files that pin them, so changing a pin fetches afresh.
+      - name: Cache the AIX image and GCC RPMs
+        uses: actions/cache@v4
+        with:
+          path: .aix-cache
+          key: aix-${{ hashFiles('tests/aix/fetch.sh', 'tests/aix/packages.txt') }}
+
+      # vars.AIX_MIRROR, if set, is a base URL with copies of the files
+      # (see fetch.sh); it is tried before the original hosts.
+      - name: Fetch the AIX image and GCC RPMs
+        env:
+          AIX_MIRROR: ${{ vars.AIX_MIRROR }}
+        run: ./tests/aix/fetch.sh "$AIX_CACHE"
+
+      # Outside the workspace, so that the 2.4 GB disk image is not
+      # swept into the payload by stage.sh.
+      - name: Unpack the image
+        run: |
+          lzip -dc "$AIX_CACHE/aix72pseries-qemu.tar.lz" | tar -C "$RUNNER_TEMP" -xf -
+          "$RUNNER_TEMP/aix72pseries-qemu/bin/linux-x86_64/qemu-system-ppc64" --version | head -1
+
+      - name: Stage the payload CD
+        run: ./tests/aix/stage.sh "$AIX_CACHE" "$RUNNER_TEMP/aix-payload.iso"
+
+      - name: Build and test on AIX
+        run: |
+          python3 tests/aix/console.py "$RUNNER_TEMP/aix72pseries-qemu" \
+            "$RUNNER_TEMP/aix-payload.iso" "$RUNNER_TEMP/aix-console.log"
+
+      - name: Upload the console log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emil-aix-console-log
+          path: ${{ runner.temp }}/aix-console.log
+          if-no-files-found: warn
+
   # Builds emil.wasm, runs the unit suites under wasmer, then the
   # end-to-end smoke test.
   wasix:
@@ -297,10 +359,9 @@ jobs:
   # Five of them fail: Genode ships only the C locale, so
   # wcwidth does not report 2 for CJK.  They are reported as failures.
   #
-  # Two compiler warnings are expected and are not regressions; see
-  # tests/genode/README.md.  Genode's <termios.h> pulls in
-  # sys/ttydefaults.h, which redefines CTRL, and its sys/cdefs.h uses
-  # _Generic, which -Wpedantic rejects under -std=c99.
+  # One compiler warning is expected and is not a regression; see
+  # tests/genode/README.md.  Genode's sys/cdefs.h uses _Generic, which
+  # -Wpedantic rejects under -std=c99.
   genode:
     runs-on: ubuntu-latest
     continue-on-error: true

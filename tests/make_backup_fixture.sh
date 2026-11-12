@@ -10,8 +10,8 @@
 
 set -eu
 
-src=${1:?usage: make_backup_fixture.sh <backup.c> <output.c>}
-out=${2:?usage: make_backup_fixture.sh <backup.c> <output.c>}
+src=${1:?"usage: make_backup_fixture.sh <backup.c> <output.c>"}
+out=${2:?"usage: make_backup_fixture.sh <backup.c> <output.c>"}
 
 BACKUP_SYSCALLS="open close read write fsync unlink fcntl"
 BACKUP_EXPECTED_SITES=22

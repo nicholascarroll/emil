@@ -486,7 +486,7 @@ void expandPalette(void) {
 		if (key == -1) {
 			if (!E.playback)
 				continue;
-			key = CTRL('g');
+			key = KEY_CTRL('g');
 		}
 		recordKey(key);
 
@@ -517,7 +517,7 @@ void expandPalette(void) {
 			continue;
 		}
 		/* Cancel */
-		if (key == CTRL('g')) {
+		if (key == KEY_CTRL('g')) {
 			restoreFocusTo(origin, origin_win);
 			setStatusMessage("Canceled.");
 			return;

@@ -6,12 +6,8 @@
 - Macro playback impoved support for interactive prompts 
 - Allow shell command within macros #155
 - #136, #154 zap-to-char improvements
-- Security: control characters no longer reach the terminal. C1 controls
-  (U+0080–U+009F) in text are drawn as an inverted `?`; control characters
-  in file names and messages as `^X` or `?`. Affects every earlier release.
-- `C-x C-w`, the first save of a buffer with no file, and saving a
-  "(New file)" that has since appeared on disk now ask before overwriting
-  an existing file. Affects every earlier release.
+- Security: control characters no longer reach the terminal.
+- `C-x C-w` now asks before overwriting and existing file.
 - Fixed case commands turning ł into Ń, Ł into ŀ and ň into ŉ (U+0139–U+0148),
   and not converting ź, ż and ž.
 - Fixed `C-q` inserting an invalid byte, after which the buffer could not be
@@ -20,6 +16,7 @@
 - Fixed filenames that aren't valid text reaching rows or the terminal unchanged.
 - Filenames that aren't valid text are displayed with substitutions.
 - Fixed invalid UTF-8 from a tags file reaching the `M-.` definitions menu.
+- CI now includes AIX 7.2
 
 ## [1.0.0] - 2026-10-12
 - `emil --help` added.

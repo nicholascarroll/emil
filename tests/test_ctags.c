@@ -111,7 +111,7 @@ static void press_jump(const int *keys, int n) {
 /* M-. where no menu is expected.  A C-g waits all the same, so a menu
  * that does open is cancelled, not left waiting for ever. */
 static void press_jump_plain(void) {
-	int keys[] = { CTRL('g') };
+	int keys[] = { KEY_CTRL('g') };
 	press_jump(keys, 1);
 }
 
@@ -968,7 +968,7 @@ void test_menu_single_match_jumps_directly(void) {
 		TEST_ASSERT(0 && "could not create temp project");
 		return;
 	}
-	int keys[] = { CTRL('g') }; /* would cancel a menu, if one opened */
+	int keys[] = { KEY_CTRL('g') }; /* would cancel a menu, if one opened */
 	jump_with_keys("helper()", 0, keys, 1);
 	TEST_ASSERT_EQUAL_INT(0, keys_read);
 	TEST_ASSERT(E.buf->filename && ends_with(E.buf->filename, "b.py"));
@@ -997,7 +997,7 @@ void test_menu_second_row_reaches_identical_definition(void) {
 		TEST_ASSERT(0 && "could not create temp project");
 		return;
 	}
-	int keys[] = { CTRL('n'), '\r' };
+	int keys[] = { KEY_CTRL('n'), '\r' };
 	jump_with_keys("x.close()", 2, keys, 2);
 	TEST_ASSERT(E.buf->filename && ends_with(E.buf->filename, "a.py"));
 	TEST_ASSERT_EQUAL_INT(4, E.buf->cy);
@@ -1009,7 +1009,7 @@ void test_menu_end_of_list_and_clamping(void) {
 		TEST_ASSERT(0 && "could not create temp project");
 		return;
 	}
-	int keys[] = { KEY_META('>'), CTRL('n'), CTRL('n'), '\r' };
+	int keys[] = { KEY_META('>'), KEY_CTRL('n'), KEY_CTRL('n'), '\r' };
 	jump_with_keys("x.close()", 2, keys, 4);
 	TEST_ASSERT(E.buf->filename && ends_with(E.buf->filename, "b.py"));
 	TEST_ASSERT_EQUAL_INT(1, E.buf->cy);
@@ -1021,7 +1021,7 @@ void test_menu_cancel_leaves_reader_in_place(void) {
 		TEST_ASSERT(0 && "could not create temp project");
 		return;
 	}
-	int keys[] = { CTRL('n'), CTRL('g') };
+	int keys[] = { KEY_CTRL('n'), KEY_CTRL('g') };
 	jump_with_keys("x.close()", 2, keys, 2);
 	TEST_ASSERT_NULL(E.buf->filename);
 	TEST_ASSERT_EQUAL_INT(2, E.buf->cx);
@@ -1060,7 +1060,7 @@ void test_menu_lists_current_file_first(void) {
 static void open_menu_and_cancel(const char *tags) {
 	write_file(proj_root, "tags", tags);
 	struct buffer *buf = make_test_buffer("sym");
-	int keys[] = { CTRL('n'), CTRL('g') };
+	int keys[] = { KEY_CTRL('n'), KEY_CTRL('g') };
 	press_jump(keys, 2);
 	TEST_ASSERT_EQUAL_INT(2, keys_read);
 	TEST_ASSERT(E.buf == buf);
@@ -1123,7 +1123,7 @@ void test_menu_with_invalid_name_still_reaches_the_valid_row(void) {
 	write_file(menu_root, "tags",
 		   "close\tqq\xffy.py\t1;\"\tm\n"
 		   "close\ta.py\t2;\"\tm\n");
-	int down[] = { CTRL('n'), '\r' };
+	int down[] = { KEY_CTRL('n'), '\r' };
 	jump_with_keys("x.close()", 2, down, 2);
 	TEST_ASSERT(E.buf->filename && ends_with(E.buf->filename, "a.py"));
 	leave_menu_project();
