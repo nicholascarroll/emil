@@ -592,27 +592,8 @@ const char *replacementTemplateError(const uint8_t *tmpl, size_t nsub) {
 	return NULL;
 }
 
-/* Read a regmatch_t offset as a signed value.
- *
- * POSIX requires regoff_t to be a signed type, and regexec reports a
- * group that did not participate in the match by setting rm_so and
- * rm_eo to -1.  Redox's relibc declares `typedef size_t regoff_t`, so
- * that sentinel arrives as (size_t)-1 and a bare `rm_so >= 0` test is
- * always true -- gcc says so outright, with -Wtype-limits.  The guard
- * is then dead code and the expansion below takes its offset from
- * subject + (size_t)-1.
- *
- * It does not currently misbehave, which is the awkward part.  relibc
- * fills both fields from one `unwrap_or((!0, !0))`, so rm_eo - rm_so
- * is 0, dbuf_append ignores a non-positive length, and the group
- * expands to nothing exactly as intended.  The output is right by
- * coincidence rather than by contract: nothing promises the two fields
- * stay equal, and the out-of-range pointer is computed either way.
- *
- * Reading through a signed type of the same width recovers the
- * sentinel.  POSIX sizes regoff_t to fit ssize_t, so this cannot
- * truncate, and it compiles to nothing wherever regoff_t is declared
- * correctly -- which is everywhere except relibc. */
+/* regoff_t must be signed (POSIX), but Redox's relibc makes it size_t,
+ * so the -1 "no match" sentinel needs reading back as signed. */
 static ssize_t matchOff(regoff_t v) {
 	return (ssize_t)v;
 }
