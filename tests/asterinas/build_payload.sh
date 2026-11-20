@@ -1,6 +1,6 @@
 #!/bin/sh
 # Copyright (c) 2026 Nicholas Carroll.
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: 0BSD
 #
 # Build the editor and its unit suites for Asterinas and stage them
 # into a payload directory, ready to be injected into the initramfs.

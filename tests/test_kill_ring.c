@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD */
 /* test_kill_ring.c
  *
  * Kill, yank and yank-pop, checked by what lands in the buffer.

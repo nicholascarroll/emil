@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD */
 /* test_warnings.c: persistent status-bar warning state.
  *
  * The tests of what the user does -- opening, editing, undoing,

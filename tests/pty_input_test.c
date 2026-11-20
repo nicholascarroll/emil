@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD */
 /* pty_input_test.c: escape-sequence and input handling, driven through
  * a real pseudo-terminal.
  *

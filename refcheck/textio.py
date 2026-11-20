@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD
 """Text in and out of refcheck: always UTF-8, never fatal.
 
 Everything refcheck reads from a tool or a file, and everything it

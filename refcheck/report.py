@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD
 """Render refcheck results as a Markdown report.
 
 Only findings and incomplete checks are shown; clean checks are reduced

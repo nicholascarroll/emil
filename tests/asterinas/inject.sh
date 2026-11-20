@@ -1,6 +1,6 @@
 #!/bin/sh
 # Copyright (c) 2026 Nicholas Carroll.
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: 0BSD
 #
 # Inject the emil payload into Asterinas's initramfs image.
 #

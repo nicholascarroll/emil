@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD */
 /* difffuzz.c: refcheck's differential keystroke driver.
  *
  * Derived from tests/fuzz_keys.c (same key generator, same readKey

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Copyright (c) 2026 Nicholas Carroll.
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: 0BSD
 #
 # Generate tests/backup_faked.c: a copy of backup.c whose syscalls are
 # rewritten to the fk_* fakes that tests/test_backup.c defines.

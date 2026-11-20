@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Nicholas Carroll.
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: 0BSD
 """Boot the AIX image under QEMU, run guest.sh from the payload CD, and
 exit with guest.sh's status.
 

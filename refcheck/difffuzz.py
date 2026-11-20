@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD
 """Differential keystroke fuzzing: old build vs new build.
 
 Runs the same seeded key sequences through two difffuzz binaries built

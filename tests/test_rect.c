@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD */
 /* test_rect.c: Rectangle operation tests.
  *
  * Undo/redo: every rectangle operation (copy, kill, yank,

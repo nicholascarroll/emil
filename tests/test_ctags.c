@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD */
 /* test_ctags.c: M-. (jump to a tag's definition).
  *
  * Each test builds a small project on disk -- a tags file and the

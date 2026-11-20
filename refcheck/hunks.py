@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD
 """Changed lines between two commits, and which of them a run executed.
 
 A hunk is identified by (file, first_line, last_line) on the new side of

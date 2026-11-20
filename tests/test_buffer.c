@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD */
 /* test_buffer.c: Row operations, screen cache, coordinate mapping.
  *
  * Killing a buffer, what a prompt hands back, and how command output

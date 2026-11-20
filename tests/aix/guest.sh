@@ -1,6 +1,6 @@
 #!/bin/sh
 # Copyright (c) 2026 Nicholas Carroll.
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: 0BSD
 #
 # Runs inside AIX, from the unpacked payload (see stage.sh): install
 # GCC, then build the editor and run the unit suites with the system

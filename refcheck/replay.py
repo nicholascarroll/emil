@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD
 """Replay a difffuzz witness on the old and new builds.
 
   python3 refcheck/replay.py --seed N --keep I,J,K OLD NEW

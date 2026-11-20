@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD */
 /* test_history.c: Tests for addHistory, getHistoryAt, freeHistory.
  *
  * History is a doubly-linked list with duplicate suppression and

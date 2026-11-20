@@ -1,4 +1,5 @@
-/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
+/* Copyright (c) 2021 chameleon, 2026 Nicholas Carroll.
+ * SPDX-License-Identifier: MIT */
 #ifndef EMIL_UNDORECORD_H
 #define EMIL_UNDORECORD_H 1
 

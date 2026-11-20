@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD */
 /* pty_harness.h: shared machinery for the two pty integration tests.
  *
  * Drives the real emil binary under a pseudo-terminal: allocate a pty,

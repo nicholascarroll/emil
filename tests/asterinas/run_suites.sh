@@ -1,6 +1,6 @@
 #!/bin/sh
 # Copyright (c) 2026 Nicholas Carroll.
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: 0BSD
 #
 # Run the unit suites inside Asterinas and report.  This runs in the
 # guest, as the init process, on busybox ash.

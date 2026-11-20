@@ -1,5 +1,5 @@
 #!/bin/sh
-# Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD
 # build.sh: build one commit of emil as a refcheck target.
 #
 #   refcheck/build.sh REPO COMMIT OUTDIR

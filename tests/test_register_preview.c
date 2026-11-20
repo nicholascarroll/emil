@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD */
 /* test_register_preview.c: no row, and no drawing of a row, may run
  * past the end of an incomplete UTF-8 sequence.
  *

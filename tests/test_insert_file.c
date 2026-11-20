@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD */
 /* test_insert_file.c: characterisation for insert-file (C-x i).
  *
  * Each test issues the command, types the file's path and RET at the

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD
 # fuzz_keys.sh: build tests/fuzz_keys.c against the editor's sources under
 # ASan+UBSan, in a scratch directory, and run it from a sandbox directory
 # holding a few files for the file, completion and ctags commands to find.

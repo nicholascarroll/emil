@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD */
 /* fuzz_keys.c: whole-editor keystroke fuzzer, for memory-safety hunting.
  *
  * A pre-1.0 audit tool, not a suite: it is not listed in SUITES and

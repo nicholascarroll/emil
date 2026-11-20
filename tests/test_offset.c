@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD */
 /* test_offset.c: the G0 offset space (design §11 step 2).
  *
  * bufOffset()/bufPos() define the flat byte-offset space against the

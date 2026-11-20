@@ -1,5 +1,5 @@
 #!/bin/sh
-# Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD
 # sandbox.sh DIR: (re)create the fixture directory a difffuzz sequence
 # runs in.  Same files as tests/fuzz_keys.sh, so the file, completion and
 # ctags commands have something to find.  Every run of every build gets

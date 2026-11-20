@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD */
 /* stubs.c: Stubs for the terminal I/O boundary.
  *
  * The test binary links every .o file except main.o and terminal.o. 

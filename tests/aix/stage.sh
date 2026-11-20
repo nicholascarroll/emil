@@ -1,6 +1,6 @@
 #!/bin/sh
 # Copyright (c) 2026 Nicholas Carroll.
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: 0BSD
 #
 # Pack the source tree, the GCC RPMs, IBM's signing key and guest.sh
 # into a CD-ROM image for the AIX VM.

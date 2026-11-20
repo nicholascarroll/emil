@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD */
 /* test_regex_semantics.c: the POSIX regex behaviour emil's search
  * design depends on, asserted against the platform's libc.
  *

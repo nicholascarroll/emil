@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD */
 /* test_adjust.c: Tests for adjustPoint and adjustAllPoints.
  *
  * adjustPoint is pure logic: given a tracked point and a mutation range,

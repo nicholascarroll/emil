@@ -1,6 +1,6 @@
 <!-- Runtime for the CI smoke test: run the editor with the version
      flag, so that it prints and exits.
-     Copyright (c) 2026 Nicholas Carroll.  SPDX-License-Identifier: MIT
+     Copyright (c) 2026 Nicholas Carroll.  SPDX-License-Identifier: 0BSD
 
      This is deliberately not pkg/runtime.  That file describes the
      editor as it is meant to be deployed, wired to a terminal and a

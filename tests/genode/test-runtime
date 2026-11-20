@@ -1,5 +1,5 @@
 <!-- Runtime for the CI unit suites.
-     Copyright (c) 2026 Nicholas Carroll.  SPDX-License-Identifier: MIT
+     Copyright (c) 2026 Nicholas Carroll.  SPDX-License-Identifier: 0BSD
 
      Not pkg/runtime: that file describes the editor as it is meant to
      be deployed, wired to a terminal and a file system.  This one

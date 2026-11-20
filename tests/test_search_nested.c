@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD */
 /* test_search_nested.c: C-M-s / C-M-r inside a search repeat it, as in
  * Emacs, and no second search can start inside a running one.
  *

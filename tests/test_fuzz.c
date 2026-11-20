@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD */
 /* Invariant fuzzer for emil's buffer/undo layer.
  *
  * An ordinary suite, listed in SUITES and scored by its exit status

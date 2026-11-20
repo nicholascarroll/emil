@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD */
 /* test_writeall.c: writeAll() delivers every byte across a signal.
  *
  * This is the coverage for findings §H1.  It replaces a scenario in

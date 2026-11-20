@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD */
 /* test_undo.c: Undo/redo stack, coalescing, bulk replay.
  * Highest-value test target: undo bugs silently corrupt files.
  *

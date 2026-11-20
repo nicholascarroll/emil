@@ -1,6 +1,6 @@
 #!/bin/sh
 # Copyright (c) 2026 Nicholas Carroll.
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: 0BSD
 #
 # Download the AIX 7.2 QEMU image, the GCC RPMs listed in packages.txt
 # and the key IBM signs them with into <cache-dir>, verifying every

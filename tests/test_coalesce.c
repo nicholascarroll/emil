@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD */
 /* test_coalesce.c: how edits group into undo steps (#104).
  *
  * These tests pin the grouping the user sees, the cap that bounds it,

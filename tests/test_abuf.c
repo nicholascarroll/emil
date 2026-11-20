@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD */
 /* test_abuf.c: Tests for the append buffer (abuf).
  *
  * abuf is a simple dynamic byte buffer used for screen rendering.

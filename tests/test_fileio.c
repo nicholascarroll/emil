@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Nicholas Carroll. SPDX-License-Identifier: 0BSD */
 /* test_fileio.c: File I/O, round-trip, UTF-8 validation, emil_getline.
  *
  * Files are opened with C-x C-f (findFileTyping in the harness), saved
